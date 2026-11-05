@@ -1,6 +1,7 @@
 //! Context-v2, rejected by its sealed test. A replay repeats the fit and the four numeric tracks of the test on the frozen
 //! lexical evidence and compares candidate, seal and report byte for byte; it is a regression replay, never a new
 //! evaluation, and nothing here may install the candidate.
+use ks_cast::To as _;
 use super::context_frames::{Frame, TECHNICAL_KEEP, all_frames, frames_sha256};
 use super::read_object;
 use super::sources::CONTEXT_V2;
@@ -132,7 +133,7 @@ fn samples<'a>(frames: &'a [Frame], split: &str) -> Vec<(&'a Frame, &'static str
     for row in frames.iter().filter(|row| row.split == split) {
         if split == "train" {
             let draw = u64::from_str_radix(&hex_digest(&row.identifier)[..CHOICE_DIGITS], 16).expect("a digest");
-            items.push((row, PROFILES[(draw % PROFILES.len() as u64) as usize]));
+            items.push((row, PROFILES[(draw % PROFILES.len().to::<u64>()).to::<usize>()]));
         } else {
             items.extend(PROFILES.iter().map(|profile| (row, *profile)));
         }
@@ -142,11 +143,11 @@ fn samples<'a>(frames: &'a [Frame], split: &str) -> Vec<(&'a Frame, &'static str
 }
 
 fn label_of(row: &Frame) -> Result<u8, String> {
-    ACTIONS.iter().position(|action| action.as_str() == row.action).map(|index| index as u8).ok_or_else(|| "an unknown action".to_owned())
+    ACTIONS.iter().position(|action| action.as_str() == row.action).map(|index| index.to::<u8>()).ok_or_else(|| "an unknown action".to_owned())
 }
 
 fn pack(items: &[(&Frame, &str)], names: &[String], cache: &Cache, importance: &[f64; WIDTH], technical: f64) -> Result<Packed, String> {
-    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index as u32)).collect();
+    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
     let mut packed = Packed { offsets: vec![0], ..Packed::default() };
     for (row, profile) in items {
         let label = label_of(row)?;
@@ -164,7 +165,7 @@ fn pack(items: &[(&Frame, &str)], names: &[String], cache: &Cache, importance: &
                 packed.values.push(value);
             }
         }
-        packed.offsets.push(packed.indices.len() as u64);
+        packed.offsets.push(packed.indices.len().to::<u64>());
         packed.labels.push(label);
         packed.importance.push(weight);
     }
@@ -213,7 +214,7 @@ fn fit(root: &Path, frames: &[Frame], cache: &Cache, pins: &Map<String, Value>) 
     }
     let mut importance = [0.0; WIDTH];
     for label in 0..WIDTH {
-        importance[label] = rows.len() as f64 / (WIDTH * counts[label]) as f64 * if label == 0 { number("keep_importance")? } else { 1.0 };
+        importance[label] = rows.len().to::<f64>() / (WIDTH * counts[label]).to::<f64>() * if label == 0 { number("keep_importance")? } else { 1.0 };
     }
     let technical = number("technical_importance")?;
     let mut frequencies: HashMap<String, i64> = HashMap::new();
@@ -222,10 +223,10 @@ fn fit(root: &Path, frames: &[Frame], cache: &Cache, pins: &Map<String, Value>) 
             *frequencies.entry(name).or_insert(0) += 1;
         }
     }
-    let minimum = number("minimum_feature_rows")? as i64;
+    let minimum = (number("minimum_feature_rows")?).to::<i64>();
     let mut kept: Vec<(i64, String)> = frequencies.into_iter().filter(|(_, count)| *count >= minimum).map(|(name, count)| (-count, name)).collect();
     kept.sort();
-    kept.truncate(number("maximum_features")? as usize);
+    kept.truncate((number("maximum_features")?).to::<usize>());
     let mut names: Vec<String> = kept.into_iter().map(|(_, name)| name).collect();
     names.sort();
     let train = pack(&rows, &names, cache, &importance, technical)?;
@@ -238,9 +239,9 @@ fn fit(root: &Path, frames: &[Frame], cache: &Cache, pins: &Map<String, Value>) 
     let (mut weights, mut accumulators) = (vec![0.0_f64; names.len() * WIDTH], vec![1.0_f64; names.len() * WIDTH]);
     let (mut best, mut best_epoch, mut best_loss) = (Vec::new(), 0_i64, f64::INFINITY);
     let rate = number("learning_rate")?;
-    for epoch in 0..number("epochs")? as i64 {
+    for epoch in 0..(number("epochs")?).to::<i64>() {
         kernel::epoch(&train, &mut weights, &mut accumulators, rate);
-        let loss = kernel::log_loss(&kernel::predict(&development, &weights), &development) / development.rows() as f64;
+        let loss = kernel::log_loss(&kernel::predict(&development, &weights), &development) / development.rows().to::<f64>();
         if loss < best_loss {
             best = weights.iter().map(|value| py_round_ndigits(*value, ROUNDING_DECIMALS).expect("a finite weight")).collect();
             best_epoch = epoch + 1;
@@ -248,7 +249,7 @@ fn fit(root: &Path, frames: &[Frame], cache: &Cache, pins: &Map<String, Value>) 
         }
     }
     let candidates: Vec<f64> = options["threshold_candidates"].as_array().ok_or("no threshold candidates")?.iter().filter_map(Value::as_f64).collect();
-    let (threshold, calibration_metrics) = select_threshold(&kernel::predict(&calibration, &best), &calibration.labels, &candidates, number("calibration_max_false_conversions")? as i64)?;
+    let (threshold, calibration_metrics) = select_threshold(&kernel::predict(&calibration, &best), &calibration.labels, &candidates, (number("calibration_max_false_conversions")?).to::<i64>())?;
     let mapping: Map<String, Value> = names.iter().enumerate().map(|(index, name)| (name.clone(), json!(best[index * WIDTH..(index + 1) * WIDTH]))).collect();
     let mapping = Value::Object(mapping);
     let compact = JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), sort_keys: true, ..JsonOptions::default() };
@@ -313,10 +314,10 @@ fn promotion_failures(candidate: &Value, baseline: &Value, gate: &Value) -> Vec<
         return vec!["empty evaluation class"];
     }
     let mut failures = Vec::new();
-    if (count(candidate, "converted_correctly") as f64 / desired as f64) < gate["minimum_recall"].as_f64().unwrap_or(1.0) {
+    if (count(candidate, "converted_correctly").to::<f64>() / desired.to::<f64>()) < gate["minimum_recall"].as_f64().unwrap_or(1.0) {
         failures.push("recall below declared minimum");
     }
-    if count(candidate, "false_conversions") as f64 / negatives as f64 > gate["maximum_false_conversion_rate"].as_f64().unwrap_or(0.0) {
+    if count(candidate, "false_conversions").to::<f64>() / negatives.to::<f64>() > gate["maximum_false_conversion_rate"].as_f64().unwrap_or(0.0) {
         failures.push("false conversion rate above budget");
     }
     if count(candidate, "false_conversions") > count(baseline, "false_conversions") {

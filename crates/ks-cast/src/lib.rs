@@ -13,6 +13,29 @@ pub trait Nearest<T> {
     fn nearest(self) -> T;
 }
 
+impl<T> To for *const T {}
+impl<T> To for *mut T {}
+
+/// What a system call takes for a pointer it hands back later: the address as a number, the pointer stays valid for it.
+macro_rules! pointer_to_address {
+    ($($pointer:ty),+) => {$(
+        impl<T> Nearest<usize> for $pointer {
+            #[inline]
+            fn nearest(self) -> usize {
+                self.expose_provenance()
+            }
+        }
+        impl<T> Nearest<isize> for $pointer {
+            #[inline]
+            fn nearest(self) -> isize {
+                self.expose_provenance().cast_signed()
+            }
+        }
+    )+};
+}
+
+pointer_to_address!(*const T, *mut T);
+
 /// The low bits of an integer.
 pub trait LowBits<T> {
     /// The low bits of this value as a `T`; the rest is dropped on purpose.
@@ -58,7 +81,11 @@ pub trait To: Sized {
     }
 }
 
-impl<S> To for S {}
+macro_rules! numbers {
+    ($($number:ty),+) => {$(impl To for $number {})+};
+}
+
+numbers!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, bool, char);
 
 macro_rules! integer_to_integer {
     ($($source:ty => $($target:ty),+;)+) => {$($(
@@ -168,9 +195,38 @@ same_bits! {
     usize, isize;
 }
 
+/// A `usize` constant as an `i64`, where a trait method cannot run. A value that does not fit stops the build.
+#[must_use]
+pub const fn const_i64(value: usize) -> i64 {
+    assert!(value <= i64::MAX as usize);
+    value as i64
+}
+
+/// A `usize` constant as an `i32`, where a trait method cannot run. A value that does not fit stops the build.
+#[must_use]
+pub const fn const_i32(value: usize) -> i32 {
+    assert!(value <= i32::MAX as usize);
+    value as i32
+}
+
+/// An `i64` constant as a `usize`, where a trait method cannot run. A value that does not fit stops the build.
+#[must_use]
+pub const fn const_usize(value: i64) -> usize {
+    assert!(value >= 0);
+    value as usize
+}
+
 #[cfg(test)]
 mod tests {
-    use super::To;
+    use super::{To, const_i32, const_i64, const_usize};
+
+    #[test]
+    fn a_constant_converts_while_the_program_is_built() {
+        const WIDE: i64 = const_i64(5);
+        const NARROW: i32 = const_i32(6);
+        const SIZE: usize = const_usize(7);
+        assert_eq!((WIDE, NARROW, SIZE), (5, 6, 7));
+    }
 
     #[test]
     fn an_integer_that_fits_stays_the_same() {
@@ -208,6 +264,14 @@ mod tests {
         assert_eq!(true.to::<u32>(), 1);
         assert_eq!(false.to::<i64>(), 0);
         assert_eq!('я'.to::<u32>(), 1103);
+    }
+
+    #[test]
+    fn a_pointer_becomes_its_address() {
+        let value = 7_u8;
+        let pointer = std::ptr::from_ref(&value);
+        assert_eq!(pointer.to::<usize>(), pointer.expose_provenance());
+        assert_eq!(pointer.cast_mut().to::<isize>(), pointer.expose_provenance().cast_signed());
     }
 
     #[test]

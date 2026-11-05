@@ -1,4 +1,5 @@
 //! One worker owns collection and delivery; the interface never performs network requests.
+use ks_cast::To as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -46,7 +47,7 @@ fn locked(shared: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
 
 impl Service {
     pub fn start(root: PathBuf, config: Config, token: String, notify: Notify) -> Service {
-        let next_send = monotonic() + config.interval_minutes as f64 * SECONDS_PER_MINUTE;
+        let next_send = monotonic() + config.interval_minutes.to::<f64>() * SECONDS_PER_MINUTE;
         let shared = Arc::new((
             Mutex::new(Shared { config, token, manual: false, manual_pending: false, reset_request: None, next_send, revision: 0, woken: false }),
             Condvar::new(),
@@ -65,7 +66,7 @@ impl Service {
     pub fn update(&self, config: Config, token: String) {
         {
             let mut state = locked(&self.shared.0);
-            state.next_send = monotonic() + config.interval_minutes as f64 * SECONDS_PER_MINUTE;
+            state.next_send = monotonic() + config.interval_minutes.to::<f64>() * SECONDS_PER_MINUTE;
             state.config = config;
             state.token = token;
             state.revision += 1;
@@ -125,7 +126,7 @@ impl Worker<'_> {
             return Ok("Настройте токен и группу Telegram.".to_owned());
         }
         if resetting && reset.is_none() && monotonic() < self.retry_at {
-            return Ok(format!("Очистка группы продолжится через {} с.", (self.retry_at - monotonic()) as i64));
+            return Ok(format!("Очистка группы продолжится через {} с.", (self.retry_at - monotonic()).to::<i64>()));
         }
         if resetting {
             let cancelled = self.cancelled(revision);
@@ -169,7 +170,7 @@ impl Worker<'_> {
         let cooldown = store.get_f64(&format!("telegram_cooldown:{}", config.bot_id));
         self.retry_at = self.retry_at.max(now + (cooldown - now_seconds()).max(0.0));
         if now < self.retry_at {
-            message.push_str(&format!(" Повтор через {} с.", (self.retry_at - now) as i64));
+            message.push_str(&format!(" Повтор через {} с.", (self.retry_at - now).to::<i64>()));
             return Ok(message);
         }
         let (pending_now, next_send) = {
@@ -208,7 +209,7 @@ impl Worker<'_> {
             if !pending {
                 state.manual_pending = false;
             }
-            state.next_send = monotonic() + if pending { PENDING_RETRY_SECONDS } else { config.interval_minutes as f64 * SECONDS_PER_MINUTE };
+            state.next_send = monotonic() + if pending { PENDING_RETRY_SECONDS } else { config.interval_minutes.to::<f64>() * SECONDS_PER_MINUTE };
         }
         Ok(message)
     }
@@ -240,7 +241,7 @@ fn run(root: &std::path::Path, shared: &Arc<(Mutex<Shared>, Condvar)>, stopping:
                 worker.failures += 1;
                 let mut delay = MAX_RETRY_DELAY_SECONDS.min(RETRY_BASE_SECONDS * RETRY_BACKOFF_BASE.powi((worker.failures - 1).min(RETRY_BACKOFF_MAX_EXPONENT)));
                 if let Error::Telegram { retry_after, .. } = error {
-                    delay = delay.max(retry_after as f64);
+                    delay = delay.max(retry_after.to::<f64>());
                 }
                 worker.retry_at = monotonic() + delay;
                 locked(&shared.0).next_send = worker.retry_at;

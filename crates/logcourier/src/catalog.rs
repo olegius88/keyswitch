@@ -1,4 +1,5 @@
 //! The chain of catalogs pinned in the group: what was delivered, each catalog naming the one before it.
+use ks_cast::To as _;
 use std::collections::HashSet;
 
 use serde_json::{Value, json};
@@ -47,7 +48,7 @@ fn valid_index(result: &Value, chat_id: &str, bot_id: &str) -> Option<()> {
             return None;
         }
         let size = entry["size"].as_i64()?;
-        if size <= 0 || size as usize > MAX_DOWNLOAD {
+        if size <= 0 || size.to::<usize>() > MAX_DOWNLOAD {
             return None;
         }
         iso_date(entry["created_at"].as_str()?)?;

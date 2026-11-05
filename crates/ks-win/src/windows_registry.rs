@@ -4,6 +4,7 @@
 //! the same here: a number for REG_DWORD and REG_QWORD, text up to the first zero for REG_SZ and REG_EXPAND_SZ, and bytes
 //! for the rest, with an empty value of those being None.
 
+use ks_cast::To as _;
 use std::io;
 use std::ptr::{null, null_mut};
 
@@ -42,7 +43,7 @@ impl Drop for Key {
 }
 
 fn check(status: u32) -> io::Result<()> {
-    if status == ERROR_SUCCESS { Ok(()) } else { Err(io::Error::from_raw_os_error(status as i32)) }
+    if status == ERROR_SUCCESS { Ok(()) } else { Err(io::Error::from_raw_os_error(status.bits::<i32>())) }
 }
 
 /// `winreg.OpenKey`, with its default of KEY_READ where the caller asks for no more.
@@ -60,7 +61,7 @@ fn query(key: &Key, name: &str) -> io::Result<RegistryValue> {
     let mut data = vec![0u8; REGISTRY_VALUE_FIRST_BUFFER_BYTES];
     loop {
         let mut value_type: REG_VALUE_TYPE = 0;
-        let mut size = data.len() as u32;
+        let mut size = data.len().low::<u32>();
         // SAFETY: `name` is NUL-terminated; `size` says how many bytes `data` holds.
         let status = unsafe {
             RegQueryValueExW(key.0, name.as_ptr(), null(), &mut value_type, data.as_mut_ptr(), &mut size)
@@ -71,7 +72,7 @@ fn query(key: &Key, name: &str) -> io::Result<RegistryValue> {
             continue;
         }
         check(status)?;
-        data.truncate(size as usize);
+        data.truncate(size.to::<usize>());
         return Ok(decode(value_type, data));
     }
 }
@@ -121,7 +122,7 @@ fn delete_value(path: &str, name: &str) -> io::Result<()> {
 /// `winreg.EnumKey` for one index, None when there is no such key or it cannot be read: the callers stop there.
 fn enumerate_key(key: &Key, index: u32) -> Option<String> {
     let mut buffer = [0u16; REGISTRY_KEY_NAME_BUFFER_CHARACTERS];
-    let mut size = buffer.len() as u32;
+    let mut size = buffer.len().low::<u32>();
     // SAFETY: `size` says how many characters `buffer` holds; the optional out parameters are null.
     let status = unsafe {
         RegEnumKeyExW(key.0, index, buffer.as_mut_ptr(), &mut size, null(), null_mut(), null_mut(), null_mut())
@@ -129,7 +130,7 @@ fn enumerate_key(key: &Key, index: u32) -> Option<String> {
     if status != ERROR_SUCCESS {
         return None;
     }
-    buffer.get(..size as usize).map(String::from_utf16_lossy)
+    buffer.get(..size.to::<usize>()).map(String::from_utf16_lossy)
 }
 
 /// `winreg.OpenKey(root, path, 0, KEY_READ | view)` where a missing key or a refusal means an empty list.
@@ -228,7 +229,7 @@ impl WindowsRegistry for NativeWindowsRegistry {
         let data = wide(command);
         // SAFETY: `name` is NUL-terminated, and the size is that of `data` with its terminating zero, in bytes.
         check(unsafe {
-            RegSetValueExW(key.0, name.as_ptr(), 0, REG_SZ, data.as_ptr().cast::<u8>(), (data.len() * 2) as u32)
+            RegSetValueExW(key.0, name.as_ptr(), 0, REG_SZ, data.as_ptr().cast::<u8>(), (data.len() * 2).low::<u32>())
         })
     }
 

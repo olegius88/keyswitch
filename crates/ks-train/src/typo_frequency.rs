@@ -2,6 +2,7 @@
 //! OpenSubtitles 2018 and the technical vocabulary of the ru.stackoverflow training split (`build_typo_frequency`). The
 //! receipt records the digest of every decompressed section, so another deflate that compresses the same bytes otherwise
 //! still verifies.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::physical::hex;
 use flate2::Compression;
@@ -110,11 +111,11 @@ fn bloom(forms: &[String]) -> (Vec<u8>, u64, u64) {
     // The optimal Bloom filter: ln(1 / p) / ln(2)^2 bits per form, ln(2) bits per form and position.
     let ln_two = 1.0 / std::f64::consts::E.log2();
     let bits = ((-(forms.len() as f64) * FALSE_POSITIVE_RATE.ln() / ln_two / ln_two).ceil() as u64).max(1);
-    let hashes = (ks_text::py_round(bits as f64 / forms.len().max(1) as f64 * ln_two) as u64).max(1);
-    let mut filter = vec![0_u8; bits.div_ceil(BITS_PER_BYTE) as usize];
+    let hashes = (ks_text::py_round(bits.to::<f64>() / forms.len().max(1).to::<f64>() * ln_two) as u64).max(1);
+    let mut filter = vec![0_u8; bits.div_ceil(BITS_PER_BYTE).to::<usize>()];
     for form in forms {
         for position in occurrence_positions(form, bits, hashes) {
-            filter[(position / BITS_PER_BYTE) as usize] |= 1 << (position % BITS_PER_BYTE);
+            filter[(position / BITS_PER_BYTE).to::<usize>()] |= 1 << (position % BITS_PER_BYTE);
         }
     }
     (filter, bits, hashes)
@@ -147,7 +148,7 @@ fn compact() -> JsonOptions {
 pub(crate) fn build(source: &Source, text: &str, vocabulary: &HashMap<String, i64>) -> Result<Built, String> {
     let letters = alphabet(source.locale);
     let (counts, total) = read_counts(text, letters);
-    let codes: HashMap<char, u8> = letters.chars().enumerate().map(|(index, letter)| (letter, index as u8 + 1)).collect();
+    let codes: HashMap<char, u8> = letters.chars().enumerate().map(|(index, letter)| (letter, index.to::<u8>() + 1)).collect();
     let mut stored: Vec<(Vec<u8>, i64)> = counts.iter().filter(|(form, count)| **count >= STORED_MIN_COUNT && form.chars().count() >= MIN_LETTERS - 1).map(|(form, count)| (form.chars().map(|letter| codes[&letter]).collect(), *count)).collect();
     stored.sort();
     let technical: BTreeSet<String> = vocabulary.iter().filter(|(form, count)| **count >= VOCABULARY_MIN_COUNT && counts.get(*form).copied().unwrap_or(0) < OCCURRENCE_MIN_COUNT).map(|(form, _)| form.clone()).collect();
@@ -159,14 +160,14 @@ pub(crate) fn build(source: &Source, text: &str, vocabulary: &HashMap<String, i6
         forms.extend_from_slice(form);
         forms.push(FORM_SEPARATOR);
     }
-    let weights: Vec<u8> = stored.iter().map(|(_, count)| COUNT_MAX_STORED.min(ks_text::py_round((*count as f64).ln() * COUNT_LOG_SCALE) as i64) as u8).collect();
+    let weights: Vec<u8> = stored.iter().map(|(_, count)| (COUNT_MAX_STORED.min((ks_text::py_round((*count as f64).ln() * COUNT_LOG_SCALE)).to::<i64>())).to::<u8>()).collect();
     let (filter, bits, hashes) = bloom(&rare);
     let (packed_forms, packed_weights) = (deflate(&forms)?, deflate(&weights)?);
     let mut payload = packed_forms.clone();
     payload.extend_from_slice(&packed_weights);
     payload.extend_from_slice(&filter);
     let selection = json!({"list_entries": total, "letter_forms": counts.len(), "stored": stored.len(), "seen_items": rare.len(), "vocabulary_forms": technical.len()});
-    let rate = (1.0 - (-(hashes as f64) * rare.len() as f64 / bits as f64).exp()).powf(hashes as f64);
+    let rate = (1.0 - (-(hashes as f64) * rare.len().to::<f64>() / bits.to::<f64>()).exp()).powf(hashes.to::<f64>());
     let seen = json!({"bits": bits, "hashes": hashes, "items": rare.len(), "false_positive_rate": rate});
     let header = json!({
         "schema_version": SCHEMA_VERSION, "name": format!("opensubtitles-2018-{}-typo-frequency", source.locale), "locale": source.locale, "alphabet": letters, "count_log_scale": COUNT_LOG_SCALE_STORED,
@@ -240,7 +241,7 @@ pub fn command(root: &Path, paths: &Paths, verify: bool) -> Result<bool, String>
             let cut = shipped.iter().position(|byte| *byte == b'\n').ok_or("a typo table without a header")?;
             let header: Value = serde_json::from_slice(&shipped[..cut]).map_err(|error| error.to_string())?;
             let payload = &shipped[cut + 1..];
-            let size = |name: &str| header["sections"][name].as_u64().unwrap_or(0) as usize;
+            let size = |name: &str| (header["sections"][name].as_u64().unwrap_or(0)).to::<usize>();
             let (forms, weights) = (inflate(&payload[..size("forms")])?, inflate(&payload[size("forms")..size("forms") + size("weights")])?);
             let filter = &payload[size("forms") + size("weights")..];
             if forms != built.sections["forms"] || weights != built.sections["weights"] || filter != built.sections["seen"].as_slice() {

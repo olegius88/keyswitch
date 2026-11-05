@@ -1,6 +1,7 @@
 //! What the GTK windows say and compute, apart from the widgets (the Python's `ui.py` helpers and `constants/ui_gtk.py`):
 //! geometry, the navigation, the texts a snapshot turns into, and the report the About page copies.
 
+use ks_cast::To as _;
 use ks_backend::BackendProbe;
 use ks_engine::EngineSnapshot;
 use ks_text::russian_text::{NounForms, quantity};
@@ -99,7 +100,7 @@ pub fn table_text(table: &[(&'static str, &'static str)], name: &str) -> &'stati
 
 /// The position of `value` among `keys`, or `fallback` for an unknown one.
 pub fn index_of(keys: &[&str], value: &str, fallback: u32) -> u32 {
-    keys.iter().position(|key| *key == value).map_or(fallback, |index| index as u32)
+    keys.iter().position(|key| *key == value).map_or(fallback, |index| index.low::<u32>())
 }
 
 /// `quantity` of a count in the noun forms.
@@ -108,7 +109,7 @@ pub fn counted(value: f64, forms: NounForms) -> String {
 }
 
 pub fn plural_entries(count: usize) -> String {
-    quantity(count as f64, ["запись", "записи", "записей"])
+    quantity(count.to::<f64>(), ["запись", "записи", "записей"])
 }
 
 pub fn learning_summary(count: usize) -> String {

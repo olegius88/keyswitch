@@ -1,5 +1,6 @@
 //! The settings window on Linux. There is no tray here: closing the window leaves the collector running, starting the
 //! program again shows it, and «Выход» on the status page ends it.
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -135,7 +136,7 @@ fn refresh_sources(app: &App) {
 }
 
 fn on_status(app: &mut App, message: &str, stats: &Value) {
-    let stamp = stats["last_success"].as_f64().and_then(|seconds| glib::DateTime::from_unix_local(seconds as i64).ok()).and_then(|at| at.format("%d.%m.%Y %H:%M:%S").ok());
+    let stamp = stats["last_success"].as_f64().and_then(|seconds| glib::DateTime::from_unix_local(seconds.to::<i64>()).ok()).and_then(|at| at.format("%d.%m.%Y %H:%M:%S").ok());
     app.widgets.summary.set_text(&summary(message, stats, &app.sources, stamp.as_deref()).replace('\r', ""));
     if message != app.last_message {
         let clock = glib::DateTime::now_local().ok().and_then(|at| at.format("%H:%M:%S").ok()).map_or_else(String::new, |text| text.to_string());
@@ -186,7 +187,7 @@ fn find_groups(shared: &Shared) {
         let dialog = gtk::AlertDialog::builder().message("Группа Telegram").detail("Выберите группу").buttons(labels.iter().map(String::as_str).collect::<Vec<_>>()).build();
         let chat = app.widgets.chat.clone();
         dialog.choose(Some(&app.widgets.window), gtk::gio::Cancellable::NONE, move |choice| {
-            if let Some(group) = choice.ok().and_then(|index| groups.get(index as usize)) {
+            if let Some(group) = choice.ok().and_then(|index| groups.get(index.to::<usize>())) {
                 chat.set_text(&group["id"].to_string());
             }
         });
@@ -270,13 +271,13 @@ fn source_dialog(shared: &Shared, path: &Path) {
     let grid = gtk::Grid::builder().row_spacing(8).column_spacing(8).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
     let name = path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
     let file = path.display().to_string();
-    let (label, rotations) = (gtk::Entry::builder().text(name).hexpand(true).build(), gtk::SpinButton::with_range(0.0, MAX_ROTATIONS as f64, 1.0));
-    rotations.set_value(DEFAULT_ROTATIONS as f64);
+    let (label, rotations) = (gtk::Entry::builder().text(name).hexpand(true).build(), gtk::SpinButton::with_range(0.0, MAX_ROTATIONS.to::<f64>(), 1.0));
+    rotations.set_value(DEFAULT_ROTATIONS.to::<f64>());
     let existing = gtk::CheckButton::with_label("Включить уже существующие записи и ротации");
     let note = gtk::Label::builder().label(SOURCE_NOTE.replace('\r', "")).wrap(true).xalign(0.0).build();
     for (row, (title, widget)) in [("Файл", gtk::Label::new(Some(&file)).upcast::<gtk::Widget>()), ("Название", label.clone().upcast()), ("Ротаций", rotations.clone().upcast())].into_iter().enumerate() {
-        grid.attach(&gtk::Label::new(Some(title)), 0, row as i32, 1, 1);
-        grid.attach(&widget, 1, row as i32, 1, 1);
+        grid.attach(&gtk::Label::new(Some(title)), 0, row.low::<i32>(), 1, 1);
+        grid.attach(&widget, 1, row.low::<i32>(), 1, 1);
     }
     grid.attach(&existing, 1, 3, 1, 1);
     grid.attach(&note, 0, 4, 2, 1);
@@ -401,7 +402,7 @@ fn build(application: &gtk::Application, root: PathBuf, config: &Config) -> App 
             action_button("Добавить файл", add_source),
             action_button("Удалить из списка", |shared| {
                 let mut app = shared.borrow_mut();
-                let mut rows: Vec<usize> = app.widgets.sources.selected_rows().iter().map(|row| row.index() as usize).collect();
+                let mut rows: Vec<usize> = app.widgets.sources.selected_rows().iter().map(|row| row.index().to::<usize>()).collect();
                 rows.sort_unstable();
                 for row in rows.into_iter().rev() {
                     app.sources.remove(row);
@@ -417,8 +418,8 @@ fn build(application: &gtk::Application, root: PathBuf, config: &Config) -> App 
     let auto = gtk::CheckButton::builder().label("Автоматически собирать и отправлять логи").active(config.auto_send).build();
     layout.append(&consent);
     layout.append(&auto);
-    let interval = gtk::SpinButton::with_range(1.0, MAX_INTERVAL_MINUTES as f64, 1.0);
-    interval.set_value(config.interval_minutes as f64);
+    let interval = gtk::SpinButton::with_range(1.0, MAX_INTERVAL_MINUTES.to::<f64>(), 1.0);
+    interval.set_value(config.interval_minutes.to::<f64>());
     form_row(&layout, "Интервал отправки, мин", &interval);
     layout.append(&note(&delivery_note()));
     button_row(

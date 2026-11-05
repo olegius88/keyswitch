@@ -1,6 +1,7 @@
 //! A sealed context-v3 and prefix-v2 pair promoted: checks first, the sealed test once, then the install
 //! (`promote_context_action_pair`). A sealed test is read once, so everything the candidate's seal pins has to be final
 //! before that read: this refuses to touch the test until every check holds.
+use ks_cast::To as _;
 use crate::corpus::read_json;
 use crate::evaluate::{EvaluationRequest, evaluate, validate_candidate_seal, validate_prefix_seal};
 use crate::mixed::{DevchatRequest, devchat};
@@ -124,7 +125,7 @@ fn restoration_shortfall(report: &Value) -> Vec<String> {
             if restored - baseline["exactly_restored"].as_i64().unwrap_or(0) < margin {
                 failures.push(format!("{name}/{mode}: the margin over the baseline pair"));
             }
-            if mode == "early_off" && (restored as f64) < RECEIPT_MIN_RESTORED_SHARE * candidate["initially_wrong"].as_i64().unwrap_or(0) as f64 {
+            if mode == "early_off" && (restored as f64) < RECEIPT_MIN_RESTORED_SHARE * (candidate["initially_wrong"].as_i64().unwrap_or(0)).to::<f64>() {
                 failures.push(format!("{name}/{mode}: the share restored"));
             }
         }

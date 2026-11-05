@@ -602,12 +602,12 @@ impl EngineCore {
         let pair = ks_text::layouts::LayoutPair::default();
         let mut result = Vec::with_capacity(strokes.len());
         for stroke in strokes {
-            let names: Vec<String> = (0..stroke.characters.len()).map(|index| self._layout_name(index as i64)).collect();
-            let letter = pystr::lower(stroke.character_for(group as i32));
+            let names: Vec<String> = (0..stroke.characters.len()).map(|index| self._layout_name(index.to::<i64>())).collect();
+            let letter = pystr::lower(stroke.character_for(group.to::<i32>()));
             if !stroke.shift() || pystr::len(&letter) != 1 || !names.iter().all(|name| name == "us" || name == "ru") {
                 return None;
             }
-            let source = names.get(group as usize)?;
+            let source = names.get(group.to::<usize>())?;
             let mut characters = Vec::with_capacity(names.len());
             for name in &names {
                 characters.push(pair.translate(&letter, source, name).ok()?);

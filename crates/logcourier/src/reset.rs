@@ -10,6 +10,7 @@
 //! it keeps even one of its messages, deleting none of them. Messages are numbered in the order they were sent, so the
 //! kept ones are all older than the deleted ones: batches go from the newest, the first refused batch is searched by
 //! halving for where the deletable part starts, and nothing older is asked for.
+use ks_cast::To as _;
 use serde_json::{Value, json};
 
 use crate::catalog::{checkpoint, current_catalog};
@@ -106,7 +107,7 @@ fn clear(store: &Store, config: &Config, client: &dyn Client, cancelled: &Cancel
         Ok(()) => {}
     }
     // A clearing begun by 0.1.4 dropped its uncatalogued archives up front and counted them.
-    let dropped = store.finish_clearing(&config.destination(), state["kept"].as_i64())? as i64 + state["dropped"].as_i64().unwrap_or(0);
+    let dropped = (store.finish_clearing(&config.destination(), state["kept"].as_i64())?).to::<i64>() + state["dropped"].as_i64().unwrap_or(0);
     Ok(summary(&state, dropped))
 }
 

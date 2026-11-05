@@ -1,4 +1,5 @@
 //! The numeric core against dumps of the previous trainer: every float compared as bits.
+use ks_cast::To as _;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -35,7 +36,7 @@ fn the_core_matches_bit_for_bit() {
             .as_array()
             .unwrap()
             .iter()
-            .map(|row| (row[0].as_object().unwrap().iter().map(|(name, value)| (name.clone(), value.as_f64().unwrap())).collect(), row[1].as_u64().unwrap() as u8, row[2].as_f64().unwrap()))
+            .map(|row| (row[0].as_object().unwrap().iter().map(|(name, value)| (name.clone(), value.as_f64().unwrap())).collect(), row[1].as_u64().unwrap().to::<u8>(), row[2].as_f64().unwrap()))
             .collect();
         let packed = Packed::build(rows.iter().map(|row| (row.0.as_slice(), row.1, row.2)), &names).unwrap();
         let mut weights = vec![0.0; names.len() * 4];

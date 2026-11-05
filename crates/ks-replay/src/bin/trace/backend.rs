@@ -1,6 +1,7 @@
 //! The backend and the field reader of a trace: each call is checked against the next one the Python made, and answered
 //! with what the Python got.
 
+use ks_cast::To as _;
 use ks_backend::input_delay::{HookGap, InputDelayReport};
 use ks_backend::selected_text::{RefusalReason, SelectedText, SelectionError, SelectionRefused};
 use ks_backend::{BackendError, BackendProbe, FieldContext, FieldReader, FieldRole, FocusInfo, Injection, InputBackend, KeyEvent, KeyFilter, KeyListener, ScreenAnchor};
@@ -259,7 +260,7 @@ fn error_of(call: &Value) -> Option<BackendError> {
     let error = call.get("x")?;
     let message = error["message"].as_str().unwrap_or("").to_owned();
     Some(match (error["type"].as_str(), error.get("group").and_then(Value::as_i64)) {
-        (Some("LayoutSwitchUnconfirmed"), Some(group)) => BackendError::LayoutSwitchUnconfirmed { message, group: group as i32 },
+        (Some("LayoutSwitchUnconfirmed"), Some(group)) => BackendError::LayoutSwitchUnconfirmed { message, group: group.to::<i32>() },
         _ => BackendError::Failed(message),
     })
 }
@@ -308,7 +309,7 @@ impl TraceBackend {
         if let Some(error) = error_of(&call) {
             return Err(error);
         }
-        Ok(call["r"].as_i64().unwrap_or(0) as i32)
+        Ok((call["r"].as_i64().unwrap_or(0)).to::<i32>())
     }
 
     /// A call the Python may raise from while the trait says it cannot: the difference is the port's.
@@ -402,7 +403,7 @@ impl InputBackend for TraceBackend {
             record_version: text("record_version"),
             xtest_version: text("xtest_version"),
             xkb_version: text("xkb_version"),
-            current_group: answer["current_group"].as_i64().unwrap_or(0) as i32,
+            current_group: (answer["current_group"].as_i64().unwrap_or(0)).to::<i32>(),
             error: text("error"),
         }
     }
@@ -498,7 +499,7 @@ impl InputBackend for TraceBackend {
         }
         let call = self.call("input_anchor", json!([]))?;
         let answer = &call["r"];
-        Some(ScreenAnchor { x: answer.get("x")?.as_i64()? as i32, y: answer["y"].as_i64().unwrap_or(0) as i32, window: answer["window"].as_i64() })
+        Some(ScreenAnchor { x: (answer.get("x")?.as_i64()?).to::<i32>(), y: (answer["y"].as_i64().unwrap_or(0)).to::<i32>(), window: answer["window"].as_i64() })
     }
 
     fn restore_window(&self, window: Option<i64>) -> bool {

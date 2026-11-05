@@ -186,8 +186,8 @@ impl EngineCore {
         }
         // The model is told that the word is being edited in place: every other letter of
         // it is already in the other layout.
-        let before_head = pystr::slice(&before, None, Some((pystr::len(&before) - pystr::len(&head)) as i64)).to_owned();
-        let after_tail = pystr::slice(&after, Some(pystr::len(&tail) as i64), None).to_owned();
+        let before_head = pystr::slice(&before, None, Some((pystr::len(&before) - pystr::len(&head)).to::<i64>())).to_owned();
+        let after_tail = pystr::slice(&after, Some(pystr::len(&tail).to::<i64>()), None).to_owned();
         let decision = self._decide_word(&whole, &vec![(target, format!("{head}{alternative}{tail}"))], source_group, application, trigger, WordOptions {
             boundary_text: closing.to_owned(),
             field_override: Some(field_with(&snapshot, before_head, after_tail)),
@@ -213,7 +213,7 @@ impl EngineCore {
         let Some(model) = self.boundary_model.as_ref().filter(|_| self.in_models(source_group) && self.in_models(target)) else {
             return false;
         };
-        let candidates: Vec<_> = (0..=signs as i64)
+        let candidates: Vec<_> = (0..=signs.to::<i64>())
             .map(|length| model.extract(original, alternative, length, self.model(source_group), self.model(target)))
             .collect();
         model.predict(&candidates).is_some_and(|prediction| prediction.suffix_length == Some(0))
@@ -521,7 +521,7 @@ impl EngineCore {
                 self.shared, "field_contradiction", "application": application, "trigger": trigger.as_str(),
                 "before_characters": pystr::len(&field.before), "after_characters": pystr::len(&field.after),
                 "typed_characters": pystr::len(&anchor),
-                "typed_end_from_caret": (end >= 0).then(|| end + pystr::len(&anchor) as i64 - pystr::len(&field.before) as i64),
+                "typed_end_from_caret": (end >= 0).then(|| end + pystr::len(&anchor).to::<i64>() - pystr::len(&field.before).to::<i64>()),
             );
         }
         if result.field.as_ref().is_some_and(|field| field.sensitive) {
@@ -581,7 +581,7 @@ impl EngineCore {
         if !self.in_models(group) || strokes.is_empty() || pystr::strip(application).is_empty() || self._application_excluded(application) {
             return;
         }
-        let words = (0..self.models.len() as i64).map(|candidate| (candidate, _text_for_group(strokes, candidate))).collect();
+        let words = (0..self.models.len().to::<i64>()).map(|candidate| (candidate, _text_for_group(strokes, candidate))).collect();
         let key = pystr::casefold(application);
         self._contexts.retain(|entry| entry.0 != key);
         self._contexts.push((key, LanguageContext { group, words, updated_at: self.monotonic() }));

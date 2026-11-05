@@ -1,5 +1,6 @@
 //! `tests/test_macos_backend.py`: the decision half of the macOS backend over a fake of the system.
 
+use ks_cast::To as _;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Condvar};
 
@@ -113,7 +114,7 @@ impl MacAPI for FakeMac {
         "TextEdit".to_owned()
     }
     fn focused_window(&self) -> i64 {
-        self.window.load(Ordering::SeqCst) as i64
+        self.window.load(Ordering::SeqCst).bits::<i64>()
     }
     fn window_process_id(&self, window: i64) -> i32 {
         if window == 99 { 4242 } else { 1 }
@@ -202,7 +203,7 @@ fn stroke(keycode: u32, group: i32, state: u32) -> KeyEvent {
         pressed: true,
         keycode,
         key_name: english.to_owned(),
-        character: characters[group as usize].clone(),
+        character: characters[group.to::<usize>()].clone(),
         characters,
         group,
         state,

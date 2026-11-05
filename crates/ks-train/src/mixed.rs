@@ -1,6 +1,7 @@
 //! Public text typed the way a person switches layouts, through the engine (`tools/mixed_typing.py`): the questions the
 //! engine asks the model on the way (`capture`), the final text against the intended one (`evaluate`), and the sealed test
 //! of developer chat built on it (`tools/evaluate_devchat_test.py`). No message is printed or written by a read of that test.
+use ks_cast::To as _;
 use crate::physical::{hex, hex_digest};
 use crate::tools::Options;
 use flate2::read::MultiGzDecoder;
@@ -120,7 +121,7 @@ fn plan(tokens: &[&str], mode: &str, choice: u64) -> Option<(i64, Vec<Step>)> {
         if slips.is_empty() {
             return None;
         }
-        let slip = slips[(choice % slips.len() as u64) as usize];
+        let slip = slips[(choice % slips.len().to::<u64>()).to::<usize>()];
         let back = if mode == LETTER_SLIP_BACK_MODE { Some(slip + 1) } else { None };
         let steps = tokens
             .iter()
@@ -139,21 +140,21 @@ fn plan(tokens: &[&str], mode: &str, choice: u64) -> Option<(i64, Vec<Step>)> {
         return Some((first, steps));
     }
     let options: Vec<i64> = match mode {
-        "forget_ru" => transitions.iter().filter(|index| intended[**index] == 1).map(|index| *index as i64).collect(),
-        "forget_en" => transitions.iter().filter(|index| intended[**index] == 0).map(|index| *index as i64).collect(),
+        "forget_ru" => transitions.iter().filter(|index| intended[**index] == 1).map(|index| (*index).to::<i64>()).collect(),
+        "forget_en" => transitions.iter().filter(|index| intended[**index] == 0).map(|index| (*index).to::<i64>()).collect(),
         "start_wrong" => vec![0],
         _ => vec![-1],
     };
     if options.is_empty() {
         return None;
     }
-    let forgotten = options[(choice % options.len() as u64) as usize];
+    let forgotten = options[(choice % options.len().to::<u64>()).to::<usize>()];
     let start = if mode == "start_wrong" { 1 - first } else { first };
     let steps = tokens
         .iter()
         .enumerate()
         .map(|(index, token)| {
-            let selected = (transitions.contains(&index) && index as i64 != forgotten).then_some(intended[index]);
+            let selected = (transitions.contains(&index) && index.to::<i64>() != forgotten).then_some(intended[index]);
             ((*token).to_owned(), intended[index], selected, false)
         })
         .collect();
@@ -195,8 +196,8 @@ fn typo(token: &str, seed: &str, kinds: &[String], least: usize) -> String {
         return token.to_owned();
     }
     let digest = draw_with(seed, MIXED_TYPO_HEX_DIGITS);
-    let kind = kinds[(digest % kinds.len() as u64) as usize].as_str();
-    let at = positions[((digest >> MIXED_TYPO_PLACE_SHIFT) % positions.len() as u64) as usize];
+    let kind = kinds[(digest % kinds.len().to::<u64>()).to::<usize>()].as_str();
+    let at = positions[((digest >> MIXED_TYPO_PLACE_SHIFT) % positions.len().to::<u64>()).to::<usize>()];
     let join = |parts: &[&[char]]| -> String { parts.iter().flat_map(|part| part.iter()).collect() };
     if kind == "missed" && positions.len() > least.max(MIXED_TYPO_MIN_LETTERS) {
         return join(&[&letters[..at], &letters[at + 1..]]);
@@ -209,22 +210,22 @@ fn typo(token: &str, seed: &str, kinds: &[String], least: usize) -> String {
     }
     let near = neighbours(letters[at]);
     if !near.is_empty() && kind == "extra" {
-        let chosen = [near[((digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % near.len() as u64) as usize]];
+        let chosen = [near[((digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % near.len().to::<u64>()).to::<usize>()]];
         return join(&[&letters[..=at], &chosen, &letters[at + 1..]]);
     }
     if !near.is_empty() {
-        let chosen = [near[((digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % near.len() as u64) as usize]];
+        let chosen = [near[((digest >> MIXED_TYPO_NEIGHBOUR_SHIFT) % near.len().to::<u64>()).to::<usize>()]];
         return join(&[&letters[..at], &chosen, &letters[at + 1..]]);
     }
     join(&[&letters[..=at], &letters[at..=at], &letters[at + 1..]])
 }
 
 fn with_typos(text: &str, rate: f64, seed: &str, kinds: &[String], least: usize) -> String {
-    let largest = (16_u64.pow(MIXED_DRAW_HEX_DIGITS as u32) - 1) as f64;
+    let largest = (16_u64.pow(MIXED_DRAW_HEX_DIGITS.to::<u32>()) - 1).to::<f64>();
     pystr::split(text)
         .iter()
         .enumerate()
-        .map(|(index, token)| if draw(&format!("{seed}:{index}")) as f64 / largest < rate { typo(token, &format!("{seed}:{index}:t"), kinds, least) } else { (*token).to_owned() })
+        .map(|(index, token)| if (draw(&format!("{seed}:{index}"))).to::<f64>() / largest < rate { typo(token, &format!("{seed}:{index}:t"), kinds, least) } else { (*token).to_owned() })
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -244,9 +245,9 @@ fn edit_point(text: &str) -> Option<(usize, usize, i64)> {
         return None;
     }
     let digest = draw(text);
-    let (offset, word, group) = &words[(digest % words.len() as u64) as usize];
-    let length = if word.len() >= MIXED_EDIT_TWO_LETTERS_FROM { 1 + ((digest >> MIXED_EDIT_LENGTH_SHIFT) % MIXED_EDIT_MAX_REMOVED_LETTERS) as usize } else { 1 };
-    let inner = 1 + ((digest >> MIXED_EDIT_PLACE_SHIFT) % (word.len() - length - 1) as u64) as usize;
+    let (offset, word, group) = &words[(digest % words.len().to::<u64>()).to::<usize>()];
+    let length = if word.len() >= MIXED_EDIT_TWO_LETTERS_FROM { 1 + ((digest >> MIXED_EDIT_LENGTH_SHIFT) % MIXED_EDIT_MAX_REMOVED_LETTERS).to::<usize>() } else { 1 };
+    let inner = 1 + ((digest >> MIXED_EDIT_PLACE_SHIFT) % (word.len() - length - 1).to::<u64>()).to::<usize>();
     Some((offset + inner, length, *group))
 }
 
@@ -262,7 +263,7 @@ impl FieldReader for Reader {
         let mut field = FieldContext::new(application, "1");
         field.role = FieldRole::Text;
         if self.after {
-            let caret = self.backend.caret() as i64;
+            let caret = self.backend.caret().to::<i64>();
             field.before = pystr::slice(pystr::slice(&text, None, Some(caret)), Some(-CONTEXT_LIMIT), None).to_owned();
             field.after = pystr::slice(pystr::slice(&text, Some(caret), None), None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS)).to_owned();
             field.source = "uia".to_owned();
@@ -476,7 +477,7 @@ impl Typist {
         for (name, value) in changes {
             settings.set(name, value, false).expect("in memory");
         }
-        let backend = Arc::new(Backend::new("Telegram", start as i32, Vec::new()));
+        let backend = Arc::new(Backend::new("Telegram", start.to::<i32>(), Vec::new()));
         let clock = FakeClock::new();
         if editing {
             clock.advance(MIXED_EDIT_CLOCK_START_SECONDS - clock.now());
@@ -546,7 +547,7 @@ impl Typist {
         let mut failed = false;
         for (token, intended, selected, slipped) in steps {
             if let Some(selected) = selected.filter(|value| i64::from(session.backend.group()) != *value) {
-                session.backend.set_group(selected as i32);
+                session.backend.set_group(selected.to::<i32>());
                 if !slipped {
                     session.core._observe_group(selected, "hotkey");
                 }
@@ -652,13 +653,13 @@ fn recipe_messages(messages: &Path, recipe: &Value) -> Result<Vec<(String, i64)>
         }
     }
     pool.sort();
-    let count = recipe.int("count") as usize;
+    let count = recipe.int("count").to::<usize>();
     let share = recipe.float("russian_share");
     let mut chosen: Vec<(String, i64)> = pool.iter().filter(|entry| entry.2 == "mixed").take(count).map(|entry| (entry.1.clone(), entry.3)).collect();
-    chosen.extend(pool.iter().filter(|entry| entry.2 == "russian").take((count as f64 * share) as usize).map(|entry| (entry.1.clone(), entry.3)));
+    chosen.extend(pool.iter().filter(|entry| entry.2 == "russian").take((count.to::<f64>() * share).to::<usize>()).map(|entry| (entry.1.clone(), entry.3)));
     let rate = recipe.float_or("typo_rate", 0.0);
     let kinds: Vec<String> = recipe.get("typo_kinds").map_or_else(|| TYPO_KINDS.iter().map(|kind| (*kind).to_owned()).collect(), string_list);
-    let least = recipe.int_or("typo_min_letters", MIXED_TYPO_MIN_LETTERS as i64) as usize;
+    let least = (recipe.int_or("typo_min_letters", MIXED_TYPO_MIN_LETTERS.to::<i64>())).to::<usize>();
     if kinds.iter().any(|kind| !TYPO_KINDS.contains(&kind.as_str()) && kind != "extra") || least < 1 {
         return Err(format!("unknown typo kinds or length: {kinds:?}, {least}"));
     }
@@ -683,7 +684,7 @@ fn lines_above(messages: &Path, recipe: &Value) -> Result<Vec<String>, String> {
         }
     }
     chosen.sort();
-    Ok(chosen.into_iter().take(pool.int("count") as usize).map(|entry| entry.1).collect())
+    Ok(chosen.into_iter().take(pool.int("count").to::<usize>()).map(|entry| entry.1).collect())
 }
 
 /// `recipe_messages`, for the tool that says whose text a recipe types.
@@ -707,7 +708,7 @@ pub(crate) fn recipe_lines_above(messages: &Path, recipe: &Value, code_path: Opt
             }
         }
         chosen.sort();
-        above = chosen.into_iter().take(pool.int("count") as usize).map(|entry| (entry.1, entry.2)).collect();
+        above = chosen.into_iter().take(pool.int("count").to::<usize>()).map(|entry| (entry.1, entry.2)).collect();
     }
     let code = match code_path {
         Some(path) if recipe.float_or("prefix_rate", 0.0) != 0.0 => gz_lines(path)?.len().min(MIXED_PREFIX_CODE_LINES),
@@ -719,17 +720,17 @@ pub(crate) fn recipe_lines_above(messages: &Path, recipe: &Value, code_path: Opt
 /// `previous_line`: what stands on the line above a message: ("code", line), ("message", index) or ("above", index).
 pub(crate) fn recipe_previous_line(recipe: &Value, text: &str, index: usize, messages: usize, code_lines: usize, lines_above: usize) -> Option<(&'static str, usize)> {
     let value = draw(&format!("{}:prefix:{text}", recipe["seed"].as_str().unwrap_or("")));
-    if ((value % MIXED_DRAW_RESOLUTION) as f64) >= recipe.float_or("prefix_rate", 0.0) * MIXED_DRAW_RESOLUTION as f64 {
+    if ((value % MIXED_DRAW_RESOLUTION) as f64) >= recipe.float_or("prefix_rate", 0.0) * MIXED_DRAW_RESOLUTION.to::<f64>() {
         return None;
     }
     let half = value / MIXED_PREFIX_KINDS;
     if code_lines != 0 && value % MIXED_PREFIX_KINDS == 0 {
-        return Some(("code", (half % code_lines as u64) as usize));
+        return Some(("code", (half % code_lines.to::<u64>()).to::<usize>()));
     }
     if lines_above != 0 {
-        return Some(("above", (half % lines_above as u64) as usize));
+        return Some(("above", (half % lines_above.to::<u64>()).to::<usize>()));
     }
-    Some(("message", ((half + index as u64 + 1) % messages as u64) as usize))
+    Some(("message", ((half + index.to::<u64>() + 1) % messages.to::<u64>()).to::<usize>()))
 }
 
 /// `jobs_for`: the recipe's messages, typos and previous lines, and one job per mode.
@@ -755,14 +756,14 @@ pub fn jobs_for(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Re
     for (index, text) in everyone.iter().enumerate() {
         let value = draw(&format!("{seed}:prefix:{text}"));
         let mut prefix = String::new();
-        if ((value % MIXED_DRAW_RESOLUTION) as f64) < prefix_rate * MIXED_DRAW_RESOLUTION as f64 {
+        if ((value % MIXED_DRAW_RESOLUTION) as f64) < prefix_rate * MIXED_DRAW_RESOLUTION.to::<f64>() {
             let half = value / MIXED_PREFIX_KINDS;
             let line = if !code.is_empty() && value % MIXED_PREFIX_KINDS == 0 {
-                &code[(half % code.len() as u64) as usize]
+                &code[(half % code.len().to::<u64>()).to::<usize>()]
             } else if !above_pool.is_empty() {
-                &above_pool[(half % above_pool.len() as u64) as usize]
+                &above_pool[(half % above_pool.len().to::<u64>()).to::<usize>()]
             } else {
-                &everyone[((half + index as u64 + 1) % everyone.len() as u64) as usize]
+                &everyone[((half + index.to::<u64>() + 1) % everyone.len().to::<u64>()).to::<usize>()]
             };
             prefix = format!("{line}\n");
         }
@@ -993,9 +994,9 @@ fn loss_chance(losses: i64, gains: i64) -> f64 {
         if count >= losses {
             sum += combination;
         }
-        combination = combination * (total - count) as f64 / (count + 1) as f64;
+        combination = combination * (total - count).to::<f64>() / (count + 1).to::<f64>();
     }
-    sum / 2_f64.powi(total as i32)
+    sum / 2_f64.powi(total.to::<i32>())
 }
 
 type Table = BTreeMap<String, (i64, i64, i64)>;
@@ -1177,7 +1178,7 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     ordered.sort_by(|a, b| (&a.0, &a.1.text).cmp(&(&b.0, &b.1.text)));
     let limit = if split == "test" { DEVCHAT_TEST_COUNT } else { usize::MAX };
     let mixed: Vec<Member> = ordered.iter().filter(|entry| entry.1.mix == "mixed").take(limit).map(|entry| entry.1.clone()).collect();
-    let share = (mixed.len() as f64 * MIXED_EVALUATE_RUSSIAN_SHARE) as usize;
+    let share = (mixed.len().to::<f64>() * MIXED_EVALUATE_RUSSIAN_SHARE).to::<usize>();
     let russian: Vec<Member> = ordered.iter().filter(|entry| entry.1.mix == "russian").take(share).map(|entry| entry.1.clone()).collect();
     let mixed_count = mixed.len();
     let chosen: Vec<Member> = mixed.into_iter().chain(russian).collect();

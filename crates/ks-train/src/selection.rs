@@ -1,4 +1,5 @@
 //! Which features, which epoch and which threshold: chosen on development and calibration, never on a sealed test.
+use ks_cast::To as _;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -56,7 +57,7 @@ pub struct EpochSelection {
 impl EpochSelection {
     /// Worst profile first, then the pooled balance: a model is judged by what it nets.
     pub fn rank(&self) -> (f64, f64, f64, f64, f64) {
-        (self.minimum_net_benefit as f64, self.net_benefit as f64, self.pooled_recall, -self.loss, -self.threshold)
+        (self.minimum_net_benefit.to::<f64>(), self.net_benefit.to::<f64>(), self.pooled_recall, -self.loss, -self.threshold)
     }
 }
 
@@ -116,9 +117,9 @@ pub fn assess_epoch(predictions: &[(String, &[f64], &[u8])], thresholds: &[f64],
     for threshold in grid {
         let (mut by_profile, mut nets, mut recalls, mut pooled_true, mut pooled_possible) = (Vec::new(), Vec::new(), Vec::new(), 0i64, 0i64);
         for (profile, positives, negatives, possible, rows) in &observations {
-            let correct = (positives.len() - lower_bound(positives, threshold)) as i64;
-            let wrong = (negatives.len() - lower_bound(negatives, threshold)) as i64;
-            let recall = correct as f64 / *possible as f64;
+            let correct = (positives.len() - lower_bound(positives, threshold)).to::<i64>();
+            let wrong = (negatives.len() - lower_bound(negatives, threshold)).to::<i64>();
+            let recall = correct.to::<f64>() / (*possible).to::<f64>();
             by_profile.push((profile.clone(), json!({"rows": rows, "converted_correctly": correct, "false_conversions": wrong, "convert_rows": possible, "conversion_recall": recall})));
             nets.push(correct - wrong);
             recalls.push(recall);
@@ -132,7 +133,7 @@ pub fn assess_epoch(predictions: &[(String, &[f64], &[u8])], thresholds: &[f64],
         let candidate = EpochSelection {
             threshold,
             minimum_recall: recalls.iter().copied().fold(f64::INFINITY, f64::min),
-            pooled_recall: pooled_true as f64 / pooled_possible as f64,
+            pooled_recall: pooled_true.to::<f64>() / pooled_possible.to::<f64>(),
             loss,
             by_profile,
             net_benefit: nets.iter().sum(),
@@ -186,7 +187,7 @@ pub fn metrics(probabilities: &[f64], labels: &[u8], threshold: f64) -> Value {
         possible += i64::from(*label == 1);
         correct += i64::from(predicted == usize::from(*label));
     }
-    let recall = if possible > 0 { right as f64 / possible as f64 } else { 0.0 };
+    let recall = if possible > 0 { right.to::<f64>() / possible.to::<f64>() } else { 0.0 };
     json!({"rows": labels.len(), "false_conversions": wrong, "converted_correctly": right, "convert_rows": possible, "conversion_recall": recall, "correct_classes": correct})
 }
 
@@ -235,7 +236,7 @@ pub fn choose_threshold(predictions: &[(String, &[f64], &[u8])], candidates: &[f
             recall_ok &= row["conversion_recall"].as_f64().unwrap_or(0.0) >= options.minimum_recall;
             by_profile.insert(name.clone(), row);
         }
-        report = json!({"false_conversions": wrong, "conversion_recall": if possible > 0 { right as f64 / possible as f64 } else { 0.0 }, "converted_correctly": right, "convert_rows": possible, "net_benefit": right - wrong, "minimum_net_benefit": minimum_net, "rows": rows, "by_profile": by_profile});
+        report = json!({"false_conversions": wrong, "conversion_recall": if possible > 0 { right.to::<f64>() / possible.to::<f64>() } else { 0.0 }, "converted_correctly": right, "convert_rows": possible, "net_benefit": right - wrong, "minimum_net_benefit": minimum_net, "rows": rows, "by_profile": by_profile});
         if minimum_net >= options.minimum_net_benefit && recall_ok {
             qualifying.push((minimum_net, right - wrong, wrong, *threshold, report.clone()));
         }
@@ -245,7 +246,7 @@ pub fn choose_threshold(predictions: &[(String, &[f64], &[u8])], candidates: &[f
     }
     let ceiling = qualifying.iter().map(|row| (row.0, row.1)).max().unwrap_or((0, 0));
     let tolerance = 1.0 - options.net_benefit_tolerance;
-    let floor = ((ceiling.0 as f64 * tolerance).floor() as i64, (ceiling.1 as f64 * tolerance).floor() as i64);
+    let floor = (((ceiling.0.to::<f64>() * tolerance).floor()).to::<i64>(), ((ceiling.1.to::<f64>() * tolerance).floor()).to::<i64>());
     // Both parts of the balance have to hold.
     let admissible: Vec<&(i64, i64, i64, f64, Value)> = qualifying.iter().filter(|row| row.0 >= floor.0 && row.1 >= floor.1).collect();
     let mut chosen = admissible[0];

@@ -9,6 +9,7 @@
 //! worker injects corrections and holds `inject_lock` across a batch. The expected-key queue has its own small lock, taken
 //! by both and never across a call to the server.
 
+use ks_cast::To as _;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -175,13 +176,13 @@ pub struct X11Backend {
 
 impl X11Backend {
     pub fn new(connector: Connector, selection_factory: Option<SelectionFactory>) -> X11Backend {
-        X11Backend::with_group_count(LAYOUT_GROUP_COUNT as usize, connector, selection_factory)
+        X11Backend::with_group_count(LAYOUT_GROUP_COUNT.to::<usize>(), connector, selection_factory)
     }
 
     pub fn with_group_count(group_count: usize, connector: Connector, selection_factory: Option<SelectionFactory>) -> X11Backend {
         X11Backend {
             shared: Arc::new(Shared {
-                group_count: group_count.clamp(LAYOUT_GROUP_COUNT as usize, MAX_XKB_GROUPS),
+                group_count: group_count.clamp(LAYOUT_GROUP_COUNT.to::<usize>(), MAX_XKB_GROUPS),
                 connector,
                 selection_factory,
                 api: Mutex::new(None),
@@ -438,12 +439,12 @@ impl Shared {
     fn character_for_keycode(&self, api: &dyn X11Api, keycode: u8, group: usize, state: u16) -> String {
         let shift = u32::from(state) & SHIFT_MASK != 0;
         let caps = u32::from(state) & LOCK_MASK != 0;
-        let mut keysym = api.keysym(keycode, group as u8, u8::from(shift));
+        let mut keysym = api.keysym(keycode, group.low::<u8>(), u8::from(shift));
         if keysym == 0 {
             // Common keys such as Space often have only group 0 in XKB. Direct indexing returns NoSymbol for RU; the actual
             // key lookup applies the key's group fallback, just as the editor does.
             let lookup_state = (state & !(XKB_GROUP_STATE_MASK << XKB_GROUP_STATE_SHIFT))
-                | ((group as u16 & XKB_GROUP_STATE_MASK) << XKB_GROUP_STATE_SHIFT);
+                | ((group.low::<u16>() & XKB_GROUP_STATE_MASK) << XKB_GROUP_STATE_SHIFT);
             match api.lookup_keysym(keycode, lookup_state) {
                 Some(resolved) => keysym = resolved,
                 None => return String::new(),
@@ -547,12 +548,12 @@ impl Shared {
     }
 
     fn switch_group(&self, group: i32) -> Result<(), X11Error> {
-        if group < 0 || group as usize >= self.group_count {
+        if group < 0 || group.to::<usize>() >= self.group_count {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
         let Some(api) = self.api() else { return Err(failed("X11 backend не запущен")) };
         let _inject = lock(&self.inject_lock);
-        if !api.lock_group(group as u8) {
+        if !api.lock_group(group.low::<u8>()) {
             return Err(failed(format!("Не удалось переключить XKB-группу на {group}")));
         }
         api.flush();
@@ -599,7 +600,7 @@ impl Shared {
         for keycode in X11_MIN_KEYCODE..=X11_MAX_KEYCODE {
             for (group, table) in tables.iter_mut().enumerate() {
                 for shifted in [false, true] {
-                    let character = self.character_for_keycode(api, keycode, group, if shifted { SHIFT_MASK as u16 } else { 0 });
+                    let character = self.character_for_keycode(api, keycode, group, if shifted { SHIFT_MASK.low::<u16>() } else { 0 });
                     let mut chars = character.chars();
                     if let (Some(only), None) = (chars.next(), chars.next()) {
                         table.entry(only).or_insert((i64::from(keycode), shifted));
@@ -620,7 +621,7 @@ impl Shared {
     }
 
     fn lock_to(api: &dyn X11Api, group: i32, message: &str) -> Result<(), X11Error> {
-        if api.lock_group(group as u8) { Ok(()) } else { Err(failed(format!("{message}{group}"))) }
+        if api.lock_group(group.low::<u8>()) { Ok(()) } else { Err(failed(format!("{message}{group}"))) }
     }
 
     fn expect(&self, sequences: &[&[(bool, u8)]]) {
@@ -630,7 +631,7 @@ impl Shared {
             expected.queue.extend(sequence.iter().copied());
         }
         expected.deadline =
-            Instant::now() + Duration::from_secs_f64(MIN_INJECTION_DEADLINE_SECONDS.max(total as f64 * INJECTION_SECONDS_PER_EVENT));
+            Instant::now() + Duration::from_secs_f64(MIN_INJECTION_DEADLINE_SECONDS.max(total.to::<f64>() * INJECTION_SECONDS_PER_EVENT));
     }
 
     fn forget_expected(&self) {
@@ -678,27 +679,27 @@ impl Shared {
         let final_group = if kept_tail != 0 { rendered_source_group } else { target_group };
         let converted = &strokes[..strokes.len() - kept_tail];
         for stroke in converted {
-            tap(&mut sequence, stroke.keycode as u8, shifted(stroke, target_group));
+            tap(&mut sequence, stroke.keycode.low::<u8>(), shifted(stroke, target_group));
         }
         // A kept word is typed again in its own layout, after the switch back.
         let mut kept_sequence: Vec<(bool, u8)> = Vec::new();
         for stroke in &strokes[converted.len()..] {
-            tap(&mut kept_sequence, stroke.keycode as u8, shifted(stroke, final_group));
+            tap(&mut kept_sequence, stroke.keycode.low::<u8>(), shifted(stroke, final_group));
         }
         // Keys typed after the word are deleted with it and typed again in the new layout. They are left out of `expected` on
         // purpose: the engine must see them come back as the user's own input.
         let mut late_sequence: Vec<(bool, u8)> = Vec::new();
         for stroke in late {
-            tap(&mut late_sequence, stroke.keycode as u8, shifted(stroke, final_group));
+            tap(&mut late_sequence, stroke.keycode.low::<u8>(), shifted(stroke, final_group));
         }
         let preserve_boundary_layout = literal.iter().any(|stroke| stroke.character_for(target_group) != stroke.character);
         let literal_group = literal.first().map_or(rendered_source_group, |stroke| stroke.group);
-        if literal_group < 0 || literal_group as usize >= self.group_count || literal.iter().any(|stroke| stroke.group != literal_group) {
+        if literal_group < 0 || literal_group.to::<usize>() >= self.group_count || literal.iter().any(|stroke| stroke.group != literal_group) {
             return Err(failed("Некорректная раскладка пунктуации; замена отменена"));
         }
         let mut boundary_sequence: Vec<(bool, u8)> = Vec::new();
         for stroke in &literal {
-            tap(&mut boundary_sequence, stroke.keycode as u8, shifted(stroke, literal_group));
+            tap(&mut boundary_sequence, stroke.keycode.low::<u8>(), shifted(stroke, literal_group));
         }
         let none: Vec<(bool, u8)> = Vec::new();
         let target_boundary_sequence = if preserve_boundary_layout || kept_tail != 0 { &none } else { &boundary_sequence };
@@ -778,13 +779,13 @@ impl Shared {
                 if with_shift {
                     events.push((true, shift_keycode));
                 }
-                events.push((true, keycode as u8));
-                events.push((false, keycode as u8));
+                events.push((true, keycode.low::<u8>()));
+                events.push((false, keycode.low::<u8>()));
                 if with_shift {
                     events.push((false, shift_keycode));
                 }
             }
-            runs.push((group as i32, events));
+            runs.push((group.low::<i32>(), events));
         }
         let steps = caret_steps(replacement);
         let mut reselect: Vec<(bool, u8)> = Vec::new();

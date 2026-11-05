@@ -3,6 +3,7 @@
 //! Every function here is free of live sockets and D-Bus connections so GNOME Shell, KDE Plasma 6 (KWin) and sway wire
 //! formats are verified deterministically.
 
+use ks_cast::To as _;
 use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
@@ -143,7 +144,7 @@ pub fn normalize_application_id(raw: &str) -> String {
 /// `int(value)` of a JSON number; `default` for anything else (a bool is not a number here).
 fn int_field(mapping: &Value, key: &str, default: i64) -> i64 {
     match mapping.get(key) {
-        Some(Value::Number(number)) => number.as_i64().or_else(|| number.as_f64().map(|float| float as i64)).unwrap_or(default),
+        Some(Value::Number(number)) => number.as_i64().or_else(|| number.as_f64().map(|float| float.to::<i64>())).unwrap_or(default),
         _ => default,
     }
 }
@@ -155,7 +156,7 @@ fn str_field<'a>(mapping: &'a Value, key: &str) -> &'a str {
 /// Pack one `i3-ipc` request frame.
 pub fn encode_sway_ipc(message_type: u32, payload: &str) -> Vec<u8> {
     let body = payload.as_bytes();
-    let mut frame = Vec::with_capacity(SWAY_IPC_HEADER_BYTES as usize + body.len());
+    let mut frame = Vec::with_capacity(SWAY_IPC_HEADER_BYTES.to::<usize>() + body.len());
     frame.extend_from_slice(SWAY_IPC_MAGIC);
     frame.extend_from_slice(&(body.len() as u32).to_ne_bytes());
     frame.extend_from_slice(&message_type.to_ne_bytes());
@@ -165,7 +166,7 @@ pub fn encode_sway_ipc(message_type: u32, payload: &str) -> Vec<u8> {
 
 /// Unpack `(payload_length, message_type)` from a 14-byte `i3-ipc` header.
 pub fn decode_sway_ipc_header(header: &[u8]) -> Result<(u32, u32), DesktopParseError> {
-    if header.len() != SWAY_IPC_HEADER_BYTES as usize {
+    if header.len() != SWAY_IPC_HEADER_BYTES.to::<usize>() {
         return Err(DesktopParseError("Invalid sway IPC header length".to_owned()));
     }
     if &header[..6] != SWAY_IPC_MAGIC {
@@ -366,7 +367,7 @@ pub struct KdeWindowIdMap {
 
 impl Default for KdeWindowIdMap {
     fn default() -> Self {
-        KdeWindowIdMap::new(KDE_WINDOW_ID_CACHE_LIMIT as usize)
+        KdeWindowIdMap::new(KDE_WINDOW_ID_CACHE_LIMIT.to::<usize>())
     }
 }
 

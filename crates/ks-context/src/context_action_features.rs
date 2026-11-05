@@ -3,6 +3,7 @@
 //! The features of a word are an ordered map from names to values: the order is part of the sum the model takes, and a
 //! name set twice keeps its first place, as in a Python `dict`. `FeatureMap` is an `IndexMap` for that.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, TERM_EDGE_SIGNS};
 use indexmap::IndexMap;
@@ -69,7 +70,7 @@ fn last(text: &str, n: usize) -> &str {
 
 /// `text[:n]`.
 fn first(text: &str, n: usize) -> &str {
-    pystr::slice(text, None, Some(n as i64))
+    pystr::slice(text, None, Some(n.to::<i64>()))
 }
 
 fn first_char(text: &str) -> &str {
@@ -87,7 +88,7 @@ fn clamp_int(value: i64, bound: i64) -> i64 {
 
 /// `max(-bands, min(bands, math.floor(delta / width)))`.
 fn band(delta: f64, width: f64, bands: i64) -> i64 {
-    (delta / width).floor().clamp(-(bands as f64), bands as f64) as i64
+    ((delta / width).floor().clamp(-(bands as f64), bands.to::<f64>())).to::<i64>()
 }
 
 fn translate(text: &str, from: &str, to: &str) -> String {
@@ -500,13 +501,13 @@ pub fn extract_action_features(item: &ContextEvidence, tables: &TermTables) -> C
         if label == "source" {
             source_case = case;
         }
-        let raw_length = count(raw).max(1) as f64;
+        let raw_length = count(raw).max(1).to::<f64>();
         insert(&mut features, format!("{label}:case:{case}"), 1.0);
         insert(&mut features, format!("{label}:script:{}", script(text)), 1.0);
-        insert(&mut features, format!("{label}:length"), count(text) as f64 / ACTION_FEATURE_WORD_MAX_CHARACTERS as f64);
-        insert(&mut features, format!("{label}:digits"), raw.chars().filter(|&c| ucd::isdigit(c)).count() as f64 / raw_length);
+        insert(&mut features, format!("{label}:length"), count(text).to::<f64>() / ACTION_FEATURE_WORD_MAX_CHARACTERS.to::<f64>());
+        insert(&mut features, format!("{label}:digits"), (raw.chars().filter(|&c| ucd::isdigit(c)).count()).to::<f64>() / raw_length);
         for mark in ",.;[]'’`-_/@\\=<>\"".chars() {
-            insert(&mut features, format!("{label}:mark:{:04x}", mark as u32), char_count(raw, mark) as f64 / raw_length);
+            insert(&mut features, format!("{label}:mark:{:04x}", mark.to::<u32>()), char_count(raw, mark).to::<f64>() / raw_length);
         }
     }
     for (label, raw) in [
@@ -532,25 +533,25 @@ pub fn extract_action_features(item: &ContextEvidence, tables: &TermTables) -> C
             &raw[..raw.len() - pystr::lstrip(raw).len()]
         };
         let whitespace = first(whitespace, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS);
-        let limit = ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS as f64;
-        insert(&mut features, format!("{label}:space_count"), count(whitespace) as f64 / limit);
+        let limit = ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS.to::<f64>();
+        insert(&mut features, format!("{label}:space_count"), count(whitespace).to::<f64>() / limit);
         for c in sorted_chars(whitespace) {
-            insert(&mut features, format!("{label}:space:{:04x}", c as u32), char_count(whitespace, c) as f64 / limit);
+            insert(&mut features, format!("{label}:space:{:04x}", c.to::<u32>()), char_count(whitespace, c).to::<f64>() / limit);
         }
     }
-    let short = ACTION_FEATURE_SHORT_TEXT_CHARACTERS as f64;
+    let short = ACTION_FEATURE_SHORT_TEXT_CHARACTERS.to::<f64>();
     let tail = first(&item.literal_tail, ACTION_FEATURE_SHORT_TEXT_CHARACTERS);
-    insert(&mut features, "tail:length".to_string(), count(tail) as f64 / short);
+    insert(&mut features, "tail:length".to_string(), count(tail).to::<f64>() / short);
     insert(&mut features, "tail:overflow".to_string(), f64::from(flag(count(&item.literal_tail) > ACTION_FEATURE_SHORT_TEXT_CHARACTERS)));
     for c in sorted_chars(tail) {
-        insert(&mut features, format!("tail:char:{:04x}", c as u32), char_count(tail, c) as f64 / short);
+        insert(&mut features, format!("tail:char:{:04x}", c.to::<u32>()), char_count(tail, c).to::<f64>() / short);
     }
     let boundary = first(&item.boundary_text, ACTION_FEATURE_SHORT_TEXT_CHARACTERS);
-    insert(&mut features, "boundary:length".to_string(), count(boundary) as f64 / short);
+    insert(&mut features, "boundary:length".to_string(), count(boundary).to::<f64>() / short);
     insert(&mut features, "boundary:overflow".to_string(), f64::from(flag(count(&item.boundary_text) > ACTION_FEATURE_SHORT_TEXT_CHARACTERS)));
     insert(&mut features, "boundary:isspace".to_string(), f64::from(flag(pystr::isspace(boundary))));
     for c in sorted_chars(boundary) {
-        insert(&mut features, format!("boundary:char:{:04x}", c as u32), char_count(boundary, c) as f64 / short);
+        insert(&mut features, format!("boundary:char:{:04x}", c.to::<u32>()), char_count(boundary, c).to::<f64>() / short);
     }
     let application = pystr::casefold(&item.field.application);
     for part in ascii_tokens(first(&application, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS)).into_iter().take(ACTION_FEATURE_APPLICATION_TOKEN_COUNT) {
@@ -1271,7 +1272,7 @@ pub fn russian_ending_bucket(token: &str, tables: &TermTables) -> String {
     if !TERM_HEAD_ENDING_LETTERS.contains(&count(&word)) {
         return "na".to_string();
     }
-    bit_length(tables.russian_endings().get(&word)).min(TERM_HEAD_ENDING_BUCKET_MAX as i64).to_string()
+    bit_length(tables.russian_endings().get(&word)).min(TERM_HEAD_ENDING_BUCKET_MAX.to::<i64>()).to_string()
 }
 
 /// How many words of Russian prose begin with the token, as the binary order of magnitude of their number
@@ -1281,7 +1282,7 @@ pub fn russian_start_bucket(token: &str, tables: &TermTables) -> String {
     if !TERM_HEAD_ENDING_LETTERS.contains(&count(&word)) {
         return "na".to_string();
     }
-    bit_length(tables.russian_starts().get(&word)).min(TERM_HEAD_ENDING_BUCKET_MAX as i64).to_string()
+    bit_length(tables.russian_starts().get(&word)).min(TERM_HEAD_ENDING_BUCKET_MAX.to::<i64>()).to_string()
 }
 
 /// Whether a token ends as many Russian words as a tail the term head keeps does (TERM_FRAGMENT_MIN_ENDING_BUCKET).
@@ -1470,7 +1471,7 @@ fn leading_digits(token: &str) -> usize {
 /// sign letter is read with the rest. `пункт 2ю` and `версии 5ю2` are a dot.
 fn digit_dot_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap, tables: &TermTables) -> Pairs {
     let head = leading_digits(&item.original);
-    let sign = format!("sign:{}", pystr::slice(&item.original, Some(head as i64), Some(head as i64 + 1)));
+    let sign = format!("sign:{}", pystr::slice(&item.original, Some(head.to::<i64>()), Some(head.to::<i64>() + 1)));
     let previous = pystr::split(&item.field.before).last().copied().unwrap_or("");
     let following = first_word(&item.field.after);
     let tail = last(&item.field.before, VARIABLE_CODE_CONTEXT_CHARACTERS);
@@ -1553,7 +1554,7 @@ pub fn dash_question(original: &str, alternative: &str, trigger: &str) -> bool {
 
 fn dash_shape(token: &str) -> bool {
     let dashes = count(token) - count(pystr::lstrip_chars(token, "-"));
-    let letters = letters_of_flag(pystr::slice(token, Some(dashes as i64), None));
+    let letters = letters_of_flag(pystr::slice(token, Some(dashes.to::<i64>()), None));
     (1..=DASH_HEAD_MAX_DASHES).contains(&dashes) && pystr::isalpha(letters) && (letters.is_ascii() || all_cyrillic(letters))
 }
 
@@ -1576,8 +1577,8 @@ fn letters_of_flag(rest: &str) -> &str {
 /// command (`git -v`, `npm i --save`); a Russian word after a dash is rarely typed so.
 fn dash_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap, tables: &TermTables) -> Pairs {
     let dashes = count(&item.original) - count(pystr::lstrip_chars(&item.original, "-"));
-    let letters = letters_of_flag(pystr::slice(&item.original, Some(dashes as i64), None));
-    let other = letters_of_flag(pystr::slice(&item.alternative, Some(dashes as i64), None));
+    let letters = letters_of_flag(pystr::slice(&item.original, Some(dashes.to::<i64>()), None));
+    let other = letters_of_flag(pystr::slice(&item.alternative, Some(dashes.to::<i64>()), None));
     let (latin, cyrillic) = if letters.is_ascii() { (letters, other) } else { (other, letters) };
     let case = if pystr::isupper(letters) {
         "upper"
@@ -1872,7 +1873,7 @@ fn brief_counts(latin: &str, cyrillic: &str, tables: &TermTables) -> (i64, i64) 
     let (latin, cyrillic) = (pystr::casefold(latin), pystr::casefold(cyrillic));
     let russian = tables.term("russian").count(&cyrillic).max(tables.term("cyrillic").count(&cyrillic));
     let other = tables.term("english").count(&latin).max(tables.term("latin").count(&latin));
-    (russian as i64, other as i64)
+    (russian.to::<i64>(), other.to::<i64>())
 }
 
 /// Whether the counts settle a short Latin token as the keys of a Russian word: its Cyrillic reading counted in Russian
@@ -2163,7 +2164,7 @@ fn slip_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let english_near = english.max(nearest_count(&latin, "english", tables));
     let probability = match item.model_probability {
         None => "na".to_string(),
-        Some(probability) => (((probability * SLIP_PROBABILITY_BANDS as f64).floor()).clamp(0.0, (SLIP_PROBABILITY_BANDS - 1) as f64) as i64).to_string(),
+        Some(probability) => (((probability * SLIP_PROBABILITY_BANDS.to::<f64>()).floor()).clamp(0.0, (SLIP_PROBABILITY_BANDS - 1).to::<f64>()) as i64).to_string(),
     };
     let margin = match (item.ortho_score, item.ortho_threshold) {
         (Some(score), Some(threshold)) => band(score - threshold, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS).to_string(),
@@ -2209,10 +2210,10 @@ pub fn extract_baseline_features(item: &ContextEvidence) -> FeatureMap {
     const BEFORE_WORDS: usize = 6;
     const AFTER_WORDS: usize = 3;
     const ORDERS: [usize; 3] = [1, 2, 3];
-    let original = normalized(pystr::slice(&item.original, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS as i64)));
-    let alternative = normalized(pystr::slice(&item.alternative, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS as i64)));
+    let original = normalized(pystr::slice(&item.original, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS.to::<i64>())));
+    let alternative = normalized(pystr::slice(&item.alternative, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS.to::<i64>())));
     let before = normalized(pystr::slice(&item.field.before, Some(-(ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS as i64)), None));
-    let after = normalized(pystr::slice(&item.field.after, None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS as i64)));
+    let after = normalized(pystr::slice(&item.field.after, None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS.to::<i64>())));
     let length = ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS.min(pystr::len(&original).max(pystr::len(&alternative)));
     let direction = item.source_group;
     let baseline = i32::from(item.baseline_convert);
@@ -2233,7 +2234,7 @@ pub fn extract_baseline_features(item: &ContextEvidence) -> FeatureMap {
         features.insert(name, value);
     }
     let application = pystr::casefold(&item.field.application);
-    let application = pystr::slice(&application, None, Some(ACTION_FEATURE_APPLICATION_NAME_CHARACTERS as i64));
+    let application = pystr::slice(&application, None, Some(ACTION_FEATURE_APPLICATION_NAME_CHARACTERS.to::<i64>()));
     let parts = application.split(|character: char| !(character.is_ascii_lowercase() || character.is_ascii_digit())).filter(|part| !part.is_empty());
     for part in parts.take(ACTION_FEATURE_APPLICATION_TOKEN_COUNT) {
         features.insert(format!("app:{part}"), 1.0);

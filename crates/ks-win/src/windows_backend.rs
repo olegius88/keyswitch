@@ -15,6 +15,7 @@
 //! A panic on the hook's path takes the program down (a callback of the system cannot unwind, and the release profile
 //! aborts), so nothing on that path indexes or unwraps; what the Python's callback would have raised lets the key pass.
 
+use ks_cast::To as _;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -1024,7 +1025,7 @@ impl Inner {
             self.input_delay.note_wait(late);
         }
         let answer = self.answer_native(native);
-        let callback = ((self.clock.perf_counter() - started) * MILLISECONDS_PER_SECOND).round_ties_even() as i64;
+        let callback = (((self.clock.perf_counter() - started) * MILLISECONDS_PER_SECOND).round_ties_even()).to::<i64>();
         if native.foreign {
             self.input_delay.record_foreign(callback);
         } else if late <= DWORD_MASK >> 1 {

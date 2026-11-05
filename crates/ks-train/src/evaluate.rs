@@ -2,6 +2,7 @@
 //! (`evaluate_context_action_sequences`). The test split is read here and nowhere else: only after the access is
 //! claimed in the ledger, once for a test, and never for a test that shares a row, a family or a document with a test
 //! read before.
+use ks_cast::To as _;
 use crate::corpus::{CorpusRow, DEVELOPMENT, checksum, load_rows, read_json};
 use crate::curricula::Counts;
 use crate::physical::{PhysicalKey, hex, hex_digest, key_of};
@@ -103,9 +104,9 @@ pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
                     explicit = Some(if initially_wrong { 1 - declared } else { declared });
                 }
             }
-            let mut candidate = key_of(character, intended as usize);
+            let mut candidate = key_of(character, intended.to::<usize>());
             if candidate.is_none() {
-                candidate = key_of(character, (1 - intended) as usize);
+                candidate = key_of(character, (1 - intended).to::<usize>());
                 if candidate.is_some() {
                     intended = 1 - intended;
                     explicit = Some(intended);
@@ -119,7 +120,7 @@ pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
                 intervention_event = Some(keys.len() + 1);
             }
             let mut chosen = key.clone();
-            chosen.explicit_group = explicit.map(|value| value as i32);
+            chosen.explicit_group = explicit.map(|value| value.to::<i32>());
             keys.push(chosen);
         }
     }
@@ -170,8 +171,8 @@ fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (Counts, V
         counts.add_by("correct_text_corruptions", i64::from(!plan.initially_wrong && !outcome.exact));
         counts.add_by("length_mismatches", i64::from(outcome.length_mismatch));
         counts.add_by("execution_errors", i64::from(outcome.error.is_some()));
-        counts.add_by("injections", outcome.corrections.len() as i64);
-        counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count() as i64);
+        counts.add_by("injections", outcome.corrections.len().to::<i64>());
+        counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count().to::<i64>());
         counts.add_by("final_layout_mismatches", i64::from(!outcome.final_layout_matches));
         let mut case = json!({"identifier": plan.identifier, "document": plan.document, "group": plan.group, "initially_wrong": plan.initially_wrong, "expected": plan.expected, "trimmed_left": plan.trimmed_left, "trimmed_right": plan.trimmed_right});
         if let (Some(table), Value::Object(outcome)) = (case.as_object_mut(), outcome.value()) {
@@ -217,7 +218,7 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let mut documents: BTreeMap<String, i64> = BTreeMap::new();
     for (name, group) in [("0", Some(0)), ("1", Some(1)), ("None", None)] {
         let distinct: BTreeSet<&str> = plans.iter().filter(|plan| plan.group == group && plan.unsupported.is_empty()).map(|plan| plan.document.as_str()).collect();
-        documents.insert(name.to_owned(), distinct.len() as i64);
+        documents.insert(name.to_owned(), distinct.len().to::<i64>());
     }
     let unsupported: Vec<Value> = plans.iter().filter(|plan| !plan.unsupported.is_empty() && !plan.initially_wrong).map(|plan| json!({"identifier": plan.identifier, "codepoints": plan.unsupported})).collect();
     let selection = json!({"source_ids": selected.iter().map(|row| row.identifier.as_str()).collect::<Vec<_>>(), "selected_rows": selected.len(), "replayed_documents": documents,
@@ -427,7 +428,7 @@ fn validate_calibration(value: &Value) -> Result<(), String> {
         let numbers: Vec<i64> = fields.iter().map(|field| count(row, field)).collect::<Result<_, _>>()?;
         let (rows, wrong, right, possible) = (numbers[0], numbers[1], numbers[2], numbers[3]);
         let recall = row.get("conversion_recall").and_then(Value::as_f64).unwrap_or(f64::NAN);
-        if possible == 0 || rows < possible || right > possible || recall != right as f64 / possible as f64 || wrong > right || right - wrong < 1 {
+        if possible == 0 || rows < possible || right > possible || recall != right.to::<f64>() / possible.to::<f64>() || wrong > right || right - wrong < 1 {
             return Err(format!("calibration gate failed: {name}"));
         }
         if name != "aggregate" {

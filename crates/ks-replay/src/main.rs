@@ -8,6 +8,7 @@
 //! module both read it from.
 #![forbid(unsafe_code)]
 
+use ks_cast::To as _;
 use ks_replay::harness::{key_of_char, Bundle, CaretReader, PhysicalKey, Session, UnreadField, KEYS, PAUSE_KEYCODE};
 use ks_backend::constants::SHIFT_MASK;
 use ks_backend::KeyEvent;
@@ -36,7 +37,7 @@ impl Counts {
 }
 
 fn vkey(version: &str) -> Vec<i64> {
-    let parts: Option<Vec<i64>> = version.split('.').map(|part| ks_text::py_int(part).map(|value| value as i64)).collect();
+    let parts: Option<Vec<i64>> = version.split('.').map(|part| ks_text::py_int(part).map(|value| value.to::<i64>())).collect();
     parts.unwrap_or_else(|| vec![0])
 }
 
@@ -145,7 +146,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
                 }
                 if countdown != 0 && tracked == countdown {
                     countdown -= 1;
-                } else if tracked != 0 && opening_bs && corrected && tracked == pystr::len(&previous_original) as i64 {
+                } else if tracked != 0 && opening_bs && corrected && tracked == pystr::len(&previous_original).to::<i64>() {
                     reopened = tracked;
                     countdown = tracked - 1;
                 } else if tracked != 0 {
@@ -176,7 +177,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
                 moved = true;
             }
             "inside" => {
-                let position = _place_inside(&field.session.backend.text(), int_of(&edit[1]) as usize, int_of(&edit[2]) as usize);
+                let position = _place_inside(&field.session.backend.text(), int_of(&edit[1]).to::<usize>(), int_of(&edit[2]).to::<usize>());
                 match position {
                     None => {
                         counts.add("opening:inside_unplaced");
@@ -201,7 +202,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
             }
         }
     }
-    let mut kept = if reopened != 0 && !beyond { countdown as usize } else { 0 };
+    let mut kept = if reopened != 0 && !beyond { countdown.to::<usize>() } else { 0 };
     if kept != 0 {
         let backend = &field.session.backend;
         let (text, caret) = (backend.text(), backend.caret());
@@ -241,7 +242,7 @@ fn _finish_with_enter(session: &mut Session) -> String {
 }
 
 fn keys_of(item: &Value) -> Vec<&'static PhysicalKey> {
-    let group = int_of(&item["group"]) as usize;
+    let group = int_of(&item["group"]).to::<usize>();
     text_of(item, "original")
         .chars()
         .map(|char| KEYS.iter().find(|key| key.characters[group] == char).expect("every key of a battery is on the keyboard"))
@@ -272,7 +273,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
         let items = stream["items"].as_array().expect("a stream holds items");
         let first = &items[0];
         let app = text_of(stream, "app");
-        let first_group = int_of(&first["group"]) as i32;
+        let first_group = int_of(&first["group"]).to::<i32>();
         let opening = mapping(stream.get("opening"));
         let decision = opening.get("decision").filter(|decision| !decision.is_null());
         let opening_previous = mapping(opening.get("previous"));
@@ -357,9 +358,9 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                 // The log counts the field's characters before the previous word and before this one: the first word
                 // begins that far from where the previous word began, whatever boundary signs the replay typed between.
                 let target = last_span + logged - prior;
-                let caret = backend.caret() as i64;
+                let caret = backend.caret().to::<i64>();
                 if 0 <= target && target != caret {
-                    let target = target as usize;
+                    let target = target.to::<usize>();
                     let mut head: Vec<char> = if target <= pre_text.len() {
                         pre_text[..target].to_vec()
                     } else {
@@ -429,7 +430,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
             field_ref.session.core._strokes = first_keys[..kept]
                 .iter()
                 .map(|key| {
-                    let character = key.characters[first_group as usize].to_string();
+                    let character = key.characters[first_group.to::<usize>()].to_string();
                     Arc::new(KeyEvent {
                         pressed: true,
                         keycode: key.keycode,
@@ -462,7 +463,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                 // The layout was picked by hand: where the tree already stands in it, the pick is still a choice and protects
                 // the next word as it did live.
                 if i64::from(backend.group()) == manual_before {
-                    session.select_layout((1 - manual_before) as i32);
+                    session.select_layout((1 - manual_before).to::<i32>());
                 }
                 if item.get("manual_kind").and_then(Value::as_str) == Some("pause") {
                     // Pause with nothing to convert toggled the layout: each tree's own engine decides whether that holds
@@ -472,7 +473,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                     }
                     session.core._switch_layout_only(i64::from(PAUSE_KEYCODE));
                 } else {
-                    session.select_layout(manual_before as i32);
+                    session.select_layout(manual_before.to::<i32>());
                 }
             }
             let typed_group = backend.group();
@@ -498,7 +499,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
             }
             for key in &keys[skip..] {
                 let group = backend.group();
-                let observed = key.characters[group as usize].to_string();
+                let observed = key.characters[group.to::<usize>()].to_string();
                 session.tap(KeyEvent {
                     pressed: true,
                     keycode: key.keycode,
@@ -552,7 +553,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
         let &(last_start, last_length, last_index, _) = spans.last().expect("a span per item");
         let last_item = &items[last_index];
         field_ref.last_item = Some(last_item.clone());
-        field_ref.last_span = Some(last_start as i64);
+        field_ref.last_span = Some(last_start.to::<i64>());
         field_ref.last_wrong = None;
         // What really stood there: the reading the log shows after every correction of the word while its stream lasted (an
         // implied target can differ: a word left as a typo is labelled by its other reading).

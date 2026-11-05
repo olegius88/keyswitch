@@ -1,4 +1,5 @@
 //! UTC time as Python's `datetime` writes it, and the ids of `uuid4().hex`.
+use ks_cast::To as _;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -36,13 +37,13 @@ struct Moment {
 }
 
 fn moment(seconds: f64) -> Moment {
-    let whole = seconds.floor() as i64;
+    let whole = seconds.floor().to::<i64>();
     let day = whole.div_euclid(86400);
     let second = whole.rem_euclid(86400);
     Moment {
         date: civil_from_days(day),
         time: (second / 3600, second / 60 % 60, second % 60),
-        micros: ((seconds - seconds.floor()) * 1e6) as i64,
+        micros: ((seconds - seconds.floor()) * 1e6).to::<i64>(),
     }
 }
 

@@ -1,5 +1,6 @@
 //! The reproducible precision and recall of the EN/RU detector (`evaluate_detector`): the most frequent words of each
 //! lexicon, a deterministic sample of each Hunspell dictionary, and the authored cases.
+use ks_cast::To as _;
 use crate::physical::pair;
 use ks_lang::detector::{DecideOptions, DetectionDecision, IntentClassifier, LanguageDetector, LanguageScorer};
 use ks_lang::language_model::locale_fallbacks;
@@ -37,7 +38,7 @@ struct Metrics {
 
 fn ratio(good: i64, other: i64) -> f64 {
     let denominator = good + other;
-    if denominator == 0 { 1.0 } else { good as f64 / denominator as f64 }
+    if denominator == 0 { 1.0 } else { good.to::<f64>() / denominator.to::<f64>() }
 }
 
 impl Metrics {
@@ -158,13 +159,13 @@ fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
     if words.len() <= sample {
         return words;
     }
-    (0..sample).map(|index| words[py_round(index as f64 * (words.len() - 1) as f64 / (sample - 1) as f64) as usize].clone()).collect()
+    (0..sample).map(|index| words[(py_round(index.to::<f64>() * (words.len() - 1).to::<f64>() / (sample - 1).to::<f64>())).to::<usize>()].clone()).collect()
 }
 
 /// The command: the report on standard output; `strict` fails the exit status when a gate does not hold.
 pub fn command(resources: &Arc<Resources>, sample: usize, dictionary_sample: usize, strict: bool) -> Result<i32, String> {
     let models: Vec<Arc<LanguageModel>> = LOCALES.iter().map(|locale| Arc::new(resources.language_model(locale, std::iter::empty::<&str>()))).collect();
-    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group as i64, model.clone() as Arc<dyn LanguageScorer>)).collect();
+    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
     let classifier: Option<Arc<dyn IntentClassifier>> = None;
     let protected = resources.protected_tokens();
     let harness = Harness { detector: LanguageDetector::new(scorers, classifier, protected.clone()).map_err(|error| error.name.to_string())? };
@@ -174,13 +175,13 @@ pub fn command(resources: &Arc<Resources>, sample: usize, dictionary_sample: usi
         let mut ordered: Vec<(String, i64)> = table_order(model, locale);
         ordered.sort_by(|a, b| b.1.cmp(&a.1));
         let words: Vec<String> = ordered.into_iter().map(|entry| entry.0).filter(|word| word_fits(word)).take(sample.max(MIN_SAMPLE_SIZE)).collect();
-        let (metrics, found) = harness.evaluate_words(group as i64, locale.to_owned(), &words)?;
+        let (metrics, found) = harness.evaluate_words(group.to::<i64>(), locale.to_owned(), &words)?;
         directions.push(metrics);
         misses.extend(found);
         if model.speller.available() {
             let sampled = hunspell_words(model.speller.source(), dictionary_sample.max(MIN_SAMPLE_SIZE));
             if !sampled.is_empty() {
-                let (metrics, found) = harness.evaluate_words(group as i64, format!("{locale} Hunspell"), &sampled)?;
+                let (metrics, found) = harness.evaluate_words(group.to::<i64>(), format!("{locale} Hunspell"), &sampled)?;
                 dictionary_directions.push(metrics);
                 misses.extend(found);
             }

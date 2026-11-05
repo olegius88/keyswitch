@@ -2,6 +2,7 @@
 //! `ortho_web_lexicon`, `ortho_independent`, `wikisource_text`): tokens of the CC0 phrase snapshot in key space, the verdict
 //! of the reference dictionaries on every word a token can ask about, the web word forms, and the independent test sets.
 //! `--inputs` rebuilds each and compares it with the frozen file; `--freeze-inputs` writes a missing generation.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::ortho::{self, KEYS, LEXICON, Row, other, read_rows, served, to_keys, visible, word_core};
 use crate::physical::{hex, hex_digest};
@@ -635,7 +636,7 @@ pub fn verify(root: &Path) -> Result<(), String> {
     });
     report_line(&mut differences, "independent evidence", active_evidence == serde_json::from_slice::<Value>(&gz_read(&active.join("known-evidence.json.gz"))?).map_err(|error| error.to_string())?);
     let known_active = read_known(&active.join("known-evidence.json.gz"))?;
-    let minimum = read_json(&directory.join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+    let minimum = (read_json(&directory.join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")?).to::<usize>();
     let (kept, dropped) = independent_population(root, &active_rows, &known_active, minimum)?;
     let recorded_set = read_json(&active.join("receipt.json"))?;
     report_line(&mut differences, "independent set", recorded_set["set"].as_str() == Some(SET_NAME) && recorded_set["schema_version"].as_i64().is_some() && json!(type_counts(&kept)) == recorded_set["types"] && json!(dropped) == recorded_set["excluded_as_seen"] && recorded_set["tokens_sha256"].as_str() == Some(&checksum(&active.join("tokens.jsonl.gz"))?) && recorded_set["evidence_sha256"].as_str() == Some(&checksum(&active.join("known-evidence.json.gz"))?) && recorded_set["snapshot_tokens_sha256"].as_str() == Some(&checksum(&directory.join("tokens.jsonl.gz"))?));
@@ -1034,7 +1035,7 @@ pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), 
             }
         }
     }
-    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = ks_text::py_round(count as f64 * WORDS_SCALE / words as f64) as i64; let bits = i64::BITS - rounded.leading_zeros(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
+    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = (ks_text::py_round(count.to::<f64>() * WORDS_SCALE / words.to::<f64>())).to::<i64>(); let bits = i64::BITS - rounded.leading_zeros(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
     let listed: String = pages.iter().map(|(title, (revision, _))| format!("{title}\t{revision}\n")).collect();
     let author_years: BTreeMap<String, i64> = authors.values().collect::<BTreeSet<_>>().into_iter().map(|author| (author.replace('_', " "), died[author])).collect();
     Ok((table, json!({"authors": author_years, "pages": pages.len(), "pages_sha256": hex_digest(&listed), "left_out": dropped, "words": words})))
@@ -1152,7 +1153,7 @@ pub fn freeze_independent(root: &Path, description: &Path, directory: &Path) -> 
     let evidence = verdict(&models, forms);
     std::fs::write(&evidence_path, gz_write(&crate::artifact::canonical(&evidence))?).map_err(|error| error.to_string())?;
     let known = read_known(&evidence_path)?;
-    let minimum = read_json(&root.join(DIRECTORY).join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+    let minimum = (read_json(&root.join(DIRECTORY).join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")?).to::<usize>();
     let (kept, dropped) = independent_population(root, &token_rows, &known, minimum)?;
     let mut by_script: BTreeMap<&str, i64> = BTreeMap::new();
     for row in &token_rows {

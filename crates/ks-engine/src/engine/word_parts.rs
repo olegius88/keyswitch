@@ -52,7 +52,7 @@ impl EngineCore {
         Ok(recognisable
             || protected_boundary
             || ignored_boundary
-            || (decision.source_score.known && effective_length as i64 >= self._minimum_word_length())
+            || (decision.source_score.known && effective_length.to::<i64>() >= self._minimum_word_length())
             || natural_source_boundary)
     }
 
@@ -74,10 +74,10 @@ impl EngineCore {
             return (whole(), Vec::new(), true, false);
         }
         let targets = self.other_groups(source_group);
-        if tail >= strokes.len() || tail as i64 > MAX_SUFFIX || targets.is_empty() {
+        if tail >= strokes.len() || tail.to::<i64>() > MAX_SUFFIX || targets.is_empty() {
             technical_event!(
                 self.shared, "boundary_guard", "model_version": model.version,
-                "reason": if tail >= strokes.len() { "no_word" } else if tail as i64 > MAX_SUFFIX { "suffix_too_long" } else { "no_target" },
+                "reason": if tail >= strokes.len() { "no_word" } else if tail.to::<i64>() > MAX_SUFFIX { "suffix_too_long" } else { "no_target" },
                 "observed_characters": strokes.len(), "ambiguous_tail": tail,
             );
             return (whole(), Vec::new(), false, false);
@@ -97,7 +97,7 @@ impl EngineCore {
         }
         let target = targets[0];
         let alternative = _text_for_group(strokes, target);
-        let candidates: Vec<_> = (0..=tail as i64)
+        let candidates: Vec<_> = (0..=tail.to::<i64>())
             .map(|length| model.extract(&original, &alternative, length, self.model(source_group), self.model(target)))
             .collect();
         let prediction = model.predict(&candidates).expect("at least one candidate");
@@ -322,7 +322,7 @@ impl EngineCore {
         let Some(&target) = targets.first() else {
             return 0;
         };
-        let target = target as i32;
+        let target = target.to::<i32>();
         let mut count = 0;
         for stroke in strokes.iter().rev() {
             let meant = stroke.character_for(target);
@@ -379,7 +379,7 @@ impl EngineCore {
         {
             return plan.clone();
         }
-        let meant = boundary.character_for(plan.target_group as i32);
+        let meant = boundary.character_for(plan.target_group.to::<i32>());
         if meant.is_empty() || meant == boundary.character || pystr::isalpha(meant) || pystr::isspace(meant) {
             return plan.clone();
         }
@@ -447,7 +447,7 @@ impl EngineCore {
             "ru" => "russian",
             _ => return Ok(false),
         };
-        Ok(self._term_frequency()?.term(prose).count(&pystr::casefold(alternative)) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0] as u64)
+        Ok(self._term_frequency()?.term(prose).count(&pystr::casefold(alternative)) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0].to::<u64>())
     }
 
     /// Whether Pause still converts the last word once `keys` follow it.

@@ -1,6 +1,7 @@
 //! What this machine computes, not what it calls itself (`environment_probe`): the primitives the trainer and the runtime
 //! depend on, each answer as its exact bit image, reduced to a digest. It is evidence and not proof: it never votes on the
 //! identity of a model, it explains a divergence. Only a full replay settles that.
+use ks_cast::To as _;
 use super::fit::Twister;
 use crate::physical::hex;
 use ks_text::pynum::{float_hex, float_repr, fsum, py_round_ndigits};
@@ -108,7 +109,7 @@ fn next_after(from: f64, to: f64) -> f64 {
 }
 
 fn builtin_sum() -> Vec<Entry> {
-    let alternating: Vec<f64> = (0..SUM_ALTERNATING_COUNT).map(|index| (if index % 2 != 0 { 1.0 } else { -1.0 }) * (1.0 + index as f64 * SUM_ALTERNATING_STEP)).collect();
+    let alternating: Vec<f64> = (0..SUM_ALTERNATING_COUNT).map(|index| (if index % 2 != 0 { 1.0 } else { -1.0 }) * (1.0 + index.to::<f64>() * SUM_ALTERNATING_STEP)).collect();
     let mut many_small = vec![1.0];
     many_small.extend(vec![SUM_SMALL_TERM; SUM_SMALL_COUNT]);
     let mut small_first = vec![SUM_SMALL_TERM; SUM_SMALL_COUNT];
@@ -209,8 +210,8 @@ fn integers() -> Vec<Entry> {
         out.push((format!("shift:{left}"), [integer(left >> SHIFT_BITS), integer(left << SHIFT_BITS)].concat()));
     }
     for value in ROUNDING {
-        out.push((format!("round_int:{}", float_repr(value)), integer(ks_text::py_round(value) as i128)));
-        out.push((format!("trunc:{}", float_repr(value)), integer(value.trunc() as i128)));
+        out.push((format!("round_int:{}", float_repr(value)), integer(ks_text::py_round(value).to::<i128>())));
+        out.push((format!("trunc:{}", float_repr(value)), integer(value.trunc().to::<i128>())));
     }
     out
 }
@@ -219,7 +220,7 @@ fn random_stream() -> Vec<Entry> {
     let mut out = Vec::new();
     for seed in RANDOM_SEEDS {
         for epoch in RANDOM_EPOCHS {
-            let mut indices: Vec<u32> = (0..SHUFFLE_LENGTH as u32).collect();
+            let mut indices: Vec<u32> = (0..SHUFFLE_LENGTH.to::<u32>()).collect();
             Twister::new(seed + epoch).shuffle(&mut indices);
             out.push((format!("shuffle:{seed}:{epoch}"), format!("{indices:?}").into_bytes()));
             let mut generator = Twister::new(seed + epoch);

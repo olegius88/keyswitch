@@ -13,6 +13,7 @@ name = "ks-release"
 path = "src/bin/ks-release.rs"
 
 [dependencies]
+ks-cast.workspace = true
 ks-text.workspace = true
 ks-backend.workspace = true
 ks-config.workspace = true

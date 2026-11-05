@@ -1,5 +1,6 @@
 //! A sequence of physical keys typed through the real engine over a model editor, on a fake clock
 //! (`evaluate_context_action_sequences.replay`): how a candidate is measured and how span frames are captured.
+use ks_cast::To as _;
 use crate::physical::PhysicalKey;
 use crate::tools::{Lexicons, Tools};
 use ks_backend::KeyEvent;
@@ -275,10 +276,10 @@ impl Replayer {
                 backend.set_group(group);
             }
             let group = backend.group();
-            let observed = key.characters[group as usize];
+            let observed = key.characters[group.to::<usize>()];
             if plan.intervention_event == Some(serial) {
                 let target = plan.group.expect("an intervention has a group");
-                let intended = key.characters[target as usize];
+                let intended = key.characters[target.to::<usize>()];
                 *intervention = json!({"event": serial, "expected": intended.to_string(), "observed": observed.to_string(), "source_group": group, "target_group": target});
                 if observed == intended {
                     return Err("ValueError: wrong intervention did not change the focus letter".to_owned());
@@ -293,13 +294,13 @@ impl Replayer {
                 characters: key.characters.iter().map(char::to_string).collect(),
                 group,
                 state: if key.shift { SHIFT_MASK } else { 0 },
-                timestamp: ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND) as i64,
+                timestamp: (ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND)).to::<i64>(),
                 ..KeyEvent::default()
             };
             backend.type_key(&pressed);
             core._handle(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
             clock.advance(SIMULATED_KEY_UP_SECONDS);
-            let released = KeyEvent { pressed: false, timestamp: ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND) as i64, ..pressed };
+            let released = KeyEvent { pressed: false, timestamp: (ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND)).to::<i64>(), ..pressed };
             backend.type_key(&released);
             core._handle(Arc::new(released)).map_err(|error| format!("{error:?}"))?;
             timers(core)?;

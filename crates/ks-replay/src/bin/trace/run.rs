@@ -1,5 +1,6 @@
 //! One trace through the Rust engine.
 
+use ks_cast::To as _;
 use super::backend::{answering_model, compact, Capabilities, Tape, TraceBackend, TraceReader};
 use super::compare::{first_difference, same};
 use super::entries::{self, Args, Outcome};
@@ -325,7 +326,7 @@ impl Worker {
             return Some(Choice::Own);
         }
         let source = |index: usize| wanted.get(index).and_then(|model| model["source"].as_str()).unwrap_or("");
-        let words = |index: usize| wanted.get(index).and_then(|model| model["words"].as_u64()).unwrap_or(0) as usize;
+        let words = |index: usize| (wanted.get(index).and_then(|model| model["words"].as_u64()).unwrap_or(0)).to::<usize>();
         if self.packaged.is_none() {
             let models: Vec<Arc<LanguageModel>> = ["en_US", "ru_RU"].iter().filter_map(|locale| self.resources.engine_language_model(locale).ok()).collect();
             let prefix_indexes = models.iter().map(|model| self.resources.prefix_index(model)).collect();
@@ -693,7 +694,7 @@ impl Worker {
             }
         }
         if let Some(personal) = observed.get("p") {
-            let count = core._personal.len() as i64;
+            let count = core._personal.len().to::<i64>();
             if personal["n"].as_i64() != Some(count) {
                 return differ("personal words", format!("python {}; rust {count}", compact(personal)));
             }

@@ -3,6 +3,7 @@
 //! A lexicon has hundreds of thousands of words; a map of `String`s would spend more on the allocations than on the
 //! text. Sorted UTF-8 is sorted by code point, the order of Python's `sorted` and `bisect` over `str`.
 
+use ks_cast::To as _;
 /// A list of strings in one allocation. `offsets[i]..offsets[i + 1]` is the `i`-th string.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WordList {
@@ -47,7 +48,7 @@ impl WordList {
     }
 
     pub fn get(&self, index: usize) -> &str {
-        &self.arena[self.offsets[index] as usize..self.offsets[index + 1] as usize]
+        &self.arena[self.offsets[index].to::<usize>()..(self.offsets[index + 1]).to::<usize>()]
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &str> + Clone {
@@ -84,12 +85,12 @@ impl WordList {
         if self.is_sorted_set() {
             return self.shrunk();
         }
-        let mut order: Vec<u32> = (0..self.len() as u32).collect();
-        order.sort_unstable_by(|&a, &b| self.get(a as usize).cmp(self.get(b as usize)));
+        let mut order: Vec<u32> = (0..self.len().to::<u32>()).collect();
+        order.sort_unstable_by(|&a, &b| self.get(a.to::<usize>()).cmp(self.get(b.to::<usize>())));
         let mut result = WordList::with_capacity(self.len(), self.arena.len());
         for (position, &index) in order.iter().enumerate() {
-            let word = self.get(index as usize);
-            if position == 0 || self.get(order[position - 1] as usize) != word {
+            let word = self.get(index.to::<usize>());
+            if position == 0 || self.get((order[position - 1]).to::<usize>()) != word {
                 result.push(word);
             }
         }
@@ -132,7 +133,7 @@ enum Values {
 impl Values {
     fn new(values: Vec<i64>) -> Self {
         if values.iter().all(|&value| i32::try_from(value).is_ok()) {
-            Values::Narrow(values.into_iter().map(|value| value as i32).collect())
+            Values::Narrow(values.into_iter().map(|value| value.to::<i32>()).collect())
         } else {
             let mut values = values;
             values.shrink_to_fit();
@@ -259,14 +260,14 @@ impl TableBuilder {
 
     /// The table; entries of one key are folded in the order they came, `merge(earlier, later)`.
     pub fn finish(self, merge: impl Fn(i64, i64) -> i64) -> WordTable {
-        let mut order: Vec<u32> = (0..self.words.len() as u32).collect();
+        let mut order: Vec<u32> = (0..self.words.len().to::<u32>()).collect();
         // Stable: repeats of a key stay in the order they came.
-        order.sort_by(|&a, &b| self.words.get(a as usize).cmp(self.words.get(b as usize)));
+        order.sort_by(|&a, &b| self.words.get(a.to::<usize>()).cmp(self.words.get(b.to::<usize>())));
         let mut words = WordList::with_capacity(self.words.len(), self.words.arena_bytes());
         let mut values: Vec<i64> = Vec::with_capacity(self.words.len());
         for (position, &index) in order.iter().enumerate() {
-            let (word, value) = (self.words.get(index as usize), self.values[index as usize]);
-            if position > 0 && self.words.get(order[position - 1] as usize) == word {
+            let (word, value) = (self.words.get(index.to::<usize>()), self.values[index.to::<usize>()]);
+            if position > 0 && self.words.get((order[position - 1]).to::<usize>()) == word {
                 let last = values.last_mut().expect("the entry before this one is there");
                 *last = merge(*last, value);
             } else {

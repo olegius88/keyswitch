@@ -1,5 +1,6 @@
 //! What a frame of the action corpus is (`ActionRow`), the words of a text (`WORDS`), the pools curricula draw their
 //! contexts from, and the frames of the natural corpus rows (`action_rows`).
+use ks_cast::To as _;
 use crate::corpus::CorpusRow;
 use crate::physical::{py_repr, reading, ring_point, sha256, translated, variant_choice};
 use crate::tools::Tools;
@@ -215,7 +216,7 @@ pub fn natural_mixed_contexts(rows: &[CorpusRow]) -> [Vec<String>; 2] {
         let script: Vec<bool> = words.iter().map(|word| word.chars().any(cyrillic_letter)).collect();
         let qualifies = if group == 1 { script.iter().all(|value| *value) } else { !script.iter().any(|value| *value) };
         if qualifies {
-            pools[group as usize].insert(&row.before);
+            pools[group.to::<usize>()].insert(&row.before);
         }
     }
     [pools[0].iter().map(|text| (*text).to_owned()).collect(), pools[1].iter().map(|text| (*text).to_owned()).collect()]
@@ -252,7 +253,7 @@ impl<C: RingContext> ContextRing<C> {
         for (position, context) in pool.iter().enumerate() {
             let written = context.written();
             for index in 0..CONTEXT_RING_POINTS {
-                ring.push((ring_point(&format!("{index}:{written}")), position as u32));
+                ring.push((ring_point(&format!("{index}:{written}")), position.to::<u32>()));
             }
         }
         ring.sort_unstable();
@@ -270,7 +271,7 @@ impl<C: RingContext> ContextRing<C> {
     pub fn choice(&self, identifier: &str, purpose: &str) -> &C {
         let point = ring_point(&format!("{purpose}:{identifier}"));
         let slot = self.points.partition_point(|value| *value < point) % self.points.len();
-        &self.pool[self.owners[slot] as usize]
+        &self.pool[self.owners[slot].to::<usize>()]
     }
 }
 
@@ -302,11 +303,11 @@ pub fn select_rows(rows: &[CorpusRow], maximum: usize) -> Vec<CorpusRow> {
             continue;
         }
         let count = counts.entry((group, &row.family)).or_insert(0);
-        if languages[group as usize] >= maximum / LAYOUT_GROUP_COUNT || *count >= MAX_CONTEXTS_PER_FAMILY {
+        if languages[group.to::<usize>()] >= maximum / LAYOUT_GROUP_COUNT || *count >= MAX_CONTEXTS_PER_FAMILY {
             continue;
         }
         *count += 1;
-        languages[group as usize] += 1;
+        languages[group.to::<usize>()] += 1;
         selected.push(row.clone());
     }
     selected
@@ -362,7 +363,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
         let group = row.group.filter(|group| *group == 0 || *group == 1).filter(|_| row.layout_representable).expect("action rows require a representable single-layout token");
         let alternate = reading(&row.original, group);
         let digest = sha256(&row.identifier);
-        let number = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) as usize;
+        let number = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]).to::<usize>();
         let trigger = TRIGGERS[number % TRIGGERS.len()];
         let mut boundary = String::new();
         if trigger == "space" {
@@ -394,7 +395,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
             result.push(frame(format!("{identity}:wrong"), &alternate, 1 - group, field, action, "layout_intervention"));
         }
         // A legitimate insertion may have neighbours in the other language.
-        let contexts = insertion[group as usize];
+        let contexts = insertion[group.to::<usize>()];
         let mixed = contexts[variant_choice(&row.identifier, "mixed-context", contexts.len())];
         let mixed_field = public_field(application, mixed, "");
         result.push(frame(format!("{}:mixed", row.identifier), &row.original, group, mixed_field.clone(), Keep, "mixed_language_insertion"));
@@ -403,7 +404,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
         if !attested {
             result.push(frame(format!("{}:mixed:wrong", row.identifier), &alternate, 1 - group, mixed_field, Convert, "mixed_language_layout_intervention"));
         }
-        let other = &natural[(1 - group) as usize];
+        let other = &natural[(1 - group).to::<usize>()];
         if !other.is_empty() && group == 0 && capital_citation(tools, &row.original, &alternate) && tools.plausible_reading(&alternate, 1 - group) {
             let chosen = &other[variant_choice(&row.identifier, "mixed-natural", other.len())];
             result.push(frame(format!("{}:mixed-capital", row.identifier), &row.original, group, public_field(application, chosen, ""), Keep, "mixed_language_insertion"));

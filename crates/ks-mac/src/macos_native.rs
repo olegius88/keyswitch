@@ -1,5 +1,6 @@
 //! The macOS half of the keyboard backend: nothing here decides anything, it only calls the system. Every decision lives
 //! in `macos_backend`, which is verified on any platform.
+use ks_cast::To as _;
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_long, c_ulong, c_void};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -118,7 +119,7 @@ fn is_main_thread() -> bool {
 }
 
 extern "C" fn run_on_main_queue(context: *mut c_void) {
-    MAIN_THREAD.run(context as u64);
+    MAIN_THREAD.run(context.to::<usize>().to::<u64>());
 }
 
 fn post_to_main_queue(number: u64) {
@@ -151,7 +152,7 @@ fn text(reference: CFRef) -> String {
         if needed > CF_STRING_MAX_BYTES as c_long {
             return String::new();
         }
-        let mut buffer = vec![0u8; needed.max(1) as usize];
+        let mut buffer = vec![0u8; needed.max(1).to::<usize>()];
         if !CFStringGetCString(reference, buffer.as_mut_ptr().cast(), buffer.len() as c_long, CF_STRING_ENCODING_UTF8) {
             return String::new();
         }
@@ -165,7 +166,7 @@ fn number(dictionary: CFRef, key: CFRef) -> i32 {
     // SAFETY: the dictionary is valid for this call and the value, if any, a number.
     unsafe {
         let value = CFDictionaryGetValue(dictionary, key);
-        if value.is_null() || !CFNumberGetValue(value, c_long::from(CF_NUMBER_SINT32_TYPE as i32), (&raw mut result).cast()) {
+        if value.is_null() || !CFNumberGetValue(value, c_long::from(CF_NUMBER_SINT32_TYPE.low::<i32>()), (&raw mut result).cast()) {
             return 0;
         }
     }
@@ -233,8 +234,8 @@ impl State {
                     continue;
                 }
                 // The array owns what it holds; these have to outlive it.
-                found.sources.insert(identifier.clone(), CFRetain(source) as usize);
-                found.layouts.insert(identifier.clone(), CFRetain(layout) as usize);
+                found.sources.insert(identifier.clone(), CFRetain(source).to::<usize>());
+                found.layouts.insert(identifier.clone(), CFRetain(layout).to::<usize>());
                 found.order.push(identifier);
             }
             CFRelease(array);
@@ -277,7 +278,7 @@ impl NativeMacAPI {
             if !info.is_null() {
                 for index in 0..CFArrayGetCount(info) {
                     let entry = CFArrayGetValueAtIndex(info, index);
-                    if number(entry, kCGWindowLayer) != NORMAL_WINDOW_LAYER as i32 {
+                    if number(entry, kCGWindowLayer) != NORMAL_WINDOW_LAYER.to::<i32>() {
                         continue;
                     }
                     if number(entry, kCGWindowOwnerPID) != focused {
@@ -306,13 +307,13 @@ extern "C" fn on_event(_proxy: CFRef, event_type: u32, event: *mut c_void, _info
     }
     // SAFETY: the system hands a valid event for the time of this call.
     unsafe {
-        let timestamp = CGEventGetTimestamp(event) as i64;
+        let timestamp = CGEventGetTimestamp(event).bits::<i64>();
         if event_type == EVENT_LEFT_MOUSE_DOWN || event_type == EVENT_RIGHT_MOUSE_DOWN || event_type == EVENT_OTHER_MOUSE_DOWN {
             listener(NativeKeyEvent { pressed: true, keycode: 0, timestamp, injected: false, replayed: false, event_type: 0, pointer: true });
             return event;
         }
         let mark = CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA_FIELD);
-        let keycode = CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD) as u32;
+        let keycode = CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE_FIELD).low::<u32>();
         // A modifier comes as a flags change, which says nothing about up or down by itself.
         let pressed = if event_type == EVENT_FLAGS_CHANGED { modifier_pressed(keycode, CGEventGetFlags(event)) } else { event_type == EVENT_KEY_DOWN };
         let native = NativeKeyEvent { pressed, keycode, timestamp, injected: mark == EVENT_MARK_INJECTED, replayed: mark == EVENT_MARK_REPLAYED, event_type, pointer: false };
@@ -399,11 +400,11 @@ impl MacAPI for NativeMacAPI {
             }
             let (mut dead, mut length) = (0u32, 0 as c_ulong);
             let mut buffer = [0u16; UC_KEY_TRANSLATE_BUFFER_CHARACTERS];
-            let status = UCKeyTranslate(pointer, keycode as u16, UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &mut dead, buffer.len() as c_ulong, &mut length, buffer.as_mut_ptr());
+            let status = UCKeyTranslate(pointer, keycode.low::<u16>(), UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &mut dead, buffer.len() as c_ulong, &mut length, buffer.as_mut_ptr());
             if status != 0 || length == 0 {
                 return String::new();
             }
-            String::from_utf16_lossy(&buffer[..length as usize])
+            String::from_utf16_lossy(&buffer[..length.to::<usize>()])
         }
     }
 
@@ -412,7 +413,7 @@ impl MacAPI for NativeMacAPI {
         for item in inputs {
             // SAFETY: the event is created, posted and released here.
             unsafe {
-                let event = CGEventCreateKeyboardEvent(std::ptr::null(), item.keycode as u16, item.pressed);
+                let event = CGEventCreateKeyboardEvent(std::ptr::null(), item.keycode.low::<u16>(), item.pressed);
                 if event.is_null() {
                     break;
                 }
@@ -517,9 +518,9 @@ impl MacAPI for NativeMacAPI {
                 *locked(&TAP_LISTENER) = None;
                 return Err(BackendError::Failed("macOS отказала в перехвате клавиатуры: разрешите KeySwitch в разделе «Конфиденциальность и безопасность» → «Универсальный доступ»".to_owned()));
             }
-            self.state.tap.store(tap as usize, Ordering::SeqCst);
+            self.state.tap.store(tap.to::<usize>(), Ordering::SeqCst);
             let source = CFMachPortCreateRunLoopSource(std::ptr::null(), tap, 0);
-            self.state.tap_source.store(source as usize, Ordering::SeqCst);
+            self.state.tap_source.store(source.to::<usize>(), Ordering::SeqCst);
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
             CGEventTapEnable(tap, true);
             ready();
@@ -676,7 +677,7 @@ impl Default for NativeAccessibility {
 impl NativeAccessibility {
     pub fn new() -> Self {
         // SAFETY: creates the system-wide element, kept for the life of this object.
-        NativeAccessibility { system: unsafe { AXUIElementCreateSystemWide() } as usize, names: Mutex::new(HashMap::new()) }
+        NativeAccessibility { system: (unsafe { AXUIElementCreateSystemWide() }).to::<usize>(), names: Mutex::new(HashMap::new()) }
     }
 
     fn name(&self, name: &str) -> CFRef {
@@ -687,7 +688,7 @@ impl NativeAccessibility {
         let Ok(text) = CString::new(name) else { return std::ptr::null() };
         // SAFETY: the created string is kept in the table for the life of this object.
         let created = unsafe { CFStringCreateWithCString(std::ptr::null(), text.as_ptr(), CF_STRING_ENCODING_UTF8) };
-        names.insert(name.to_owned(), created as usize);
+        names.insert(name.to_owned(), created.to::<usize>());
         created
     }
 
@@ -706,7 +707,7 @@ impl NativeAccessibility {
 
 impl AccessibilityAPI for NativeAccessibility {
     fn focused_element(&self) -> usize {
-        self.attribute(self.system, "AXFocusedUIElement") as usize
+        self.attribute(self.system, "AXFocusedUIElement").to::<usize>()
     }
 
     fn string_attribute(&self, element: usize, name: &str) -> Option<String> {
@@ -732,7 +733,7 @@ impl AccessibilityAPI for NativeAccessibility {
         unsafe {
             let read = AXValueGetValue(value, AX_VALUE_TYPE_CF_RANGE, (&raw mut span).cast());
             CFRelease(value);
-            read.then_some((span.location as i64, span.length as i64))
+            read.then_some((span.location.to::<i64>(), span.length.to::<i64>()))
         }
     }
 

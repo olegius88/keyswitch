@@ -1,5 +1,6 @@
 //! What every curriculum reads: the tree's files, the term tables, the portable lexicons and the answers built on them
 //! (`context_deferral`, `reference_lexicon`).
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::physical::{expanded_aliases, translated};
 use ks_context::context_action_features as features;
@@ -52,7 +53,7 @@ impl Tools {
 
     /// `plausible_reading`: a known word of its layout or an identifier.
     pub fn plausible_reading(&self, text: &str, group: i64) -> bool {
-        if self.portable[group as usize].score(text).known {
+        if self.portable[group.to::<usize>()].score(text).known {
             return true;
         }
         self.identifiers.as_ref().is_some_and(|identifiers| identifiers.contains(text))
@@ -87,11 +88,11 @@ impl Tools {
             let weak = 1 - strong;
             let weak_word = if weak == 0 { &latin } else { &cyrillic };
             if counts[strong] >= minimum
-                && counts[strong] as f64 >= dominance * counts[weak] as f64
+                && counts[strong].to::<f64>() >= dominance * counts[weak].to::<f64>()
                 && counts[weak] < other_maximum
                 && (!self.portable[weak].score(weak_word).known || (strong == 1 && features::brief_dominant(&latin, &cyrillic, &self.tables)))
             {
-                return Some(strong as i64);
+                return Some(strong.to::<i64>());
             }
         }
         None
@@ -184,7 +185,7 @@ fn number(value: &Value, name: &str) -> f64 {
 impl Options for Value {
     fn int(&self, name: &str) -> i64 {
         let value = self.get(name).unwrap_or_else(|| panic!("the recipe has no {name}"));
-        value.as_i64().unwrap_or_else(|| number(value, name) as i64)
+        value.as_i64().unwrap_or_else(|| number(value, name).to::<i64>())
     }
 
     fn float(&self, name: &str) -> f64 {
@@ -214,7 +215,7 @@ impl Options for Value {
     fn budgets(&self, name: &str) -> Vec<(usize, usize)> {
         let table = self.get(name).and_then(Value::as_object).unwrap_or_else(|| panic!("the recipe has no {name}"));
         let mut budgets: Vec<(usize, usize)> =
-            table.iter().map(|(length, count)| (length.parse().expect("a length"), count.as_u64().expect("a count") as usize)).collect();
+            table.iter().map(|(length, count)| (length.parse().expect("a length"), count.as_u64().expect("a count").to::<usize>())).collect();
         budgets.sort_unstable();
         budgets
     }

@@ -1,6 +1,7 @@
 //! The curricula that add frames to TRAIN and to the heads' own DEVELOPMENT: each answers a question the corpus's natural
 //! frames do not hold, as `train_context_action_model.py` frames it. The reasons for each frame are in the module's
 //! documentation of the model (`model/context_v3/README.md`) and in the Python trainer's history.
+use ks_cast::To as _;
 use crate::corpus::{CorpusRow, DEVELOPMENT, TRAIN, typo_variants};
 use crate::physical::{hex_digest, reading, sha256, translated, variant_choice};
 use crate::rows::{ActionRow, ContextRing, application_of, cyrillic, curated_letter, field_of, natural_mixed_contexts, public_field, varied_boundary, word_spans};
@@ -167,7 +168,7 @@ fn counted_abbreviations(tools: &Tools, minimum: u64, dominance: f64) -> Vec<Str
             continue;
         }
         let keys = reading(token, 1);
-        if (count as f64) < dominance * tools.count("latin", &keys) as f64 || tools.is_refused(&[token, &keys]) {
+        if (count as f64) < dominance * tools.count("latin", &keys).to::<f64>() || tools.is_refused(&[token, &keys]) {
             continue;
         }
         abbreviations.push(token.to_owned());
@@ -247,7 +248,7 @@ pub fn capital_citation_curriculum(tools: &Tools, source_rows: &[CorpusRow], opt
 /// `english_capital_curriculum`.
 pub fn english_capital_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Value, models: &Lexicons) -> Curriculum {
     let budgets = options.budgets("words_by_length");
-    let per_word = options.int("frames_per_word") as usize;
+    let per_word = options.int("frames_per_word").to::<usize>();
     let weight = options.float("sample_weight");
     let contrast = options.is_true("lowercase_contrast");
     let [english, russian] = natural_mixed_contexts(source_rows);
@@ -321,7 +322,7 @@ fn abbreviation_forms(tools: &Tools) -> Vec<(String, String)> {
 
 /// `abbreviation_curriculum`.
 pub fn abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let per_form = options.int("frames_per_form") as usize;
+    let per_form = options.int("frames_per_form").to::<usize>();
     let [_, russian] = natural_mixed_contexts(source_rows);
     let contexts = ContextRing::new(russian);
     if per_form == 0 || contexts.is_empty() || (split != TRAIN && split != DEVELOPMENT) {
@@ -341,7 +342,7 @@ pub fn abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
         // Convert when its Latin reading occurs often enough and far more often than it does (`ФШ` is `AI`).
         let own = tools.count("cyrillic", &pystr::casefold(&form));
         let latin_count = tools.count("latin", &pystr::casefold(&latin));
-        let convert = latin_count as i64 >= options.int("minimum_latin_count") && latin_count as f64 >= options.float("dominance") * own as f64;
+        let convert = latin_count.to::<i64>() >= options.int("minimum_latin_count") && latin_count.to::<f64>() >= options.float("dominance") * own.to::<f64>();
         let action = if convert { Convert } else { Keep };
         counts.add(action.as_str());
         for index in 0..per_form {
@@ -358,10 +359,10 @@ pub fn abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
 
 /// `latin_abbreviation_curriculum`.
 pub fn latin_abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let per_form = options.int("frames_per_form") as usize;
+    let per_form = options.int("frames_per_form").to::<usize>();
     let [english, _] = natural_mixed_contexts(source_rows);
     let english = ContextRing::new(english);
-    let terms = ContextRing::new(if per_form != 0 { counted_terms(tools, options.int("minimum_term_count") as u64) } else { Vec::new() });
+    let terms = ContextRing::new(if per_form != 0 { counted_terms(tools, options.int("minimum_term_count").to::<u64>()) } else { Vec::new() });
     if per_form == 0 || english.is_empty() || terms.is_empty() || (split != TRAIN && split != DEVELOPMENT) {
         return not_used();
     }
@@ -380,7 +381,7 @@ pub fn latin_abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[
         let own = tools.count("cyrillic", &pystr::casefold(&form));
         let folded = pystr::casefold(&latin);
         let latin_count = tools.count("latin", &folded).max(tools.count("english", &folded));
-        let keep = own as i64 >= options.int("minimum_cyrillic_count") && own as f64 >= options.float("dominance") * latin_count as f64;
+        let keep = own.to::<i64>() >= options.int("minimum_cyrillic_count") && own.to::<f64>() >= options.float("dominance") * latin_count.to::<f64>();
         let action = if keep { Keep } else { Convert };
         counts.add(action.as_str());
         for index in 0..per_form {
@@ -406,16 +407,16 @@ pub fn latin_abbreviation_curriculum(tools: &Tools, split: &str, source_rows: &[
 
 /// `unknown_token_curriculum`.
 pub fn unknown_token_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let item_modulus = options.int("item_modulus") as usize;
+    let item_modulus = options.int("item_modulus").to::<usize>();
     let [_, russian] = natural_mixed_contexts(source_rows);
     let contexts = ContextRing::new(russian);
     if item_modulus == 0 || contexts.is_empty() || (split != TRAIN && split != DEVELOPMENT) {
         return not_used();
     }
     let weight = options.float("sample_weight");
-    let echo_modulus = options.int("echo_modulus") as usize;
+    let echo_modulus = options.int("echo_modulus").to::<usize>();
     let held_out = options.held_out();
-    let minimum = options.int("minimum_term_count") as u64;
+    let minimum = options.int("minimum_term_count").to::<u64>();
     let mut rows = Vec::new();
     let mut counts = Counts::default();
     let frame = |identifier: String, typed: &str, group: i64, before: &str, action: ContextAction| {
@@ -508,7 +509,7 @@ pub fn unknown_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpu
 
 /// `joined_token_curriculum`.
 pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let item_modulus = options.int("item_modulus") as usize;
+    let item_modulus = options.int("item_modulus").to::<usize>();
     if item_modulus == 0 || (split != TRAIN && split != DEVELOPMENT) {
         return not_used();
     }
@@ -569,8 +570,8 @@ pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
             pair_frames(&mut rows, &mut counts, &identifier, token, &keys, group, before, kind);
         }
     }
-    let repeat_words = options.int_or("repeat_words", 0) as usize;
-    let minimum = options.int_or("repeat_minimum_count", 0) as u64;
+    let repeat_words = options.int_or("repeat_words", 0).to::<usize>();
+    let minimum = options.int_or("repeat_minimum_count", 0).to::<u64>();
     let [english, russian] = natural_mixed_contexts(source_rows);
     let contexts = [ContextRing::new(english), ContextRing::new(russian)];
     for (group, alphabet) in [(1_i64, "russian"), (0, "english")] {
@@ -587,7 +588,7 @@ pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
             })
             .collect();
         words.sort_by_cached_key(|word| hex_digest(&format!("joined-repeat:{alphabet}:{word}")));
-        let ring = &contexts[group as usize];
+        let ring = &contexts[group.to::<usize>()];
         // The first `repeat_words` words in hash order, of both splits: each split frames its share of them.
         for word in words.into_iter().take(if ring.is_empty() { 0 } else { repeat_words }) {
             let identifier = format!("joined-repeat:{alphabet}:{word}");
@@ -635,7 +636,7 @@ fn planned_or_field(typed: &str) -> AfterOrigin {
 
 /// `term_curriculum`.
 pub fn term_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let item_modulus = options.int("item_modulus") as usize;
+    let item_modulus = options.int("item_modulus").to::<usize>();
     let [_, russian] = natural_mixed_contexts(source_rows);
     let contexts = ContextRing::new(russian);
     if item_modulus == 0 || contexts.is_empty() || (split != TRAIN && split != DEVELOPMENT) {
@@ -811,7 +812,7 @@ pub fn first_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
 
 /// `brief_curriculum`.
 pub fn brief_curriculum(tools: &Tools, split: &str, options: &Value) -> Curriculum {
-    let minimum = options.int("minimum_count") as u64;
+    let minimum = options.int("minimum_count").to::<u64>();
     if minimum == 0 || (split != TRAIN && split != DEVELOPMENT) {
         return not_used();
     }
@@ -852,7 +853,7 @@ pub fn brief_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
             continue;
         }
         let russian = tools.count("russian", cyrillic_keys);
-        let share = russian as f64 / (russian + tools.count("english", latin).max(tools.count("latin", latin))) as f64;
+        let share = russian.to::<f64>() / (russian + tools.count("english", latin).max(tools.count("latin", latin))).to::<f64>();
         counts.add(if share > 0.0 && share < 1.0 {
             "both"
         } else if share != 0.0 {
@@ -879,7 +880,7 @@ pub fn brief_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
 
 /// `kept_neighbour_curriculum`.
 pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Value, models: &Lexicons) -> Curriculum {
-    let budget = |name: &str| options.int(name) as usize;
+    let budget = |name: &str| options.int(name).to::<usize>();
     let (natural_frames, term_frames, abbreviation_frames, typo_frames) = (budget("natural_frames"), budget("term_frames"), budget("abbreviation_frames"), budget("typo_frames"));
     if natural_frames == 0 && term_frames == 0 && abbreviation_frames == 0 && typo_frames == 0 {
         return (Vec::new(), json!({"frames": 0, "scope": "not used"}));
@@ -908,7 +909,7 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
                 && &item.text[current.1..following.0] == " "
             {
                 let before = &item.text[..current.0];
-                natural[item.group as usize].insert(format!("{before}|{word}"), (before.to_owned(), word.to_owned(), next.to_owned()));
+                natural[item.group.to::<usize>()].insert(format!("{before}|{word}"), (before.to_owned(), word.to_owned(), next.to_owned()));
             }
         }
     }
@@ -920,7 +921,7 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
         for key in ranked(keys, &format!("natural-{group}")).into_iter().take(natural_frames / LAYOUT_GROUP_COUNT) {
             let (before, word, following) = &natural[group][&key];
             let identifier = format!("kept-natural:{}", hex_digest(&key));
-            rows.push(frame(identifier, word, group as i64, before, following, Keep, "kept_neighbour".to_owned()));
+            rows.push(frame(identifier, word, group.to::<i64>(), before, following, Keep, "kept_neighbour".to_owned()));
             counts.add(format!("natural_{group}"));
         }
     }
@@ -930,12 +931,12 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
             return chosen;
         }
         for word in words {
-            if counts.get(purpose) as usize >= budget {
+            if counts.get(purpose).to::<usize>() >= budget {
                 break;
             }
             chosen.push(word.clone());
             for index in 0..KEPT_NEIGHBOUR_FRAMES_PER_WORD {
-                if counts.get(purpose) as usize >= budget {
+                if counts.get(purpose).to::<usize>() >= budget {
                     break;
                 }
                 let identifier = format!("kept-{purpose}:{word}:{index}");
@@ -946,9 +947,9 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
         }
         chosen
     };
-    let terms = counted_terms(tools, options.int("minimum_term_count") as u64);
+    let terms = counted_terms(tools, options.int("minimum_term_count").to::<u64>());
     let chosen_terms = inserted(&ranked(terms.clone(), "term"), term_frames, "term", &term_typed, Convert);
-    let abbreviations = counted_abbreviations(tools, options.int("minimum_abbreviation_count") as u64, options.float("abbreviation_dominance"));
+    let abbreviations = counted_abbreviations(tools, options.int("minimum_abbreviation_count").to::<u64>(), options.float("abbreviation_dominance"));
     let chosen_abbreviations = inserted(&ranked(abbreviations.clone(), "abbreviation"), abbreviation_frames, "abbreviation", &|token| token.to_owned(), Keep);
     let mut misspelt: BTreeSet<String> = BTreeSet::new();
     for word in models[1].frequencies.words().iter() {
@@ -980,15 +981,15 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
 
 /// `counted_token_curriculum`.
 pub fn counted_token_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let (term_frames, abbreviation_frames) = (options.int("term_frames") as usize, options.int("abbreviation_frames") as usize);
-    let per_word = options.int("frames_per_word") as usize;
+    let (term_frames, abbreviation_frames) = (options.int("term_frames").to::<usize>(), options.int("abbreviation_frames").to::<usize>());
+    let per_word = options.int("frames_per_word").to::<usize>();
     let russian = ContextRing::new(russian_contexts(source_rows));
     if (term_frames == 0 && abbreviation_frames == 0) || russian.is_empty() {
         return (Vec::new(), json!({"frames": 0, "scope": "not used"}));
     }
     let weight = options.float("sample_weight");
-    let terms = counted_terms(tools, options.int("minimum_term_count") as u64);
-    let abbreviations = counted_abbreviations(tools, options.int("minimum_abbreviation_count") as u64, options.float("abbreviation_dominance"));
+    let terms = counted_terms(tools, options.int("minimum_term_count").to::<u64>());
+    let abbreviations = counted_abbreviations(tools, options.int("minimum_abbreviation_count").to::<u64>(), options.float("abbreviation_dominance"));
     let capitals = options.is_true("capitals");
     let mut rows: Vec<ActionRow> = Vec::new();
     let mut chosen: [Vec<String>; 2] = [Vec::new(), Vec::new()];
@@ -1030,8 +1031,8 @@ pub fn counted_token_curriculum(tools: &Tools, source_rows: &[CorpusRow], option
 
 /// `letter_curriculum`.
 pub fn letter_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Value) -> Curriculum {
-    let (term_sentences, english_sentences) = (options.int("term_sentences") as usize, options.int("english_sentences") as usize);
-    let terms = ContextRing::new(technical_terms(tools, options.int("minimum_term_count") as u64));
+    let (term_sentences, english_sentences) = (options.int("term_sentences").to::<usize>(), options.int("english_sentences").to::<usize>());
+    let terms = ContextRing::new(technical_terms(tools, options.int("minimum_term_count").to::<u64>()));
     if (term_sentences == 0 && english_sentences == 0) || terms.is_empty() {
         return (Vec::new(), json!({"frames": 0, "scope": "not used"}));
     }
@@ -1123,7 +1124,7 @@ pub fn alone_labels(tools: &Tools, rows: Vec<ActionRow>, evidence: Option<&Value
         if matches!(row.action, Wait | Suggest) && row.after_origin != AfterOrigin::PlannedNextConversion {
             let alternate = reading(&row.original, row.group);
             if features::alone_question(&row.original, &alternate, &row.field.before, &row.field.after, row.trigger) {
-                let strong = tools.counted_reading(&row.original, &alternate, row.group, evidence.int("minimum_count") as u64, evidence.int("other_maximum_count") as u64, evidence.float("dominance"));
+                let strong = tools.counted_reading(&row.original, &alternate, row.group, evidence.int("minimum_count").to::<u64>(), evidence.int("other_maximum_count").to::<u64>(), evidence.float("dominance"));
                 if let Some(strong) = strong {
                     row.action = if strong == row.group { Keep } else { Convert };
                 } else if let Some(own) = decide.and_then(|decide| decide(&row)) {

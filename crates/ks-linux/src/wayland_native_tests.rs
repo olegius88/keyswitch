@@ -11,7 +11,7 @@ fn temporary_path(name: &str) -> PathBuf {
 fn capability_bitmaps_are_read_from_bytes_and_from_sysfs_words() {
     assert_eq!(bits_from_bytes(&[0b0000_0101, 0, 0b1000_0000]), HashSet::from([0, 2, 23]));
     // Words are the machine's unsigned long, the most significant first: "1 0" is bit 64.
-    let word_bits = (std::mem::size_of::<libc::c_ulong>() * 8) as u32;
+    let word_bits = (std::mem::size_of::<libc::c_ulong>() * 8).low::<u32>();
     assert_eq!(bits_from_sysfs("1 0\n"), HashSet::from([word_bits]));
     assert_eq!(bits_from_sysfs("zz 3"), HashSet::from([0, 1]));
     assert!(bits_from_sysfs("  ").is_empty());
@@ -24,7 +24,7 @@ fn input_events_keep_the_kernels_layout() {
     let event = decode_input_event(&bytes);
     assert_eq!((event.sec, event.usec, event.ev_type, event.code, event.value), (0, 0, EV_KEY, 30, 1));
     // The same bytes through a pipe, read the way the helper reads a device.
-    let mut ends = [0 as c_int; 2];
+    let mut ends = [0.to::<c_int>(); 2];
     // SAFETY: `ends` has room for the two descriptors `pipe2` writes.
     assert_eq!(unsafe { libc::pipe2(ends.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC) }, 0);
     let mut os = LinuxHelperOs::new();
@@ -55,7 +55,7 @@ fn send_with_descriptor(stream: &UnixStream, bytes: &[u8], descriptor: RawFd) {
     let mut io_vector = libc::iovec { iov_base: bytes.as_ptr() as *mut c_void, iov_len: bytes.len() };
     // SAFETY: the space is the size the macro computes for one descriptor, and the pointers stay valid for the call.
     unsafe {
-        let space = libc::CMSG_SPACE(std::mem::size_of::<RawFd>() as u32) as usize;
+        let space = (libc::CMSG_SPACE((std::mem::size_of::<RawFd>()).low::<u32>())).to::<usize>();
         let mut control = vec![0u8; space];
         let mut header: libc::msghdr = std::mem::zeroed();
         header.msg_iov = &mut io_vector;
@@ -65,7 +65,7 @@ fn send_with_descriptor(stream: &UnixStream, bytes: &[u8], descriptor: RawFd) {
         let message = libc::CMSG_FIRSTHDR(&header);
         (*message).cmsg_level = libc::SOL_SOCKET;
         (*message).cmsg_type = libc::SCM_RIGHTS;
-        (*message).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<RawFd>() as u32) as _;
+        (*message).cmsg_len = libc::CMSG_LEN((std::mem::size_of::<RawFd>()).low::<u32>()) as _;
         libc::CMSG_DATA(message).cast::<RawFd>().write_unaligned(descriptor);
         assert!(libc::sendmsg(stream.as_raw_fd(), &header, 0) >= 0);
     }
@@ -78,9 +78,9 @@ fn read_request(stream: &mut UnixStream) -> Option<WlMessage> {
     let mut header = [0u8; 8];
     stream.read_exact(&mut header).ok()?;
     let word = u32::from_ne_bytes([header[4], header[5], header[6], header[7]]);
-    let mut payload = vec![0u8; (word >> 16) as usize - 8];
+    let mut payload = vec![0u8; (word >> 16).to::<usize>() - 8];
     stream.read_exact(&mut payload).ok()?;
-    Some(WlMessage { object: u32::from_ne_bytes([header[0], header[1], header[2], header[3]]), opcode: (word & 0xFFFF) as u16, payload })
+    Some(WlMessage { object: u32::from_ne_bytes([header[0], header[1], header[2], header[3]]), opcode: (word & 0xFFFF).to::<u16>(), payload })
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn the_monitor_learns_the_keymap_and_the_repeat_delay_from_a_scripted_compositor
                     (&file).write_all(TEST_KEYMAP.as_bytes()).unwrap();
                     (&file).write_all(&[0]).unwrap();
                     let mut keymap = WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1.to_ne_bytes().to_vec();
-                    keymap.extend((TEST_KEYMAP.len() as u32 + 1).to_ne_bytes());
+                    keymap.extend((TEST_KEYMAP.len().low::<u32>() + 1).to_ne_bytes());
                     send_with_descriptor(&compositor_side, &wl_message(6, 0, &keymap), descriptor);
                     let mut repeat = 25i32.to_ne_bytes().to_vec();
                     repeat.extend(300i32.to_ne_bytes());
@@ -200,7 +200,7 @@ fn scripted_sway(path: &Path, commands: Arc<Mutex<Vec<String>>>, push_event: Arc
             // The first request decides what the connection is: a subscription stays open and waits for an event.
             connection.read_exact(&mut header).unwrap();
             let (length, message_type) = decode_sway_ipc_header(&header).unwrap();
-            let mut body = vec![0u8; length as usize];
+            let mut body = vec![0u8; length.to::<usize>()];
             connection.read_exact(&mut body).unwrap();
             if message_type == SWAY_IPC_SUBSCRIBE {
                 connection.write_all(&[encode_sway_ipc(SWAY_IPC_SUBSCRIBE, "{\"success\": true}")].concat()).unwrap();
@@ -224,7 +224,7 @@ fn scripted_sway(path: &Path, commands: Arc<Mutex<Vec<String>>>, push_event: Arc
                         return;
                     }
                     let (length, message_type) = decode_sway_ipc_header(&header).unwrap();
-                    let mut body = vec![0u8; length as usize];
+                    let mut body = vec![0u8; length.to::<usize>()];
                     if connection.read_exact(&mut body).is_err() {
                         return;
                     }

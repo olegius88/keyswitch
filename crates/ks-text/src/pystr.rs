@@ -5,6 +5,7 @@
 //! Case mapping follows CPython's `unicodeobject.c`: `lower` and the lowering inside `title`, `capitalize` and
 //! `swapcase` apply the final sigma rule, `upper`/`casefold` map every character independently.
 
+use ks_cast::To as _;
 use crate::ucd::{flags, is_case_ignorable, is_cased};
 use crate::unicode_tables as t;
 
@@ -19,14 +20,14 @@ fn single(runs: &[(u32, u16, u8, i32)], cp: u32) -> Option<u32> {
     let off = cp - start;
     let step = u32::from(step);
     if off.is_multiple_of(step) && off / step < u32::from(n) {
-        Some((cp as i64 + i64::from(delta)) as u32)
+        Some((cp.to::<i64>() + i64::from(delta)).low::<u32>())
     } else {
         None
     }
 }
 
 fn push_mapped(out: &mut String, c: char, runs: &[(u32, u16, u8, i32)], multi_cp: &[u32], multi: &[[u32; 3]]) {
-    let cp = c as u32;
+    let cp = c.to::<u32>();
     if let Ok(i) = multi_cp.binary_search(&cp) {
         for &m in &multi[i] {
             if m != 0 {
@@ -150,7 +151,7 @@ pub fn swapcase(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
     for i in 0..chars.len() {
-        let f = flags(chars[i] as u32);
+        let f = flags(chars[i].to::<u32>());
         if f & t::UPPER != 0 {
             push_lower(&mut out, &chars, i);
         } else if f & t::LOWER != 0 {
@@ -165,7 +166,7 @@ pub fn swapcase(s: &str) -> String {
 // ---------------------------------------------------------------- whole-string predicates
 
 fn all_nonempty(s: &str, mask: u16) -> bool {
-    !s.is_empty() && s.chars().all(|c| flags(c as u32) & mask != 0)
+    !s.is_empty() && s.chars().all(|c| flags(c.to::<u32>()) & mask != 0)
 }
 
 /// `str.isalpha()`: not empty and every character is a letter.
@@ -194,7 +195,7 @@ pub fn isspace(s: &str) -> bool {
 }
 /// `str.isprintable()`: True for the empty string.
 pub fn isprintable(s: &str) -> bool {
-    s.chars().all(|c| flags(c as u32) & t::PRINTABLE != 0)
+    s.chars().all(|c| flags(c.to::<u32>()) & t::PRINTABLE != 0)
 }
 /// `str.isascii()`.
 pub fn isascii(s: &str) -> bool {
@@ -205,7 +206,7 @@ pub fn isascii(s: &str) -> bool {
 pub fn isupper(s: &str) -> bool {
     let mut cased = false;
     for c in s.chars() {
-        let f = flags(c as u32);
+        let f = flags(c.to::<u32>());
         if f & (t::LOWER | t::TITLE) != 0 {
             return false;
         }
@@ -220,7 +221,7 @@ pub fn isupper(s: &str) -> bool {
 pub fn islower(s: &str) -> bool {
     let mut cased = false;
     for c in s.chars() {
-        let f = flags(c as u32);
+        let f = flags(c.to::<u32>());
         if f & (t::UPPER | t::TITLE) != 0 {
             return false;
         }
@@ -236,7 +237,7 @@ pub fn istitle(s: &str) -> bool {
     let mut cased = false;
     let mut previous_is_cased = false;
     for c in s.chars() {
-        let f = flags(c as u32);
+        let f = flags(c.to::<u32>());
         if f & (t::UPPER | t::TITLE) != 0 {
             if previous_is_cased {
                 return false;
@@ -259,7 +260,7 @@ pub fn istitle(s: &str) -> bool {
 // ---------------------------------------------------------------- strip
 
 fn is_ws(c: char) -> bool {
-    flags(c as u32) & t::SPACE != 0
+    flags(c.to::<u32>()) & t::SPACE != 0
 }
 
 /// `str.strip()` without arguments: Python whitespace on both ends.
@@ -404,9 +405,9 @@ pub fn len(s: &str) -> usize {
 /// Python's clamping of a slice or search bound against a length: negative values count from the end,
 /// the result lies in `0..=len`.
 pub fn clamp_index(index: i64, len: usize) -> usize {
-    let len = len as i64;
+    let len = len.to::<i64>();
     let adjusted = if index < 0 { index.saturating_add(len) } else { index };
-    adjusted.clamp(0, len) as usize
+    adjusted.clamp(0, len).to::<usize>()
 }
 
 /// Byte offset of the code point `n` (`n` may be the length).
@@ -420,12 +421,12 @@ fn byte_offset(s: &str, n: usize) -> usize {
 
 /// `s[i]`: negative indexes count from the end; `None` where Python raises IndexError.
 pub fn char_at(s: &str, index: i64) -> Option<char> {
-    let n = len(s) as i64;
+    let n = len(s).to::<i64>();
     let i = if index < 0 { index + n } else { index };
     if i < 0 || i >= n {
         return None;
     }
-    s.chars().nth(i as usize)
+    s.chars().nth(i.to::<usize>())
 }
 
 /// `s[start:stop]`: bounds are optional, may be negative, and are clamped.
@@ -447,7 +448,7 @@ pub fn slice_step(s: &str, start: Option<i64>, stop: Option<i64>, step: i64) -> 
         return None;
     }
     let chars: Vec<char> = s.chars().collect();
-    let n = chars.len() as i64;
+    let n = chars.len().to::<i64>();
     let (lo, hi) = if step > 0 { (0, n) } else { (-1, n - 1) };
     let adjust = |v: i64| {
         let v = if v < 0 { v.saturating_add(n) } else { v };
@@ -462,12 +463,12 @@ pub fn slice_step(s: &str, start: Option<i64>, stop: Option<i64>, step: i64) -> 
     let mut i = a;
     if step > 0 {
         while i < b {
-            out.push(chars[i as usize]);
+            out.push(chars[i.to::<usize>()]);
             i += step;
         }
     } else {
         while i > b {
-            out.push(chars[i as usize]);
+            out.push(chars[i.to::<usize>()]);
             i += step;
         }
     }
@@ -497,7 +498,7 @@ pub fn find(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
     let from = byte_offset(s, a);
     let to = from + byte_offset(&s[from..], b - a);
     match s[from..to].find(sub) {
-        Some(i) => (a + len(&s[from..from + i])) as i64,
+        Some(i) => (a + len(&s[from..from + i])).to::<i64>(),
         None => -1,
     }
 }
@@ -511,7 +512,7 @@ pub fn rfind(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
     let from = byte_offset(s, a);
     let to = from + byte_offset(&s[from..], b - a);
     match s[from..to].rfind(sub) {
-        Some(i) => (a + len(&s[from..from + i])) as i64,
+        Some(i) => (a + len(&s[from..from + i])).to::<i64>(),
         None => -1,
     }
 }

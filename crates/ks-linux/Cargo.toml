@@ -34,6 +34,7 @@ name = "e2e_wayland"
 harness = false
 
 [dependencies]
+ks-cast.workspace = true
 ks-backend.workspace = true
 ks-config.workspace = true
 ks-text.workspace = true

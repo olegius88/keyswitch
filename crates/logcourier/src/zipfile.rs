@@ -1,4 +1,5 @@
 //! ZIP archives as `zipfile` writes them: stored or deflated entries, nothing more.
+use ks_cast::To as _;
 use std::io::Write;
 
 use flate2::Compression;
@@ -41,7 +42,7 @@ impl ZipWriter {
         };
         let method: u16 = if deflate { 8 } else { 0 };
         let flags: u16 = if name.is_ascii() { 0 } else { 0x800 };
-        let offset = self.output.len() as u32;
+        let offset = self.output.len().low::<u32>();
         let common = |out: &mut Vec<u8>| {
             out.extend_from_slice(&20u16.to_le_bytes());
             out.extend_from_slice(&flags.to_le_bytes());
@@ -69,7 +70,7 @@ impl ZipWriter {
     }
 
     pub fn finish(mut self) -> Vec<u8> {
-        let start = self.output.len() as u32;
+        let start = self.output.len().low::<u32>();
         self.output.extend_from_slice(&self.central);
         self.output.extend_from_slice(b"PK\x05\x06");
         self.output.extend_from_slice(&[0u8; 4]);

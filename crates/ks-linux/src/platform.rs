@@ -1,6 +1,7 @@
 //! What the process asks of the operating system directly: the local time of the log, the system description of its first
 //! line, and the signals that end a run without a window.
 
+use ks_cast::To as _;
 use std::ffi::CStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,15 +16,15 @@ fn local_time() -> LocalTime {
     // SAFETY: both pointers refer to live values owned by this frame; `localtime_r` writes only into `broken`.
     let converted = unsafe { libc::localtime_r(&seconds, &mut broken) };
     if converted.is_null() {
-        return logsetup::utc_time(now.as_millis() as i64);
+        return logsetup::utc_time(now.as_millis().low::<i64>());
     }
     LocalTime {
         year: broken.tm_year + 1900,
-        month: (broken.tm_mon + 1) as u32,
-        day: broken.tm_mday as u32,
-        hour: broken.tm_hour as u32,
-        minute: broken.tm_min as u32,
-        second: broken.tm_sec as u32,
+        month: (broken.tm_mon + 1).bits::<u32>(),
+        day: broken.tm_mday.bits::<u32>(),
+        hour: broken.tm_hour.bits::<u32>(),
+        minute: broken.tm_min.bits::<u32>(),
+        second: broken.tm_sec.bits::<u32>(),
         millisecond: now.subsec_millis(),
     }
 }

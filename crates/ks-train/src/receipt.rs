@@ -1,5 +1,6 @@
 //! The public aggregate evidence of an accepted pair and its verification (`verify_context_action_model`): every count
 //! recomputed from the private cases of the sealed test before it is published, every gate recomputed from the counts.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::evaluate::{EvaluationRequest, PROFILES, evaluation_identity, validate_candidate_seal, validate_prefix_seal};
 use crate::fit::readable;
@@ -55,7 +56,7 @@ fn calibration_counts(row: &Value, policy: &Value) -> Result<(), String> {
     if possible <= 0
         || possible > rows
         || right > possible
-        || recall != right as f64 / possible as f64
+        || recall != right.to::<f64>() / possible.to::<f64>()
         || wrong > right
         || right - wrong < policy["minimum_calibration_net_benefit"].as_i64().unwrap_or(1)
         || recall < policy["minimum_calibration_conversion_recall"].as_f64().unwrap_or(0.0)
@@ -169,9 +170,9 @@ fn loss_chance(losses: i64, gains: i64) -> f64 {
         if number >= losses {
             sum += combination;
         }
-        combination = combination * (total - number) as f64 / (number + 1) as f64;
+        combination = combination * (total - number).to::<f64>() / (number + 1).to::<f64>();
     }
-    sum / 2_f64.powi(total as i32)
+    sum / 2_f64.powi(total.to::<i32>())
 }
 
 fn validate_devchat(block: &Value, receipt: &Value) -> Result<(), String> {
@@ -305,11 +306,11 @@ fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'stat
         let target = intervention["target_group"].as_i64();
         let observed = intervention["observed"].as_str().unwrap_or("");
         if event < 1
-            || event as usize > characters.len()
+            || event.to::<usize>() > characters.len()
             || source.is_none()
             || target != group
             || source == target
-            || intervention["expected"].as_str() != Some(characters[event as usize - 1].to_string().as_str())
+            || intervention["expected"].as_str() != Some(characters[event.to::<usize>() - 1].to_string().as_str())
             || observed.chars().count() != 1
             || intervention["observed"] == intervention["expected"]
         {
@@ -325,12 +326,12 @@ fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'stat
     let mut layout_errors = 0;
     for correction in corrections {
         let event = count(&correction["event"], "case correction event")?;
-        if event < 1 || event as usize > characters.len() || ["source_group", "target_group", "actual_group"].iter().any(|key| !matches!(correction[*key].as_i64(), Some(0 | 1))) {
+        if event < 1 || event.to::<usize>() > characters.len() || ["source_group", "target_group", "actual_group"].iter().any(|key| !matches!(correction[*key].as_i64(), Some(0 | 1))) {
             return Err("invalid case correction layout or event".to_owned());
         }
         for (name, caret) in [("before", "caret_before"), ("after", "caret_after")] {
             let held = correction[name].as_str().ok_or("invalid case correction text or caret")?;
-            if count(&correction[caret], "case correction caret")? as usize > held.chars().count() {
+            if (count(&correction[caret], "case correction caret")?).to::<usize>() > held.chars().count() {
                 return Err("invalid case correction text or caret".to_owned());
             }
         }
@@ -338,7 +339,7 @@ fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'stat
     }
     let counts = BTreeMap::from([
         ("rows", 1), ("initially_correct", i64::from(!wrong)), ("initially_wrong", i64::from(wrong)), ("preserved_correct", i64::from(!wrong && exact)), ("exactly_restored", i64::from(wrong && exact)),
-        ("correct_text_corruptions", i64::from(!wrong && !exact)), ("length_mismatches", i64::from(length)), ("injections", corrections.len() as i64), ("execution_errors", i64::from(!error.is_null())),
+        ("correct_text_corruptions", i64::from(!wrong && !exact)), ("length_mismatches", i64::from(length)), ("injections", corrections.len().to::<i64>()), ("execution_errors", i64::from(!error.is_null())),
         ("correction_layout_mismatches", layout_errors), ("final_layout_mismatches", i64::from(!layout)),
     ]);
     let inputs = json!([document, group, expected, count(&case["trimmed_left"], "case left trim")?, count(&case["trimmed_right"], "case right trim")?, intended]);
@@ -350,7 +351,7 @@ pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), Stri
     let selection = &report["selection"];
     let identifiers: Vec<&str> = selection["source_ids"].as_array().ok_or("case selection IDs are missing")?.iter().filter_map(Value::as_str).collect();
     let selected: HashSet<&str> = identifiers.iter().copied().collect();
-    if selected.len() != identifiers.len() || identifiers.len() as i64 != count(&selection["selected_rows"], "selected case rows")? {
+    if selected.len() != identifiers.len() || identifiers.len().to::<i64>() != count(&selection["selected_rows"], "selected case rows")? {
         return Err("case selection IDs are missing, duplicated or inconsistent".to_owned());
     }
     let membership = |field: &str| -> HashSet<&str> { identity["test_membership"][field].as_array().into_iter().flatten().filter_map(Value::as_str).collect() };

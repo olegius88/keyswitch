@@ -4,6 +4,7 @@
 //! A manifest written by this trainer says so in `toolchain.implementation`, and its digests are of the Rust sources. A
 //! manifest without that field was written by the Python trainer, whose sources are not in this tree: the numeric replay
 //! (`intent --verify`) stands in for them until the first model sealed here replaces it.
+use ks_cast::To as _;
 use super::fit::{Platt, Quantized, Selections, Veto};
 use crate::artifact::canonical;
 use crate::physical::hex;
@@ -335,7 +336,7 @@ pub fn encode_model(file: &ModelFile<'_>) -> Result<Vec<u8>, String> {
     let scale = if largest == 0.0 { 1.0 } else { largest / QUANTIZED_LIMIT };
     let mut payload = Vec::with_capacity(weights.len() * 2 + file.fingerprints.len() * 8);
     for weight in &weights {
-        let value = ks_text::py_round(weight / scale).clamp(-QUANTIZED_LIMIT, QUANTIZED_LIMIT) as i16;
+        let value = ks_text::py_round(weight / scale).clamp(-QUANTIZED_LIMIT, QUANTIZED_LIMIT).to::<i16>();
         payload.extend_from_slice(&value.to_le_bytes());
     }
     for fingerprint in file.fingerprints {

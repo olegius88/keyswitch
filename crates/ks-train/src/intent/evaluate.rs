@@ -1,6 +1,7 @@
 //! The independent strict evaluation of a layout-intent model (`evaluate_intent_model`): provenance against the frozen
 //! inputs, every first-party sealed record recomputed through the runtime, the external corpora, and the real detector at
 //! every reachable context extreme.
+use ks_cast::To as _;
 use super::dataset::{self, DatasetBundle, LexicalExample, Split};
 use super::external::{self, ExternalCorpus, SealedSignatureIndex, Snapshot};
 use super::fit::{self, Confusion, FitConfig, Selection, Selections, Veto, WILSON_95_Z, is_typo_kind, metrics_payload, wilson_upper};
@@ -394,7 +395,7 @@ pub fn verify_provenance(model: &LinearNgramModel, manifest: &Value, inputs: &Pr
         check("embedded_manifest", model.metadata() == Value::Object(without_artifact), "embedded metadata equals the signed training manifest"),
         check("build_provenance_sha256", calculated == recorded, format!("calculated={calculated}, manifest={recorded}")),
         check("model_version", model.model_version == version && version == expected_version, format!("model={}, sidecar={version}, expected={expected_version}", model.model_version)),
-        check("feature_schema", model.dimension == config.dimension as i64 && model.fnv_seed == config.feature_hash_seed, format!("dimension={}, fnv_seed={}", model.dimension, model.fnv_seed)),
+        check("feature_schema", model.dimension == config.dimension.to::<i64>() && model.fnv_seed == config.feature_hash_seed, format!("dimension={}, fnv_seed={}", model.dimension, model.fnv_seed)),
         check("membership_schema", model.membership_seed == config.membership_hash_seed, format!("membership_seed={}, expected={}", model.membership_seed, config.membership_hash_seed)),
         check("calibration_scope", scope_ok, manifest["calibration_scope"].as_str().unwrap_or("").to_owned()),
     ];
@@ -483,8 +484,8 @@ fn veto_from(rows: &[PredictionRow<'_>], threshold: f64) -> Result<Veto, String>
     if positives.is_empty() {
         return Err("veto evaluation requires positive examples".to_owned());
     }
-    let vetoed = positives.iter().filter(|row| row.raw_logit < threshold).count() as i64;
-    Ok(Veto { raw_logit: threshold, positive_samples: positives.len() as i64, vetoed_positive_samples: vetoed, false_negative_rate: vetoed as f64 / positives.len() as f64 })
+    let vetoed = positives.iter().filter(|row| row.raw_logit < threshold).count().to::<i64>();
+    Ok(Veto { raw_logit: threshold, positive_samples: positives.len().to::<i64>(), vetoed_positive_samples: vetoed, false_negative_rate: vetoed.to::<f64>() / positives.len().to::<f64>() })
 }
 
 fn typo_rows<'a, 'b>(rows: &'a [PredictionRow<'b>]) -> impl Iterator<Item = &'a PredictionRow<'b>> + Clone {
@@ -790,7 +791,7 @@ fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [Lexic
     if safety.iter().any(|example| example.label || !example.safety) {
         return Err("production context safety rows must be safety negatives".to_owned());
     }
-    if source_known.iter().any(|example| example.label || !models[example.source_group as usize].score(&example.original).known) {
+    if source_known.iter().any(|example| example.label || !models[example.source_group.to::<usize>()].score(&example.original).known) {
         return Err("production context source-known rows must be source-known negatives".to_owned());
     }
     fit::verify_context_invariance(config)?;
@@ -806,7 +807,7 @@ fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [Lexic
         let references: Vec<&'a LexicalExample> = examples.iter().collect();
         for evaluation in &mut profiles {
             let profile = evaluation.profile;
-            let fixed: Vec<(i64, Arc<dyn LanguageScorer>)> = (0..2).map(|group| (group as i64, Arc::new(FixedContext { delegate: corpus_models[group].clone() as Arc<dyn LanguageScorer>, profile }) as Arc<dyn LanguageScorer>)).collect();
+            let fixed: Vec<(i64, Arc<dyn LanguageScorer>)> = (0..2).map(|group| (group.to::<i64>(), Arc::new(FixedContext { delegate: corpus_models[group].clone() as Arc<dyn LanguageScorer>, profile }) as Arc<dyn LanguageScorer>)).collect();
             let detector = LanguageDetector::new(fixed, Some(cache.clone() as Arc<dyn IntentClassifier>), protected.clone()).map_err(load_error)?;
             let rows = map_rows(&references, workers, |example| policy_row(&detector, example, Some(&profile)))?;
             let all: Vec<&PolicyRow<'a>> = rows.iter().collect();
@@ -823,7 +824,7 @@ fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [Lexic
                 evaluation.corpora.insert("sealed_test_typos", corpus_evaluation(&typos));
             }
         }
-        unique += cache.cache.lock().expect("a prediction cache").len() as u64;
+        unique += cache.cache.lock().expect("a prediction cache").len().to::<u64>();
         hits += cache.hits.load(Ordering::Relaxed);
     }
     for evaluation in &mut profiles {
@@ -835,19 +836,19 @@ fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [Lexic
 }
 
 fn shape_is_valid(value: &CorpusEvaluation<'_>) -> bool {
-    let positives = value.examples.iter().filter(|example| example.label).count() as i64;
-    let negatives = value.examples.len() as i64 - positives;
+    let positives = value.examples.iter().filter(|example| example.label).count().to::<i64>();
+    let negatives = value.examples.len().to::<i64>() - positives;
     let valid = |comparison: &Comparison, positives: i64, negatives: i64| comparison.fallback.true_positive + comparison.fallback.false_negative == positives && comparison.fallback.true_negative + comparison.fallback.false_positive == negatives && comparison.ensemble.true_positive + comparison.ensemble.false_negative == positives && comparison.ensemble.true_negative + comparison.ensemble.false_positive == negatives && 0 <= comparison.negative_model_evaluated && comparison.negative_model_evaluated <= comparison.model_evaluated && comparison.model_evaluated <= comparison.samples;
-    let aggregate = value.overall.samples == value.examples.len() as i64 && valid(&value.overall, positives, negatives) && value.negative_decisions.len() as i64 == negatives && value.negative_decisions.iter().filter(|decision| **decision).count() as i64 == value.overall.ensemble.false_positive;
+    let aggregate = value.overall.samples == value.examples.len().to::<i64>() && valid(&value.overall, positives, negatives) && value.negative_decisions.len().to::<i64>() == negatives && value.negative_decisions.iter().filter(|decision| **decision).count().to::<i64>() == value.overall.ensemble.false_positive;
     let mut samples = 0;
     let mut per_trigger = true;
     for (trigger, comparison) in &value.per_trigger {
         let rows: Vec<&&LexicalExample> = value.examples.iter().filter(|example| example.trigger.as_str() == *trigger).collect();
-        let positive = rows.iter().filter(|example| example.label).count() as i64;
+        let positive = rows.iter().filter(|example| example.label).count().to::<i64>();
         samples += comparison.samples;
-        per_trigger = per_trigger && comparison.samples == rows.len() as i64 && valid(comparison, positive, rows.len() as i64 - positive);
+        per_trigger = per_trigger && comparison.samples == rows.len().to::<i64>() && valid(comparison, positive, rows.len().to::<i64>() - positive);
     }
-    aggregate && per_trigger && samples == value.examples.len() as i64
+    aggregate && per_trigger && samples == value.examples.len().to::<i64>()
 }
 
 /// `_context_profile_corpus_gate`.
@@ -914,7 +915,7 @@ fn context_profile_corpus_gate(config: &FitConfig, profile: &Profile, name: &str
         trigger_gates.insert((*trigger).to_owned(), json!({"passed": passed, "recall_policy": recall_policy, "minimum_recall": minimum_recall, "maximum_false_positive_rate": maximum_fpr, "checks": checks, "comparison": comparison.payload()}));
     }
     let reachability = match name {
-        "unknown_typo" => json!({"all_rows_reach_model": overall.model_evaluated == overall.samples, "all_negative_rows_reach_model": overall.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER as i64 == overall.samples}),
+        "unknown_typo" => json!({"all_rows_reach_model": overall.model_evaluated == overall.samples, "all_negative_rows_reach_model": overall.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() == overall.samples}),
         "safety" | "source_known" => json!({"pre_model_guard_blocks_all_rows": overall.model_evaluated == 0 && overall.negative_model_evaluated == 0}),
         _ => json!({}),
     };
@@ -997,7 +998,7 @@ struct SafetyPolicy {
 
 /// `evaluate_safety_policy`: the safety rows through the same guards and ensemble as production.
 fn safety_policy(detector: &LanguageDetector, examples: &[LexicalExample], protected: &ProtectedTokens) -> Result<SafetyPolicy, String> {
-    let mut policy = SafetyPolicy { samples: examples.len() as i64, per_trigger: TRIGGERS.iter().map(|trigger| (trigger.as_str(), Confusion::default())).collect(), ..SafetyPolicy::default() };
+    let mut policy = SafetyPolicy { samples: examples.len().to::<i64>(), per_trigger: TRIGGERS.iter().map(|trigger| (trigger.as_str(), Confusion::default())).collect(), ..SafetyPolicy::default() };
     for (index, example) in examples.iter().enumerate() {
         if example.label || !example.safety {
             return Err(format!("safety policy corpus must contain only labelled-negative safety rows: index={index}, base={:?}", example.base_signature));
@@ -1049,7 +1050,7 @@ fn percentile(samples: &[f64], quantile: f64) -> Result<f64, String> {
     }
     let mut ordered = samples.to_vec();
     ordered.sort_by(|a, b| a.partial_cmp(b).expect("finite samples"));
-    let index = (ordered.len() - 1).min(ks_text::py_round((ordered.len() - 1) as f64 * quantile) as usize);
+    let index = (ordered.len() - 1).min((ks_text::py_round((ordered.len() - 1).to::<f64>() * quantile)).to::<usize>());
     Ok(ordered[index])
 }
 
@@ -1066,7 +1067,7 @@ fn coverage_statistics(rows: &[&PredictionRow<'_>]) -> Result<Value, String> {
         return Err("prediction coverage must be finite and in [0, 1]".to_owned());
     }
     let total = fsum(&values).map_err(|_| "the sum of the coverage overflowed")?;
-    Ok(json!({"samples": values.len(), "minimum": values.iter().copied().fold(f64::INFINITY, f64::min), "p05": percentile(&values, 0.05)?, "p25": percentile(&values, 0.25)?, "median": median(&values), "p75": percentile(&values, 0.75)?, "p95": percentile(&values, 0.95)?, "maximum": values.iter().copied().fold(f64::NEG_INFINITY, f64::max), "mean": total / values.len() as f64, "zero_coverage_samples": values.iter().filter(|value| **value == 0.0).count(), "full_coverage_samples": values.iter().filter(|value| **value == 1.0).count()}))
+    Ok(json!({"samples": values.len(), "minimum": values.iter().copied().fold(f64::INFINITY, f64::min), "p05": percentile(&values, 0.05)?, "p25": percentile(&values, 0.25)?, "median": median(&values), "p75": percentile(&values, 0.75)?, "p95": percentile(&values, 0.95)?, "maximum": values.iter().copied().fold(f64::NEG_INFINITY, f64::max), "mean": total / values.len().to::<f64>(), "zero_coverage_samples": values.iter().filter(|value| **value == 0.0).count(), "full_coverage_samples": values.iter().filter(|value| **value == 1.0).count()}))
 }
 
 /// `coverage_diagnostics`: OOD membership coverage, never a gate.
@@ -1128,7 +1129,7 @@ fn latency_report(artifact: &Path, model: &LinearNgramModel, examples: &[Lexical
 fn dictionaries_match_policy(provenance: &[external::DictionaryProvenance; 2], hunspell: &Value) -> bool {
     LOCALES.iter().enumerate().all(|(group, locale)| {
         let (observed, pinned) = (&provenance[group], &hunspell[*locale]);
-        observed.locale == *locale && pinned["dictionary_sha256"].as_str() == Some(observed.dictionary.sha256.as_str()) && pinned["dictionary_bytes"].as_u64() == Some(observed.dictionary.bytes as u64) && pinned["affix_sha256"].as_str() == Some(observed.affix.sha256.as_str()) && pinned["affix_bytes"].as_u64() == Some(observed.affix.bytes as u64)
+        observed.locale == *locale && pinned["dictionary_sha256"].as_str() == Some(observed.dictionary.sha256.as_str()) && pinned["dictionary_bytes"].as_u64() == Some(observed.dictionary.bytes.to::<u64>()) && pinned["affix_sha256"].as_str() == Some(observed.affix.sha256.as_str()) && pinned["affix_bytes"].as_u64() == Some(observed.affix.bytes.to::<u64>())
     })
 }
 
@@ -1155,7 +1156,7 @@ fn external_provenance_gates(policy: &Value, stable: bool, lexical: &ExternalCor
     let exclusions: BTreeSet<String> = index.signatures.union(&development_signatures).cloned().collect();
     let sources_match = |corpus: &ExternalCorpus| corpus.dictionary_sources[0] == corpus.dictionary_provenance[0].dictionary.path && corpus.dictionary_sources[1] == corpus.dictionary_provenance[1].dictionary.path;
     let provenance_matches = lexical.dictionary_provenance == development.dictionary_provenance && development.dictionary_provenance == holdout.dictionary_provenance && sources_match(lexical) && sources_match(holdout) && sources_match(development) && dictionaries_match_policy(&lexical.dictionary_provenance, &policy["hunspell"]);
-    let minimum = policy["minimum_words_per_group"].as_u64().unwrap_or(0) as usize;
+    let minimum = (policy["minimum_words_per_group"].as_u64().unwrap_or(0)).to::<usize>();
     let pinned = |name: &str| policy[name].as_str().unwrap_or("").to_owned();
     json!({
         "external_policy_schema": policy["schema_version"].as_i64() == Some(EXTERNAL_SCHEMA_VERSION),
@@ -1287,7 +1288,7 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let veto = veto_from(rows, model.veto_threshold)?;
     let comparison = compare_with_fallback(&detector, whole.split(Split::Test), options.comparison_sample, workers)?;
     let onboard = external::onboard_words(&words, dataset_config.minimum_word_length);
-    let minimum = policy["minimum_words_per_group"].as_u64().ok_or("minimum_words_per_group")? as usize;
+    let minimum = (policy["minimum_words_per_group"].as_u64().ok_or("minimum_words_per_group")?).to::<usize>();
     let references = [&*models[0], &*models[1]];
     let lexical = external::build_lexical_disjoint_corpus(&onboard, minimum, &snapshots)?;
     let development = external::build_unknown_typo_disjoint_corpus(&onboard, &index.signatures, minimum, &snapshots, &references, &protected, external::DEVELOPMENT_RANK_NAMESPACE, external::DEVELOPMENT_CHOICE_NAMESPACE)?;
@@ -1302,7 +1303,7 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let unknown_comparison = compare_with_fallback(&detector, &holdout.examples, 0, workers)?;
     let unknown_rows = predict_rows(&model, &holdout.examples, workers)?;
     let unknown_metrics = prediction_metrics(unknown_rows.iter());
-    let source_known: Vec<LexicalExample> = lexical.examples.iter().filter(|example| !example.label && models[example.source_group as usize].score(&example.original).known).map(|example| LexicalExample { source_known: true, ..example.clone() }).collect();
+    let source_known: Vec<LexicalExample> = lexical.examples.iter().filter(|example| !example.label && models[example.source_group.to::<usize>()].score(&example.original).known).map(|example| LexicalExample { source_known: true, ..example.clone() }).collect();
     if !(0..2).all(|group| source_known.iter().any(|example| example.source_group == group)) {
         return Err("source-known runtime subset must cover groups 0 and 1".to_owned());
     }
@@ -1313,7 +1314,7 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let inference_p95 = latency["inference_ms"]["p95"].as_f64().ok_or("inference_ms.p95")?;
     let safety_false_positives: i64 = safety.per_trigger.values().map(|matrix| matrix.false_positive).sum();
     let bypasses = safety.expected_guard_samples - safety.expected_guarded_samples;
-    let expected_unknown = external::PAIRED_ROWS_PER_TRIGGER as i64 * (holdout.words_by_group[0] + holdout.words_by_group[1]) as i64 * TRIGGERS.len() as i64;
+    let expected_unknown = external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() * (holdout.words_by_group[0] + holdout.words_by_group[1]).to::<i64>() * TRIGGERS.len().to::<i64>();
     let mut neutral_metrics = BTreeMap::new();
     for trigger in TRIGGERS {
         neutral_metrics.insert(trigger.as_str(), (evidence.test_metrics[trigger.as_str()], evidence.typo_metrics[trigger.as_str()]));
@@ -1335,12 +1336,12 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     gate("fallback_regression", comparison.introduced == 0 && comparison.ensemble.false_positive <= comparison.fallback.false_positive);
     gate("hunspell_hard_guard_regression", source_known_comparison.samples > 0 && source_known_comparison.model_evaluated == 0 && source_known_comparison.negative_model_evaluated == 0 && source_known_comparison.ensemble.false_positive == 0 && source_known_comparison.introduced == 0);
     gate("lexical_disjoint_recall", lexical_comparison.ensemble.recall() + RECALL_TOLERANCE >= lexical_comparison.fallback.recall());
-    gate("unknown_typo_model_evaluated", unknown_comparison.samples == expected_unknown && unknown_comparison.model_evaluated == unknown_comparison.samples && unknown_comparison.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER as i64 == unknown_comparison.samples);
+    gate("unknown_typo_model_evaluated", unknown_comparison.samples == expected_unknown && unknown_comparison.model_evaluated == unknown_comparison.samples && unknown_comparison.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() == unknown_comparison.samples);
     gate("unknown_typo_false_positives", unknown_comparison.ensemble.false_positive <= unknown_comparison.fallback.false_positive && unknown_comparison.ensemble.specificity() >= unknown_comparison.fallback.specificity());
     gate("unknown_typo_recall", unknown_comparison.ensemble.recall() + RECALL_TOLERANCE >= unknown_comparison.fallback.recall());
     gate("unknown_typo_raw_model_integrity", unknown_metrics.values().all(|matrix| matrix.true_positive + matrix.false_negative > 0 && matrix.true_negative + matrix.false_positive > 0));
     gate("production_context_ensemble", context_gate["passed"] == json!(true));
-    gate("artifact_size", latency["artifact_bytes"].as_u64().is_some_and(|bytes| bytes as usize <= lang::KSLM_MAX_CONTAINER_BYTES));
+    gate("artifact_size", latency["artifact_bytes"].as_u64().is_some_and(|bytes| bytes.to::<usize>() <= lang::KSLM_MAX_CONTAINER_BYTES));
     gate("load_latency", load_p95 <= LOAD_P95_MAX_MS);
     gate("inference_latency", inference_p95 <= INFERENCE_P95_MAX_MS);
     gate("deterministic_inference", latency["deterministic_predictions"] == json!(true));

@@ -1,6 +1,7 @@
 //! Boundary-v1, rejected by its sealed test. The candidate, the seal and the report are anchored by digests, and a replay
 //! repeats the fit and the test on the phrase reserve of context-v2 and compares all three byte for byte. It is a
 //! regression replay of an observed test, not a new evaluation.
+use ks_cast::To as _;
 use super::sources::BOUNDARY_V1;
 use super::{read_object, reference_models};
 use crate::artifact::canonical;
@@ -80,7 +81,7 @@ fn rows(root: &Path, test: bool) -> Result<Vec<Row>, String> {
         }
     }
     let layouts = pair();
-    let maximum = MAX_SUFFIX as usize;
+    let maximum = MAX_SUFFIX.to::<usize>();
     let mut result = BTreeSet::new();
     for word in words {
         let russian = word.chars().all(|character| ('а'..='я').contains(&character) || character == 'ё');
@@ -117,7 +118,7 @@ fn encoded(root: &Path, data: Vec<Row>) -> Result<Encoded, String> {
     Ok(data
         .into_iter()
         .map(|row| {
-            let candidates = (0..=row.suffix).map(|suffix| features(&row.original, &row.alternative, suffix as i64, &models[0], &models[1])).collect();
+            let candidates = (0..=row.suffix).map(|suffix| features(&row.original, &row.alternative, suffix.to::<i64>(), &models[0], &models[1])).collect();
             (row, candidates)
         })
         .collect())
@@ -165,8 +166,8 @@ fn train(root: &Path, pins: Map<String, Value>) -> Result<(Vec<u8>, Vec<u8>), St
     let names: Vec<String> = training[0].1[0].keys().cloned().collect();
     let mut order: Vec<usize> = (0..names.len()).collect();
     order.sort_by(|&a, &b| pystr::cmp(&names[a], &names[b]));
-    let literal = training.iter().filter(|(row, _)| row.label > 0).count() as f64;
-    let word = training.len() as f64 - literal;
+    let literal = (training.iter().filter(|(row, _)| row.label > 0).count()).to::<f64>();
+    let word = training.len().to::<f64>() - literal;
     let dense = |rows: &[&(Row, Vec<IndexMap<String, f64>>)], weight: &dyn Fn(bool) -> f64| -> Vec<Dense> {
         rows.iter()
             .map(|(row, candidates)| Dense {
@@ -176,7 +177,7 @@ fn train(root: &Path, pins: Map<String, Value>) -> Result<(Vec<u8>, Vec<u8>), St
             })
             .collect()
     };
-    let total = training.len() as f64;
+    let total = training.len().to::<f64>();
     let trained = dense(&training, &|is_literal| total / (2.0 * if is_literal { literal } else { word }));
     let developed = dense(&development, &|is_literal| if is_literal { literal } else { word });
     let (mut weights, mut squared) = (vec![0.0_f64; names.len()], vec![1.0_f64; names.len()]);
@@ -200,7 +201,7 @@ fn train(root: &Path, pins: Map<String, Value>) -> Result<(Vec<u8>, Vec<u8>), St
         if loss < best_loss {
             best.clone_from(&weights);
             best_loss = loss;
-            epoch_used = epoch as i64 + 1;
+            epoch_used = epoch.to::<i64>() + 1;
         }
     }
     let table: IndexMap<String, f64> = names.iter().cloned().zip(best.iter().map(|value| py_round_ndigits(*value, WEIGHT_DECIMALS).expect("a finite weight"))).collect();
@@ -240,8 +241,8 @@ fn evaluate(root: &Path) -> Result<Vec<u8>, String> {
     let data = encoded(root, rows(root, true)?)?;
     let model = BoundaryModel::load(&candidate).map_err(|error| error.name.to_string())?;
     let result = metrics(&model, &data.iter().collect::<Vec<_>>());
-    let count = result["rows"].as_i64().ok_or("no test rows")? as f64;
-    let accepted = result.get("errors").and_then(Value::as_i64).unwrap_or(0) == 0 && result.get("correct").and_then(Value::as_i64).unwrap_or(0) as f64 / count >= MIN_DECIDED_FRACTION;
+    let count = (result["rows"].as_i64().ok_or("no test rows")?).to::<f64>();
+    let accepted = result.get("errors").and_then(Value::as_i64).unwrap_or(0) == 0 && result.get("correct").and_then(Value::as_i64).unwrap_or(0).to::<f64>() / count >= MIN_DECIDED_FRACTION;
     let families: HashSet<&str> = data.iter().map(|(row, _)| row.family.as_str()).collect();
     Ok(canonical(&json!({
         "schema_version": 1, "seal_sha256": checksum(&seal)?, "candidate_sha256": checksum(&candidate)?,
@@ -282,7 +283,7 @@ pub fn verify(root: &Path) -> Result<Value, String> {
     if rows <= 0 || correct + abstained + errors != rows || literal + word != rows || lost + split != errors {
         return Err("inconsistent boundary counts".to_owned());
     }
-    let accepted = errors == 0 && correct as f64 / rows as f64 >= MIN_DECIDED_FRACTION;
+    let accepted = errors == 0 && correct.to::<f64>() / rows.to::<f64>() >= MIN_DECIDED_FRACTION;
     if report.get("accepted").and_then(Value::as_bool) != Some(accepted) {
         return Err("boundary promotion contradicts metrics".to_owned());
     }

@@ -29,6 +29,7 @@
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
 //! line per frame with floats as C99 hex, to be compared with another trainer's.
+use ks_cast::To as _;
 use ks_text::JsonOptions;
 use ks_train::fit::{FitRequest, NoStages, fit};
 use std::path::{Path, PathBuf};
@@ -428,7 +429,7 @@ fn typing_command(arguments: &[String]) -> i32 {
         "mixed" => {
             let number = |name: &str, default: f64| option(arguments, name).map_or(default, |value| value.parse().expect("a number"));
             let kinds: Vec<&str> = option(arguments, "--kinds").unwrap_or("comment").split(',').collect();
-            let recipe = serde_json::json!({"seed": option(arguments, "--seed").unwrap_or("mixbench-v1"), "kinds": kinds, "count": number("--count", 0.0) as i64, "russian_share": number("--russian-share", 0.25),
+            let recipe = serde_json::json!({"seed": option(arguments, "--seed").unwrap_or("mixbench-v1"), "kinds": kinds, "count": number("--count", 0.0).to::<i64>(), "russian_share": number("--russian-share", 0.25),
                 "typo_rate": number("--typo-rate", 0.0), "prefix_rate": number("--prefix-rate", 0.0), "edit": arguments.iter().any(|argument| argument == "--edit")});
             let code = option(arguments, "--code").map(PathBuf::from);
             let model = option(arguments, "--model").map_or_else(|| installed.clone(), PathBuf::from);

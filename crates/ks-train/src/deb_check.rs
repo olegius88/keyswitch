@@ -1,6 +1,7 @@
 //! What a Debian package has to hold before anyone installs it: the exact frozen models, the licences, the repository
 //! source and its public key, nothing enabled behind the user's back, a program that links and starts and loads the very
 //! model it carries.
+use ks_cast::To as _;
 use crate::corpus::checksum;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -43,14 +44,14 @@ fn kslm_version(bytes: &[u8]) -> Result<String, String> {
     if bytes.len() < KSLM_HEADER_BYTES || &bytes[..4] != b"KSLM" {
         return Err("KSLM header is truncated".to_owned());
     }
-    let field = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
+    let field = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]).to::<usize>();
     let (manifest_length, payload_length) = (field(KSLM_MANIFEST_LENGTH_AT), field(KSLM_PAYLOAD_LENGTH_AT));
     if !(2..=INTENT_MANIFEST_MAX_BYTES).contains(&manifest_length) || payload_length > INTENT_PAYLOAD_MAX_BYTES || bytes.len() != KSLM_HEADER_BYTES + manifest_length + payload_length {
         return Err("KSLM container has invalid bounds".to_owned());
     }
     let manifest: Value = serde_json::from_slice(&bytes[KSLM_HEADER_BYTES..KSLM_HEADER_BYTES + manifest_length]).map_err(|error| error.to_string())?;
     let (fingerprints, dimension) = (manifest["supported_fingerprint_count"].as_u64().unwrap_or(u64::MAX), manifest["dimension"].as_u64().unwrap_or(0));
-    if fingerprints > INTENT_FINGERPRINT_MAX_COUNT || dimension == 0 || payload_length as u64 != dimension * WEIGHT_BYTES + fingerprints * FINGERPRINT_BYTES {
+    if fingerprints > INTENT_FINGERPRINT_MAX_COUNT || dimension == 0 || payload_length.to::<u64>() != dimension * WEIGHT_BYTES + fingerprints * FINGERPRINT_BYTES {
         return Err("KSLM payload shape does not match its embedded manifest".to_owned());
     }
     manifest["model_version"].as_str().map(str::to_owned).ok_or_else(|| "a manifest without a version".to_owned())

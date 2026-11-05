@@ -4,6 +4,7 @@
 //! it runs in the panel. Nothing here keeps the window alive from a signal handler: handlers hold the settings and plain data
 //! and reach the window through `gtk_app`.
 
+use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -497,7 +498,7 @@ impl MainWindow {
         let stack = self.stack.clone();
         self.nav_list.connect_row_selected(move |_, row| {
             let Some(row) = row else { return };
-            let Some((name, _, _)) = NAVIGATION.get(row.index() as usize) else { return };
+            let Some((name, _, _)) = NAVIGATION.get(row.index().to::<usize>()) else { return };
             stack.set_visible_child_name(name);
             if *name == "history" || *name == "automation" {
                 gtk_app::refresh_current(name);
@@ -514,7 +515,7 @@ impl MainWindow {
 
     pub fn show_page(&self, page: &str) -> bool {
         let Some(index) = NAVIGATION.iter().position(|(name, _, _)| *name == page) else { return false };
-        match self.nav_list.row_at_index(index as i32) {
+        match self.nav_list.row_at_index(index.low::<i32>()) {
             Some(row) => {
                 self.nav_list.select_row(Some(&row));
                 true
@@ -825,7 +826,7 @@ impl MainWindow {
         let weak_search = search.downgrade();
         applications.set_filter_func(move |row| {
             let wanted = weak_search.upgrade().map(|search| search.text().trim().to_lowercase()).unwrap_or_default();
-            searched.get(row.index() as usize).is_some_and(|choice| choice.search_text().contains(&wanted))
+            searched.get(row.index().to::<usize>()).is_some_and(|choice| choice.search_text().contains(&wanted))
         });
         let weak_list = applications.downgrade();
         search.connect_search_changed(move |_| {
@@ -835,7 +836,7 @@ impl MainWindow {
         });
         let weak = dialog.downgrade();
         applications.connect_row_activated(move |_, row| {
-            if let Some(choice) = catalog.get(row.index() as usize) {
+            if let Some(choice) = catalog.get(row.index().to::<usize>()) {
                 gtk_app::add_application_exclusion(&choice.identifier, &choice.name);
             }
             if let Some(dialog) = weak.upgrade() {
@@ -1061,7 +1062,7 @@ impl Builder<'_> {
         row.connect_value_notify(move |row| {
             let value = row.value();
             let stored = match key.as_str() {
-                "detection.minimum_length" | "detection.early_switch_min_length" => json!(value as i64),
+                "detection.minimum_length" | "detection.early_switch_min_length" => json!(value.to::<i64>()),
                 "detection.pause_delay_seconds" => json!((value * 10.0).round() / 10.0),
                 _ => json!(value),
             };
@@ -1078,7 +1079,7 @@ impl Builder<'_> {
         let settings = self.settings();
         let key = path.to_owned();
         row.connect_selected_notify(move |row| {
-            if let Some(value) = keys.get(row.selected() as usize) {
+            if let Some(value) = keys.get(row.selected().to::<usize>()) {
                 if key == "appearance.theme" {
                     gtk_app::set_theme(value);
                 } else {
@@ -1244,7 +1245,7 @@ impl Builder<'_> {
             "Минимум для базового детектора; явные правила, короткие исключения и контекстный помощник могут разрешить замену раньше",
             (MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX, 1.0),
             0,
-            DEFAULT_MINIMUM_WORD_LENGTH as f64,
+            DEFAULT_MINIMUM_WORD_LENGTH.to::<f64>(),
         ));
         behavior.add(&self.spin_row(
             "detection.confidence",
@@ -1309,7 +1310,7 @@ impl Builder<'_> {
             "Символов до ранней смены",
             &format!(
                 "Минимум для проверки; значение {} действует только в словарном алгоритме. Модель проверяет префиксы длиной {PREFIX_MIN_CHARACTERS}–{PREFIX_MAX_CHARACTERS} и ждёт при сомнении",
-                EARLY_SWITCH_MIN_LENGTH_SETTING_MIN as i64
+                EARLY_SWITCH_MIN_LENGTH_SETTING_MIN.to::<i64>()
             ),
             (EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX, 1.0),
             0,
@@ -1554,8 +1555,8 @@ impl Builder<'_> {
             "Проверять автоматически",
             &format!(
                 "Первая проверка через {} после запуска, затем раз в {}",
-                counted(UPDATE_CHECK_INITIAL_DELAY_SECONDS as f64, SECONDS),
-                counted(UPDATE_CHECK_INTERVAL_SECONDS as f64 / 3600.0, HOURS)
+                counted(UPDATE_CHECK_INITIAL_DELAY_SECONDS.to::<f64>(), SECONDS),
+                counted(UPDATE_CHECK_INTERVAL_SECONDS.to::<f64>() / 3600.0, HOURS)
             ),
         ));
         policy.add(&action_row(

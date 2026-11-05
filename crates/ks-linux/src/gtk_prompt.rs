@@ -1,5 +1,6 @@
 //! The windows of the switching rules: the offer above the caret and the rule window (the Python's `learning_prompt.py`).
 
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
@@ -77,7 +78,7 @@ impl PromptInner {
     fn position_above_anchor(&self) {
         let Some(anchor) = *self.anchor.borrow() else { return };
         let Some(surface) = self.window.surface() else { return };
-        let window = surface.downcast::<gdk_x11::X11Surface>().map_or(0, |surface| surface.xid() as i64);
+        let window = surface.downcast::<gdk_x11::X11Surface>().map_or(0, |surface| surface.xid().bits::<i64>());
         let monitor = monitor_at(&WidgetExt::display(&self.window), anchor.x, anchor.y);
         let (x, y) = prompt_position((anchor.x, anchor.y), (self.window.width(), self.window.height()), monitor);
         (self.callbacks.position)(window, x, y);

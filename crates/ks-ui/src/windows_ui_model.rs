@@ -2,6 +2,7 @@
 //! `windows_ui_model.py`, `desktop_theme.py` and the parts of `desktop_ui.py` that are not drawing). It compiles and is
 //! tested on every platform; `settings_window` draws it.
 
+use ks_cast::To as _;
 use std::fmt;
 
 use ks_config::app_quirks::MENTION_HEADS;
@@ -241,7 +242,7 @@ pub fn autocorrection_settings() -> Vec<SettingSpec> {
                 &format!(
                     "Минимум для проверки; значение {} действует только в словарном алгоритме. \
                      Модель проверяет префиксы длиной {PREFIX_MIN_CHARACTERS}–{PREFIX_MAX_CHARACTERS} и ждёт при сомнении.",
-                    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN as i64
+                    EARLY_SWITCH_MIN_LENGTH_SETTING_MIN.to::<i64>()
                 ),
                 Int,
             ),
@@ -397,7 +398,7 @@ pub fn update_settings() -> Vec<SettingSpec> {
             "Автоматически проверять обновления",
             &format!(
                 "Проверять GitHub Releases после запуска и раз в {}.",
-                quantity(UPDATE_CHECK_INTERVAL_MS as f64 / 1000.0 / 3600.0, HOURS)
+                quantity(UPDATE_CHECK_INTERVAL_MS.to::<f64>() / 1000.0 / 3600.0, HOURS)
             ),
             Bool,
         ),
@@ -473,7 +474,7 @@ pub fn parse_number(spec: &SettingSpec, text: &str) -> Option<(Value, String)> {
     }
     let numeric = spec.minimum.max(numeric.min(spec.maximum));
     if spec.kind == Int {
-        let value = numeric.round_ties_even() as i64;
+        let value = numeric.round_ties_even().to::<i64>();
         return Some((json!(value), value.to_string()));
     }
     let scale = 10f64.powi(NUMBER_DISPLAY_DECIMAL_PLACES);
@@ -486,7 +487,7 @@ pub fn stepped_text(spec: &SettingSpec, shown: &str, steps: i32) -> String {
     let cleaned = pystr::strip(shown).replace(',', ".");
     let current: f64 = cleaned.parse().unwrap_or(spec.minimum);
     let next = (current + spec.step * f64::from(steps)).clamp(spec.minimum, spec.maximum);
-    if spec.kind == Int { format!("{}", next.round_ties_even() as i64) } else { format!("{:?}", (next * 100.0).round_ties_even() / 100.0) }
+    if spec.kind == Int { format!("{}", next.round_ties_even().to::<i64>()) } else { format!("{:?}", (next * 100.0).round_ties_even() / 100.0) }
 }
 
 // ------------------------------------------------------------------------------------------------------ exclusions
@@ -580,7 +581,7 @@ pub fn log_state_text(status: &Map<String, Value>, path: &str, rotation: &str) -
     } else if size == 0 {
         "файл пуст: записей ещё нет".to_owned()
     } else {
-        format!("записывается, {:.1} КБ", size as f64 / 1024.0)
+        format!("записывается, {:.1} КБ", size.to::<f64>() / 1024.0)
     };
     format!("Файл журнала: {path}\nСостояние: {state}\nРотация в режиме диагностики: {rotation}, включение начинает новый файл")
 }
@@ -741,8 +742,8 @@ pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
     /// A Win32 COLORREF.
-    pub const fn colorref(self) -> u32 {
-        self.0 as u32 | (self.1 as u32) << 8 | (self.2 as u32) << 16
+    pub fn colorref(self) -> u32 {
+        u32::from(self.0) | u32::from(self.1) << 8 | u32::from(self.2) << 16
     }
 }
 

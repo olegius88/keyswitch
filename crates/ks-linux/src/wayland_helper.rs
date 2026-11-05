@@ -5,6 +5,7 @@
 //! key through to `/dev/uinput` and switches into zero-latency pass-through until the parent catches up; if the socket
 //! closes, `EVIOCGRAB` is released immediately.
 
+use ks_cast::To as _;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -73,11 +74,11 @@ pub fn seq_newer(seq: u32, than: u32) -> bool {
 
 /// Encode one binary control/event frame between parent and helper.
 pub fn pack_frame(msg_type: u32, payload: &[u8]) -> io::Result<Vec<u8>> {
-    if payload.len() > HELPER_MAX_FRAME_BYTES as usize {
+    if payload.len() > HELPER_MAX_FRAME_BYTES.to::<usize>() {
         return Err(invalid("Helper frame payload exceeds limit"));
     }
-    let mut frame = Vec::with_capacity(HELPER_FRAME_HEADER_BYTES as usize + payload.len());
-    frame.push(msg_type as u8);
+    let mut frame = Vec::with_capacity(HELPER_FRAME_HEADER_BYTES.to::<usize>() + payload.len());
+    frame.push(msg_type.low::<u8>());
     frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     frame.extend_from_slice(payload);
     Ok(frame)
@@ -96,12 +97,12 @@ impl FrameReader {
 
     pub fn feed(&mut self, chunk: &[u8]) -> io::Result<Vec<(u32, Vec<u8>)>> {
         self.buffer.extend_from_slice(chunk);
-        let header = HELPER_FRAME_HEADER_BYTES as usize;
+        let header = HELPER_FRAME_HEADER_BYTES.to::<usize>();
         let mut frames = Vec::new();
         while self.buffer.len() >= header {
             let msg_type = u32::from(self.buffer[0]);
-            let length = u32::from_be_bytes([self.buffer[1], self.buffer[2], self.buffer[3], self.buffer[4]]) as usize;
-            if length > HELPER_MAX_FRAME_BYTES as usize {
+            let length = u32::from_be_bytes([self.buffer[1], self.buffer[2], self.buffer[3], self.buffer[4]]).to::<usize>();
+            if length > HELPER_MAX_FRAME_BYTES.to::<usize>() {
                 return Err(invalid("Helper frame length exceeds limit"));
             }
             let end = header + length;
@@ -142,7 +143,7 @@ pub struct RawInputEvent {
 
 impl RawInputEvent {
     pub fn timestamp_ms(&self) -> u32 {
-        (self.sec.wrapping_mul(1000).wrapping_add(self.usec.div_euclid(MICROSECONDS_PER_MILLISECOND)) & i64::from(UINT32_MODULO_MASK)) as u32
+        (self.sec.wrapping_mul(1000).wrapping_add(self.usec.div_euclid(MICROSECONDS_PER_MILLISECOND)) & i64::from(UINT32_MODULO_MASK)).low::<u32>()
     }
 }
 
@@ -350,7 +351,7 @@ impl<'a> WaylandInputHelper<'a> {
         fds.extend(self.pointers.iter().map(|(fd, _)| *fd));
         let mut timeout_ms = WAYLAND_HELPER_POLL_TIMEOUT_MS;
         if let Some(pending) = &self.pending {
-            let remaining = ((pending.deadline - self.os.monotonic()) * 1000.0).round_ties_even().max(0.0) as i32;
+            let remaining = (((pending.deadline - self.os.monotonic()) * 1000.0).round_ties_even().max(0.0)).to::<i32>();
             timeout_ms = timeout_ms.min(remaining);
         }
         let events: HashMap<i32, i16> = self.os.poll(&fds, timeout_ms).into_iter().collect();
@@ -399,7 +400,7 @@ impl<'a> WaylandInputHelper<'a> {
 
     fn read_channel(&mut self, mask: i16) -> io::Result<bool> {
         if mask & libc::POLLIN != 0 {
-            let mut chunk = vec![0u8; HELPER_SOCKET_CHUNK_BYTES as usize];
+            let mut chunk = vec![0u8; HELPER_SOCKET_CHUNK_BYTES.to::<usize>()];
             let count = match self.channel.recv(&mut chunk) {
                 Ok(count) => count,
                 Err(_) => return Ok(false),
@@ -448,12 +449,12 @@ impl<'a> WaylandInputHelper<'a> {
                     self.pending = None;
                 }
                 let items = &payload[CMD_BATCH_HEADER_SIZE..];
-                if items.len() < count * HELPER_EMIT_ITEM_BYTES as usize {
+                if items.len() < count * HELPER_EMIT_ITEM_BYTES.to::<usize>() {
                     return Err(short("emit batch"));
                 }
                 let mut raw_events: Vec<(u32, u32, i32)> = Vec::new();
                 let mut emitted = 0u32;
-                for item in items.chunks(HELPER_EMIT_ITEM_BYTES as usize).take(count) {
+                for item in items.chunks(HELPER_EMIT_ITEM_BYTES.to::<usize>()).take(count) {
                     let pressed = item[0] != 0;
                     let keycode = u32::from(u16::from_be_bytes([item[1], item[2]]));
                     if pressed && self.passed_keys.contains(&keycode) {
@@ -529,7 +530,7 @@ impl<'a> WaylandInputHelper<'a> {
 
     /// Write key transitions in bursts the compositor's event queue holds (see the burst constant).
     fn write_paced(&mut self, fd: i32, raw_events: &[(u32, u32, i32)]) -> io::Result<()> {
-        let burst = (WAYLAND_UINPUT_BURST_TRANSITIONS * TRANSITION_EVENTS) as usize;
+        let burst = (WAYLAND_UINPUT_BURST_TRANSITIONS * TRANSITION_EVENTS).to::<usize>();
         for (index, part) in raw_events.chunks(burst).enumerate() {
             if index > 0 {
                 self.os.sleep(WAYLAND_UINPUT_BURST_PAUSE_SECONDS);
@@ -604,7 +605,7 @@ impl<'a> WaylandInputHelper<'a> {
         payload.push(u8::from(pressed));
         payload.extend_from_slice(&(code as u16).to_be_bytes());
         payload.extend_from_slice(&timestamp_ms.to_be_bytes());
-        payload.push(flags as u8);
+        payload.push(flags.low::<u8>());
         self.send(HELPER_MSG_KEY, &payload)
     }
 
@@ -1031,10 +1032,10 @@ impl HelperClient {
             (Some(_), false) => HELPER_EMIT_TEXT,
         };
         let (req_id, slot) = self.shared.allocate_reply();
-        let mut body = Vec::with_capacity(CMD_BATCH_HEADER_SIZE + items.len() * HELPER_EMIT_ITEM_BYTES as usize);
+        let mut body = Vec::with_capacity(CMD_BATCH_HEADER_SIZE + items.len() * HELPER_EMIT_ITEM_BYTES.to::<usize>());
         body.extend_from_slice(&req_id.to_be_bytes());
         body.extend_from_slice(&(items.len() as u16).to_be_bytes());
-        body.push(check as u8);
+        body.push(check.low::<u8>());
         body.extend_from_slice(&known_seq.unwrap_or(0).to_be_bytes());
         for &(pressed, keycode) in items {
             body.push(u8::from(pressed));
@@ -1115,7 +1116,7 @@ impl ClientShared {
 
     fn read_loop(&self) {
         let mut reader = FrameReader::new();
-        let mut chunk = vec![0u8; HELPER_SOCKET_CHUNK_BYTES as usize];
+        let mut chunk = vec![0u8; HELPER_SOCKET_CHUNK_BYTES.to::<usize>()];
         'reading: while !self.closed.load(Ordering::SeqCst) {
             let count = match self.channel.recv(&mut chunk) {
                 Ok(0) | Err(_) => break,
@@ -1199,7 +1200,7 @@ impl ClientShared {
                     let sent = if key.needs_verdict() {
                         let verdict = if swallow { HELPER_VERDICT_SWALLOW } else { HELPER_VERDICT_PASS };
                         let mut body = key.seq.to_be_bytes().to_vec();
-                        body.push(verdict as u8);
+                        body.push(verdict.low::<u8>());
                         self.send_frame(HELPER_CMD_VERDICT, &body)
                     } else if key.forced() {
                         self.send_frame(HELPER_CMD_SEQ_ACK, &key.seq.to_be_bytes())

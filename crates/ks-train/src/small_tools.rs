@@ -1,6 +1,7 @@
 //! The short tools of a model cycle and a release: the base of a fit that refits some heads (`carry_context_heads`), what
 //! a machine can run (`training_doctor`), the truncated forms dropped from the Russian supplement
 //! (`filter_lexicon_supplement`), and the signed APT repository (`apt_repository`).
+use ks_cast::To as _;
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
 use crate::heads::HEAD_PREFIXES;
@@ -191,7 +192,7 @@ pub fn verify_supplement(root: &Path) -> Result<Value, String> {
     let kept = strings(&serde_json::from_slice::<Value>(&raw).map_err(|error| error.to_string())?["words"]);
     let forms = strings(&record["dropped"]["forms"]);
     let together: Vec<String> = kept.iter().chain(forms.iter()).cloned().collect();
-    if record["input"]["words_sha256"].as_str() != Some(words_digest(&together).as_str()) || record["input"]["words"].as_u64() != Some(together.len() as u64) {
+    if record["input"]["words_sha256"].as_str() != Some(words_digest(&together).as_str()) || record["input"]["words"].as_u64() != Some(together.len().to::<u64>()) {
         return Err("kept and dropped forms are not the recorded input".to_owned());
     }
     let (retained, removed) = split_forms(&kept, &onboard, speller.as_ref());
@@ -335,7 +336,7 @@ fn index_entry(package: &Path, pool_path: &str) -> Result<String, String> {
 
 /// `%a, %d %b %Y %H:%M:%S UTC` of the current moment.
 fn release_date() -> String {
-    let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs()) as i64;
+    let seconds = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>();
     let (days, rest) = (seconds.div_euclid(SECONDS_PER_DAY), seconds.rem_euclid(SECONDS_PER_DAY));
     const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -348,7 +349,7 @@ fn release_date() -> String {
     let day = of_year - (153 * cycle + 2) / 5 + 1;
     let month = if cycle < 10 { cycle + 3 } else { cycle - 9 };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!("{}, {day:02} {} {year:04} {:02}:{:02}:{:02} UTC", WEEKDAYS[days.rem_euclid(7) as usize], MONTHS[month as usize - 1], rest / 3600, rest / 60 % 60, rest % 60)
+    format!("{}, {day:02} {} {year:04} {:02}:{:02}:{:02} UTC", WEEKDAYS[days.rem_euclid(7).to::<usize>()], MONTHS[month.to::<usize>() - 1], rest / 3600, rest / 60 % 60, rest % 60)
 }
 
 fn release_stanza(sources: &Sources, indices: &[(String, Vec<u8>)]) -> String {

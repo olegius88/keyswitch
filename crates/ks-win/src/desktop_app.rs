@@ -6,6 +6,7 @@
 //! message. The window itself, its pages, the learning prompt and the rule window are in `settings_window`,
 //! `learning_prompt` and `rule_editor_dialog`; this file wires them to the engine, the stores and the tray.
 
+use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::ptr::{null, null_mut};
@@ -113,13 +114,13 @@ fn local_time() -> LocalTime {
         time
     };
     LocalTime {
-        year: time.wYear as i32,
-        month: time.wMonth as u32,
-        day: time.wDay as u32,
-        hour: time.wHour as u32,
-        minute: time.wMinute as u32,
-        second: time.wSecond as u32,
-        millisecond: time.wMilliseconds as u32,
+        year: time.wYear.to::<i32>(),
+        month: time.wMonth.to::<u32>(),
+        day: time.wDay.to::<u32>(),
+        hour: time.wHour.to::<u32>(),
+        minute: time.wMinute.to::<u32>(),
+        second: time.wSecond.to::<u32>(),
+        millisecond: time.wMilliseconds.to::<u32>(),
     }
 }
 
@@ -128,7 +129,7 @@ fn platform_description() -> String {
     // SAFETY: RtlGetVersion fills the structure whose size it is told.
     let (major, minor, build) = unsafe {
         let mut info: OSVERSIONINFOW = std::mem::zeroed();
-        info.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+        info.dwOSVersionInfoSize = (std::mem::size_of::<OSVERSIONINFOW>()).low::<u32>();
         RtlGetVersion(&mut info);
         (info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber)
     };
@@ -169,7 +170,7 @@ pub fn write_standard(error: bool, text: &str) {
             }
         }
         let mut written = 0u32;
-        WriteFile(handle, text.as_ptr(), text.len() as u32, &mut written, null_mut());
+        WriteFile(handle, text.as_ptr(), text.len().low::<u32>(), &mut written, null_mut());
     }
 }
 
@@ -177,7 +178,7 @@ pub fn write_standard(error: bool, text: &str) {
 pub fn leave(status: i32) -> ! {
     logsetup::uninstall_handler();
     // SAFETY: ends the process.
-    unsafe { ExitProcess(status as u32) }
+    unsafe { ExitProcess(status.bits::<u32>()) }
 }
 
 // -------------------------------------------------------------------------------------------------------- the program
@@ -519,7 +520,7 @@ fn host_message(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> O
             Some(0)
         }
         WM_TRAY => {
-            if lparam as u32 == WM_LBUTTONUP || lparam as u32 == WM_RBUTTONUP {
+            if lparam.low::<u32>() == WM_LBUTTONUP || lparam.low::<u32>() == WM_RBUTTONUP {
                 // A primary click opens the same complete menu as the secondary one.
                 with_app(|app| app.show_menu());
             }
@@ -715,7 +716,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         last_update_notification: RefCell::new(String::new()),
     });
     APP.with(|slot| *slot.borrow_mut() = Some(app.clone()));
-    WINDOW.store(window as isize, Ordering::SeqCst);
+    WINDOW.store(window.to::<isize>(), Ordering::SeqCst);
 
     let _ = settings.subscribe(Arc::new(|path: &str, value: &Value| {
         let (path, value) = (path.to_owned(), value.clone());

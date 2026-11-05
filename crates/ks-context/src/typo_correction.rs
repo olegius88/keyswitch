@@ -13,6 +13,7 @@
 //! Lock, and a letter not pressed in the word takes the key of the last press that typed it (KeyTemplates). A letter no
 //! key has typed yet cannot be typed, and its candidate is not made.
 
+use ks_cast::To as _;
 use crate::constants::{
     KEYBOARD_ROW_LENGTHS, TYPO_ALPHABETS, TYPO_CANDIDATE_MIN_COUNT, TYPO_COUNT_LOG_SCALE, TYPO_DELETION_LOG_PROBABILITY, TYPO_FORM_SEPARATOR,
     TYPO_FREQUENCY_MAX_BYTES, TYPO_FREQUENCY_SCHEMA_VERSION, TYPO_INSERTION_LOG_PROBABILITY, TYPO_MIN_LETTERS, TYPO_OCCURRENCE_HASH_BYTES,
@@ -42,7 +43,7 @@ pub const CORRECT_TYPOS_ENGLISH_DESCRIPTION: &str = "По умолчанию и�
 pub fn correct_typos_description() -> String {
     format!(
         "Исправлять в слове одну опечатку: переставленные буквы, лишнюю, пропущенную или соседнюю клавишу. Только если ни один словарь не знает слово, а одно частое слово намного вероятнее других; слова, в которых меньше {}, и имена в середине предложения не трогаются. Pause или сочетание отмены сразу после исправления возвращает слово как набрано, и больше оно не исправляется; не исправляется и слово, которое не раз оставлено как набрано. Такие слова хранятся только как хеши и только при включённой истории",
-        quantity(TYPO_MIN_LETTERS as f64, LETTERS)
+        quantity(TYPO_MIN_LETTERS.to::<f64>(), LETTERS)
     )
 }
 
@@ -91,7 +92,7 @@ pub struct TypoPolicy {
 impl Default for TypoPolicy {
     fn default() -> Self {
         TypoPolicy {
-            candidate_min_count: TYPO_CANDIDATE_MIN_COUNT as i64,
+            candidate_min_count: TYPO_CANDIDATE_MIN_COUNT.to::<i64>(),
             posterior_ratio: TYPO_POSTERIOR_RATIO,
             log_probabilities: [
                 (Operation::Transposition, TYPO_TRANSPOSITION_LOG_PROBABILITY),
@@ -106,8 +107,8 @@ impl Default for TypoPolicy {
 impl TypoPolicy {
     /// The stored weight of `candidate_min_count`, the least a corrected word may have.
     pub fn minimum_weight(&self) -> i64 {
-        let scaled = ks_text::log(self.candidate_min_count as f64).expect("a positive count") * TYPO_COUNT_LOG_SCALE as f64;
-        ks_text::py_round_to_int(scaled).expect("a finite weight") as i64
+        let scaled = ks_text::log(self.candidate_min_count.to::<f64>()).expect("a positive count") * TYPO_COUNT_LOG_SCALE.to::<f64>();
+        ks_text::py_round_to_int(scaled).expect("a finite weight").to::<i64>()
     }
 
     fn log_probability(&self, operation: Operation) -> f64 {
@@ -142,9 +143,9 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
     for (row_index, row) in letter_rows.iter().enumerate() {
         for (index, &key) in row.iter().enumerate() {
             let mut near: Vec<char> = Vec::new();
-            for position in [index as i64 - 1, index as i64 + 1] {
+            for position in [index.to::<i64>() - 1, index.to::<i64>() + 1] {
                 if 0 <= position && (position as usize) < row.len() {
-                    near.push(row[position as usize]);
+                    near.push(row[position.to::<usize>()]);
                 }
             }
             if row_index > 0 {
@@ -153,7 +154,7 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
             }
             if row_index + 1 < letter_rows.len() {
                 let below = letter_rows[row_index + 1];
-                near.extend([index as i64 - 1, index as i64].into_iter().filter(|&position| 0 <= position && (position as usize) < below.len()).map(|position| below[position as usize]));
+                near.extend([index.to::<i64>() - 1, index.to::<i64>()].into_iter().filter(|&position| 0 <= position && (position as usize) < below.len()).map(|position| below[position.to::<usize>()]));
             }
             if ucd::isalpha(key) {
                 let mut letters: Vec<char> = near.into_iter().filter(|&c| ucd::isalpha(c)).collect();
@@ -193,7 +194,7 @@ fn int_member(value: Option<&Value>) -> Option<i64> {
 /// `header.get(name) == number` as Python compares an int with a JSON number or flag.
 fn equals_int(value: Option<&Value>, wanted: i64) -> bool {
     match value {
-        Some(Value::Number(number)) => number.as_i64().map_or_else(|| number.as_f64() == Some(wanted as f64), |found| found == wanted),
+        Some(Value::Number(number)) => number.as_i64().map_or_else(|| number.as_f64() == Some(wanted.to::<f64>()), |found| found == wanted),
         Some(Value::Bool(flag)) => i64::from(*flag) == wanted,
         _ => false,
     }
@@ -209,8 +210,8 @@ impl TypoLexicon {
         let mut coded = Vec::with_capacity(form.len());
         for c in form.chars() {
             match self.alphabet.chars().position(|letter| letter == c) {
-                Some(place) => coded.push((place + 1) as u8),
-                None if (c as u32) < 256 => coded.push(c as u32 as u8),
+                Some(place) => coded.push((place + 1).to::<u8>()),
+                None if (c as u32) < 256 => coded.push((c.to::<u32>()).to::<u8>()),
                 None => return None,
             }
         }
@@ -227,7 +228,7 @@ impl TypoLexicon {
         let (mut low, mut high) = (0, self.size());
         while low < high {
             let middle = (low + high) >> 1;
-            let stored = &self.forms[self.starts[middle] as usize..self.starts[middle + 1] as usize - 1];
+            let stored = &self.forms[self.starts[middle].to::<usize>()..(self.starts[middle + 1]).to::<usize>() - 1];
             match stored.cmp(coded.as_slice()) {
                 std::cmp::Ordering::Equal => return Some(i64::from(self.weights[middle])),
                 std::cmp::Ordering::Less => low = middle + 1,
@@ -250,7 +251,7 @@ impl TypoLexicon {
         if self.coded(form).is_none() {
             return false;
         }
-        occurrence_positions(form, self.seen_bits, self.seen_hashes).all(|position| self.seen[(position / 8) as usize] & (1 << (position % 8)) != 0)
+        occurrence_positions(form, self.seen_bits, self.seen_hashes).all(|position| self.seen[(position / 8).to::<usize>()] & (1 << (position % 8)) != 0)
     }
 
     /// `TypoLexicon.load(path, locale)`.
@@ -258,7 +259,7 @@ impl TypoLexicon {
         use std::io::Read;
         let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
         let mut raw = Vec::new();
-        file.take(TYPO_FREQUENCY_MAX_BYTES as u64 + 1).read_to_end(&mut raw).map_err(|error| LoadError::os(&error, path))?;
+        file.take(TYPO_FREQUENCY_MAX_BYTES.to::<u64>() + 1).read_to_end(&mut raw).map_err(|error| LoadError::os(&error, path))?;
         if raw.len() > TYPO_FREQUENCY_MAX_BYTES {
             return Err(LoadError::value("typo frequency file is too large"));
         }
@@ -271,11 +272,11 @@ impl TypoLexicon {
         let header = header.as_object().ok_or_else(invalid_header)?;
         let alphabet = TYPO_ALPHABETS.iter().find(|entry| entry.0 == locale).map(|entry| entry.1);
         let digest: String = Sha256::digest(payload).iter().map(|byte| format!("{byte:02x}")).collect();
-        if !equals_int(header.get("schema_version"), TYPO_FREQUENCY_SCHEMA_VERSION as i64)
+        if !equals_int(header.get("schema_version"), TYPO_FREQUENCY_SCHEMA_VERSION.to::<i64>())
             || header.get("locale").and_then(Value::as_str) != Some(locale)
             || alphabet.is_none()
             || header.get("alphabet").and_then(Value::as_str) != alphabet
-            || !equals_int(header.get("count_log_scale"), TYPO_COUNT_LOG_SCALE as i64)
+            || !equals_int(header.get("count_log_scale"), TYPO_COUNT_LOG_SCALE.to::<i64>())
             || header.get("payload_sha256").and_then(Value::as_str) != Some(digest.as_str())
         {
             return Err(invalid_header());
@@ -288,16 +289,16 @@ impl TypoLexicon {
         let (Some(bits), Some(hashes)) = (bits, hashes) else {
             return Err(LoadError::value("invalid typo frequency sections"));
         };
-        if sizes.len() != TYPO_SECTIONS.len() || sizes.iter().sum::<i64>() != payload.len() as i64 || bits < 1 || hashes < 1 {
+        if sizes.len() != TYPO_SECTIONS.len() || sizes.iter().sum::<i64>() != payload.len().to::<i64>() || bits < 1 || hashes < 1 {
             return Err(LoadError::value("invalid typo frequency sections"));
         }
-        let ends: Vec<usize> = sizes.iter().scan(0, |total, &size| { *total += size as usize; Some(*total) }).collect();
+        let ends: Vec<usize> = sizes.iter().scan(0, |total, &size| { *total += size.to::<usize>(); Some(*total) }).collect();
         let inflate = |bytes: &[u8]| miniz_oxide::inflate::decompress_to_vec_zlib(bytes).map_err(|error| LoadError::value(format!("Error -3 while decompressing data: {error:?}")));
         let forms = inflate(&payload[..ends[0]])?;
         let weights = inflate(&payload[ends[0]..ends[1]])?;
         let filter_bits = payload[ends[1]..].to_vec();
         let mut starts: Vec<u32> = vec![0];
-        starts.extend(forms.iter().enumerate().filter(|(_, byte)| usize::from(**byte) == TYPO_FORM_SEPARATOR).map(|(at, _)| (at + 1) as u32));
+        starts.extend(forms.iter().enumerate().filter(|(_, byte)| usize::from(**byte) == TYPO_FORM_SEPARATOR).map(|(at, _)| (at + 1).to::<u32>()));
         if starts.len() - 1 != weights.len() || (!forms.is_empty() && usize::from(forms[forms.len() - 1]) != TYPO_FORM_SEPARATOR) || (filter_bits.len() as i64) * 8 < bits {
             return Err(LoadError::value("invalid typo frequency payload"));
         }
@@ -309,8 +310,8 @@ impl TypoLexicon {
             starts,
             weights,
             seen: filter_bits,
-            seen_bits: bits as u64,
-            seen_hashes: hashes as u64,
+            seen_bits: bits.to::<u64>(),
+            seen_hashes: hashes.to::<u64>(),
             version: format!("typo-frequency-{}", &version_digest[..VERSION_HASH_CHARACTERS]),
         })
     }
@@ -323,7 +324,7 @@ pub fn occurrence_positions(form: &str, bits: u64, hashes: u64) -> impl Iterator
     let read = |bytes: &[u8]| bytes.iter().rev().fold(0_u128, |total, &byte| (total << 8) | u128::from(byte));
     let first = read(&digest[..width]);
     let step = read(&digest[width..2 * width]) | 1;
-    (0..hashes).map(move |index| ((first + u128::from(index) * step) % u128::from(bits)) as u64)
+    (0..hashes).map(move |index| ((first + u128::from(index) * step) % u128::from(bits)).to::<u64>())
 }
 
 /// `packaged_lexicon(locale)`: the shipped list of a locale; None when none is shipped or it does not load.
@@ -398,7 +399,7 @@ pub fn edits(word: &str, alphabet: &str, neighbours: &HashMap<char, String>) -> 
         }
     }
     for (position, &extra) in chars.iter().enumerate() {
-        let around = [position as i64 - 1, position as i64 + 1].into_iter().filter(|&index| 0 <= index && (index as usize) < chars.len()).map(|index| chars[index as usize]);
+        let around = [position.to::<i64>() - 1, position.to::<i64>() + 1].into_iter().filter(|&index| 0 <= index && (index as usize) < chars.len()).map(|index| chars[index.to::<usize>()]);
         if around.into_iter().any(|letter| extra == letter || neighbours.get(&letter).is_some_and(|near| near.contains(extra))) {
             found.push(Edit { operation: Operation::Deletion, position, letter: None });
         }
@@ -482,7 +483,7 @@ impl TypoJudgement {
     pub fn count_order(&self) -> i64 {
         match &self.choice {
             None => -1,
-            Some(choice) => (choice.weight as f64 / TYPO_COUNT_LOG_SCALE as f64).exp().log10().floor() as i64,
+            Some(choice) => ((choice.weight.to::<f64>() / TYPO_COUNT_LOG_SCALE.to::<f64>()).exp().log10().floor()).to::<i64>(),
         }
     }
 }
@@ -600,7 +601,7 @@ pub fn decide_under(policy: &TypoPolicy, candidates: &[Candidate], capital: bool
         .iter()
         .map(|candidate| {
             let slips: Vec<f64> = candidate.edits.iter().map(|edit| policy.log_probability(edit.operation)).collect();
-            candidate.weight as f64 / TYPO_COUNT_LOG_SCALE as f64 + log_sum(&slips)
+            candidate.weight.to::<f64>() / TYPO_COUNT_LOG_SCALE.to::<f64>() + log_sum(&slips)
         })
         .collect();
     // `max(range(n), key=lambda index: (totals[index], candidates[index].word))`: the first of equal keys.
@@ -671,7 +672,7 @@ impl KeyTemplates {
             if let (Some(c), None) = (chars.next(), chars.next())
                 && ucd::isalpha(c)
             {
-                self.keys.insert((group as i32, c), event.clone());
+                self.keys.insert((group.to::<i32>(), c), event.clone());
             }
         }
     }

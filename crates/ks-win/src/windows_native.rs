@@ -9,6 +9,7 @@
 //! the ring, written before anything else at each event, and the listener, set before the hook is installed and taken
 //! away after it is removed. There is one keyboard hook per process.
 
+use ks_cast::To as _;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK};
@@ -41,7 +42,7 @@ impl InputTimes {
     /// One writer only: the thread of the hooks.
     pub fn append(&self, time: u32) {
         let next = self.next.load(Ordering::Relaxed);
-        if let Some(slot) = self.slots.get(next as usize % HOOK_INPUT_TIMES_KEPT) {
+        if let Some(slot) = self.slots.get(next.to::<usize>() % HOOK_INPUT_TIMES_KEPT) {
             slot.store(time, Ordering::Relaxed);
         }
         self.next.store(next.wrapping_add(1), Ordering::Release);
@@ -49,9 +50,9 @@ impl InputTimes {
 
     pub fn copy(&self) -> Vec<i64> {
         let end = self.next.load(Ordering::Acquire);
-        let count = end.min(HOOK_INPUT_TIMES_KEPT as u64);
+        let count = end.min(HOOK_INPUT_TIMES_KEPT.to::<u64>());
         (end - count..end)
-            .filter_map(|index| self.slots.get(index as usize % HOOK_INPUT_TIMES_KEPT))
+            .filter_map(|index| self.slots.get(index.to::<usize>() % HOOK_INPUT_TIMES_KEPT))
             .map(|slot| i64::from(slot.load(Ordering::Relaxed)))
             .collect()
     }
@@ -122,8 +123,8 @@ pub fn keyboard_fields(item: &NativeInput) -> KeyboardFields {
         0
     };
     KeyboardFields {
-        virtual_key: if item.unicode { 0 } else { item.virtual_key as u16 },
-        scan_code: item.scan_code as u16,
+        virtual_key: if item.unicode { 0 } else { item.virtual_key.low::<u16>() },
+        scan_code: item.scan_code.low::<u16>(),
         flags,
         extra,
     }
@@ -134,7 +135,7 @@ pub fn keyboard_state(virtual_key: u32, state: u32) -> Option<[u8; KEYBOARD_STAT
     let mut keys = [0u8; KEYBOARD_STATE_ARRAY_SIZE];
     let mut press = |pressed: [u32; 3]| {
         for key in pressed {
-            if let Some(entry) = keys.get_mut(key as usize) {
+            if let Some(entry) = keys.get_mut(key.to::<usize>()) {
                 *entry = VK_STATE_DOWN_BIT;
             }
         }
@@ -149,14 +150,14 @@ pub fn keyboard_state(virtual_key: u32, state: u32) -> Option<[u8; KEYBOARD_STAT
         press([VK_MENU, VK_LMENU, VK_RMENU]);
     }
     if state & LOCK_MASK != 0
-        && let Some(entry) = keys.get_mut(VK_CAPITAL as usize)
+        && let Some(entry) = keys.get_mut(VK_CAPITAL.to::<usize>())
     {
         *entry = 0x01;
     }
     if state & SUPER_MASK != 0 {
         return None;
     }
-    if let Some(entry) = keys.get_mut((virtual_key & VIRTUAL_KEY_BYTE_MASK) as usize) {
+    if let Some(entry) = keys.get_mut((virtual_key & VIRTUAL_KEY_BYTE_MASK).to::<usize>()) {
         *entry |= VK_STATE_DOWN_BIT;
     }
     Some(keys)
@@ -187,6 +188,8 @@ pub(crate) use win32::wide;
 
 #[cfg(windows)]
 mod win32 {
+    use ks_cast::To as _;
+
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
     use std::ptr::{null, null_mut};
@@ -249,11 +252,11 @@ mod win32 {
     }
 
     fn to_hwnd(window: i64) -> HWND {
-        window as isize as HWND
+        window.to::<isize>() as HWND
     }
 
     fn from_handle(handle: *mut c_void) -> i64 {
-        handle as isize as i64
+        (handle.to::<isize>()).to::<i64>()
     }
 
     fn last_error_code() -> u32 {
@@ -275,7 +278,7 @@ mod win32 {
         // into this local.
         unsafe {
             let mut info: GUITHREADINFO = zeroed();
-            info.cbSize = size_of::<GUITHREADINFO>() as u32;
+            info.cbSize = (size_of::<GUITHREADINFO>()).low::<u32>();
             (GetGUIThreadInfo(thread_id, &mut info) != 0).then_some(info)
         }
     }
@@ -354,7 +357,7 @@ mod win32 {
             // SAFETY: for HC_ACTION the system passes a KBDLLHOOKSTRUCT in lParam, valid for this call.
             let native = unsafe { &*(data as *const KBDLLHOOKSTRUCT) };
             if let Some(event) =
-                native_key_event(message as u32, native.vkCode, native.scanCode, native.flags, native.time, native.dwExtraInfo)
+                native_key_event(message.low::<u32>(), native.vkCode, native.scanCode, native.flags, native.time, native.dwExtraInfo)
             {
                 append_time(native.time);
                 if call_listener(event) {
@@ -410,13 +413,13 @@ mod win32 {
             if count <= 0 {
                 return Err(error("Windows не вернула список раскладок"));
             }
-            let mut values = vec![null_mut::<c_void>(); count as usize];
+            let mut values = vec![null_mut::<c_void>(); count.to::<usize>()];
             // SAFETY: the list has room for `count` handles, the number passed.
             let actual = unsafe { GetKeyboardLayoutList(count, values.as_mut_ptr()) };
             if actual <= 0 {
                 return Err(error("Windows не заполнила список раскладок"));
             }
-            values.truncate(actual as usize);
+            values.truncate(actual.to::<usize>());
             Ok(values.into_iter().map(from_handle).collect())
         }
 
@@ -433,7 +436,7 @@ mod win32 {
             // The request goes to the thread whose layout foreground_layout reads.
             let (window, _thread_id) = input_window();
             // SAFETY: PostMessageW takes its arguments by value; a window that is gone makes it fail.
-            !window.is_null() && unsafe { PostMessageW(window, WM_INPUTLANGCHANGEREQUEST, 0, layout as isize as LPARAM) } != 0
+            !window.is_null() && unsafe { PostMessageW(window, WM_INPUTLANGCHANGEREQUEST, 0, (layout.to::<isize>()).to::<LPARAM>()) } != 0
         }
 
         fn translate_key(&self, virtual_key: u32, scan_code: u32, state: u32, layout: i64) -> String {
@@ -448,16 +451,16 @@ mod win32 {
                     scan_code,
                     keys.as_ptr(),
                     buffer.as_mut_ptr(),
-                    buffer.len() as i32,
+                    buffer.len().low::<i32>(),
                     TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
-                    layout as isize as *mut c_void,
+                    layout.to::<isize>() as *mut c_void,
                 )
             };
             if written <= 0 {
                 return String::new();
             }
             // Up to the first zero, as a wide buffer's text, and no further than the count.
-            let written = buffer.iter().take(written as usize).take_while(|&&unit| unit != 0).count();
+            let written = buffer.iter().take(written.to::<usize>()).take_while(|&&unit| unit != 0).count();
             let Some(units) = buffer.get(..written) else {
                 return String::new();
             };
@@ -491,8 +494,8 @@ mod win32 {
                 })
                 .collect();
             // SAFETY: the array holds the number of INPUT structures passed, of the size passed.
-            let sent = unsafe { SendInput(native.len() as u32, native.as_ptr(), size_of::<INPUT>() as i32) };
-            Ok(sent as usize)
+            let sent = unsafe { SendInput(native.len().low::<u32>(), native.as_ptr(), (size_of::<INPUT>()).low::<i32>()) };
+            Ok(sent.to::<usize>())
         }
 
         fn active_application(&self) -> String {
@@ -511,7 +514,7 @@ mod win32 {
             if process.is_null() {
                 return String::new();
             }
-            let mut size = PROCESS_IMAGE_NAME_BUFFER_CHARACTERS as u32;
+            let mut size = PROCESS_IMAGE_NAME_BUFFER_CHARACTERS.low::<u32>();
             let mut buffer = vec![0u16; PROCESS_IMAGE_NAME_BUFFER_CHARACTERS];
             // SAFETY: `size` says how many characters `buffer` holds; `process` is the open handle above.
             let queried = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut size) };
@@ -520,7 +523,7 @@ mod win32 {
             if queried == 0 {
                 return String::new();
             }
-            buffer.truncate(size as usize);
+            buffer.truncate(size.to::<usize>());
             let path = String::from_utf16_lossy(&buffer);
             ntpath_splitext(ntpath_basename(&path)).0.to_owned()
         }
@@ -638,12 +641,12 @@ mod win32 {
 
         fn caps_lock_enabled(&self) -> bool {
             // SAFETY: GetKeyState takes a key number by value.
-            i32::from(unsafe { GetKeyState(VK_CAPITAL as i32) }) & 1 != 0
+            i32::from(unsafe { GetKeyState(VK_CAPITAL.bits::<i32>()) }) & 1 != 0
         }
 
         fn key_down(&self, virtual_key: u32) -> bool {
             // SAFETY: GetAsyncKeyState takes a key number by value.
-            i32::from(unsafe { GetAsyncKeyState(virtual_key as i32) }) & ASYNC_KEY_DOWN_BIT != 0
+            i32::from(unsafe { GetAsyncKeyState(virtual_key.bits::<i32>()) }) & ASYNC_KEY_DOWN_BIT != 0
         }
 
         fn tick_count(&self) -> i64 {
@@ -652,7 +655,7 @@ mod win32 {
         }
 
         fn last_input_time(&self) -> Result<i64, WindowsBackendError> {
-            let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+            let mut info = LASTINPUTINFO { cbSize: (size_of::<LASTINPUTINFO>()).low::<u32>(), dwTime: 0 };
             // SAFETY: `info` is valid and its cbSize is set.
             if unsafe { GetLastInputInfo(&mut info) } == 0 {
                 return Err(error("GetLastInputInfo завершился ошибкой"));
@@ -748,7 +751,7 @@ mod win32 {
             }
             let mut buffer = [0u16; WINDOW_CLASS_NAME_MAX_CHARACTERS + 1];
             // SAFETY: `buffer` has room for the count passed.
-            let written = unsafe { GetClassNameW(to_hwnd(window), buffer.as_mut_ptr(), buffer.len() as i32) };
+            let written = unsafe { GetClassNameW(to_hwnd(window), buffer.as_mut_ptr(), buffer.len().low::<i32>()) };
             let written = usize::try_from(written).unwrap_or(0).min(buffer.len());
             buffer.get(..written).map_or_else(String::new, String::from_utf16_lossy)
         }
@@ -909,13 +912,13 @@ mod tests {
         times.append(5);
         times.append(u32::MAX);
         assert_eq!(times.copy(), vec![5, i64::from(u32::MAX)]);
-        for time in 0..HOOK_INPUT_TIMES_KEPT as u32 + 2 {
+        for time in 0..HOOK_INPUT_TIMES_KEPT.low::<u32>() + 2 {
             times.append(time);
         }
         let copy = times.copy();
         assert_eq!(copy.len(), HOOK_INPUT_TIMES_KEPT);
         assert_eq!(copy.first(), Some(&2));
-        assert_eq!(copy.last(), Some(&(HOOK_INPUT_TIMES_KEPT as i64 + 1)));
+        assert_eq!(copy.last(), Some(&(HOOK_INPUT_TIMES_KEPT.to::<i64>() + 1)));
     }
 
     #[test]
@@ -972,7 +975,7 @@ mod tests {
         let fields = keyboard_fields(&NativeInput::key(true, VK_BACK));
         assert_eq!(
             fields,
-            KeyboardFields { virtual_key: VK_BACK as u16, scan_code: 0, flags: 0, extra: KEYSWITCH_EXTRA_INFO }
+            KeyboardFields { virtual_key: VK_BACK.low::<u16>(), scan_code: 0, flags: 0, extra: KEYSWITCH_EXTRA_INFO }
         );
         let up = keyboard_fields(&NativeInput::extended_key(false, VK_MENU_MASK));
         assert_eq!(up.flags, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY);
@@ -1012,11 +1015,11 @@ mod tests {
         assert_eq!(plain.iter().filter(|&&byte| byte != 0).count(), 1);
         let shifted = keyboard_state(0x41, SHIFT_MASK | LOCK_MASK).unwrap();
         for key in [VK_SHIFT, VK_LSHIFT, VK_RSHIFT] {
-            assert_eq!(shifted[key as usize], VK_STATE_DOWN_BIT);
+            assert_eq!(shifted[key.to::<usize>()], VK_STATE_DOWN_BIT);
         }
-        assert_eq!(shifted[VK_CAPITAL as usize], 0x01);
+        assert_eq!(shifted[VK_CAPITAL.to::<usize>()], 0x01);
         // The key is Caps Lock itself, with Caps Lock on: down and locked.
-        assert_eq!(keyboard_state(VK_CAPITAL, LOCK_MASK).unwrap()[VK_CAPITAL as usize], 0x81);
+        assert_eq!(keyboard_state(VK_CAPITAL, LOCK_MASK).unwrap()[VK_CAPITAL.to::<usize>()], 0x81);
         // A number past a byte is taken modulo 256, as the Python's mask does.
         assert_eq!(keyboard_state(0x141, 0).unwrap()[0x41], VK_STATE_DOWN_BIT);
     }

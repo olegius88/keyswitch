@@ -5,6 +5,7 @@
 //! OK and Escape is Cancel. `accept` turns the form into a rule and answers with an empty string, or with what to fix, which
 //! the window shows instead of closing.
 
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
@@ -158,10 +159,10 @@ pub fn open(arguments: Arguments) {
     let brushes = Brushes::new(arguments.palette);
     let draft = arguments.draft;
     let label = |text: &str| text_window(window, text, SS_LEFT | SS_NOPREFIX, 0, 0, "STATIC");
-    let choice = |text: &str, id: usize| text_window(window, text, WS_TABSTOP | BS_OWNERDRAW as u32, 0, id, "BUTTON");
+    let choice = |text: &str, id: usize| text_window(window, text, WS_TABSTOP | BS_OWNERDRAW.to::<u32>(), 0, id, "BUTTON");
     let controls = Controls {
         pattern_label: label(PATTERN_LABEL),
-        pattern: text_window(window, &draft.pattern, WS_TABSTOP | ES_AUTOHSCROLL as u32, WS_EX_CLIENTEDGE, ID_PATTERN, "EDIT"),
+        pattern: text_window(window, &draft.pattern, WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, ID_PATTERN, "EDIT"),
         hint: label(""),
         condition_lead: label(CONDITION_LEAD),
         matches: MATCHES.iter().enumerate().map(|(index, rule_match)| choice(match_label(*rule_match), ID_MATCH_FIRST + index)).collect(),
@@ -169,8 +170,8 @@ pub fn open(arguments: Arguments) {
         case: choice(CASE_LABEL, ID_CASE),
         actions: ACTIONS.iter().enumerate().map(|(index, action)| choice(action_label(*action), ID_ACTION_FIRST + index)).collect(),
         problem: label(""),
-        ok: text_window(window, "OK", WS_TABSTOP | BS_DEFPUSHBUTTON as u32, 0, ID_OK, "BUTTON"),
-        cancel: text_window(window, "Отмена", WS_TABSTOP | BS_PUSHBUTTON as u32, 0, ID_CANCEL, "BUTTON"),
+        ok: text_window(window, "OK", WS_TABSTOP | BS_DEFPUSHBUTTON.to::<u32>(), 0, ID_OK, "BUTTON"),
+        cancel: text_window(window, "Отмена", WS_TABSTOP | BS_PUSHBUTTON.to::<u32>(), 0, ID_CANCEL, "BUTTON"),
     };
     for hwnd in [controls.pattern_label, controls.pattern, controls.hint, controls.condition_lead, controls.extra_lead, controls.problem, controls.ok, controls.cancel]
         .into_iter()
@@ -217,7 +218,7 @@ pub fn open(arguments: Arguments) {
         SetWindowPos(window, null_mut(), x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
         ShowWindow(window, SW_SHOW);
     }
-    (arguments.activate)(window as isize as i64);
+    (arguments.activate)((window.to::<isize>()).to::<i64>());
     let pattern = DIALOG.with(|slot| slot.borrow().as_ref().map(|dialog| dialog.controls.pattern));
     if let Some(pattern) = pattern {
         // SAFETY: the window and the edit box are ours.
@@ -238,7 +239,7 @@ fn outer_size(window: HWND) -> (i32, i32) {
     });
     let mut rect = client;
     // SAFETY: fills the rectangle it is given.
-    unsafe { AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi as u32) };
+    unsafe { AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>()) };
     let _ = window;
     (rect.right - rect.left, rect.bottom - rect.top)
 }
@@ -357,7 +358,7 @@ fn layout() {
     let mut rect = RECT { left: 0, top: 0, right: width, bottom: height };
     // SAFETY: fills the rectangle; the window is ours.
     unsafe {
-        AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi as u32);
+        AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>());
         SetWindowPos(window, null_mut(), 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE);
     }
     w32::invalidate(window);
@@ -452,7 +453,7 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
         }
         WM_COMMAND => {
             let id = wparam & 0xFFFF;
-            let code = ((wparam >> 16) & 0xFFFF) as u32;
+            let code = ((wparam >> 16) & 0xFFFF).low::<u32>();
             match id {
                 ID_OK => confirm(),
                 ID_CANCEL => close(),
@@ -467,7 +468,7 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
             let item = unsafe { &*(lparam as *const DRAWITEMSTRUCT) };
             DIALOG.with(|slot| {
                 if let Some(dialog) = slot.borrow().as_ref() {
-                    let radio = item.CtlID as usize != ID_CASE;
+                    let radio = item.CtlID.to::<usize>() != ID_CASE;
                     w32::draw_choice(item, &dialog.brushes, dialog.fonts.base, dialog.dpi, radio);
                 }
             });
@@ -480,7 +481,7 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
             let hdc = wparam as HDC;
             if message == WM_CTLCOLOREDIT {
                 w32::set_label_colors(hdc, palette.foreground.colorref(), palette.field.colorref());
-                return dialog.brushes.field as LRESULT;
+                return dialog.brushes.field.to::<LRESULT>();
             }
             let control = lparam as HWND;
             let color = if control == dialog.controls.problem {
@@ -491,11 +492,11 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
                 palette.foreground
             };
             w32::set_label_colors(hdc, color.colorref(), palette.content.colorref());
-            dialog.brushes.content as LRESULT
+            dialog.brushes.content.to::<LRESULT>()
         }),
         WM_ACTIVATE => {
             // Only the keyboard leaving the window counts; moving between its own fields never reaches here.
-            let active = (wparam & 0xFFFF) as u32 != WA_INACTIVE;
+            let active = (wparam & 0xFFFF).low::<u32>() != WA_INACTIVE;
             let focused = DIALOG.with(|slot| {
                 let mut slot = slot.borrow_mut();
                 let dialog = slot.as_mut()?;

@@ -26,6 +26,7 @@
 //! This module only scores. It never decides, never injects and never overrides an explicit user rule; the policy
 //! layer applies it.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::load_error::{json_text, read_limited, LoadError};
 use crate::packed_grams::GramTable;
@@ -169,7 +170,7 @@ pub fn read_once(text: &str, minimum: i64) -> String {
     let mut start = 0;
     for index in 1..=chars.len() {
         if index == chars.len() || chars[index] != chars[start] {
-            let length = (index - start) as i64;
+            let length = (index - start).to::<i64>();
             if length >= minimum {
                 result.push(chars[start]);
             } else {
@@ -215,7 +216,7 @@ fn _compound_known(text: &str, script: &str, known: &dyn Fn(&str, &str) -> bool,
     let Some((head, tail)) = two_parts(text) else {
         return false;
     };
-    pystr::len(head).max(pystr::len(tail)) as i64 >= min_letters && known(script, head) && known(script, tail)
+    (pystr::len(head).max(pystr::len(tail))).to::<i64>() >= min_letters && known(script, head) && known(script, tail)
 }
 
 /// A reading that is no word of the dictionary but becomes one without one of its letters.
@@ -610,7 +611,7 @@ fn strict_int(value: &Value) -> Option<i64> {
 fn schema_number(value: &Value) -> Option<i64> {
     match value {
         Value::Bool(flag) => Some(i64::from(*flag)),
-        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(|x| x as i64)),
+        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(|x| x.to::<i64>())),
         _ => None,
     }
 }
@@ -709,8 +710,8 @@ impl OrthoModel {
         let (Some(order), Some(version), Some(scale)) = (order, version, scale) else {
             return value_error("invalid orthotactic identity");
         };
-        let order = order as usize;
-        let scale = scale as f64;
+        let order = order.to::<usize>();
+        let scale = scale.to::<f64>();
         let mut models = match models {
             Some(models) if models.has_exactly_scripts() => models,
             _ => return value_error("orthotactic artifact must carry both scripts"),
@@ -722,7 +723,7 @@ impl OrthoModel {
             let (mut logprob, mut backoff) = (raw.logprob, raw.backoff);
             logprob.set_scale(scale);
             backoff.set_scale(scale);
-            Ok(Channel { order, logprob, backoff, uniform: raw.uniform as f64 / scale })
+            Ok(Channel { order, logprob, backoff, uniform: raw.uniform.to::<f64>() / scale })
         };
         let channels = PerScript {
             en: channel(models.take("en").expect("both scripts are there"))?,
@@ -733,7 +734,7 @@ impl OrthoModel {
         let (Some(raw_thresholds), Some(minimum_length)) = (raw_thresholds, minimum_length) else {
             return value_error("orthotactic artifact carries no usable decision threshold");
         };
-        let threshold = |script: &str| int_like(&raw_thresholds[script]).map(|value| value as f64 / scale);
+        let threshold = |script: &str| int_like(&raw_thresholds[script]).map(|value| value.to::<f64>() / scale);
         let (Some(en), Some(ru)) = (threshold("en"), threshold("ru")) else {
             return value_error("invalid orthotactic threshold");
         };
@@ -823,7 +824,7 @@ impl OrthoModel {
             let mut weights = Vec::with_capacity(names.len());
             for &name in names {
                 match int_like(&table[name]) {
-                    Some(value) => weights.push((name, value as f64 / scale)),
+                    Some(value) => weights.push((name, value.to::<f64>() / scale)),
                     None => return value_error("invalid orthotactic feature weight"),
                 }
             }
@@ -887,7 +888,7 @@ impl OrthoModel {
         let table = raw.as_object().filter(|table| has_exact_keys(table, &SCRIPTS));
         let values = table.and_then(|table| Some((strict_int(&table["en"])?, strict_int(&table["ru"])?)));
         match values {
-            Some((en, ru)) => Ok(Some(PerScript { en: en as f64 / scale, ru: ru as f64 / scale })),
+            Some((en, ru)) => Ok(Some(PerScript { en: en.to::<f64>() / scale, ru: ru.to::<f64>() / scale })),
             None => value_error("invalid orthotactic feature centres"),
         }
     }
@@ -903,7 +904,7 @@ impl OrthoModel {
             let mut values = [0.0; 4];
             for (slot, shape) in values.iter_mut().zip(SHAPES) {
                 match int_like(&table[shape]) {
-                    Some(value) => *slot = value as f64 / scale,
+                    Some(value) => *slot = value.to::<f64>() / scale,
                     None => return value_error("invalid shape channel"),
                 }
             }
@@ -934,7 +935,7 @@ impl OrthoModel {
             Some(known) => token_features(keys, source_script, &**identifier, known, shape, self.hyphens, &self.compound_min_letters),
             None => token_features(keys, source_script, &**identifier, &**self.known(), shape, self.hyphens, &self.compound_min_letters),
         };
-        features.as_pairs().into_iter().map(|(name, value)| (name, value as f64)).collect()
+        features.as_pairs().into_iter().map(|(name, value)| (name, value.to::<f64>())).collect()
     }
 
     /// Evidence, in nats, that the keys were meant for the other layout.
@@ -983,7 +984,7 @@ impl OrthoModel {
         let mut features = 0.0;
         if let Some(weights) = &self.features {
             let mut values = self.feature_values(featured, source, known, shape);
-            let positions = (pystr::len(featured) + 1) as f64;
+            let positions = (pystr::len(featured) + 1).to::<f64>();
             if let Some(centres) = &self.centres {
                 let plausibility = source_logprob / positions - centres.get(source);
                 values.insert(CONTINUOUS_FEATURE, plausibility);

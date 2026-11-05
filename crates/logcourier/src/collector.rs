@@ -1,4 +1,5 @@
 //! Reads the new bytes of the log files into the queue, with the read position in the same transaction.
+use ks_cast::To as _;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -140,7 +141,7 @@ impl<'a> Collector<'a> {
                 let identity = identity_of(&stream)?;
                 let size = stream.metadata()?.len();
                 let anchor = fingerprint(&mut stream, size)?;
-                db.execute("INSERT OR IGNORE INTO cursors VALUES (?,?,?,?)", params![source.id, identity, size as i64, anchor])?;
+                db.execute("INSERT OR IGNORE INTO cursors VALUES (?,?,?,?)", params![source.id, identity, size.bits::<i64>(), anchor])?;
                 let version = latest_version(&mut stream)?;
                 db.execute("INSERT OR REPLACE INTO cursor_context VALUES (?,?,?)", params![source.id, identity, version])?;
             }
@@ -168,7 +169,7 @@ impl<'a> Collector<'a> {
             if cursor.is_none() {
                 cursor = self.adopt_copy(&source.id, &identity, &mut stream, size)?;
             }
-            let mut offset = cursor.as_ref().map_or(0, |(offset, _)| *offset as u64);
+            let mut offset = cursor.as_ref().map_or(0, |(offset, _)| (*offset).bits::<u64>());
             let mut reset = match &cursor {
                 Some((_, anchor)) => offset > size || fingerprint(&mut stream, offset)? != *anchor,
                 None => false,
@@ -193,9 +194,9 @@ impl<'a> Collector<'a> {
                         data.truncate(newline + 1);
                     }
                 }
-                stream.seek(SeekFrom::Start(offset + data.len() as u64))?;
+                stream.seek(SeekFrom::Start(offset + data.len().to::<u64>()))?;
                 let mut lookahead = Vec::new();
-                stream.by_ref().take(HEADER_BYTES as u64).read_to_end(&mut lookahead)?;
+                stream.by_ref().take(HEADER_BYTES.to::<u64>()).read_to_end(&mut lookahead)?;
                 let line_start = offset == 0 || {
                     stream.seek(SeekFrom::Start(offset - 1))?;
                     let mut byte = [0u8; 1];
@@ -213,7 +214,7 @@ impl<'a> Collector<'a> {
                 let mut metadata = json!({
                     "schema": 1, "bundle_id": bundle_id, "collector_version": crate::VERSION, "device_id": config.device_id,
                     "device_name": config.device_name, "source_id": source.id, "source_label": source.label, "keyswitch_version": version,
-                    "created_at": iso_at(now), "start_byte": offset, "end_byte": offset + data.len() as u64, "source_reset": reset,
+                    "created_at": iso_at(now), "start_byte": offset, "end_byte": offset + data.len().to::<u64>(), "source_reset": reset,
                     "ends_with_newline": data.last() == Some(&b'\n'), "raw_sha256": sha256_hex(&data),
                 });
                 let payload = make_archive(&data, &metadata);
@@ -223,9 +224,9 @@ impl<'a> Collector<'a> {
                 metadata["sha256"] = json!(sha256_hex(&payload));
                 metadata["size"] = json!(payload.len());
                 let name = format!("lc-{}-{bundle_id}.zip", stamp_at(now));
-                let new_offset = offset + data.len() as u64;
+                let new_offset = offset + data.len().to::<u64>();
                 let anchor = fingerprint(&mut stream, new_offset)?;
-                self.store.enqueue(&source.id, &identity, new_offset as i64, &anchor, &config.destination(), &metadata, &payload, &name, version.as_deref())?;
+                self.store.enqueue(&source.id, &identity, new_offset.bits::<i64>(), &anchor, &config.destination(), &metadata, &payload, &name, version.as_deref())?;
                 offset = new_offset;
                 reset = false;
                 count += 1;
@@ -247,11 +248,11 @@ impl<'a> Collector<'a> {
         let db = &self.store.db;
         let known: Vec<(String, i64, String)> = {
             let mut statement = db.prepare("SELECT identity,offset,anchor FROM cursors WHERE source=? AND offset>0 AND offset<=? ORDER BY offset DESC")?;
-            let rows = statement.query_map(params![source, size as i64], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            let rows = statement.query_map(params![source, size.bits::<i64>()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
             rows.collect::<sqlite::Result<_>>()?
         };
         for (other, offset, anchor) in known {
-            if fingerprint(stream, offset as u64)? != anchor {
+            if fingerprint(stream, offset.bits::<u64>())? != anchor {
                 continue;
             }
             let context: Option<Option<String>> =

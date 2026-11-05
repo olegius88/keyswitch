@@ -5,6 +5,7 @@
 // The raw pointers these functions take are window, font and brush handles: opaque numbers the system looks up, never
 // dereferenced here, so a stale one fails the call and does nothing worse.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
+use ks_cast::To as _;
 
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
@@ -105,7 +106,7 @@ pub fn create_window(class: &str, text: &str, style: u32, ex_style: u32, parent:
 }
 
 pub fn set_font(window: HWND, font: HFONT) {
-    send(window, WM_SETFONT, font as WPARAM, 1);
+    send(window, WM_SETFONT, font.to::<WPARAM>(), 1);
 }
 
 pub fn set_text(window: HWND, text: &str) {
@@ -117,9 +118,9 @@ pub fn set_text(window: HWND, text: &str) {
 pub fn text_of(window: HWND) -> String {
     // SAFETY: the buffer is as long as the length the control reported, plus the terminator.
     unsafe {
-        let length = GetWindowTextLengthW(window).max(0) as usize;
+        let length = GetWindowTextLengthW(window).max(0).to::<usize>();
         let mut buffer = vec![0u16; length + 1];
-        let copied = GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32).max(0) as usize;
+        let copied = (GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len().low::<i32>()).max(0)).to::<usize>();
         String::from_utf16_lossy(&buffer[..copied])
     }
 }
@@ -153,8 +154,8 @@ impl Fonts {
         // SAFETY: NONCLIENTMETRICSW is plain data; the call fills it for the size it is told.
         let metrics = unsafe {
             let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
-            metrics.cbSize = std::mem::size_of::<NONCLIENTMETRICSW>() as u32;
-            let filled = SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &mut metrics as *mut _ as *mut c_void, 0, dpi as u32);
+            metrics.cbSize = (std::mem::size_of::<NONCLIENTMETRICSW>()).low::<u32>();
+            let filled = SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &mut metrics as *mut _ as *mut c_void, 0, dpi.bits::<u32>());
             if filled == 0 { None } else { Some(metrics) }
         };
         let (base, semibold) = match metrics {
@@ -244,7 +245,7 @@ pub fn text_width(font: HFONT, text: &str) -> i32 {
         let hdc = GetDC(null_mut());
         let old = SelectObject(hdc, font as HGDIOBJ);
         let mut size = windows_sys::Win32::Foundation::SIZE { cx: 0, cy: 0 };
-        GetTextExtentPoint32W(hdc, wide_text.as_ptr(), wide_text.len() as i32, &mut size);
+        GetTextExtentPoint32W(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut size);
         SelectObject(hdc, old);
         ReleaseDC(null_mut(), hdc);
         size.cx
@@ -255,14 +256,14 @@ pub fn text_width(font: HFONT, text: &str) -> i32 {
 pub fn wrapped_height(font: HFONT, text: &str, width: i32) -> i32 {
     let mut wide_text: Vec<u16> = text.encode_utf16().collect();
     if wide_text.is_empty() {
-        wide_text.push(b' ' as u16);
+        wide_text.push((b' ').to::<u16>());
     }
     let mut rect = RECT { left: 0, top: 0, right: width.max(1), bottom: 0 };
     // SAFETY: as in `text_width`; DT_CALCRECT only measures.
     unsafe {
         let hdc = GetDC(null_mut());
         let old = SelectObject(hdc, font as HGDIOBJ);
-        DrawTextW(hdc, wide_text.as_ptr(), wide_text.len() as i32, &mut rect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
+        DrawTextW(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut rect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
         SelectObject(hdc, old);
         ReleaseDC(null_mut(), hdc);
     }
@@ -278,7 +279,7 @@ pub fn pixels_per_inch() -> i32 {
     // SAFETY: the screen's device context, released at once.
     unsafe {
         let hdc = GetDC(null_mut());
-        let dpi = GetDeviceCaps(hdc, LOGPIXELSY as i32);
+        let dpi = GetDeviceCaps(hdc, LOGPIXELSY.bits::<i32>());
         ReleaseDC(null_mut(), hdc);
         if dpi > 0 { dpi } else { crate::constants::BASE_DPI }
     }
@@ -311,7 +312,7 @@ pub fn set_title_bar_dark(window: HWND, dark: bool) {
     let value: i32 = i32::from(dark);
     // SAFETY: the attribute's value is a BOOL of four bytes that lives through the call.
     unsafe {
-        DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE as u32, &value as *const i32 as *const c_void, 4);
+        DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE.to::<u32>(), &value as *const i32 as *const c_void, 4);
     }
 }
 
@@ -364,7 +365,7 @@ fn with_pen_and_brush(hdc: *mut c_void, pen_color: u32, pen_width: i32, brush: H
 fn draw_text(hdc: *mut c_void, text: &str, rect: &mut RECT, flags: u32) {
     let text: Vec<u16> = text.encode_utf16().collect();
     // SAFETY: the buffer and the rectangle live through the call.
-    unsafe { DrawTextW(hdc, text.as_ptr(), text.len() as i32, rect, flags) };
+    unsafe { DrawTextW(hdc, text.as_ptr(), text.len().low::<i32>(), rect, flags) };
 }
 
 /// Draws a check box or a radio button (the owner-drawn kind keeps its colours in both schemes).
@@ -373,7 +374,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
     let hdc = item.hDC;
     let rect = item.rcItem;
     // SAFETY: reads the state word of the item's window.
-    let state = unsafe { GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) } as isize;
+    let state = (unsafe { GetWindowLongPtrW(item.hwndItem, GWLP_USERDATA) }).to::<isize>();
     let (checked, modified) = (state & STATE_CHECKED != 0, state & STATE_MODIFIED != 0);
     let size = scaled(16, dpi);
     let top = rect.top + scaled(1, dpi);
@@ -403,8 +404,8 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
             } else {
                 let pen = CreatePen(PS_SOLID, scaled(2, dpi).max(2), 0x00ff_ffff);
                 let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-                let unit = size as f32 / 16.0;
-                let at = |x: f32, y: f32| ((left as f32 + x * unit) as i32, (top as f32 + y * unit) as i32);
+                let unit = size.to::<f32>() / 16.0;
+                let at = |x: f32, y: f32| ((left.to::<f32>() + x * unit).to::<i32>(), (top.to::<f32>() + y * unit).to::<i32>());
                 let (x1, y1) = at(3.5, 8.5);
                 let (x2, y2) = at(6.5, 11.5);
                 let (x3, y3) = at(12.5, 4.5);
@@ -415,7 +416,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
                 DeleteObject(pen as HGDIOBJ);
             }
         }
-        SetBkMode(hdc, TRANSPARENT as i32);
+        SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, if modified { rgb(palette.accent) } else { rgb(palette.foreground) });
         let mut text_rect = RECT { left: right + scaled(8, dpi), top: rect.top, right: rect.right, bottom: rect.bottom };
         let text = text_of(item.hwndItem);
@@ -435,7 +436,7 @@ pub fn draw_navigation(item: &DRAWITEMSTRUCT, fill: HBRUSH, text_color: u32, fon
     unsafe {
         FillRect(hdc, &rect, fill);
         let old_font = SelectObject(hdc, font as HGDIOBJ);
-        SetBkMode(hdc, TRANSPARENT as i32);
+        SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, text_color);
         rect.left += scaled(crate::constants::NAVIGATION_BUTTON_PADDING_X_PIXELS, dpi);
         draw_text(hdc, &text_of(item.hwndItem), &mut rect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
@@ -460,7 +461,7 @@ pub fn draw_label_text(hdc: *mut c_void, text: &str, rect: &mut RECT, font: HFON
     // SAFETY: the font is selected into the device context of this paint and put back.
     unsafe {
         let old = SelectObject(hdc, font as HGDIOBJ);
-        SetBkMode(hdc, TRANSPARENT as i32);
+        SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, color);
         draw_text(hdc, text, rect, DT_SINGLELINE | DT_LEFT | DT_NOPREFIX);
         SelectObject(hdc, old);
@@ -504,7 +505,7 @@ pub fn listbox_reset(window: HWND, items: &[String]) {
     send(window, LB_RESETCONTENT, 0, 0);
     for item in items {
         let text = wide(item);
-        send(window, LB_ADDSTRING, 0, text.as_ptr() as LPARAM);
+        send(window, LB_ADDSTRING, 0, text.as_ptr().to::<LPARAM>());
     }
 }
 
@@ -513,9 +514,9 @@ pub fn listbox_selected(window: HWND) -> Option<String> {
     if index < 0 {
         return None;
     }
-    let length = send(window, LB_GETTEXTLEN, index as WPARAM, 0).max(0) as usize;
+    let length = (send(window, LB_GETTEXTLEN, index.bits::<WPARAM>(), 0).max(0)).bits::<usize>();
     let mut buffer = vec![0u16; length + 1];
-    send(window, LB_GETTEXT, index as WPARAM, buffer.as_mut_ptr() as LPARAM);
+    send(window, LB_GETTEXT, index.bits::<WPARAM>(), buffer.as_mut_ptr().to::<LPARAM>());
     Some(String::from_utf16_lossy(&buffer[..length]))
 }
 
@@ -523,26 +524,26 @@ pub fn listbox_selected(window: HWND) -> Option<String> {
 
 /// A drop-down list with its selection field `field_height` tall and room for `rows` entries.
 pub fn combo_set_field_height(window: HWND, field_height: i32) {
-    send(window, CB_SETITEMHEIGHT, usize::MAX, field_height as LPARAM);
+    send(window, CB_SETITEMHEIGHT, usize::MAX, field_height.to::<LPARAM>());
 }
 
 pub fn combo_reset(window: HWND, items: &[String]) {
     send(window, CB_RESETCONTENT, 0, 0);
     for item in items {
         let text = wide(item);
-        send(window, CB_ADDSTRING, 0, text.as_ptr() as LPARAM);
+        send(window, CB_ADDSTRING, 0, text.as_ptr().to::<LPARAM>());
     }
 }
 
 /// Selects the entry with exactly this text; false when there is none.
 pub fn combo_select_text(window: HWND, text: &str) -> bool {
     let wide_text = wide(text);
-    let found = send(window, CB_FINDSTRINGEXACT, usize::MAX, wide_text.as_ptr() as LPARAM);
+    let found = send(window, CB_FINDSTRINGEXACT, usize::MAX, wide_text.as_ptr().to::<LPARAM>());
     if found < 0 {
         send(window, CB_SETCURSEL, usize::MAX, 0);
         return false;
     }
-    send(window, CB_SETCURSEL, found as WPARAM, 0);
+    send(window, CB_SETCURSEL, found.bits::<WPARAM>(), 0);
     true
 }
 
@@ -551,9 +552,9 @@ pub fn combo_selected_text(window: HWND) -> Option<String> {
     if index < 0 {
         return None;
     }
-    let length = send(window, CB_GETLBTEXTLEN, index as WPARAM, 0).max(0) as usize;
+    let length = (send(window, CB_GETLBTEXTLEN, index.bits::<WPARAM>(), 0).max(0)).bits::<usize>();
     let mut buffer = vec![0u16; length + 1];
-    send(window, CB_GETLBTEXT, index as WPARAM, buffer.as_mut_ptr() as LPARAM);
+    send(window, CB_GETLBTEXT, index.bits::<WPARAM>(), buffer.as_mut_ptr().to::<LPARAM>());
     Some(String::from_utf16_lossy(&buffer[..length]))
 }
 
@@ -571,7 +572,7 @@ pub fn list_view_styles() -> u32 {
 
 /// Report-style list with whole-row selection and the given columns (title, width at 96 dpi).
 pub fn list_view_setup(window: HWND, columns: &[(&str, i32)], dpi: i32) {
-    send(window, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER) as LPARAM);
+    send(window, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER).to::<LPARAM>());
     for (index, (title, width)) in columns.iter().enumerate() {
         let mut text = wide(title);
         // SAFETY: LVCOLUMNW is plain data; the text pointer lives through the SendMessage call.
@@ -579,14 +580,14 @@ pub fn list_view_setup(window: HWND, columns: &[(&str, i32)], dpi: i32) {
         column.mask = LVCF_TEXT | LVCF_WIDTH;
         column.cx = scaled(*width, dpi);
         column.pszText = text.as_mut_ptr();
-        send(window, LVM_INSERTCOLUMNW, index, &column as *const LVCOLUMNW as LPARAM);
+        send(window, LVM_INSERTCOLUMNW, index, (&column as *const LVCOLUMNW).to::<LPARAM>());
     }
 }
 
 pub fn list_view_colors(window: HWND, background: u32, text: u32) {
-    send(window, LVM_SETBKCOLOR, 0, background as LPARAM);
-    send(window, LVM_SETTEXTBKCOLOR, 0, background as LPARAM);
-    send(window, LVM_SETTEXTCOLOR, 0, text as LPARAM);
+    send(window, LVM_SETBKCOLOR, 0, background.to::<LPARAM>());
+    send(window, LVM_SETTEXTBKCOLOR, 0, background.to::<LPARAM>());
+    send(window, LVM_SETTEXTCOLOR, 0, text.to::<LPARAM>());
 }
 
 pub fn list_view_set_rows(window: HWND, rows: &[Vec<String>]) {
@@ -598,13 +599,13 @@ pub fn list_view_set_rows(window: HWND, rows: &[Vec<String>]) {
             // SAFETY: LVITEMW is plain data; the text pointer lives through the SendMessage call.
             let mut item: LVITEMW = unsafe { std::mem::zeroed() };
             item.mask = LVIF_TEXT;
-            item.iItem = index as i32;
-            item.iSubItem = column as i32;
+            item.iItem = index.low::<i32>();
+            item.iSubItem = column.low::<i32>();
             item.pszText = text.as_mut_ptr();
             if column == 0 {
-                send(window, LVM_INSERTITEMW, 0, &item as *const LVITEMW as LPARAM);
+                send(window, LVM_INSERTITEMW, 0, (&item as *const LVITEMW).to::<LPARAM>());
             } else {
-                send(window, LVM_SETITEMTEXTW, index, &item as *const LVITEMW as LPARAM);
+                send(window, LVM_SETITEMTEXTW, index, (&item as *const LVITEMW).to::<LPARAM>());
             }
         }
     }
@@ -614,11 +615,11 @@ pub fn list_view_selected(window: HWND) -> Vec<usize> {
     let mut selected = Vec::new();
     let mut from: isize = -1;
     loop {
-        let next = send(window, LVM_GETNEXTITEM, from as WPARAM, LVNI_SELECTED as LPARAM);
+        let next = send(window, LVM_GETNEXTITEM, from.bits::<WPARAM>(), LVNI_SELECTED.to::<LPARAM>());
         if next < 0 {
             break;
         }
-        selected.push(next as usize);
+        selected.push(next.bits::<usize>());
         from = next;
     }
     selected
@@ -656,11 +657,11 @@ pub fn pick_executable(owner: HWND, title: &str) -> Option<String> {
     // SAFETY: OPENFILENAMEW is plain data; the buffers and strings live through the call.
     unsafe {
         let mut dialog: OPENFILENAMEW = std::mem::zeroed();
-        dialog.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+        dialog.lStructSize = (std::mem::size_of::<OPENFILENAMEW>()).low::<u32>();
         dialog.hwndOwner = owner;
         dialog.lpstrFilter = filter.as_ptr();
         dialog.lpstrFile = buffer.as_mut_ptr();
-        dialog.nMaxFile = buffer.len() as u32;
+        dialog.nMaxFile = buffer.len().low::<u32>();
         dialog.lpstrTitle = title.as_ptr();
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
         if GetOpenFileNameW(&mut dialog) == 0 {
@@ -715,5 +716,5 @@ pub fn set_label_colors(hdc: *mut c_void, foreground: u32, background: u32) {
 
 pub fn control_with_id(parent: HWND, id: usize) -> HWND {
     // SAFETY: takes a handle and a number by value.
-    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(parent, id as i32) }
+    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetDlgItem(parent, id.low::<i32>()) }
 }

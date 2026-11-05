@@ -2,6 +2,7 @@
 //! as Pillow draws it (rectangles, a rounded badge, a slash, flag stripes), then scaled to the size the tray asks for. The
 //! glyphs of the badge come from the platform as a coverage mask (`Ink`), since the font is Windows'.
 
+use ks_cast::To as _;
 use crate::tray_model::TrayState;
 
 pub const TRAY_ICON_SIZE_PIXELS: usize = 64;
@@ -58,7 +59,7 @@ impl Canvas {
 
     fn put(&mut self, x: i32, y: i32, color: Rgba) {
         if x >= 0 && y >= 0 && (x as usize) < self.size && (y as usize) < self.size {
-            self.pixels[y as usize * self.size + x as usize] = color;
+            self.pixels[y.to::<usize>() * self.size + x.to::<usize>()] = color;
         }
     }
 
@@ -89,9 +90,9 @@ impl Canvas {
     fn line(&mut self, from: (f64, f64), to: (f64, f64), width: f64, color: Rgba) {
         let (dx, dy) = (to.0 - from.0, to.1 - from.1);
         let length_squared = dx * dx + dy * dy;
-        for y in 0..self.size as i32 {
-            for x in 0..self.size as i32 {
-                let (px, py) = (x as f64 + 0.5 - from.0, y as f64 + 0.5 - from.1);
+        for y in 0..self.size.low::<i32>() {
+            for x in 0..self.size.low::<i32>() {
+                let (px, py) = (x.to::<f64>() + 0.5 - from.0, y.to::<f64>() + 0.5 - from.1);
                 let along = ((px * dx + py * dy) / length_squared).clamp(0.0, 1.0);
                 let (ox, oy) = (px - along * dx, py - along * dy);
                 if (ox * ox + oy * oy).sqrt() <= width / 2.0 {
@@ -103,18 +104,18 @@ impl Canvas {
 
     /// Blend white over the badge with the glyph coverage, the ink centred.
     fn text(&mut self, ink: &Ink) {
-        let left = (self.size as i32 - ink.width as i32) / 2;
-        let top = (self.size as i32 - ink.height as i32) / 2;
+        let left = (self.size.low::<i32>() - ink.width.low::<i32>()) / 2;
+        let top = (self.size.low::<i32>() - ink.height.low::<i32>()) / 2;
         for row in 0..ink.height {
             for column in 0..ink.width {
-                let cover = ink.coverage[row * ink.width + column] as u32;
-                let (x, y) = (left + column as i32, top + row as i32);
-                if cover == 0 || x < 0 || y < 0 || x as usize >= self.size || y as usize >= self.size {
+                let cover = (ink.coverage[row * ink.width + column]).to::<u32>();
+                let (x, y) = (left + column.low::<i32>(), top + row.low::<i32>());
+                if cover == 0 || x < 0 || y < 0 || x.to::<usize>() >= self.size || y.to::<usize>() >= self.size {
                     continue;
                 }
-                let pixel = &mut self.pixels[y as usize * self.size + x as usize];
+                let pixel = &mut self.pixels[y.to::<usize>() * self.size + x.to::<usize>()];
                 for channel in 0..3 {
-                    pixel[channel] = ((pixel[channel] as u32 * (255 - cover) + 255 * cover + 127) / 255) as u8;
+                    pixel[channel] = ((pixel[channel].to::<u32>() * (255 - cover) + 255 * cover + 127) / 255).low::<u8>();
                 }
             }
         }
@@ -123,22 +124,22 @@ impl Canvas {
 
 fn draw_flag(canvas: &mut Canvas, group: i64) {
     let size = TRAY_ICON_SIZE_PIXELS;
-    let last = size as i32 - 1;
+    let last = size.low::<i32>() - 1;
     if group == 1 {
-        let first_edge = (size / RUSSIAN_FLAG_BAND_COUNT) as i32;
-        let second_edge = (size * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR / RUSSIAN_FLAG_BAND_COUNT) as i32;
+        let first_edge = (size / RUSSIAN_FLAG_BAND_COUNT).low::<i32>();
+        let second_edge = (size * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR / RUSSIAN_FLAG_BAND_COUNT).low::<i32>();
         canvas.rectangle(0, 0, last, first_edge - 1, WHITE);
         canvas.rectangle(0, first_edge, last, second_edge - 1, RUSSIAN_FLAG_BLUE_RGBA);
         canvas.rectangle(0, second_edge, last, last, RUSSIAN_FLAG_RED_RGBA);
         return;
     }
     for index in 0..US_FLAG_STRIPE_COUNT {
-        let top = (index * size / US_FLAG_STRIPE_COUNT) as i32;
-        let bottom = ((index + 1) * size / US_FLAG_STRIPE_COUNT) as i32 - 1;
+        let top = (index * size / US_FLAG_STRIPE_COUNT).low::<i32>();
+        let bottom = ((index + 1) * size / US_FLAG_STRIPE_COUNT).low::<i32>() - 1;
         canvas.rectangle(0, top, last, bottom, if index % 2 == 0 { US_FLAG_STRIPE_RED_RGBA } else { WHITE });
     }
-    let canton_right = (size * US_FLAG_CANTON_WIDTH_NUMERATOR / US_FLAG_CANTON_WIDTH_DENOMINATOR) as i32 - 1;
-    let canton_bottom = (size * US_FLAG_CANTON_HEIGHT_STRIPES / US_FLAG_STRIPE_COUNT) as i32 - 1;
+    let canton_right = (size * US_FLAG_CANTON_WIDTH_NUMERATOR / US_FLAG_CANTON_WIDTH_DENOMINATOR).low::<i32>() - 1;
+    let canton_bottom = (size * US_FLAG_CANTON_HEIGHT_STRIPES / US_FLAG_STRIPE_COUNT).low::<i32>() - 1;
     canvas.rectangle(0, 0, canton_right, canton_bottom, US_FLAG_CANTON_RGBA);
     for row in 0..US_FLAG_STAR_ROWS {
         let long_row = row % 2 == 0;
@@ -215,14 +216,14 @@ pub fn scaled_bgra(canvas: &Canvas, target: usize) -> Vec<u8> {
                 for x in x0..x1.min(canvas.size) {
                     let pixel = canvas.pixels[y * canvas.size + x];
                     for channel in 0..3 {
-                        sums[channel] += pixel[channel] as u32 * pixel[3] as u32;
+                        sums[channel] += pixel[channel].to::<u32>() * pixel[3].to::<u32>();
                     }
-                    alpha += pixel[3] as u32;
+                    alpha += pixel[3].to::<u32>();
                     count += 1;
                 }
             }
-            let color = |channel: usize| if alpha == 0 { 0 } else { ((sums[channel] + alpha / 2) / alpha) as u8 };
-            out.extend_from_slice(&[color(2), color(1), color(0), ((alpha + count / 2) / count.max(1)) as u8]);
+            let color = |channel: usize| if alpha == 0 { 0 } else { ((sums[channel] + alpha / 2) / alpha).low::<u8>() };
+            out.extend_from_slice(&[color(2), color(1), color(0), ((alpha + count / 2) / count.max(1)).low::<u8>()]);
         }
     }
     out

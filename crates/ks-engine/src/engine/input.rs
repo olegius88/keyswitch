@@ -474,7 +474,7 @@ impl EngineCore {
             match (characters.next(), characters.next()) {
                 (Some(only), None) => {
                     let group = category(only).as_bytes()[0];
-                    only as u32 <= BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT && group != b'M' && group != b'C'
+                    only.to::<u32>() <= BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT && group != b'M' && group != b'C'
                 }
                 _ => false,
             }

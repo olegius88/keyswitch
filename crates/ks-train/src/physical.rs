@@ -1,5 +1,6 @@
 //! Exact US/RU key pairs shared by context training and physical replay (`context_physical_keys`), the hashes the
 //! curricula draw with, and the physical identity of a word (`physical`, `expanded_aliases`).
+use ks_cast::To as _;
 use ks_text::layouts::LayoutPair;
 use ks_text::{normalize, pystr};
 use sha2::{Digest, Sha256};
@@ -24,7 +25,7 @@ pub static KEYS: LazyLock<Vec<PhysicalKey>> = LazyLock::new(|| {
     let mut keys = Vec::new();
     for (shift, us, ru) in [(false, PLAIN_US, PLAIN_RU), (true, SHIFT_US, SHIFT_RU)] {
         for (index, (left, right)) in us.chars().zip(ru.chars()).enumerate() {
-            keys.push(PhysicalKey { characters: [left, right], shift, keycode: index as u32 + PHYSICAL_KEY_KEYCODE_BASE, explicit_group: None });
+            keys.push(PhysicalKey { characters: [left, right], shift, keycode: index.to::<u32>() + PHYSICAL_KEY_KEYCODE_BASE, explicit_group: None });
         }
     }
     keys
@@ -86,7 +87,7 @@ pub fn variant_choice(identifier: &str, purpose: &str, count: usize) -> usize {
     hasher.update(b":");
     hasher.update(identifier.as_bytes());
     let digest = hasher.finalize();
-    u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) as usize % count
+    u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]).to::<usize>() % count
 }
 
 /// `_ring_point`: the first sixteen hex digits of the hash.

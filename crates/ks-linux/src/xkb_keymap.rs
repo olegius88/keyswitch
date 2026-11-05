@@ -2,6 +2,7 @@
 //!
 //! The map is read from the server once (key types and key symbols) and kept until the server says it changed.
 
+use ks_cast::To as _;
 /// One entry of a key type's map: the modifiers that select a level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TypeEntry {
@@ -98,7 +99,7 @@ impl KeyMap {
         }
         let mut column = group * usize::from(key.width);
         if let Some(key_type) = self.key_type(key, group) {
-            let active = (state & 0xff) as u8 & key_type.mods_mask;
+            let active = (state & 0xff).to::<u8>() & key_type.mods_mask;
             if let Some(entry) = key_type.entries.iter().find(|entry| entry.active && entry.mods_mask == active) {
                 column += usize::from(entry.level);
             }

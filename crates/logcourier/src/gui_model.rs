@@ -1,4 +1,5 @@
 //! What the settings window shows and checks, with no window in it.
+use ks_cast::To as _;
 use serde_json::Value;
 
 use crate::config::{Config, Source};
@@ -15,7 +16,7 @@ pub const SOURCES_NOTE: &str = "Читаются только выбранные
 pub const SOURCE_NOTE: &str = "Без этого флажка сбор начнётся с конца файлов при первом запуске сбора.\r\nРотации: имя.log.1 … имя.log.N; архивы .gz не читаются.";
 
 fn seconds(count: f64) -> String {
-    let whole = count as i64;
+    let whole = count.to::<i64>();
     let (last, last_two) = (whole % 10, whole % 100);
     let form = if last == 1 && last_two != 11 {
         "секунду"
@@ -28,16 +29,16 @@ fn seconds(count: f64) -> String {
 }
 
 fn number(value: f64) -> String {
-    if value.fract() == 0.0 { format!("{}", value as i64) } else { format!("{value}").replace('.', ",") }
+    if value.fract() == 0.0 { format!("{}", value.to::<i64>()) } else { format!("{value}").replace('.', ",") }
 }
 
 pub fn delivery_note() -> String {
     format!(
         "Логи могут содержать переписку, имена, пути и другие личные данные.\r\nЭто передача полного содержимого, не обезличенная телеметрия.\r\n\r\nСбор раз в {}; отправка по выбранному интервалу.\r\nОчередь: до {} МиБ. Локальный фрагмент: до {} МиБ до сжатия.\r\nПеред отправкой фрагменты объединяются в пакеты до {} МБ.\r\nДокументы и закрепления — не чаще одного раза в {}.\r\nПауза Telegram сохраняется после перезапуска; кнопка её не сбрасывает.\r\nПри заполнении очереди сбор остановится. Ротация исходной программы\r\nможет удалить ещё не прочитанные записи — увеличьте её срок хранения.\r\n\r\nПри неопределённом ответе сети возможен повторный файл с тем же ID.\r\nКаталог и скачивание исключают повторы по идентификатору архива.\r\nФайлы в Telegram автоматически не удаляются.",
-        seconds(WAKE_POLL_SECONDS as f64),
-        number(MAX_QUEUE_BYTES as f64 / 1_048_576.0),
-        number(CHUNK_BYTES as f64 / 1_048_576.0),
-        number(MAX_DOWNLOAD as f64 / 1_000_000.0),
+        seconds(WAKE_POLL_SECONDS.to::<f64>()),
+        number(MAX_QUEUE_BYTES.to::<f64>() / 1_048_576.0),
+        number(CHUNK_BYTES.to::<f64>() / 1_048_576.0),
+        number(MAX_DOWNLOAD.to::<f64>() / 1_000_000.0),
         seconds(GROUP_INTERVAL),
     )
 }

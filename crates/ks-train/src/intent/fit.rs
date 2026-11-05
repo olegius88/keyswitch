@@ -1,5 +1,6 @@
 //! The fit of the layout-intent model (`train_intent_model`): the features of the runtime, FTRL-Proximal with the epoch's
 //! Mersenne Twister shuffle, quantization, the Platt calibration by direction and the thresholds by trigger and direction.
+use ks_cast::To as _;
 use super::dataset::LexicalExample;
 use ks_lang::WordScore;
 use ks_lang::intent_model::{CorrectionTrigger, IntentModelInput, LAYOUT_DIRECTIONS, TRIGGERS, extract_features};
@@ -78,18 +79,18 @@ impl FitConfig {
         let top = |name: &str| config[name].as_u64().ok_or_else(|| name.to_owned());
         Ok(FitConfig {
             seed: top("seed")?,
-            dimension: top("dimension")? as usize,
+            dimension: (top("dimension")?).to::<usize>(),
             feature_hash_seed: top("feature_hash_seed")?,
             membership_hash_seed: top("membership_hash_seed")?,
-            maximum_epochs: int("ftrl", "maximum_epochs")? as u64,
-            minimum_epochs: int("ftrl", "minimum_epochs")? as u64,
-            patience: int("ftrl", "patience")? as u64,
+            maximum_epochs: (int("ftrl", "maximum_epochs")?).to::<u64>(),
+            minimum_epochs: (int("ftrl", "minimum_epochs")?).to::<u64>(),
+            patience: (int("ftrl", "patience")?).to::<u64>(),
             alpha: float("ftrl", "alpha")?,
             beta: float("ftrl", "beta")?,
             l1: float("ftrl", "l1")?,
             l2: float("ftrl", "l2")?,
             calibration_l2: float("calibration", "l2")?,
-            calibration_iterations: int("calibration", "maximum_iterations")? as usize,
+            calibration_iterations: (int("calibration", "maximum_iterations")?).to::<usize>(),
             precision_floor: float("thresholds", "precision_floor")?,
             max_fpr: float("thresholds", "maximum_false_positive_rate")?,
             pause_max_fpr: float("thresholds", "pause_maximum_false_positive_rate")?,
@@ -125,18 +126,18 @@ const MT_M: usize = 397;
 
 impl Twister {
     pub fn new(seed: u64) -> Twister {
-        let mut key = vec![seed as u32];
+        let mut key = vec![seed.to::<u32>()];
         if seed >> 32 != 0 {
-            key.push((seed >> 32) as u32);
+            key.push((seed >> 32).to::<u32>());
         }
         let mut state = vec![0_u32; MT_N];
         state[0] = 19_650_218;
         for index in 1..MT_N {
-            state[index] = 1_812_433_253_u32.wrapping_mul(state[index - 1] ^ (state[index - 1] >> 30)).wrapping_add(index as u32);
+            state[index] = 1_812_433_253_u32.wrapping_mul(state[index - 1] ^ (state[index - 1] >> 30)).wrapping_add(index.to::<u32>());
         }
         let (mut i, mut j) = (1, 0);
         for _ in 0..MT_N.max(key.len()) {
-            state[i] = (state[i] ^ (state[i - 1] ^ (state[i - 1] >> 30)).wrapping_mul(1_664_525)).wrapping_add(key[j]).wrapping_add(j as u32);
+            state[i] = (state[i] ^ (state[i - 1] ^ (state[i - 1] >> 30)).wrapping_mul(1_664_525)).wrapping_add(key[j]).wrapping_add(j.to::<u32>());
             i += 1;
             j += 1;
             if i >= MT_N {
@@ -148,7 +149,7 @@ impl Twister {
             }
         }
         for _ in 0..MT_N - 1 {
-            state[i] = (state[i] ^ (state[i - 1] ^ (state[i - 1] >> 30)).wrapping_mul(1_566_083_941)).wrapping_sub(i as u32);
+            state[i] = (state[i] ^ (state[i - 1] ^ (state[i - 1] >> 30)).wrapping_mul(1_566_083_941)).wrapping_sub(i.to::<u32>());
             i += 1;
             if i >= MT_N {
                 state[0] = state[MT_N - 1];
@@ -189,7 +190,7 @@ impl Twister {
     /// `shuffle`.
     pub fn shuffle(&mut self, items: &mut [u32]) {
         for i in (1..items.len()).rev() {
-            let j = self.below(i as u32 + 1) as usize;
+            let j = (self.below(i.to::<u32>() + 1)).to::<usize>();
             items.swap(i, j);
         }
     }
@@ -205,7 +206,7 @@ pub struct Featured<'a> {
 
 impl Featured<'_> {
     fn row(&self, row: usize) -> std::ops::Range<usize> {
-        self.offsets[row] as usize..self.offsets[row + 1] as usize
+        self.offsets[row].to::<usize>()..(self.offsets[row + 1]).to::<usize>()
     }
 }
 
@@ -244,8 +245,8 @@ pub fn featurize<'a>(examples: &[&'a LexicalExample], config: &FitConfig, worker
                     let (mut lengths, mut indices, mut values, mut fingerprints) = (Vec::with_capacity(range.len()), Vec::new(), Vec::new(), BTreeSet::new());
                     for example in &examples[range] {
                         let input = IntentModelInput { original: &example.original, alternative: &example.alternative, source_group: example.source_group, target_group: example.target_group, trigger: example.trigger, source_score: score, target_score: score, context_delta: example.context_delta, context_group: example.context_group };
-                        let vector = extract_features(&input, config.dimension as i64, config.feature_hash_seed, config.membership_hash_seed, &NGRAM_ORDERS).map_err(|error| error.name.to_string())?;
-                        lengths.push(vector.values.len() as u64);
+                        let vector = extract_features(&input, config.dimension.to::<i64>(), config.feature_hash_seed, config.membership_hash_seed, &NGRAM_ORDERS).map_err(|error| error.name.to_string())?;
+                        lengths.push(vector.values.len().to::<u64>());
                         for (index, value) in vector.values {
                             indices.push(index);
                             values.push(value);
@@ -321,14 +322,14 @@ impl Ftrl {
     /// One epoch in `order`: the update of `FTRLProximal.update`, operation for operation.
     fn run_epoch(&mut self, rows: &Featured<'_>, order: &[u32], scratch: &mut Vec<f64>) {
         for &row in order {
-            let row = row as usize;
+            let row = row.to::<usize>();
             let range = rows.row(row);
             let example = rows.examples[row];
             let old_bias = self.bias();
             scratch.clear();
             let (mut total, mut compensation) = (0.0_f64, 0.0_f64);
             for position in range.clone() {
-                let weight = self.weight(rows.indices[position] as usize);
+                let weight = self.weight(rows.indices[position].to::<usize>());
                 scratch.push(weight);
                 let x = weight * rows.values[position];
                 let t = total + x;
@@ -349,7 +350,7 @@ impl Ftrl {
             self.bias_z += residual - bias_sigma * old_bias;
             self.bias_n = new_bias_n;
             for (offset, position) in range.enumerate() {
-                let index = rows.indices[position] as usize;
+                let index = rows.indices[position].to::<usize>();
                 let gradient = residual * rows.values[position];
                 let old_n = self.n[index];
                 let new_n = old_n + gradient * gradient;
@@ -364,7 +365,7 @@ impl Ftrl {
     fn score(&self, rows: &Featured<'_>, row: usize) -> f64 {
         let (mut total, mut compensation) = (0.0_f64, 0.0_f64);
         for position in rows.row(row) {
-            let x = self.weight(rows.indices[position] as usize) * rows.values[position];
+            let x = self.weight(rows.indices[position].to::<usize>()) * rows.values[position];
             let t = total + x;
             if total.abs() >= x.abs() {
                 compensation += (total - t) + x;
@@ -411,7 +412,7 @@ pub struct Confusion {
 
 fn share(good: i64, other: i64) -> f64 {
     let denominator = good + other;
-    if denominator != 0 { good as f64 / denominator as f64 } else { 1.0 }
+    if denominator != 0 { good.to::<f64>() / denominator.to::<f64>() } else { 1.0 }
 }
 
 impl Confusion {
@@ -445,8 +446,8 @@ pub fn wilson_upper(successes: i64, samples: i64, z: f64) -> f64 {
     if samples == 0 {
         return 1.0;
     }
-    let n = samples as f64;
-    let proportion = successes as f64 / n;
+    let n = samples.to::<f64>();
+    let proportion = successes.to::<f64>() / n;
     let z2 = z * z;
     let denominator = 1.0 + z2 / n;
     let centre = proportion + z2 / (WILSON_CENTRE_FACTOR * n);
@@ -501,7 +502,7 @@ pub fn confusion_of(items: &[Scored<'_>], logits: [f64; 2], keep: impl Fn(&Score
 fn maximum_primary_false_positives(positives: i64, negatives: i64, precision_floor: f64, max_fpr: f64, z: f64) -> Result<i64, String> {
     let mut maximum = -1;
     for false_positives in 0..=negatives {
-        let precision = if positives + false_positives != 0 { positives as f64 / (positives + false_positives) as f64 } else { 1.0 };
+        let precision = if positives + false_positives != 0 { positives.to::<f64>() / (positives + false_positives).to::<f64>() } else { 1.0 };
         if precision + RATE_TOLERANCE < precision_floor || wilson_upper(false_positives, negatives, z) > max_fpr + RATE_TOLERANCE {
             break;
         }
@@ -527,10 +528,10 @@ fn direction_curve(selected: &[Scored<'_>], direction: usize, maximum_false_posi
         return Err(format!("no threshold examples for direction {direction}"));
     }
     ordered.sort_by(|a, b| b.calibrated.partial_cmp(&a.calibrated).expect("finite logits"));
-    let positives = ordered.iter().filter(|item| item.example.label).count() as i64;
-    let negatives = ordered.len() as i64 - positives;
-    let typo_positives = ordered.iter().filter(|item| item.typo && item.example.label).count() as i64;
-    let typo_negatives = ordered.iter().filter(|item| item.typo && !item.example.label).count() as i64;
+    let positives = ordered.iter().filter(|item| item.example.label).count().to::<i64>();
+    let negatives = ordered.len().to::<i64>() - positives;
+    let typo_positives = ordered.iter().filter(|item| item.typo && item.example.label).count().to::<i64>();
+    let typo_negatives = ordered.iter().filter(|item| item.typo && !item.example.label).count().to::<i64>();
     if positives.min(negatives).min(typo_positives).min(typo_negatives) <= 0 {
         return Err(format!("direction {direction} requires both labels overall and for typos"));
     }
@@ -613,8 +614,8 @@ fn choose_directional(selected: &[Scored<'_>], policy: &ThresholdPolicy) -> Resu
     if selected.is_empty() {
         return Err("no threshold examples for this trigger".to_owned());
     }
-    let positives = selected.iter().filter(|item| item.example.label).count() as i64;
-    let negatives = selected.len() as i64 - positives;
+    let positives = selected.iter().filter(|item| item.example.label).count().to::<i64>();
+    let negatives = selected.len().to::<i64>() - positives;
     let certified = maximum_primary_false_positives(positives, negatives, policy.precision_floor, policy.max_fpr, SELECTION_Z)?.min(policy.maximum_false_positives);
     let forward = direction_curve(selected, 0, certified)?;
     let reverse = direction_curve(selected, 1, certified)?;
@@ -694,7 +695,7 @@ fn evaluate_epoch(development: &Featured<'_>, raw: &[f64], config: &FitConfig, e
         "development_false_positive_rate_upper_familywise_95": upper, "development_typo_precision": typos.precision(), "development_typo_recall": typos.recall(), "development_typo_specificity": typos.specificity(),
         "development_typo_false_positive": typos.false_positive, "development_typo_false_positive_rate_upper_familywise_95": typo_upper, "development_policy_checks_passed": passed_checks, "development_policy_passed": passed, "nonzero_weights": nonzero,
     });
-    let ranking = [f64::from(u8::from(passed)), passed_checks as f64, metrics.recall(), typos.recall(), metrics.specificity(), typos.specificity(), metrics.precision(), typos.precision(), -log_loss];
+    let ranking = [f64::from(u8::from(passed)), passed_checks.to::<f64>(), metrics.recall(), typos.recall(), metrics.specificity(), typos.specificity(), metrics.precision(), typos.precision(), -log_loss];
     Ok(EpochReport { value, ranking, line: format!("epoch={epoch} loss={log_loss:.9} policy_passed={passed} nonzero_weights={nonzero}") })
 }
 
@@ -708,7 +709,7 @@ pub struct FitResult {
 pub fn fit_ftrl(training: &Featured<'_>, development: &Featured<'_>, config: &FitConfig, workers: usize) -> Result<FitResult, String> {
     let mut model = Ftrl::new(config);
     let (mut best_model, mut best_ranking, mut best_epoch, mut stale): (Option<Ftrl>, Option<[f64; 9]>, u64, u64) = (None, None, 0, 0);
-    let mut order: Vec<u32> = (0..training.examples.len() as u32).collect();
+    let mut order: Vec<u32> = (0..training.examples.len().to::<u32>()).collect();
     let mut scratch = Vec::new();
     let mut history = Vec::new();
     for epoch in 1..=config.maximum_epochs {
@@ -746,16 +747,16 @@ pub struct Quantized {
 /// `quantize_weights`.
 pub fn quantize(weights: &[(usize, f64)], dimension: usize) -> Quantized {
     let maximum = weights.iter().map(|entry| entry.1.abs()).fold(0.0, f64::max);
-    let scale = if maximum != 0.0 { maximum / QUANTIZED_LIMIT as f64 } else { 1.0 };
+    let scale = if maximum != 0.0 { maximum / QUANTIZED_LIMIT.to::<f64>() } else { 1.0 };
     let (mut values, mut support) = (vec![0_i16; dimension], vec![0_u8; dimension.div_ceil(8)]);
     let mut maximum_error = 0.0_f64;
     for (index, weight) in weights {
         let quantized = (py_round(weight / scale) as i64).clamp(-QUANTIZED_LIMIT, QUANTIZED_LIMIT);
-        values[*index] = quantized as i16;
+        values[*index] = quantized.to::<i16>();
         if quantized != 0 {
             support[index / 8] |= 1 << (index % 8);
         }
-        maximum_error = maximum_error.max((weight - quantized as f64 * scale).abs());
+        maximum_error = maximum_error.max((weight - quantized.to::<f64>() * scale).abs());
     }
     Quantized { dimension, scale, values, support, maximum_absolute_error: maximum_error }
 }
@@ -765,7 +766,7 @@ pub fn score_quantized(quantized: &Quantized, bias: f64, rows: &Featured<'_>, wo
     parallel_scores(rows, workers, &|row| {
         let mut logit = bias;
         for position in rows.row(row) {
-            logit += f64::from(quantized.values[rows.indices[position] as usize]) * quantized.scale * rows.values[position];
+            logit += f64::from(quantized.values[rows.indices[position].to::<usize>()]) * quantized.scale * rows.values[position];
         }
         logit
     })
@@ -785,13 +786,13 @@ fn calibration_loss(scores: &[(f64, bool)], slope: f64, intercept: f64, l2: f64)
 
 /// `fit_platt_calibration`.
 fn fit_platt(scores: &[(f64, bool)], l2: f64, maximum_iterations: usize) -> Result<Platt, String> {
-    let positives = scores.iter().filter(|entry| entry.1).count() as i64;
-    let negatives = scores.len() as i64 - positives;
+    let positives = scores.iter().filter(|entry| entry.1).count().to::<i64>();
+    let negatives = scores.len().to::<i64>() - positives;
     if positives == 0 || negatives == 0 {
         return Err("calibration requires both labels".to_owned());
     }
     let mut slope = 1.0_f64;
-    let mut intercept = ((positives as f64 + 1.0) / (negatives as f64 + 1.0)).ln();
+    let mut intercept = ((positives.to::<f64>() + 1.0) / (negatives.to::<f64>() + 1.0)).ln();
     for _ in 0..maximum_iterations {
         let (mut gradient_slope, mut gradient_intercept) = (l2 * slope, l2 * intercept);
         let (mut hessian_ss, mut hessian_si, mut hessian_ii) = (l2, 0.0, l2);
@@ -831,7 +832,7 @@ fn fit_platt(scores: &[(f64, bool)], l2: f64, maximum_iterations: usize) -> Resu
             break;
         }
     }
-    Ok(Platt { slope, intercept, sample_count: scores.len() as i64, positive_count: positives })
+    Ok(Platt { slope, intercept, sample_count: scores.len().to::<i64>(), positive_count: positives })
 }
 
 /// `fit_directional_platt_calibration`: each physical direction on its own calibration partition.
@@ -873,15 +874,15 @@ impl Veto {
 /// `veto_metrics`.
 pub fn veto_metrics(items: &[Scored<'_>], raw_logit: f64) -> Veto {
     let positives: Vec<&Scored<'_>> = items.iter().filter(|item| item.example.label).collect();
-    let vetoed = positives.iter().filter(|item| item.raw < raw_logit).count() as i64;
-    Veto { raw_logit, positive_samples: positives.len() as i64, vetoed_positive_samples: vetoed, false_negative_rate: vetoed as f64 / positives.len() as f64 }
+    let vetoed = positives.iter().filter(|item| item.raw < raw_logit).count().to::<i64>();
+    Veto { raw_logit, positive_samples: positives.len().to::<i64>(), vetoed_positive_samples: vetoed, false_negative_rate: vetoed.to::<f64>() / positives.len().to::<f64>() }
 }
 
 /// `choose_veto_threshold`.
 pub fn choose_veto(items: &[Scored<'_>], config: &FitConfig) -> Veto {
     let mut scores: Vec<f64> = items.iter().filter(|item| item.example.label).map(|item| item.raw).collect();
     scores.sort_by(|a, b| a.partial_cmp(b).expect("finite logits"));
-    let index = (scores.len() - 1).min((config.veto_quantile * (scores.len() - 1) as f64).floor() as usize);
+    let index = (scores.len() - 1).min(((config.veto_quantile * (scores.len() - 1).to::<f64>()).floor()).to::<usize>());
     veto_metrics(items, scores[index] - config.veto_margin)
 }
 
@@ -960,17 +961,17 @@ fn maximum_margin(base: &Selections, by_trigger: &BTreeMap<&'static str, Vec<Sco
     }
     candidates.sort_by(|a, b| a.partial_cmp(b).expect("finite margins"));
     candidates.dedup();
-    let (mut lower, mut upper, mut best) = (0_i64, candidates.len() as i64 - 1, 0_i64);
+    let (mut lower, mut upper, mut best) = (0_i64, candidates.len().to::<i64>() - 1, 0_i64);
     while lower <= upper {
         let middle = (lower + upper) / 2;
-        if selections_pass(config, &apply_margin(base, by_trigger, config, candidates[middle as usize])) {
+        if selections_pass(config, &apply_margin(base, by_trigger, config, candidates[middle.to::<usize>()])) {
             best = middle;
             lower = middle + 1;
         } else {
             upper = middle - 1;
         }
     }
-    candidates[best as usize]
+    candidates[best.to::<usize>()]
 }
 
 /// `choose_trigger_thresholds`.
@@ -1063,7 +1064,7 @@ pub fn verify_context_invariance(config: &FitConfig) -> Result<(), String> {
     for (original, alternative, source_group, target_group) in sentinels {
         for trigger in TRIGGERS {
             let input = |context_delta: f64, context_group: Option<i64>| IntentModelInput { original, alternative, source_group, target_group, trigger, source_score: &score, target_score: &score, context_delta, context_group };
-            let extract = |input: IntentModelInput<'_>| extract_features(&input, config.dimension as i64, config.feature_hash_seed, config.membership_hash_seed, &NGRAM_ORDERS).map_err(|error| error.name.to_string());
+            let extract = |input: IntentModelInput<'_>| extract_features(&input, config.dimension.to::<i64>(), config.feature_hash_seed, config.membership_hash_seed, &NGRAM_ORDERS).map_err(|error| error.name.to_string());
             let expected = extract(input(0.0, None))?;
             for (_, delta, selector) in STRESS_PROFILES {
                 let group = if selector == "source" { source_group } else { target_group };

@@ -1,4 +1,5 @@
 //! Every stage of a fit written down, one line per frame, floats as C99 hex: what a comparison with another trainer reads.
+use ks_cast::To as _;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use ks_backend::FieldContext;
@@ -52,7 +53,7 @@ fn hex_of(value: f64) -> String {
     }
     let sign = if value.is_sign_negative() { "-" } else { "" };
     let bits = value.to_bits();
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let exponent = ((bits >> 52) & 0x7ff).to::<i64>();
     let mantissa = bits & ((1 << 52) - 1);
     if exponent == 0 && mantissa == 0 {
         return format!("{sign}0x0.0p+0");
@@ -118,8 +119,8 @@ impl Stages for Writer {
             .iter()
             .enumerate()
             .map(|(row, count)| {
-                let end = position + *count as usize;
-                let features: Vec<String> = (position..end).map(|entry| format!("{}={}", names[columns.ids[entry] as usize], hex_of(columns.values[entry]))).collect();
+                let end = position + (*count).to::<usize>();
+                let features: Vec<String> = (position..end).map(|entry| format!("{}={}", names[columns.ids[entry].to::<usize>()], hex_of(columns.values[entry]))).collect();
                 position = end;
                 format!("{}|{}|{}|{}", columns.labels[row], hex_of(columns.importance[row]), hex_of(columns.weights[row]), features.join(";"))
             })

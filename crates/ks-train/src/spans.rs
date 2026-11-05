@@ -1,5 +1,6 @@
 //! Bounded non-test frames captured from physical engine boundaries (`context_action_spans`): a wrong focus after a
 //! correct anchor of the same split, typed through the real engine, whose every question to the model is recorded.
+use ks_cast::To as _;
 use crate::corpus::{CorpusRow, TRAIN, DEVELOPMENT, CALIBRATION};
 use crate::curricula::Counts;
 use crate::physical::{PhysicalKey, hex_digest, key_of, sha256};
@@ -39,7 +40,7 @@ fn rank(purpose: &str, identity: &str) -> [u8; 32] {
 
 /// `_keys`: the first key that types each character in this layout.
 fn keys_of(text: &str, group: i64) -> Option<Vec<PhysicalKey>> {
-    text.chars().map(|character| key_of(character, group as usize).cloned()).collect()
+    text.chars().map(|character| key_of(character, group.to::<usize>()).cloned()).collect()
 }
 
 fn body(text: &str, group: i64) -> Vec<u32> {
@@ -59,7 +60,7 @@ fn select(rows: &[CorpusRow], maximum: usize) -> (Vec<&CorpusRow>, [Vec<&CorpusR
         }
         families.entry(&row.family).or_insert(row);
         if pystr::isalpha(&row.original) && (SPAN_ANCHOR_MIN_CHARACTERS..=SPAN_ANCHOR_MAX_CHARACTERS).contains(&length) {
-            anchors[group as usize].push(row);
+            anchors[group.to::<usize>()].push(row);
         }
     }
     let mut ranked: Vec<&CorpusRow> = families.into_values().collect();
@@ -67,7 +68,7 @@ fn select(rows: &[CorpusRow], maximum: usize) -> (Vec<&CorpusRow>, [Vec<&CorpusR
     let mut selected = Vec::new();
     let mut per_group = [0_usize; 2];
     for row in ranked {
-        let group = row.group.expect("a selected row has a group") as usize;
+        let group = row.group.expect("a selected row has a group").to::<usize>();
         if anchors[group].is_empty() || per_group[group] >= maximum / LAYOUT_GROUP_COUNT {
             continue;
         }
@@ -95,21 +96,21 @@ fn label(capture: &Capture, expected: &str) -> Option<ContextAction> {
 /// `build_span_curriculum`: attainable labels captured without dictionary or candidate predictions.
 pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximum_families: i64, expected_split: &str) -> SpanCurriculum {
     assert!(
-        (LAYOUT_GROUP_COUNT as i64..=SPAN_MAXIMUM_FAMILIES).contains(&maximum_families) && maximum_families % LAYOUT_GROUP_COUNT as i64 == 0,
+        (LAYOUT_GROUP_COUNT.to::<i64>()..=SPAN_MAXIMUM_FAMILIES).contains(&maximum_families) && maximum_families % LAYOUT_GROUP_COUNT.to::<i64>() == 0,
         "span family budget"
     );
     assert!([TRAIN, DEVELOPMENT, CALIBRATION].contains(&expected_split), "span curriculum never accepts the test split");
     assert!(rows.iter().all(|row| row.split == expected_split && row.quarantine_reasons.is_empty()), "span curriculum accepts only rows from the declared split");
-    let (selected, anchors) = select(rows, maximum_families as usize);
+    let (selected, anchors) = select(rows, maximum_families.to::<usize>());
     let mut counts = Counts::default();
-    counts.add_by("input_rows", rows.len() as i64);
-    counts.add_by("selected_families", selected.len() as i64);
+    counts.add_by("input_rows", rows.len().to::<i64>());
+    counts.add_by("selected_families", selected.len().to::<i64>());
     let mut frames: Vec<SpanFrame> = Vec::new();
     for row in selected {
         let group = row.group.expect("a selected row has a group");
         counts.add(format!("selected_group_{group}"));
         let purpose = format!("anchor:{}", row.family);
-        let anchor = anchors[group as usize].iter().min_by_key(|other| (rank(&purpose, &other.identifier), other.identifier.clone())).expect("an anchor");
+        let anchor = anchors[group.to::<usize>()].iter().min_by_key(|other| (rank(&purpose, &other.identifier), other.identifier.clone())).expect("an anchor");
         let parent_body = body(&row.original, group);
         for (variant, (tail, spacing)) in VARIANTS.into_iter().enumerate() {
             let before = format!("{}{spacing}", anchor.original);
@@ -122,8 +123,8 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
                 let mut keys = prefix_keys;
                 keys.extend(focus_keys);
                 keys.extend(tail_keys);
-                keys[0].explicit_group = Some(group as i32);
-                keys[prefix_length].explicit_group = Some(source as i32);
+                keys[0].explicit_group = Some(group.to::<i32>());
+                keys[prefix_length].explicit_group = Some(source.to::<i32>());
                 let expected = format!("{before}{}{tail} ", row.original);
                 let expected_characters: Vec<char> = expected.chars().collect();
                 let identity = hex_digest(&format!("{}:{variant}:{}", row.identifier, i32::from(wrong)));
@@ -159,10 +160,10 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
         *family_counts.entry(frame.parent_family.clone()).or_insert(0) += 1;
     }
     for frame in &mut frames {
-        frame.sample_weight = 1.0 / family_counts[&frame.parent_family] as f64;
+        frame.sample_weight = 1.0 / family_counts[&frame.parent_family].to::<f64>();
     }
-    counts.add_by("retained_families", family_counts.len() as i64);
-    counts.add_by("frames", frames.len() as i64);
+    counts.add_by("retained_families", family_counts.len().to::<i64>());
+    counts.add_by("frames", frames.len().to::<i64>());
     SpanCurriculum { frames, counts: Some(counts) }
 }
 

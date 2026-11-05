@@ -3,6 +3,7 @@
 //! The files live in `$KS_GOLDEN_DIR/text` (default: the `golden` folder of the private work tree); a test
 //! skips with a message when its file is absent. Floats are compared by their bits (a NaN only has to be a NaN).
 
+use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_text::{layouts, normalize, pyjson, pynum, pystr, russian_text, ucd};
 use serde_json::Value;
@@ -36,7 +37,7 @@ fn same_float(got: f64, want: f64) -> bool {
 }
 
 fn text(cps: &Value) -> String {
-    cps.as_array().expect("array").iter().map(|c| char::from_u32(c.as_u64().expect("cp") as u32).expect("scalar")).collect()
+    cps.as_array().expect("array").iter().map(|c| char::from_u32(c.as_u64().expect("cp").low::<u32>()).expect("scalar")).collect()
 }
 
 #[derive(Default)]
@@ -70,7 +71,7 @@ fn predicates_for_every_code_point() {
     assert_eq!(data.len(), 0x110000 * 4, "all 1 114 112 code points");
     let mut failures = Failures::default();
     for cp in 0..0x110000u32 {
-        let v = u32::from_le_bytes(data[cp as usize * 4..cp as usize * 4 + 4].try_into().unwrap());
+        let v = u32::from_le_bytes(data[cp.to::<usize>() * 4..cp.to::<usize>() * 4 + 4].try_into().unwrap());
         let got: [bool; 16] = [
             ucd::isalpha_cp(cp), ucd::isalnum_cp(cp), ucd::isdecimal_cp(cp), ucd::isdigit_cp(cp), ucd::isnumeric_cp(cp),
             ucd::isspace_cp(cp), ucd::isupper_cp(cp), ucd::islower_cp(cp), ucd::istitle_cp(cp), ucd::isprintable_cp(cp),
@@ -96,7 +97,7 @@ fn case_mapping_for_every_code_point() {
     let mut table = std::collections::HashMap::new();
     for row in rows {
         let r = row.as_array().unwrap();
-        table.insert(r[0].as_u64().unwrap() as u32, [text(&r[1]), text(&r[2]), text(&r[3]), text(&r[4])]);
+        table.insert(r[0].as_u64().unwrap().low::<u32>(), [text(&r[1]), text(&r[2]), text(&r[3]), text(&r[4])]);
     }
     let mut failures = Failures::default();
     for cp in 0..0x110000u32 {
@@ -119,7 +120,7 @@ fn normalisation_for_every_code_point() {
     let mut table = std::collections::HashMap::new();
     for row in rows {
         let r = row.as_array().unwrap();
-        table.insert(r[0].as_u64().unwrap() as u32, (text(&r[1]), text(&r[2]), r[3].as_u64().unwrap() as u8));
+        table.insert(r[0].as_u64().unwrap().low::<u32>(), (text(&r[1]), text(&r[2]), r[3].as_u64().unwrap().low::<u8>()));
     }
     let mut failures = Failures::default();
     for cp in 0..0x110000u32 {
@@ -173,7 +174,7 @@ fn string_operations_over_the_sample() {
         failures.check("is*", s, got, is);
         failures.check("nfc", s, normalize::nfc(s), st("nfc"));
         failures.check("nfd", s, normalize::nfd(s), st("nfd"));
-        failures.check("len", s, pystr::len(s) as u64, o["len"].as_u64().unwrap());
+        failures.check("len", s, pystr::len(s).to::<u64>(), o["len"].as_u64().unwrap());
         if o.get("strip_chars").is_none() {
             continue;
         }
@@ -210,9 +211,9 @@ fn string_operations_over_the_sample() {
         let (sub, a, b) = (f[0].as_str().unwrap(), opt(&f[1]), opt(&f[2]));
         failures.check("find", s, pystr::find(s, sub, a, b), f[3].as_i64().unwrap());
         failures.check("rfind", s, pystr::rfind(s, sub, a, b), f[4].as_i64().unwrap());
-        failures.check("count", s, pystr::count(s, sub, a, b) as i64, f[5].as_i64().unwrap());
+        failures.check("count", s, pystr::count(s, sub, a, b).to::<i64>(), f[5].as_i64().unwrap());
         let p = o["pad"].as_array().unwrap();
-        let (w, fill) = (p[0].as_u64().unwrap() as usize, p[1].as_str().unwrap().chars().next().unwrap());
+        let (w, fill) = (p[0].as_u64().unwrap().to::<usize>(), p[1].as_str().unwrap().chars().next().unwrap());
         failures.check("ljust", s, pystr::ljust(s, w, fill), p[2].as_str().unwrap().to_string());
         failures.check("rjust", s, pystr::rjust(s, w, fill), p[3].as_str().unwrap().to_string());
         failures.check("center", s, pystr::center(s, w, fill), p[4].as_str().unwrap().to_string());
@@ -344,7 +345,7 @@ fn json_dumps_byte_for_byte() {
             let o = case[0].as_array().unwrap();
             let indent = match &o[1] {
                 Value::Null => None,
-                Value::Number(n) => Some(pyjson::Indent::Spaces(n.as_u64().unwrap() as usize)),
+                Value::Number(n) => Some(pyjson::Indent::Spaces(n.as_u64().unwrap().to::<usize>())),
                 Value::String(s) => Some(pyjson::Indent::Text(s.clone())),
                 _ => unreachable!(),
             };

@@ -4,6 +4,7 @@
 //! Everything here runs on the thread of the window that owns the icon. The menu is built each time it opens, so its
 //! labels and switches follow the state, as pystray's callables did.
 
+use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::ptr::{null, null_mut};
 
@@ -44,8 +45,8 @@ fn copy_text(target: &mut [u16], text: &str) {
 unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi::HBITMAP, *mut u8)> {
     let mut header: BITMAPINFO = unsafe { std::mem::zeroed() };
     header.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: size as i32,
+        biSize: (std::mem::size_of::<BITMAPINFOHEADER>()).low::<u32>(),
+        biWidth: size.low::<i32>(),
         biHeight: -(size as i32),
         biPlanes: 1,
         biBitCount: 32,
@@ -81,19 +82,19 @@ fn glyph_ink(text: &str) -> Option<Ink> {
             0,
             0,
             0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            ANTIALIASED_QUALITY as u32,
-            DEFAULT_PITCH as u32,
+            DEFAULT_CHARSET.to::<u32>(),
+            OUT_DEFAULT_PRECIS.to::<u32>(),
+            CLIP_DEFAULT_PRECIS.to::<u32>(),
+            ANTIALIASED_QUALITY.to::<u32>(),
+            DEFAULT_PITCH.to::<u32>(),
             face.as_ptr(),
         );
         let old_bitmap = SelectObject(hdc, bitmap as _);
         let old_font = SelectObject(hdc, font as _);
         std::ptr::write_bytes(bits, 0, size * size * 4);
-        SetBkMode(hdc, TRANSPARENT as i32);
+        SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, 0x00FF_FFFF);
-        TextOutW(hdc, 0, 0, units.as_ptr(), units.len() as i32);
+        TextOutW(hdc, 0, 0, units.as_ptr(), units.len().low::<i32>());
         let pixels = std::slice::from_raw_parts(bits, size * size * 4);
         let coverage: Vec<u8> = pixels.chunks_exact(4).map(|pixel| pixel[1]).collect();
         SelectObject(hdc, old_font);
@@ -134,7 +135,7 @@ fn create_icon(state: &TrayState) -> Option<HICON> {
     let canvas = render(state, ink.as_ref());
     // SAFETY: a plain metrics query.
     let metric = unsafe { GetSystemMetrics(SM_CXSMICON) };
-    let target = if metric > 0 { metric } else { DEFAULT_SMALL_ICON_PIXELS } as usize;
+    let target = (if metric > 0 { metric } else { DEFAULT_SMALL_ICON_PIXELS }).to::<usize>();
     let bytes = scaled_bgra(&canvas, target);
     // SAFETY: the colour DIB has room for `target * target * 4` bytes, which `bytes` is; the bitmaps are copied by
     // CreateIconIndirect and released here.
@@ -142,7 +143,7 @@ fn create_icon(state: &TrayState) -> Option<HICON> {
         let (color, bits) = dib_section(target)?;
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), bits, bytes.len());
         // The mask is ignored for a 32-bit colour bitmap with alpha, but the call needs one.
-        let mask = CreateBitmap(target as i32, target as i32, 1, 1, null());
+        let mask = CreateBitmap(target.low::<i32>(), target.low::<i32>(), 1, 1, null());
         let info = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
         let icon = CreateIconIndirect(&info);
         DeleteObject(color as _);
@@ -178,7 +179,7 @@ impl Tray {
     fn data(&self, flags: u32) -> NOTIFYICONDATAW {
         // SAFETY: NOTIFYICONDATAW is plain data for which all zeros is a valid value.
         let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
-        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.cbSize = (std::mem::size_of::<NOTIFYICONDATAW>()).low::<u32>();
         data.hWnd = self.window;
         data.uID = ICON_ID;
         data.uFlags = flags;
@@ -275,7 +276,7 @@ impl Tray {
                 }
                 AppendMenuW(menu, flags, index + 1, wide(&entry.label).as_ptr());
                 if entry.default {
-                    SetMenuDefaultItem(menu, index as u32, 1);
+                    SetMenuDefaultItem(menu, index.low::<u32>(), 1);
                 }
             }
             let mut point = POINT { x: 0, y: 0 };

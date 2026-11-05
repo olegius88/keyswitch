@@ -6,6 +6,7 @@
 //! verdict it returns; the engine's worker injects corrections and holds `inject_lock` across a batch. The state shared by
 //! the two sits behind one small lock that is never held across a call to the API, the listener or the key filter.
 
+use ks_cast::To as _;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -171,7 +172,7 @@ pub fn is_cyrillic(text: &str) -> bool {
 pub fn select_layout_indices(layout_count: usize, translate: &dyn Fn(u32, u32, i64) -> String) -> Result<(i64, i64), BackendError> {
     let mut english: Option<i64> = None;
     let mut russian: Option<i64> = None;
-    for index in 0..layout_count as i64 {
+    for index in 0..layout_count.to::<i64>() {
         let sample = translate(EVDEV_KEY_Q, 0, index);
         if english.is_none() && pystr::isascii(&sample) && pystr::isalpha(&sample) {
             english = Some(index);
@@ -262,7 +263,7 @@ fn sleep(value: f64) {
 
 impl WaylandBackend {
     pub fn new(api: Arc<dyn WaylandApi>, selection_factory: Option<crate::x11_backend::SelectionFactory>) -> WaylandBackend {
-        WaylandBackend::with_group_count(api, LAYOUT_GROUP_COUNT as usize, selection_factory)
+        WaylandBackend::with_group_count(api, LAYOUT_GROUP_COUNT.to::<usize>(), selection_factory)
     }
 
     pub fn with_group_count(api: Arc<dyn WaylandApi>, group_count: usize, selection_factory: Option<crate::x11_backend::SelectionFactory>) -> WaylandBackend {
@@ -373,7 +374,7 @@ impl Inner {
     fn current_group(&self) -> Result<i32, BackendError> {
         let active = self.api.current_layout_index();
         let indices = self.layout_list()?;
-        Ok(indices.iter().position(|index| *index == active).map_or(-1, |position| position as i32))
+        Ok(indices.iter().position(|index| *index == active).map_or(-1, |position| position.low::<i32>()))
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -511,7 +512,7 @@ impl Inner {
         let consumed = self.answer_native(&native);
         // Handled, and handed to the engine's queue: a correction decided from here knows it.
         self.state().known_seq = native.seq;
-        let callback = (started.elapsed().as_secs_f64() * 1000.0).round_ties_even() as i64;
+        let callback = ((started.elapsed().as_secs_f64() * 1000.0).round_ties_even()).to::<i64>();
         if late <= UINT32_MODULO_MASK >> 1 {
             self.input_delay.record(i64::from(late), callback);
         }
@@ -733,7 +734,7 @@ impl Inner {
         if self.current_group()? == group {
             return Ok(());
         }
-        let target_index = self.layout_list()?[group as usize];
+        let target_index = self.layout_list()?[group.to::<usize>()];
         if !self.api.select_layout_index(target_index) {
             return Err(failed("Среда Wayland отклонила запрос смены раскладки"));
         }
@@ -777,7 +778,7 @@ impl Inner {
                     return Err(failed(INPUT_AHEAD_ERROR));
                 }
                 known_seq = None;
-                if posted as usize != raw.len() {
+                if posted.to::<usize>() != raw.len() {
                     return Err(failed(format!("uinput принял {posted} из {} событий ввода", raw.len())));
                 }
                 for item in batch {
@@ -820,7 +821,7 @@ impl Inner {
 
     /// The keys that type the characters of `strokes` in `group`, or None if one is missing there.
     fn typed_in_group(&self, strokes: &[KeyEvent], group: i32) -> Result<Option<Vec<NativeInput>>, BackendError> {
-        let layout_index = self.layout_list()?[group as usize];
+        let layout_index = self.layout_list()?[group.to::<usize>()];
         let lock_state = if self.api.caps_lock_enabled() { LOCK_MASK } else { 0 };
         let mut result = Vec::new();
         for stroke in strokes {
@@ -861,7 +862,7 @@ impl Inner {
 
     fn inject_correction_inner(&self, injection: &Injection<'_>) -> Result<i32, BackendError> {
         let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = *injection;
-        let group_count = self.group_count() as i32;
+        let group_count = self.group_count().low::<i32>();
         if !(0 <= target_group && target_group < group_count) {
             return Err(failed(format!("Неизвестная группа раскладки {target_group}")));
         }
@@ -1000,7 +1001,7 @@ impl Inner {
 
     fn key_inputs(key: KeyChoice) -> Vec<NativeInput> {
         let (code, shifted) = key;
-        let code = code as u32;
+        let code = code.low::<u32>();
         let tap = [NativeInput::synthetic(true, code), NativeInput::synthetic(false, code)];
         if !shifted {
             return tap.to_vec();
@@ -1054,7 +1055,7 @@ impl Inner {
         let _inject = lock(&self.inject_lock);
         self.check_hold()?;
         for (index, (group, keys)) in runs.iter().enumerate() {
-            let group = *group as i32;
+            let group = (*group).low::<i32>();
             if index > 0 {
                 self.switch_group_after_typing(group)?;
             } else {

@@ -5,6 +5,7 @@
 //! `lang/words.txt.gz` beside it), the resources in `$KS_RESOURCES`; a test skips with a message when they are absent.
 //! Floats are compared by their bits. In a debug build only every 20th row of the big files is compared.
 
+use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::detector::{DecideOptions, DetectionDecision, LanguageDetector};
 use ks_lang::intent_model::{self, CorrectionTrigger, IntentModelInput, LinearNgramModel, TRIGGERS};
@@ -153,7 +154,7 @@ const LAYOUT: [&str; 2] = ["us", "ru"];
 impl Fixture {
     /// `alternative(word, source)`.
     fn alternative(&self, word: &str, source: i64) -> String {
-        self.pair.translate(word, LAYOUT[source as usize], LAYOUT[1 - source as usize]).unwrap()
+        self.pair.translate(word, LAYOUT[source.to::<usize>()], LAYOUT[1 - source.to::<usize>()]).unwrap()
     }
 
     fn score(&self, group: i64, word: &str) -> WordScore {
@@ -234,7 +235,7 @@ fn intent_model_facts() {
     fail.check("membership_seed", "", model.membership_seed, real["membership_seed"].as_u64().unwrap());
     fail.check("payload_sha256", "", model.payload_sha256.clone(), s(&real["payload_sha256"]));
     fail.check("checksum", "", model.checksum.clone(), s(&real["checksum"]));
-    let weights: Vec<u8> = (0..model.dimension as usize).flat_map(|bucket| model.weight(bucket).to_le_bytes()).collect();
+    let weights: Vec<u8> = (0..model.dimension.to::<usize>()).flat_map(|bucket| model.weight(bucket).to_le_bytes()).collect();
     fail.check("weights", "", format!("{:x}", Sha256::digest(&weights)), s(&real["weights_sha256"]));
     let canonical = ks_text::json_dumps(
         &model.metadata(),
@@ -291,7 +292,7 @@ fn intent_model_facts() {
     let want: Vec<&str> = meta["protected_tokens"].as_array().unwrap().iter().map(|item| item.as_str().unwrap()).collect();
     fail.check("protected tokens", "", protected, want);
     for (slot, group) in [0usize, 1].iter().enumerate() {
-        let model = f.detector.model(slot as i64).unwrap().as_language_model().unwrap();
+        let model = f.detector.model(slot.to::<i64>()).unwrap().as_language_model().unwrap();
         let starts = short_words::word_starts(model);
         let got: Vec<Value> = starts.items().iter().map(|(start, count)| json!([start, count])).collect();
         fail.check("word_starts", &group.to_string(), json!(got), meta["word_starts"][group.to_string()].clone());
@@ -393,7 +394,7 @@ fn words_helpers() {
     };
     let fail = Failures::default();
     let ran = for_each_row("words_helpers.jsonl.gz", |_, row| {
-        let word = &f.words[row[0].as_u64().unwrap() as usize];
+        let word = &f.words[row[0].as_u64().unwrap().to::<usize>()];
         fail.check("token_key", word, LanguageDetector::token_key(word), row[1].as_str().unwrap().to_string());
         let model = |group: i64| f.detector.model(group).unwrap().as_language_model().unwrap();
         let flags = i64::from(f.detector.is_protected_token(word))
@@ -419,14 +420,14 @@ fn words_intent() {
     };
     let fail = Failures::default();
     let ran = for_each_row("words_intent.jsonl.gz", |_, row| {
-        let word = &f.words[row[0].as_u64().unwrap() as usize];
-        let (source, trigger) = (row[1].as_i64().unwrap(), TRIGGERS[row[2].as_u64().unwrap() as usize]);
+        let word = &f.words[row[0].as_u64().unwrap().to::<usize>()];
+        let (source, trigger) = (row[1].as_i64().unwrap(), TRIGGERS[row[2].as_u64().unwrap().to::<usize>()]);
         let alt = f.alternative(word, source);
         let score = f.score(0, "");
         let item = f.evidence(word, &alt, source, 1 - source, trigger, &score);
         let features = extract(f, &item);
         let p = f.intent.predict(&item).unwrap();
-        let supported = (p.coverage * features.character_fingerprints.len() as f64).round() as u64;
+        let supported = ((p.coverage * features.character_fingerprints.len().to::<f64>()).round()).to::<u64>();
         let got = json!([hex(p.logit), hex(p.probability), supported, features.character_fingerprints.len(), i64::from(p.should_switch), features.values.len(), feature_digest(&features)]);
         fail.check("predict", word, got, json!([row[3], row[4], row[5], row[6], row[7], row[8], row[9]]));
     });
@@ -442,7 +443,7 @@ fn words_features() {
     };
     let fail = Failures::default();
     let ran = for_each_row("words_features.jsonl.gz", |_, row| {
-        let word = &f.words[row[0].as_u64().unwrap() as usize];
+        let word = &f.words[row[0].as_u64().unwrap().to::<usize>()];
         let source = row[1].as_i64().unwrap();
         let alt = f.alternative(word, source);
         let score = f.score(0, "");
@@ -514,12 +515,12 @@ impl Base {
             protect: true,
             context_group: None,
             forced: None,
-            trigger: TRIGGERS[(i + source as usize + usize::from(kind > 1)) % 6],
+            trigger: TRIGGERS[(i + source.to::<usize>() + usize::from(kind > 1)) % 6],
             intent: true,
             tracked: true,
         };
         if kind == 2 {
-            base.minimum_length = 1 + (i % 4) as i64;
+            base.minimum_length = 1 + (i % 4).to::<i64>();
             base.confidence = CONFIDENCES[(i / 3) % 4];
             base.aggressive = i % 2 == 1;
             base.protect = !i.is_multiple_of(7);
@@ -569,7 +570,7 @@ fn decide_sweep() {
     };
     let fail = Failures::default();
     let ran = for_each_row("decide_sweep.jsonl.gz", |_, row| {
-        let (i, source, kind) = (row[0].as_u64().unwrap() as usize, row[1].as_i64().unwrap(), row[2].as_u64().unwrap());
+        let (i, source, kind) = (row[0].as_u64().unwrap().to::<usize>(), row[1].as_i64().unwrap(), row[2].as_u64().unwrap());
         let word = &f.words[i];
         let alternatives: Texts = vec![(1 - source, f.alternative(word, source))];
         let base = Base::new(f, kind, i, source);
@@ -604,7 +605,7 @@ fn explicit_row(f: &Fixture, fail: &Failures, row: &Value) {
         context_group: group(&o[6]),
         forced_target_group: group(&o[7]),
         rejected_targets: &rejected,
-        trigger: TRIGGERS[o[4].as_u64().unwrap() as usize],
+        trigger: TRIGGERS[o[4].as_u64().unwrap().to::<usize>()],
         use_intent_model: o[5] == 1,
     };
     let key = format!("{original:?} {source} {o}");

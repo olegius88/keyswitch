@@ -1,6 +1,7 @@
 //! Public, incremental input situations for the prefix task (`prefix_corpus`): ground truth comes from an intended whole
 //! word and an authored setting, never from the early-switch threshold. No private logs. `--verify` rebuilds every split
 //! and compares its content with the frozen file; `--freeze` writes a new generation into an empty folder.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::ortho_inputs::load_phrases;
 use crate::physical::{hex, hex_digest, pair};
@@ -43,7 +44,7 @@ fn family(word: &str, group: i64) -> String {
 fn split_for(signature: &str, namespace: &str) -> &'static str {
     let digest = hex_digest(&format!("{namespace}:{signature}"));
     let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % SPLIT_BUCKET_COUNT;
-    if bucket < TRAIN_SPLIT_BUCKETS { "train" } else { SPLITS[(bucket - TRAIN_SPLIT_BUCKETS + 1) as usize] }
+    if bucket < TRAIN_SPLIT_BUCKETS { "train" } else { SPLITS[(bucket - TRAIN_SPLIT_BUCKETS + 1).to::<usize>()] }
 }
 
 /// `WORDS.finditer`: `[^\W_]+(?:['’\-][^\W_]+)*`, as (first character, word).
@@ -84,7 +85,7 @@ struct Situation {
 
 /// `situations`.
 fn situations(root: &Path, config: &Value) -> Result<Vec<Situation>, String> {
-    let number = |name: &str| config[name].as_u64().map(|value| value as usize).ok_or_else(|| format!("config.{name}"));
+    let number = |name: &str| config[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("config.{name}"));
     let (minimum, maximum, per_language, per_family) = (number("minimum_word_length")?, number("maximum_word_length")?, number("maximum_words_per_language")?, number("maximum_words_per_family")?);
     let namespace = config["namespace"].as_str().ok_or("a namespace")?;
     let mut words: BTreeMap<(String, i64), i64> = BTreeMap::new();
@@ -173,7 +174,7 @@ fn role_name(role: FieldRole) -> &'static str {
 /// The rows of every split, each row a canonical line.
 fn build(root: &Path, resources: &Arc<Resources>, config: &Value) -> Result<(BTreeMap<&'static str, Vec<u8>>, BTreeMap<&'static str, i64>, BTreeMap<&'static str, BTreeSet<String>>), String> {
     let profiles = [profile(root, resources, false)?, profile(root, resources, true)?];
-    let maximum_prefix = config["maximum_prefix_length"].as_u64().ok_or("config.maximum_prefix_length")? as usize;
+    let maximum_prefix = (config["maximum_prefix_length"].as_u64().ok_or("config.maximum_prefix_length")?).to::<usize>();
     let mut content: BTreeMap<&'static str, Vec<u8>> = SPLITS.iter().map(|split| (*split, Vec::new())).collect();
     let mut counts: BTreeMap<&'static str, i64> = SPLITS.iter().map(|split| (*split, 0)).collect();
     let mut groups: BTreeMap<&'static str, BTreeSet<String>> = SPLITS.iter().map(|split| (*split, BTreeSet::new())).collect();
@@ -186,14 +187,14 @@ fn build(root: &Path, resources: &Arc<Resources>, config: &Value) -> Result<(BTr
         for length in 1..=letters.len().min(maximum_prefix) {
             let original: String = letters[..length].iter().collect();
             let alternate = pair().translate(&original, from, to).expect("layouts");
-            let ambiguous = profiles[0].indexes[situation.source as usize].completions(&original).completions > 0;
+            let ambiguous = profiles[0].indexes[situation.source.to::<usize>()].completions(&original).completions > 0;
             let label = if length <= SHARED_WAIT_MAX_CHARACTERS || (desired && ambiguous) { WAIT } else if desired { CONVERT } else { KEEP };
             for (name, lexicon) in PROFILES.iter().zip(&profiles) {
                 let item = PrefixInput { original: original.clone(), alternative: alternate.clone(), source_group: situation.source, field: FieldContext { role: situation.role, before: situation.before.clone(), ..FieldContext::new(situation.application, "public-prefix") } };
                 let sides = [PrefixSide { index: &lexicon.indexes[0], model: &lexicon.models[0] }, PrefixSide { index: &lexicon.indexes[1], model: &lexicon.models[1] }];
                 let values: Map<String, Value> = features(&item, [&sides[0], &sides[1]]).into_iter().map(|(feature, value)| (feature, json!(value))).collect();
-                let indexes: Vec<(i64, &PrefixIndex)> = lexicon.indexes.iter().enumerate().map(|(group, index)| (group as i64, index)).collect();
-                let scorers: Vec<(i64, &dyn PrefixScorer)> = lexicon.models.iter().enumerate().map(|(group, model)| (group as i64, &**model as &dyn PrefixScorer)).collect();
+                let indexes: Vec<(i64, &PrefixIndex)> = lexicon.indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), index)).collect();
+                let scorers: Vec<(i64, &dyn PrefixScorer)> = lexicon.models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), &**model as &dyn PrefixScorer)).collect();
                 let baseline = early_switch_decision(&indexes, &scorers, &original, &[(1 - situation.source, alternate.as_str())], situation.source, &policy);
                 let row = json!({"sequence": sequence, "family": situation.signature, "source": situation.source, "text": situation.text, "before": situation.before, "application": situation.application, "role": role_name(situation.role), "category": situation.category, "length": length, "profile": name, "label": label, "desired": desired, "legacy_convert": baseline.should_switch, "features": values});
                 content.get_mut(situation.split).expect("a split").extend(crate::artifact::canonical(&row));

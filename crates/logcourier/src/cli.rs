@@ -1,4 +1,5 @@
 //! The command line of LogCourier: status, the catalog and fetching archives.
+use ks_cast::To as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -125,7 +126,7 @@ fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
         return Ok(usage("Нет токена в системном хранилище или LOGCOURIER_BOT_TOKEN"));
     }
     let client = Telegram::new(&token)?;
-    let mut entries = list_entries(&client, &chat_id, options.limit as usize, MAX_CATALOG_PAGES, options.version.as_deref())?;
+    let mut entries = list_entries(&client, &chat_id, options.limit.to::<usize>(), MAX_CATALOG_PAGES, options.version.as_deref())?;
     if command == "list" {
         println!("{}", pretty(&Value::Array(entries), false));
         return Ok(0);
@@ -144,7 +145,7 @@ fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
     for entry in &entries {
         let data = client.download(entry["file_id"].as_str().unwrap_or_default(), MAX_DOWNLOAD)?;
         let digest = entry["sha256"].as_str().unwrap_or_default();
-        if data.len() as i64 != entry["size"].as_i64().unwrap_or(-1) || sha256_hex(&data) != digest {
+        if data.len().to::<i64>() != entry["size"].as_i64().unwrap_or(-1) || sha256_hex(&data) != digest {
             return Err(Error::value("Контрольная сумма архива не совпала; файл не сохранён."));
         }
         let target = root.join(format!("lc-{}.zip", entry["bundle_id"].as_str().unwrap_or_default()));

@@ -70,8 +70,8 @@ impl EngineCore {
         let group = i64::from(stroke.group);
         let target = self.other_groups(group)[0];
         let shown = key_of(KeyEvent {
-            group: target as i32,
-            character: stroke.character_for(target as i32).to_owned(),
+            group: target.to::<i32>(),
+            character: stroke.character_for(target.to::<i32>()).to_owned(),
             ..(**stroke).clone()
         });
         // Nothing is retyped in another layout: the "@" goes out as a literal of

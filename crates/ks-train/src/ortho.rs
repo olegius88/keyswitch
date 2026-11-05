@@ -1,6 +1,7 @@
 //! The key-space orthotactic model, by counting (`train_ortho_model`, `ortho_corpus`): character n-gram channels per
 //! language, case channels, and feature weights fitted out of fold by a logistic regression. Every step iterates in a
 //! fixed order, so `--verify` replays the artifact byte for byte.
+use ks_cast::To as _;
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
 use crate::physical::{hex, hex_digest, pair};
@@ -178,9 +179,9 @@ pub(crate) fn extra_key_variant(script: &str, keys: &str) -> Option<String> {
     }
     let mut letters: Vec<char> = letter_keys(other(script)).iter().copied().filter(|letter| pystr::lower(&letter.to_string()) == letter.to_string()).collect();
     letters.sort_unstable();
-    let position = (part(1) % (length as u64 + 1)) as usize;
+    let position = (part(1) % (length.to::<u64>() + 1)).to::<usize>();
     let mut output: String = base.chars().take(position).collect();
-    output.push(letters[(part(2) % letters.len() as u64) as usize]);
+    output.push(letters[(part(2) % letters.len().to::<u64>()).to::<usize>()]);
     output.extend(base.chars().skip(position));
     Some(output)
 }
@@ -248,7 +249,7 @@ fn drop_first(gram: &str) -> &str {
 }
 
 pub(crate) fn quantise(value: f64, scale: i64) -> i64 {
-    py_round(value * scale as f64) as i64
+    (py_round(value * scale.to::<f64>())).to::<i64>()
 }
 
 /// `channel_payload` over `fit_channel`: interpolated absolute discounting, quantised as the artifact stores it.
@@ -272,15 +273,15 @@ pub(crate) fn channel_payload(gram_counts: &HashMap<String, i64>, order: usize, 
     for (size, grams) in by_size.iter_mut().enumerate().skip(1) {
         grams.sort_unstable();
         for gram in grams.iter() {
-            let count = gram_counts[*gram] as f64;
+            let count = gram_counts[*gram].to::<f64>();
             if size == 1 {
-                let probability = (count + UNIGRAM_PSEUDO_COUNT) / (unigram_total as f64 + UNIGRAM_PSEUDO_COUNT * alphabet as f64);
+                let probability = (count + UNIGRAM_PSEUDO_COUNT) / (unigram_total.to::<f64>() + UNIGRAM_PSEUDO_COUNT * alphabet.to::<f64>());
                 logprob.insert(gram, probability.ln());
                 continue;
             }
             let context = drop_last(gram);
-            let total = context_total[context] as f64;
-            let weight = discount * context_types[context] as f64 / total;
+            let total = context_total[context].to::<f64>();
+            let weight = discount * context_types[context].to::<f64>() / total;
             let lower = logprob.get(drop_first(gram)).map_or(uniform.exp(), |value| value.exp());
             let probability = (count - discount).max(0.0) / total + weight * lower;
             logprob.insert(gram, probability.ln());
@@ -301,8 +302,8 @@ pub(crate) fn shape_channel(observed: &Counts, scale: i64) -> Value {
     let mut result = Map::new();
     for script in SCRIPTS {
         let counter = &observed[script];
-        let total = counter.values().sum::<i64>() as f64 + SHAPE_PSEUDO_COUNT * SHAPES.len() as f64;
-        let table: Map<String, Value> = SHAPES.iter().map(|shape| ((*shape).to_owned(), json!(quantise(((counter.get(*shape).copied().unwrap_or(0) as f64 + SHAPE_PSEUDO_COUNT) / total).ln(), scale)))).collect();
+        let total = (counter.values().sum::<i64>()).to::<f64>() + SHAPE_PSEUDO_COUNT * SHAPES.len().to::<f64>();
+        let table: Map<String, Value> = SHAPES.iter().map(|shape| ((*shape).to_owned(), json!(quantise(((counter.get(*shape).copied().unwrap_or(0).to::<f64>() + SHAPE_PSEUDO_COUNT) / total).ln(), scale)))).collect();
         result.insert(script.to_owned(), Value::Object(table));
     }
     Value::Object(result)
@@ -453,7 +454,7 @@ fn dyadic(value: f64) -> (BigInt, i64) {
         return (BigInt::from(0), 0);
     }
     let bits = value.to_bits();
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let exponent = ((bits >> 52) & 0x7ff).to::<i64>();
     let fraction = bits & ((1_u64 << 52) - 1);
     let (mantissa, power) = if exponent == 0 { (fraction, -1074) } else { (fraction | (1_u64 << 52), exponent - 1075) };
     (BigInt::from_biguint(if bits >> 63 == 1 { Sign::Minus } else { Sign::Plus }, BigUint::from(mantissa)), power)
@@ -462,29 +463,29 @@ fn dyadic(value: f64) -> (BigInt, i64) {
 /// `_float_sqrt_of_frac`: the square root of n/m, correctly rounded.
 fn sqrt_of_fraction(numerator: &BigUint, denominator: &BigUint, extra_power: i64) -> f64 {
     const WIDTH: i64 = 109;
-    let q = (numerator.bits() as i64 - denominator.bits() as i64 - WIDTH).div_euclid(2);
+    let q = (numerator.bits().to::<i64>() - denominator.bits().to::<i64>() - WIDTH).div_euclid(2);
     let round_to_odd = |n: BigUint, m: BigUint| -> BigUint {
         let a = (&n / &m).sqrt();
         if &a * &a * &m != n { a | BigUint::from(1_u8) } else { a }
     };
     let (value, power) = if q >= 0 {
-        (round_to_odd(numerator.clone(), denominator << (2 * q) as u64), q)
+        (round_to_odd(numerator.clone(), denominator << (2 * q).to::<u64>()), q)
     } else {
-        (round_to_odd(numerator << (-2 * q) as u64, denominator.clone()), q)
+        (round_to_odd(numerator << (-2 * q).to::<u64>(), denominator.clone()), q)
     };
     // `numerator / denominator` of two integers: the nearest double, ties to even.
-    let width = value.bits() as i64;
+    let width = value.bits().to::<i64>();
     let drop = (width - 53).max(0);
-    let kept: BigUint = &value >> drop as u64;
+    let kept: BigUint = &value >> drop.to::<u64>();
     let mut mantissa = kept.iter_u64_digits().next().unwrap_or(0);
     if drop > 0 {
-        let half = BigUint::from(1_u8) << (drop - 1) as u64;
-        let rest = &value - (&kept << drop as u64);
+        let half = BigUint::from(1_u8) << (drop - 1).to::<u64>();
+        let rest = &value - (&kept << drop.to::<u64>());
         if rest > half || (rest == half && mantissa & 1 == 1) {
             mantissa += 1;
         }
     }
-    mantissa as f64 * 2_f64.powi((drop + power + extra_power) as i32)
+    mantissa.to::<f64>() * 2_f64.powi((drop + power + extra_power).to::<i32>())
 }
 
 /// `statistics.pstdev`: the exact variance as a fraction, its square root correctly rounded.
@@ -496,7 +497,7 @@ fn pstdev(values: &[f64]) -> f64 {
         if mantissa.sign() == Sign::NoSign {
             continue;
         }
-        let scaled = mantissa << (power - least) as u64;
+        let scaled = mantissa << (power - least).to::<u64>();
         squares += &scaled * &scaled;
         sum += scaled;
     }
@@ -512,7 +513,7 @@ fn pstdev(values: &[f64]) -> f64 {
 }
 
 fn fmean(values: &[f64]) -> f64 {
-    fsum(values).expect("finite samples") / values.len() as f64
+    fsum(values).expect("finite samples") / values.len().to::<f64>()
 }
 
 /// `logistic`: coefficients on the raw scale of a logistic regression with an L2 penalty, by Newton steps.
@@ -528,7 +529,7 @@ fn logistic(samples: &[Vec<f64>], labels: &[i64], l2: f64, firth: bool, separate
         let mut hessian: Vec<Vec<f64>> = (0..=width).map(|row| (0..=width).map(|column| if row == column && row != 0 { l2 } else { 0.0 }).collect()).collect();
         let probabilities: Vec<f64> = standard.iter().map(|row| probability_of(py_sum(weights.iter().zip(row).map(|(w, x)| w * x)))).collect();
         for ((row, label), probability) in standard.iter().zip(labels).zip(&probabilities) {
-            let (residual, curvature) = (probability - *label as f64, probability * (1.0 - probability));
+            let (residual, curvature) = (probability - (*label).to::<f64>(), probability * (1.0 - probability));
             for first in 0..=width {
                 gradient[first] += residual * row[first];
                 for second in first..=width {
@@ -582,7 +583,7 @@ fn shared_weight(parts: &Parts, firth: bool, prior: Option<&BTreeMap<&'static st
             for (predictor, column, label) in &parts[**direction] {
                 let row: Vec<f64> = (0..size - 1).map(|index| if index == position { 1.0 } else { 0.0 }).chain([*column]).collect();
                 let probability = probability_of(estimate[position] + predictor + estimate[size - 1] * column);
-                let (residual, curvature) = (probability - *label as f64, probability * (1.0 - probability));
+                let (residual, curvature) = (probability - (*label).to::<f64>(), probability * (1.0 - probability));
                 for first in 0..size {
                     gradient[first] += residual * row[first];
                     for second in 0..size {
@@ -596,7 +597,7 @@ fn shared_weight(parts: &Parts, firth: bool, prior: Option<&BTreeMap<&'static st
             return 0.0;
         }
         if let Some(scales) = prior {
-            let share = 1.0 / scales.len() as f64;
+            let share = 1.0 / scales.len().to::<f64>();
             for scale in scales.values() {
                 let pseudo = probability_of(estimate[size - 1] * scale);
                 gradient[size - 1] += share * (pseudo - FIRTH_CENTRE) * scale;
@@ -629,7 +630,7 @@ type Weights = BTreeMap<&'static str, BTreeMap<String, f64>>;
 
 /// `fitted_weights`: each feature's weight in nats per direction from the out-of-fold samples [char score, *names].
 fn fitted_weights(samples: &BTreeMap<&'static str, Vec<Vec<f64>>>, labels: &BTreeMap<&'static str, Vec<i64>>, settings: &Settings, names: &[&'static str], ties: &mut Ties) -> Result<Weights, String> {
-    let minimum = settings.value["feature_min_types"].as_i64().unwrap_or(0) as usize;
+    let minimum = (settings.value["feature_min_types"].as_i64().unwrap_or(0)).to::<usize>();
     let copied_names = settings.list("feature_copied");
     let always_tied = settings.list("feature_tied");
     let omitted = settings.list("feature_omitted");
@@ -752,7 +753,7 @@ struct Inputs {
 fn feature_weights(inputs: &Inputs, names: &[&'static str], ties: &mut Ties, centres: &mut BTreeMap<&'static str, f64>, target_centres: &mut BTreeMap<&'static str, f64>, scratch: &Path) -> Result<Weights, String> {
     let settings = &inputs.settings;
     let folds = settings.value["feature_folds"].as_u64().ok_or("feature_folds")?;
-    let minimum = settings.value["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+    let minimum = (settings.value["minimum_length"].as_u64().ok_or("minimum_length")?).to::<usize>();
     let mut samples: BTreeMap<&'static str, Vec<Vec<f64>>> = SCRIPTS.iter().map(|script| (*script, Vec::new())).collect();
     let mut labels: BTreeMap<&'static str, Vec<i64>> = SCRIPTS.iter().map(|script| (*script, Vec::new())).collect();
     let train: Vec<&Row> = inputs.rows.iter().filter(|row| row.split == TRAIN).collect();
@@ -774,8 +775,8 @@ fn feature_weights(inputs: &Inputs, names: &[&'static str], ties: &mut Ties, cen
                 continue;
             }
             let features = token_features(&scored.reading, direction, &identifier, &known, shape, model.hyphens, &model.compound_min_letters);
-            let mut values: HashMap<&str, f64> = features.as_pairs().iter().map(|(name, value)| (*name, *value as f64)).collect();
-            let length = scored.reading.chars().count() as f64 + 1.0;
+            let mut values: HashMap<&str, f64> = features.as_pairs().iter().map(|(name, value)| (*name, (*value).to::<f64>())).collect();
+            let length = scored.reading.chars().count().to::<f64>() + 1.0;
             values.insert(CONTINUOUS_FEATURE, scored.source_logprob / length);
             values.insert(TARGET_FEATURE, scored.target_logprob / length);
             let script: &'static str = if direction == "en" { "en" } else { "ru" };
@@ -849,8 +850,8 @@ pub(crate) fn gz_text(path: &Path) -> Result<String, String> {
 
 /// `web_weight`: an Onboard-like weight from a rank: the bit length of the count per billion words (Zipf).
 fn web_weight(rank: i64) -> i64 {
-    let per_billion = py_round(WEB_TOP_PER_BILLION as f64 / (rank + 1) as f64) as i64;
-    (i64::BITS - per_billion.leading_zeros()).min(MAXIMUM_LEXICON_WEIGHT as u32).max(1) as i64
+    let per_billion = (py_round(WEB_TOP_PER_BILLION.to::<f64>() / (rank + 1).to::<f64>())).to::<i64>();
+    ((i64::BITS - per_billion.leading_zeros()).min(MAXIMUM_LEXICON_WEIGHT.to::<u32>()).max(1)).to::<i64>()
 }
 
 /// `to_keys`: the physical keys a typist pressed to produce this token.
@@ -904,7 +905,7 @@ fn web_rows(root: &Path, settings: &Settings) -> Result<Vec<Row>, String> {
 fn load_inputs(root: &Path) -> Result<Inputs, String> {
     let directory = root.join(DIRECTORY);
     let value = read_json(&directory.join("config.json"))?;
-    let settings = Settings { order: value["order"].as_u64().ok_or("order")? as usize, scale: value["scale"].as_i64().ok_or("scale")?, discount: value["discount"].as_f64().ok_or("discount")?, collapse: value["collapse_runs"].as_i64(), value };
+    let settings = Settings { order: (value["order"].as_u64().ok_or("order")?).to::<usize>(), scale: value["scale"].as_i64().ok_or("scale")?, discount: value["discount"].as_f64().ok_or("discount")?, collapse: value["collapse_runs"].as_i64(), value };
     if read_json(&directory.join("corpus-receipt.json"))?["tokens_sha256"].as_str() != Some(checksum(&directory.join("tokens.jsonl.gz"))?.as_str()) {
         return Err("key-space corpus does not match its receipt".to_owned());
     }
@@ -1028,11 +1029,11 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
                     return Err("candidate or provenance changed after the seal".to_owned());
                 }
                 let references: Vec<&Row> = inputs.rows.iter().collect();
-                let minimum = inputs.settings.value["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+                let minimum = (inputs.settings.value["minimum_length"].as_u64().ok_or("minimum_length")?).to::<usize>();
                 let model = serving_model(&candidate, &inputs)?;
                 let corpus = outcome(&model, &population(&references, TEST, &inputs.known, minimum));
                 let summed = |name: &str| SCRIPTS.iter().map(|script| corpus["counts"][format!("{script}:{name}")].as_i64().unwrap_or(0)).sum::<i64>();
-                let recall = summed("recalled_types") as f64 / summed("positive_types").max(1) as f64;
+                let recall = summed("recalled_types").to::<f64>() / summed("positive_types").max(1).to::<f64>();
                 let promotion = &inputs.settings.value["promotion"];
                 let passed = summed("negative_types") >= promotion["minimum_test_negatives"].as_i64().unwrap_or(0) && summed("false_types") <= promotion["maximum_test_false_conversions"].as_i64().unwrap_or(0) && recall >= promotion["minimum_recall"].as_f64().unwrap_or(1.0);
                 let report = json!({"schema_version": EVIDENCE_SCHEMA, "model_version": seal["model_version"], "seal_sha256": checksum(&seal_path)?, "candidate_sha256": checksum(&candidate)?, "thresholds": seal["thresholds"], "corpus_test": corpus, "recall": py_round_ndigits(recall, RECALL_DECIMALS), "promotion_passed": passed,

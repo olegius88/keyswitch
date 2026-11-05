@@ -5,6 +5,7 @@
 //! loads the installed artifact through [`VersionedPrefixModel::default_model`], which reads either schema, so an accepted
 //! schema-two pair can be installed without touching the frozen module.
 
+use ks_cast::To as _;
 use crate::constants::{
     CURRENT_PREFIX_FEATURE_VERSION, MAX_PREFIX_CHARACTER_NGRAM_ORDER, MAX_PREFIX_MODEL_BYTES, PREFIX_CHARACTER_FEATURE_WEIGHT_CAP, PREFIX_MAX_CHARACTERS,
 };
@@ -21,7 +22,7 @@ use std::path::Path;
 /// The start marker describes an observed boundary. There is no end marker: an incremental prefix is not evidence that
 /// the word has finished.
 pub fn features_for_version(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], feature_version: i64) -> Result<indexmap::IndexMap<String, f64>, LoadError> {
-    if feature_version != 1 && feature_version != CURRENT_PREFIX_FEATURE_VERSION as i64 {
+    if feature_version != 1 && feature_version != CURRENT_PREFIX_FEATURE_VERSION.to::<i64>() {
         return Err(LoadError::value("unsupported prefix features"));
     }
     let mut result = features(item, sides);
@@ -29,7 +30,7 @@ pub fn features_for_version(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], fea
         return Ok(result);
     }
     for (side, text, group) in [("source", &item.original, item.source_group), ("target", &item.alternative, 1 - item.source_group)] {
-        let normalized = ks_text::normalize::nfc(pystr::slice(text, None, Some(PREFIX_MAX_CHARACTERS as i64)));
+        let normalized = ks_text::normalize::nfc(pystr::slice(text, None, Some(PREFIX_MAX_CHARACTERS.to::<i64>())));
         let observed: Vec<char> = std::iter::once('^').chain(pystr::casefold(&normalized).chars()).collect();
         for order in 1..=MAX_PREFIX_CHARACTER_NGRAM_ORDER {
             for start in 0..(observed.len() + 1).saturating_sub(order) {
@@ -64,7 +65,7 @@ impl VersionedPrefixModel {
         let unsupported = || LoadError::value("unsupported prefix model");
         let artifact = artifact.ok_or_else(unsupported)?;
         let payload = &artifact.payload;
-        let feature_version = payload.get("feature_version").and_then(Value::as_i64).filter(|&found| found == PREFIX_FEATURE_VERSION as i64 || found == CURRENT_PREFIX_FEATURE_VERSION as i64);
+        let feature_version = payload.get("feature_version").and_then(Value::as_i64).filter(|&found| found == PREFIX_FEATURE_VERSION.to::<i64>() || found == CURRENT_PREFIX_FEATURE_VERSION.to::<i64>());
         let (true, Some(feature_version)) = (payload.get("kind").and_then(Value::as_str) == Some("keyswitch.prefix-policy") && actions_match(payload), feature_version) else {
             return Err(unsupported());
         };

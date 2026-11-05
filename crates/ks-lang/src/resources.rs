@@ -2,6 +2,7 @@
 //! override, and a speller chosen by the app. Holds what the Python keeps in `lru_cache`s: the engine's models and
 //! the shared lexicons are built once.
 
+use ks_cast::To as _;
 use crate::boundary_model::{self, BoundaryModel};
 use crate::boundary_policy::{self, BoundaryPolicy};
 use crate::detector::{LanguageDetector, LanguageScorer, ProtectedTokens};
@@ -176,7 +177,7 @@ impl Resources {
     pub fn language_detector(&self, locales: &[&str]) -> Result<LanguageDetector, LoadError> {
         let mut models: Vec<(i64, Arc<dyn LanguageScorer>)> = Vec::new();
         for (index, locale) in locales.iter().take(crate::constants::LAYOUT_GROUP_COUNT).enumerate() {
-            models.push((index as i64, self.engine_language_model(locale)?));
+            models.push((index.to::<i64>(), self.engine_language_model(locale)?));
         }
         let intent: Option<Arc<dyn crate::detector::IntentClassifier>> = self.intent_model().0.map(|model| model as _);
         LanguageDetector::new(models, intent, self.protected_tokens())

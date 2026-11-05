@@ -5,6 +5,7 @@
 //! 195 641 words; as maps of `String`s they cost several times their text. Lookups answer what the Python dict answered.
 //! The files are read through serde visitors, so no tree of `serde_json::Value` is built.
 
+use ks_cast::To as _;
 use ks_lang::LoadError;
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer as _};
@@ -48,8 +49,8 @@ impl NameIndex {
 
     /// The name of an entry of the file.
     pub fn name(&self, entry: usize) -> &str {
-        let start = if entry == 0 { 0 } else { self.ends[entry - 1] as usize };
-        &self.arena[start..self.ends[entry] as usize]
+        let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
+        &self.arena[start..self.ends[entry].to::<usize>()]
     }
 
     /// The entry of a name, if the table holds it.
@@ -57,7 +58,7 @@ impl NameIndex {
         let hash = name_hash(name);
         let mut at = self.hashes.partition_point(|&found| found < hash);
         while at < self.hashes.len() && self.hashes[at] == hash {
-            let entry = self.order[at] as usize;
+            let entry = self.order[at].to::<usize>();
             if self.name(entry) == name {
                 return Some(entry);
             }
@@ -68,7 +69,7 @@ impl NameIndex {
 
     /// The names the table holds, in no particular order.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.order.iter().map(|&entry| self.name(entry as usize))
+        self.order.iter().map(|&entry| self.name(entry.to::<usize>()))
     }
 
     /// Bytes of heap the index holds.
@@ -97,18 +98,18 @@ impl Names {
     }
 
     fn name(&self, entry: usize) -> &str {
-        let start = if entry == 0 { 0 } else { self.ends[entry - 1] as usize };
-        &self.arena[start..self.ends[entry] as usize]
+        let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
+        &self.arena[start..self.ends[entry].to::<usize>()]
     }
 
     /// The index sorted by hash. A name given twice keeps its last value, as `dict` does.
     fn index(self) -> NameIndex {
-        let mut keyed: Vec<(u32, u32)> = (0..self.len()).map(|entry| (name_hash(self.name(entry)), entry as u32)).collect();
-        keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| self.name(a.1 as usize).cmp(self.name(b.1 as usize))).then(a.1.cmp(&b.1)));
+        let mut keyed: Vec<(u32, u32)> = (0..self.len()).map(|entry| (name_hash(self.name(entry)), entry.to::<u32>())).collect();
+        keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| self.name(a.1.to::<usize>()).cmp(self.name(b.1.to::<usize>()))).then(a.1.cmp(&b.1)));
         let mut kept: Vec<(u32, u32)> = Vec::with_capacity(keyed.len());
         for &(hash, entry) in &keyed {
             match kept.last() {
-                Some(&(_, last)) if self.name(last as usize) == self.name(entry as usize) => *kept.last_mut().expect("not empty") = (hash, entry),
+                Some(&(_, last)) if self.name(last.to::<usize>()) == self.name(entry.to::<usize>()) => *kept.last_mut().expect("not empty") = (hash, entry),
                 _ => kept.push((hash, entry)),
             }
         }
@@ -355,7 +356,7 @@ fn json_error(error: &serde_json::Error) -> LoadError {
 fn open_limited(path: &Path, limit: usize, too_large: &str) -> Result<BufReader<std::fs::File>, LoadError> {
     let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
     let length = file.metadata().map_err(|error| LoadError::os(&error, path))?.len();
-    if length > limit as u64 {
+    if length > limit.to::<u64>() {
         return Err(LoadError::value(too_large));
     }
     Ok(BufReader::with_capacity(1 << 16, file))
@@ -469,10 +470,10 @@ impl<'de> Deserialize<'de> for Weight {
                 formatter.write_str("a value")
             }
             fn visit_u64<E: de::Error>(self, value: u64) -> Result<Weight, E> {
-                Ok(Weight { value: value as f64, integer: true, valid: true })
+                Ok(Weight { value: value.to::<f64>(), integer: true, valid: true })
             }
             fn visit_i64<E: de::Error>(self, value: i64) -> Result<Weight, E> {
-                Ok(Weight { value: value as f64, integer: true, valid: true })
+                Ok(Weight { value: value.to::<f64>(), integer: true, valid: true })
             }
             fn visit_f64<E: de::Error>(self, value: f64) -> Result<Weight, E> {
                 Ok(Weight { value, integer: false, valid: true })
@@ -645,12 +646,12 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
 /// no escaping of non-ASCII letters.
 fn checksum(table: &WeightTable, integers: &[u8]) -> String {
     let mut order: Vec<u32> = table.index.order.clone();
-    order.sort_unstable_by(|&a, &b| table.index.name(a as usize).cmp(table.index.name(b as usize)));
+    order.sort_unstable_by(|&a, &b| table.index.name(a.to::<usize>()).cmp(table.index.name(b.to::<usize>())));
     let mut hasher = Sha256::new();
     let mut text = String::with_capacity(1 << 16);
     text.push('{');
     for (position, &entry) in order.iter().enumerate() {
-        let entry = entry as usize;
+        let entry = entry.to::<usize>();
         if position > 0 {
             text.push(',');
         }
@@ -662,7 +663,7 @@ fn checksum(table: &WeightTable, integers: &[u8]) -> String {
             }
             let value = table.values[ACTION_COUNT * entry + action];
             if integers[entry] & (1 << action) != 0 {
-                text.push_str(&format!("{}", value as i64));
+                text.push_str(&format!("{}", value.to::<i64>()));
             } else {
                 text.push_str(&ks_text::float_repr(value));
             }

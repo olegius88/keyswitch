@@ -1,6 +1,7 @@
 //! A new corpus from a frozen one: a test-only holdout from unread public sources (`freeze_context_action_holdout`) and
 //! fitting splits extended with short utterances (`freeze_context_action_fitting`). No model, dictionary score or text of
 //! any test row takes part in selection, and no test text is printed. Nothing is overwritten.
+use ks_cast::To as _;
 use crate::corpus::{CorpusRow, FITTING_SPLITS, checksum, load_rows, read_json};
 use crate::physical::{expanded_aliases, hex, hex_digest, physical};
 use flate2::Compression;
@@ -171,7 +172,7 @@ fn is_digits(text: &str) -> bool {
 
 /// `surface_tokens`.
 fn surface_tokens(lines: &[Vec<String>]) -> Result<Vec<SurfaceToken>, String> {
-    let members: HashMap<i64, &Vec<String>> = lines.iter().filter(|parts| is_digits(&parts[0])).map(|parts| (ks_text::py_int(&parts[0]).expect("digits") as i64, parts)).collect();
+    let members: HashMap<i64, &Vec<String>> = lines.iter().filter(|parts| is_digits(&parts[0])).map(|parts| (ks_text::py_int(&parts[0]).expect("digits").to::<i64>(), parts)).collect();
     let mut result = Vec::new();
     let mut covered: BTreeSet<i64> = BTreeSet::new();
     for parts in lines {
@@ -1503,7 +1504,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         }
         let pick = |rows: &[CorpusRow], split: &str| -> Result<(Vec<u8>, u64), String> {
             let chosen: Vec<&CorpusRow> = rows.iter().filter(|row| row.split == split).collect();
-            Ok((gzip_member(&chosen)?, chosen.len() as u64))
+            Ok((gzip_member(&chosen)?, chosen.len().to::<u64>()))
         };
         let test_path = output.join("test.jsonl.gz");
         let (first, first_count) = pick(&ud_rows, "test")?;
@@ -1517,7 +1518,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         let (ud_member, ud_count) = pick(&ud_rows, "quarantine")?;
         let (technical_member, technical_count) = pick(&technical_rows, "quarantine")?;
         std::fs::write(&quarantine_path, [base_quarantine, prior_member, ud_member, technical_member].concat()).map_err(|error| error.to_string())?;
-        let expected = quarantine_record["rows"].as_u64().ok_or("a split without a row count")? + prior.len() as u64 + ud_count + technical_count;
+        let expected = quarantine_record["rows"].as_u64().ok_or("a split without a row count")? + prior.len().to::<u64>() + ud_count + technical_count;
         files.insert("quarantine".to_owned(), split_record(&quarantine_path, expected)?);
         let membership = json!({"namespace": request.namespace, "scope": "test-only holdout extension; families known to the base corpus, its accessed test, the prefix curriculum or declared exposure are quarantined",
             "row_ids_sha256": row_ids, "family_ids_sha256": family_ids, "document_ids_sha256": document_ids, "alias_sha256": aliases, "alias_scope": ALIAS_SCOPE});
@@ -1678,7 +1679,7 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
         let path = output.join(format!("{split}.jsonl.gz"));
         let bytes = [std::fs::read(&source_path).map_err(|error| error.to_string())?, gzip_member(&new_rows)?].concat();
         std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-        files.insert(split.to_owned(), split_record(&path, record["rows"].as_u64().ok_or("a split without a row count")? + new_rows.len() as u64)?);
+        files.insert(split.to_owned(), split_record(&path, record["rows"].as_u64().ok_or("a split without a row count")? + new_rows.len().to::<u64>())?);
     }
     std::fs::copy(request.base.join("test-membership.json"), output.join("test-membership.json")).map_err(|error| error.to_string())?;
     let manifest = json!({"schema_version": base_manifest["schema_version"], "namespace": request.namespace, "kind": "fitting-extension", "base_namespace": base_manifest["namespace"], "base_manifest_sha256": checksum(&request.base.join("manifest.json"))?,

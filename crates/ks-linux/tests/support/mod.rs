@@ -2,6 +2,7 @@
 //! code, and a watcher for the panel icon.
 #![allow(dead_code)]
 
+use ks_cast::To as _;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -77,7 +78,7 @@ impl Typer {
 
     pub fn type_keys(&self, physical: &str) -> Result<(), String> {
         for character in physical.chars() {
-            let keycode = self.keycode(character as u32)?;
+            let keycode = self.keycode(character.to::<u32>())?;
             self.event(KEY_PRESS_EVENT, keycode, KEY_PRESS_DELAY_MS)?;
             self.event(KEY_RELEASE_EVENT, keycode, KEY_RELEASE_DELAY_MS)?;
         }
@@ -86,7 +87,7 @@ impl Typer {
 
     /// Through real Ctrl+A and Backspace, so that the observer sees the edit too.
     pub fn clear_field(&self) -> Result<(), String> {
-        let (control, letter) = (self.keycode(CONTROL_L_KEYSYM)?, self.keycode('a' as u32)?);
+        let (control, letter) = (self.keycode(CONTROL_L_KEYSYM)?, self.keycode(('a').to::<u32>())?);
         for (kind, keycode) in [(KEY_PRESS_EVENT, control), (KEY_PRESS_EVENT, letter), (KEY_RELEASE_EVENT, letter), (KEY_RELEASE_EVENT, control)] {
             self.event(kind, keycode, KEY_RELEASE_DELAY_MS)?;
         }
@@ -98,7 +99,7 @@ impl Typer {
     }
 
     pub fn switch_group(&self, group: i32) -> Result<(), String> {
-        if !self.api.lock_group(group as u8) {
+        if !self.api.lock_group(group.low::<u8>()) {
             return Err(format!("cannot switch the XKB group to {group}"));
         }
         self.api.sync();

@@ -1,5 +1,6 @@
 //! Versioned, privacy-aware configuration deltas for the technical journal.
 
+use ks_cast::To as _;
 use crate::config::{SettingsData, SettingsStore};
 use crate::constants::LOGGED_SETTING_VALUE_MAX_CHARACTERS;
 use crate::pycompat::py_eq;
@@ -28,7 +29,7 @@ fn loggable_value(value: &Value) -> Value {
             if pystr::len(text) <= LOGGED_SETTING_VALUE_MAX_CHARACTERS {
                 value.clone()
             } else {
-                Value::String(format!("{}...", pystr::slice(text, None, Some(LOGGABLE_STRING_TRUNCATED_CHARACTERS as i64))))
+                Value::String(format!("{}...", pystr::slice(text, None, Some(LOGGABLE_STRING_TRUNCATED_CHARACTERS.to::<i64>()))))
             }
         }
         Value::Array(items) => json!({"type": "list", "items": items.len()}),

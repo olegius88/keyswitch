@@ -9,6 +9,7 @@ name = "ks_ui"
 path = "src/lib.rs"
 
 [dependencies]
+ks-cast.workspace = true
 ks-config.workspace = true
 ks-text.workspace = true
 ks-context.workspace = true

@@ -10,6 +10,7 @@
 //! stems) and must not be a known word itself, while the alternative rendering must start many frequent words of the
 //! other language.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::language_model::{LanguageModel, WordScore};
 use crate::tables::{WordList, WordTable};
@@ -165,7 +166,7 @@ impl PrefixIndex {
             Some(words) => (start..last).map(|index| self.frequencies.get_or_zero(words.get(index))).max(),
         };
         PrefixEvidence {
-            completions: (stop - start) as i64,
+            completions: (stop - start).to::<i64>(),
             maximum_frequency: maximum.unwrap_or(0),
             known: self.frequencies.contains(&normalized) || (start < words.len() && words.get(start) == normalized),
         }

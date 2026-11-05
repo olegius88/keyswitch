@@ -1,6 +1,7 @@
 //! Parity of `ks-config` with the Python program, against golden files dumped by gen_golden_config.py.
 //! They live in `$KS_GOLDEN_DIR/config`; a test skips with a message when its file is absent.
 
+use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_config::config::SettingsStore;
 use ks_config::history::{data_dir_from, history_limit, HistoryEntry, HistoryStore};
@@ -376,10 +377,10 @@ fn typing_tables() -> Vec<HashMap<char, KeyChoice>> {
         .map(|keys| {
             let mut t = HashMap::new();
             for (i, k) in keys.chars().enumerate() {
-                t.insert(k, (i as i64, false));
+                t.insert(k, (i.to::<i64>(), false));
                 if ks_text::ucd::isalpha(k) {
                     for u in ks_text::pystr::upper(&k.to_string()).chars() {
-                        t.insert(u, (i as i64, true));
+                        t.insert(u, (i.to::<i64>(), true));
                     }
                 }
             }
@@ -449,7 +450,7 @@ const ALL_REASONS: [RefusalReason; 20] = {
 #[test]
 fn caret() {
     let Some(records) = lines("caret.jsonl.gz") else { return };
-    let ranges: Vec<(u32, u32)> = records[0]["unanswered"].as_array().unwrap().iter().map(|r| (r[0].as_u64().unwrap() as u32, r[1].as_u64().unwrap() as u32)).collect();
+    let ranges: Vec<(u32, u32)> = records[0]["unanswered"].as_array().unwrap().iter().map(|r| (r[0].as_u64().unwrap().to::<u32>(), r[1].as_u64().unwrap().to::<u32>())).collect();
     let mut bad = 0;
     for code in 0..0x110000u32 {
         if let Some(c) = char::from_u32(code) {

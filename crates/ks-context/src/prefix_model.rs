@@ -3,6 +3,7 @@
 //! Uses the validated sparse-weight container, not the completed-word extractor or its weights. Its scores describe
 //! synthetic training evidence, not a calibrated probability that a real user's intent has been understood.
 
+use ks_cast::To as _;
 use crate::constants::{
     MAX_PREFIX_FEATURE_NAME_CHARACTERS, MAX_PREFIX_MODEL_BYTES, MAX_PREFIX_WEIGHTS, MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_V1_APPLICATION_NAME_CHARACTERS,
     PREFIX_V1_APPLICATION_TOKEN_COUNT, PREFIX_V1_BEFORE_CONTEXT_CHARACTERS, PREFIX_V1_BEFORE_WORD_COUNT, PREFIX_V1_COMPLETIONS_LOG_DIVISOR,
@@ -57,7 +58,7 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
     put("bias".to_string(), 1.0);
     put(format!("direction:{}", item.source_group), 1.0);
     put(format!("length:{}", pystr::len(&original).min(PREFIX_V1_LENGTH_BUCKET_MAX_CHARACTERS)), 1.0);
-    put("length".to_string(), pystr::len(&original).min(PREFIX_V1_LENGTH_SCALE_CHARACTERS) as f64 / PREFIX_V1_LENGTH_SCALE_CHARACTERS as f64);
+    put("length".to_string(), pystr::len(&original).min(PREFIX_V1_LENGTH_SCALE_CHARACTERS).to::<f64>() / PREFIX_V1_LENGTH_SCALE_CHARACTERS.to::<f64>());
     put("source:letters".to_string(), flag(pystr::isalpha(&original)));
     put("target:letters".to_string(), flag(pystr::isalpha(&alternate)));
     put("token:capitals".to_string(), flag(pystr::slice(&item.original, Some(1), None).chars().any(ucd::isupper)));
@@ -67,8 +68,8 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
         let evidence = side.index.completions(text);
         let score = side.model.score(text);
         put(format!("{name}:empty"), flag(evidence.completions == 0));
-        put(format!("{name}:completions"), (evidence.completions as f64).ln_1p() / PREFIX_V1_COMPLETIONS_LOG_DIVISOR as f64);
-        put(format!("{name}:frequency"), (evidence.maximum_frequency as f64).ln_1p() / PREFIX_V1_FREQUENCY_LOG_DIVISOR as f64);
+        put(format!("{name}:completions"), (evidence.completions as f64).ln_1p() / PREFIX_V1_COMPLETIONS_LOG_DIVISOR.to::<f64>());
+        put(format!("{name}:frequency"), (evidence.maximum_frequency as f64).ln_1p() / PREFIX_V1_FREQUENCY_LOG_DIVISOR.to::<f64>());
         put(format!("{name}:known"), flag(evidence.known || score.known));
         put(format!("{name}:invalid"), score.invalid_ratio);
         put(format!("{name}:ngram"), clamp(score.ngram_score, PREFIX_V1_NGRAM_SCORE_BOUND) / PREFIX_V1_NGRAM_SCORE_BOUND);
@@ -80,14 +81,14 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
     let quote = !line.matches('"').count().is_multiple_of(PREFIX_V1_QUOTE_MARKS_PER_PAIR) || !line.matches('\'').count().is_multiple_of(PREFIX_V1_QUOTE_MARKS_PER_PAIR);
     let ru = before.chars().filter(|&c| ('а'..='я').contains(&c) || c == 'ё').count();
     let en = before.chars().filter(|c| c.is_ascii_lowercase()).count();
-    let total = (ru + en).max(1) as f64;
+    let total = ((ru + en).max(1)).to::<f64>();
     let context = [
         ("comment", flag(comment)),
         ("syntax", flag(syntax)),
         ("quote", flag(quote)),
         ("empty", flag(pystr::strip(&before).is_empty())),
-        ("ru", ru as f64 / total),
-        ("en", en as f64 / total),
+        ("ru", ru.to::<f64>() / total),
+        ("en", en.to::<f64>() / total),
         ("technical", flag(syntax && !comment && !quote)),
     ];
     let source_empty = result["source:empty"];
@@ -97,7 +98,7 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
     }
     result.insert(format!("role:{}", item.field.role.as_str()), 1.0);
     let application = pystr::casefold(&item.field.application);
-    let application = pystr::slice(&application, None, Some(PREFIX_V1_APPLICATION_NAME_CHARACTERS as i64));
+    let application = pystr::slice(&application, None, Some(PREFIX_V1_APPLICATION_NAME_CHARACTERS.to::<i64>()));
     for part in application.split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit())).filter(|part| !part.is_empty()).take(PREFIX_V1_APPLICATION_TOKEN_COUNT) {
         result.insert(format!("app:{part}"), 1.0);
     }
@@ -205,12 +206,12 @@ impl PrefixModel {
         let artifact = artifact.ok_or_else(unsupported)?;
         let payload = &artifact.payload;
         if payload.get("kind").and_then(Value::as_str) != Some("keyswitch.prefix-policy")
-            || payload.get("feature_version").and_then(Value::as_i64) != Some(PREFIX_FEATURE_VERSION as i64)
+            || payload.get("feature_version").and_then(Value::as_i64) != Some(PREFIX_FEATURE_VERSION.to::<i64>())
             || !actions_match(payload)
         {
             return Err(unsupported());
         }
-        Ok(finish_load(artifact, PREFIX_FEATURE_VERSION as i64, "prefix-v1-")?.model)
+        Ok(finish_load(artifact, PREFIX_FEATURE_VERSION.to::<i64>(), "prefix-v1-")?.model)
     }
 
     /// `PrefixModel.default()`: the installed artifact, or nothing.

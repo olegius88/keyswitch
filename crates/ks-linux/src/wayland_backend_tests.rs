@@ -132,7 +132,7 @@ impl WaylandApi for FakeApi {
         if known_seq.is_some() && state.refuse_checked {
             return Ok(0);
         }
-        Ok(state.post_result.unwrap_or(inputs.len() as u32))
+        Ok(state.post_result.unwrap_or(inputs.len().low::<u32>()))
     }
     fn active_application(&self) -> String {
         "org.gnome.TextEditor".to_owned()

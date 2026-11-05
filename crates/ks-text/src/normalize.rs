@@ -3,6 +3,7 @@
 //! Hand-written instead of a crate because `unicode-normalization` carries a newer Unicode version than
 //! CPython 3.14 and the tables here are generated from CPython itself. Hangul is algorithmic.
 
+use ks_cast::To as _;
 use crate::unicode_tables as t;
 
 const S_BASE: u32 = 0xAC00;
@@ -17,7 +18,7 @@ const S_COUNT: u32 = L_COUNT * N_COUNT;
 
 /// Canonical combining class (`unicodedata.combining`).
 pub fn combining_class(c: char) -> u8 {
-    let cp = c as u32;
+    let cp = c.to::<u32>();
     if cp < 0x300 {
         return 0;
     }
@@ -26,7 +27,7 @@ pub fn combining_class(c: char) -> u8 {
 }
 
 fn decompose_char(c: char, out: &mut Vec<char>) {
-    let cp = c as u32;
+    let cp = c.to::<u32>();
     if (S_BASE..S_BASE + S_COUNT).contains(&cp) {
         let s = cp - S_BASE;
         out.push(char::from_u32(L_BASE + s / N_COUNT).expect("hangul"));
@@ -49,7 +50,7 @@ fn decompose_char(c: char, out: &mut Vec<char>) {
 }
 
 fn compose_pair(a: char, b: char) -> Option<char> {
-    let (a, b) = (a as u32, b as u32);
+    let (a, b) = (a.to::<u32>(), b.to::<u32>());
     if (L_BASE..L_BASE + L_COUNT).contains(&a) && (V_BASE..V_BASE + V_COUNT).contains(&b) {
         return char::from_u32(S_BASE + ((a - L_BASE) * V_COUNT + (b - V_BASE)) * T_COUNT);
     }

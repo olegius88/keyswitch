@@ -3,6 +3,7 @@
 //! prompt would both read as a manual layout switch and swallow the next typed key; Enter and Esc reach the engine through
 //! the global keyboard hook, and the window's own key handling below is only a second way to the same calls.
 
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
@@ -86,7 +87,7 @@ fn monitor_dpi(point: POINT) -> i32 {
         let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
         GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y)
     };
-    if result == 0 && x > 0 { x as i32 } else { BASE_DPI }
+    if result == 0 && x > 0 { x.bits::<i32>() } else { BASE_DPI }
 }
 
 fn virtual_screen() -> (i32, i32, i32, i32) {
@@ -154,13 +155,13 @@ pub fn show(prompt: &LearningPrompt, anchor: Option<ScreenAnchor>, callbacks: Rc
     }
     let restore = anchor.and_then(|place| place.window);
     // The prompt must never take the foreground.
-    (callbacks.keep_inactive)(window as isize as i64);
+    (callbacks.keep_inactive)((window.to::<isize>()).to::<i64>());
     SHOWN.with(|slot| {
         *slot.borrow_mut() = Some(Shown { window, fonts, prompt: prompt.clone(), anchor, word_line, dpi, callbacks: callbacks.clone() });
     });
     // SAFETY: the window is ours; NOACTIVATE keeps the foreground where it is.
     unsafe { SetWindowPos(window, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE | SWP_SHOWWINDOW) };
-    (callbacks.keep_inactive)(window as isize as i64);
+    (callbacks.keep_inactive)((window.to::<isize>()).to::<i64>());
     if restore.is_some() {
         (callbacks.restore)(restore);
     }
@@ -236,7 +237,7 @@ unsafe extern "system" fn prompt_proc(window: HWND, message: u32, wparam: WPARAM
             paint(window);
             0
         }
-        WM_MOUSEACTIVATE => MA_NOACTIVATE as LRESULT,
+        WM_MOUSEACTIVATE => MA_NOACTIVATE.to::<LRESULT>(),
         WM_KEYDOWN => {
             key_down(wparam);
             0

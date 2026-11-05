@@ -1,6 +1,7 @@
 //! Prefix-v1, the first prefix model: fitted on frozen numeric rows, sealed, tested once. The installed prefix model has
 //! its own schema and receipt; this keeps the old evidence checked, and a replay repeats the fit and the test on the
 //! frozen rows and compares candidate, seal and report byte for byte.
+use ks_cast::To as _;
 use super::read_object;
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
@@ -115,7 +116,7 @@ fn metrics(data: &[SequenceResult], threshold: f64) -> Value {
             ("sequences", 1),
             ("desired", i64::from(result.desired)),
             ("converted", i64::from(first.is_some() && result.desired)),
-            ("converted_before_end", i64::from(first.is_some_and(|length| length < pystr::len(&result.text) as i64) && result.desired)),
+            ("converted_before_end", i64::from(first.is_some_and(|length| length < pystr::len(&result.text).to::<i64>()) && result.desired)),
             ("false", i64::from(is_false)),
             ("technical_false", i64::from(is_false && matches!(result.category.as_str(), "identifier" | "command"))),
             ("legacy_converted", i64::from(result.legacy_at.is_some() && result.desired)),
@@ -143,30 +144,30 @@ fn train(root: &Path, pins: &Value) -> Result<(Vec<u8>, Vec<u8>), String> {
         for name in features_of(row)?.keys() {
             *counts.entry(name.clone()).or_insert(0) += 1;
         }
-        *labels.entry(row["label"].as_u64().ok_or("a row without a label")? as usize).or_insert(0) += 1;
+        *labels.entry((row["label"].as_u64().ok_or("a row without a label")?).to::<usize>()).or_insert(0) += 1;
         Ok(())
     })?;
     let mut ranked: Vec<(i64, String)> = counts.into_iter().map(|(name, count)| (-count, name)).collect();
     ranked.sort();
-    ranked.truncate(number("maximum_features")? as usize);
+    ranked.truncate((number("maximum_features")?).to::<usize>());
     let mut names: Vec<String> = ranked.into_iter().filter(|(count, _)| -*count >= MIN_FEATURE_OCCURRENCES).map(|(_, name)| name).collect();
     names.sort();
     let factors = [number("keep_importance")?, 1.0, number("wait_importance")?, 1.0];
     let total: i64 = labels.values().sum();
-    let importance: BTreeMap<usize, f64> = labels.iter().map(|(label, count)| (*label, total as f64 / (labels.len() as i64 * count) as f64 * factors[*label])).collect();
-    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index as u32)).collect();
+    let importance: BTreeMap<usize, f64> = labels.iter().map(|(label, count)| (*label, total.to::<f64>() / (labels.len().to::<i64>() * count).to::<f64>() * factors[*label])).collect();
+    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
     let pack = |split: &str| -> Result<Packed, String> {
         let mut packed = Packed { offsets: vec![0], ..Packed::default() };
         each_row(root, split, |row| {
-            let label = row["label"].as_u64().ok_or("a row without a label")? as usize;
+            let label = (row["label"].as_u64().ok_or("a row without a label")?).to::<usize>();
             for (name, value) in features_of(row)? {
                 if let Some(index) = vocabulary.get(name.as_str()) {
                     packed.indices.push(*index);
                     packed.values.push(value.as_f64().ok_or("a feature without a value")?);
                 }
             }
-            packed.offsets.push(packed.indices.len() as u64);
-            packed.labels.push(label as u8);
+            packed.offsets.push(packed.indices.len().to::<u64>());
+            packed.labels.push(label.to::<u8>());
             packed.importance.push(importance[&label]);
             Ok(())
         })?;
@@ -176,9 +177,9 @@ fn train(root: &Path, pins: &Value) -> Result<(Vec<u8>, Vec<u8>), String> {
     let (mut weights, mut accumulators) = (vec![0.0_f64; names.len() * WIDTH], vec![1.0_f64; names.len() * WIDTH]);
     let (mut best, mut best_loss, mut selected_epoch) = (weights.clone(), f64::INFINITY, 0_i64);
     let rate = number("learning_rate")?;
-    for epoch in 0..number("epochs")? as i64 {
+    for epoch in 0..(number("epochs")?).to::<i64>() {
         kernel::epoch(&trained, &mut weights, &mut accumulators, rate);
-        let loss = kernel::log_loss(&kernel::predict(&developed, &weights), &developed) / developed.rows() as f64;
+        let loss = kernel::log_loss(&kernel::predict(&developed, &weights), &developed) / developed.rows().to::<f64>();
         if loss < best_loss {
             best.clone_from(&weights);
             best_loss = loss;
@@ -232,12 +233,12 @@ fn accepted(result: &Value, gates: &Value) -> bool {
             && desired <= sequences
             && technical <= false_count
             && false_count <= sequences - desired
-            && sequences as f64 >= gate("minimum_test_sequences")
+            && sequences.to::<f64>() >= gate("minimum_test_sequences")
             && desired > 0
-            && false_count as f64 / sequences as f64 <= gate("maximum_false_sequence_rate")
-            && technical as f64 <= gate("maximum_technical_false_sequences")
-            && before_end as f64 / desired as f64 >= gate("minimum_wrong_layout_sequence_recall")
-            && (false_count - legacy_false) as f64 <= gate("maximum_false_sequences_over_legacy")
+            && false_count.to::<f64>() / sequences.to::<f64>() <= gate("maximum_false_sequence_rate")
+            && technical.to::<f64>() <= gate("maximum_technical_false_sequences")
+            && before_end.to::<f64>() / desired.to::<f64>() >= gate("minimum_wrong_layout_sequence_recall")
+            && (false_count - legacy_false).to::<f64>() <= gate("maximum_false_sequences_over_legacy")
     })
 }
 
@@ -302,13 +303,13 @@ pub fn verify(root: &Path) -> Result<Value, String> {
             let (sequences, desired, exact, restored, changed, early) = (count("sequences")?, count("desired")?, count("exact")?, count("restored")?, count("changed_correct")?, count("early_restored")?);
             count("length_mismatches")?;
             count("injections")?;
-            if !(sequences == ids.len() as i64 && 0 < desired && desired <= sequences && early <= restored && restored <= desired && exact == restored + sequences - desired - changed) {
+            if !(sequences == ids.len().to::<i64>() && 0 < desired && desired <= sequences && early <= restored && restored <= desired && exact == restored + sequences - desired - changed) {
                 return Err("inconsistent prefix engine counts".to_owned());
             }
         }
         let (current, previous) = (&table["candidate"], &table["shipping_no_prefix"]);
         let number = |value: &Value, name: &str| value[name].as_i64().unwrap_or(0);
-        if number(current, "length_mismatches") != 0 || number(current, "changed_correct") > number(previous, "changed_correct") || number(current, "restored") < number(previous, "restored") || (number(current, "early_restored") as f64) < EARLY_RESTORED_MIN_FRACTION * number(current, "desired") as f64 {
+        if number(current, "length_mismatches") != 0 || number(current, "changed_correct") > number(previous, "changed_correct") || number(current, "restored") < number(previous, "restored") || (number(current, "early_restored") as f64) < EARLY_RESTORED_MIN_FRACTION * number(current, "desired").to::<f64>() {
             return Err("prefix engine quality gates failed".to_owned());
         }
     }

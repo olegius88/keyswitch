@@ -41,6 +41,8 @@ pub use native::WinHttpOpener;
 
 #[cfg(windows)]
 mod native {
+    use ks_cast::To as _;
+
     use std::ffi::c_void;
     use std::io;
     use std::ptr::{null, null_mut};
@@ -90,7 +92,7 @@ mod native {
             if done == 0 {
                 return Err(io::Error::last_os_error());
             }
-            Ok(count as usize)
+            Ok(count.to::<usize>())
         }
 
         fn url(&self) -> String {
@@ -116,10 +118,10 @@ mod native {
         // SAFETY: a null buffer with a zero size asks WinHTTP for the size it needs, in bytes.
         unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, null_mut(), &mut size) };
         let mut buffer = vec![0u16; (size as usize).div_ceil(2).max(1)];
-        let mut size = (buffer.len() * 2) as u32;
+        let mut size = (buffer.len() * 2).low::<u32>();
         // SAFETY: the buffer holds `size` bytes.
         check(unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, buffer.as_mut_ptr().cast(), &mut size) })?;
-        let characters = (size as usize / 2).min(buffer.len());
+        let characters = (size.to::<usize>() / 2).min(buffer.len());
         let text = &buffer[..characters];
         let end = text.iter().position(|&unit| unit == 0).unwrap_or(text.len());
         Ok(String::from_utf16_lossy(&text[..end]))
@@ -159,7 +161,7 @@ mod native {
                 check(WinHttpSendRequest(handles.request, headers.as_ptr(), headers_length, null(), 0, 0, 0))?;
                 check(WinHttpReceiveResponse(handles.request, null_mut()))?;
                 let mut status: u32 = 0;
-                let mut size = size_of::<u32>() as u32;
+                let mut size = (size_of::<u32>()).low::<u32>();
                 check(WinHttpQueryHeaders(
                     handles.request,
                     WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,

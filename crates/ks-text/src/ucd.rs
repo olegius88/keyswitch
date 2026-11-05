@@ -13,6 +13,7 @@
 //! The `istitle`/`isupper`/`islower` of a single character are what `c.istitle()` ... return in Python
 //! for a one-character string; the raw flags the string methods need are `is_upper_flag` and friends.
 
+use ks_cast::To as _;
 use crate::unicode_tables as t;
 
 pub use t::UNICODE_VERSION;
@@ -21,9 +22,9 @@ pub use t::UNICODE_VERSION;
 #[inline]
 pub fn flags(cp: u32) -> u16 {
     if cp < 128 {
-        t::ASCII_FLAGS[cp as usize]
+        t::ASCII_FLAGS[cp.to::<usize>()]
     } else if (t::CYRILLIC_LO..t::CYRILLIC_HI).contains(&cp) {
-        t::CYRILLIC_FLAGS[(cp - t::CYRILLIC_LO) as usize]
+        t::CYRILLIC_FLAGS[(cp - t::CYRILLIC_LO).to::<usize>()]
     } else if cp > 0x10FFFF {
         0
     } else {
@@ -105,7 +106,7 @@ predicate!(
 
 /// The value of a decimal digit (`unicodedata.decimal(c, None)`): `0..=9` or `None`.
 pub fn decimal_value(c: char) -> Option<u32> {
-    let cp = c as u32;
+    let cp = c.to::<u32>();
     if cp < 128 {
         return if (0x30..=0x39).contains(&cp) { Some(cp - 0x30) } else { None };
     }

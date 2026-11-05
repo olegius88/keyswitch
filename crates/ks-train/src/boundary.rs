@@ -1,5 +1,6 @@
 //! The boundary-v2 model: balanced segmentation examples frozen before any held-out evaluation (`boundary_v2_corpus`),
 //! pairwise learning, development selection, calibration and the sealed test (`train_boundary_v2`).
+use ks_cast::To as _;
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
 use crate::kernel::{self, Packed};
@@ -24,7 +25,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const BOUNDARY_MAX_SUFFIX: usize = BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS as usize;
+const BOUNDARY_MAX_SUFFIX: usize = ks_cast::const_usize(BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS);
 const FAMILY_KEY_CHARACTERS: usize = 4;
 const SPLIT_BUCKET_COUNT: u64 = 10;
 const TRAIN_SPLIT_BUCKETS: u64 = 6;
@@ -155,11 +156,11 @@ fn typo_sampled(word: &str) -> bool {
 
 /// The key a misspelling drops, chosen per word: any key but the last, the one this model segments.
 fn typo_position(word: &str, keys: usize) -> usize {
-    (choice(&digest(&format!("typo:{word}")), CHOICE_HEX_DIGITS) % (keys as u64 - 1)) as usize
+    (choice(&digest(&format!("typo:{word}")), CHOICE_HEX_DIGITS) % (keys.to::<u64>() - 1)).to::<usize>()
 }
 
 fn typo_suffix(word: &str) -> &'static str {
-    LITERAL_SUFFIXES[(choice(&digest(&format!("literal:{word}")), CHOICE_HEX_DIGITS) % LITERAL_SUFFIXES.len() as u64) as usize]
+    LITERAL_SUFFIXES[(choice(&digest(&format!("literal:{word}")), CHOICE_HEX_DIGITS) % LITERAL_SUFFIXES.len().to::<u64>()).to::<usize>()]
 }
 
 fn hex_of(path: &Path) -> Result<Value, String> {
@@ -238,7 +239,7 @@ fn add(rows: &mut BTreeMap<String, Row>, models: &[Arc<LanguageModel>], sample: 
         return;
     }
     let alternative = translated(&original, "us", "ru");
-    let values: Vec<Features> = (0..=tail).map(|count| features(&original, &alternative, count as i64, &models[0], &models[1], FEATURE_VERSION)).collect();
+    let values: Vec<Features> = (0..=tail).map(|count| features(&original, &alternative, count.to::<i64>(), &models[0], &models[1], FEATURE_VERSION)).collect();
     if typo && values.iter().any(|value| value["word:known_either"] != 0.0) {
         return;
     }
@@ -380,7 +381,7 @@ fn examples(directory: &Path, split: &str) -> Result<Vec<Example>, String> {
     text.lines()
         .map(|line| {
             let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
-            let labels = row["labels"].as_array().ok_or("labels")?.iter().filter_map(Value::as_u64).map(|label| label as usize).collect();
+            let labels = row["labels"].as_array().ok_or("labels")?.iter().filter_map(Value::as_u64).map(|label| label.to::<usize>()).collect();
             let values = row["features"].as_array().ok_or("features")?.iter().map(|table| table.as_object().map_or_else(IndexMap::new, |table| table.iter().map(|(name, value)| (name.clone(), value.as_f64().unwrap_or(0.0))).collect())).collect();
             Ok(Example { category: row["category"].as_str().ok_or("category")?.to_owned(), labels, features: values })
         })
@@ -415,7 +416,7 @@ fn acceptable(root: &Path, result: &Value, test: bool) -> Result<bool, String> {
     }
     for category in gates["required_recall_strata"].as_array().ok_or("recall strata")?.iter().filter_map(Value::as_str) {
         let local = &categories[category];
-        let share = local["correct"].as_i64().unwrap_or(0) as f64 / local["rows"].as_i64().unwrap_or(0).max(1) as f64;
+        let share = (local["correct"].as_i64().unwrap_or(0)).to::<f64>() / (local["rows"].as_i64().unwrap_or(0).max(1)).to::<f64>();
         if share < gates["minimum_decided_fraction_per_stratum"].as_f64().unwrap_or(1.0) {
             return Ok(false);
         }
@@ -433,7 +434,7 @@ fn packed(data: &[Example], names: &[String]) -> Result<Packed, String> {
     for row in data {
         let values = &row.features;
         let denominator = sizes.len() * sizes[row.category.as_str()] * row.labels.len() * (values.len() - 1);
-        let importance = data.len() as f64 / denominator as f64;
+        let importance = data.len().to::<f64>() / denominator.to::<f64>();
         for correct in &row.labels {
             for other in 0..values.len() {
                 if *correct == other {
@@ -482,11 +483,11 @@ pub fn train(root: &Path, directory: &Path) -> Result<(Vec<u8>, Vec<u8>), String
     let mut accumulators = vec![1.0; names.len() * ACTIONS];
     let (mut best, mut best_loss, mut selected) = (weights.clone(), f64::INFINITY, 0);
     let rate = config["learning_rate"].as_f64().ok_or("a learning rate")?;
-    for epoch in 0..config["epochs"].as_u64().ok_or("epochs")? as usize {
+    for epoch in 0..(config["epochs"].as_u64().ok_or("epochs")?).to::<usize>() {
         kernel::epoch(&train_rows, &mut weights, &mut accumulators, rate);
         let probabilities = kernel::predict(&development, &weights);
         let terms: Vec<f64> = development.labels.iter().enumerate().map(|(index, label)| -development.importance[index] * probabilities[index * ACTIONS + usize::from(*label)].max(LOG_LOSS_PROBABILITY_FLOOR).ln()).collect();
-        let loss = py_sum(terms) / development.labels.len() as f64;
+        let loss = py_sum(terms) / development.labels.len().to::<f64>();
         if loss < best_loss {
             (best, best_loss, selected) = (weights.clone(), loss, epoch + 1);
         }

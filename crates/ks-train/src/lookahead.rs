@@ -1,6 +1,7 @@
 //! Bounded candidates for an unexecuted next-word conversion (`context_lookahead_curriculum`), and the curricula built on
 //! them. The original first-word annotation supplies the label; a baseline proposal for the next word only establishes
 //! an entry condition.
+use ks_cast::To as _;
 use crate::captured::group_of_word;
 use crate::corpus::CorpusRow;
 use crate::curricula::{Counts, Curriculum};
@@ -123,8 +124,8 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
         assert!(seed.sample_weight.is_finite() && seed.sample_weight > 0.0, "lookahead requires finite positive mass");
     }
     let mut counts = Counts::default();
-    counts.add_by("input_seeds", seeds.len() as i64);
-    counts.add_by("input_anchors", anchors.len() as i64);
+    counts.add_by("input_seeds", seeds.len().to::<i64>());
+    counts.add_by("input_anchors", anchors.len().to::<i64>());
     let mut sorted_anchors: Vec<&Anchor> = anchors.iter().collect();
     sorted_anchors.sort_by(|a, b| a.identifier.cmp(&b.identifier));
     let mut available: [Vec<&Anchor>; 2] = [Vec::new(), Vec::new()];
@@ -133,7 +134,7 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
             counts.add("skipped_anchor");
             continue;
         }
-        available[anchor.group as usize].push(anchor);
+        available[anchor.group.to::<usize>()].push(anchor);
     }
     let mut families: HashMap<&str, Vec<usize>> = HashMap::new();
     let mut labels: HashMap<String, HashSet<ContextAction>> = HashMap::new();
@@ -145,7 +146,7 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
     }
     let mut family_names: Vec<&str> = families.keys().copied().collect();
     family_names.sort_by_cached_key(|family| (rank("family", family), (*family).to_owned()));
-    family_names.truncate(maximum_families as usize);
+    family_names.truncate(maximum_families.to::<usize>());
     let mut selected: Vec<usize> = Vec::new();
     for family in &family_names {
         // Interleave the existing actions so many KEEP contexts cannot hide all positive lookahead seeds.
@@ -160,10 +161,10 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
             *position += 1;
         }
         ranked.sort();
-        selected.extend(ranked.into_iter().take(seeds_per_family as usize).map(|entry| entry.3));
+        selected.extend(ranked.into_iter().take(seeds_per_family.to::<usize>()).map(|entry| entry.3));
     }
-    counts.add_by("selected_families", family_names.len() as i64);
-    counts.add_by("selected_seeds", selected.len() as i64);
+    counts.add_by("selected_families", family_names.len().to::<i64>());
+    counts.add_by("selected_seeds", selected.len().to::<i64>());
     let mut proposals: HashMap<usize, (ContextEvidence, String)> = HashMap::new();
     for index in selected {
         let seed = &seeds[index];
@@ -172,7 +173,7 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
         let planned_label = seed.planned_action.unwrap_or(seed.action);
         let words = if item.field.after.is_empty() { seed.next_words.as_str() } else { item.field.after.as_str() };
         let continuation = pystr::split(words);
-        let mut choices: Vec<&Anchor> = available[group as usize].clone();
+        let mut choices: Vec<&Anchor> = available[group.to::<usize>()].clone();
         if planned_label == ContextAction::Convert && !continuation.is_empty() {
             choices.retain(|anchor| anchor.text == continuation[0]);
         }
@@ -444,16 +445,16 @@ fn lexical_short_pairs(tools: &Tools, models: &Lexicons) -> Result<Vec<(String, 
         supplement.push(words.iter().map(str::to_owned).collect());
     }
     let real = |text: &str, group: i64| {
-        let known = models[group as usize].score(text).known;
-        (!supplement[group as usize].contains(text) && known) || (tools.plausible_reading(text, group) && !known)
+        let known = models[group.to::<usize>()].score(text).known;
+        (!supplement[group.to::<usize>()].contains(text) && known) || (tools.plausible_reading(text, group) && !known)
     };
     let mut pairs = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for group in 0..2_i64 {
         // The table is sorted by word.
-        for word in models[group as usize].frequencies.words().iter() {
+        for word in models[group.to::<usize>()].frequencies.words().iter() {
             let length = pystr::len(word);
-            if length <= ACTION_SHORT_WORD_MAX_CHARACTERS || length > ACTION_DEFERRED_WORD_MAX_CHARACTERS || !pystr::isalpha(word) || supplement[group as usize].contains(word) {
+            if length <= ACTION_SHORT_WORD_MAX_CHARACTERS || length > ACTION_DEFERRED_WORD_MAX_CHARACTERS || !pystr::isalpha(word) || supplement[group.to::<usize>()].contains(word) {
                 continue;
             }
             let Ok(alternate) = translated(word, group) else { continue };
@@ -482,7 +483,7 @@ pub fn lexical_short_pair_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows:
             for variant in 0..LEXICAL_PAIR_ANCHOR_VARIANTS {
                 let identifier = format!("lexical:{member_group}:{member}:{variant}");
                 let field = public_field(application_of(&identifier), "", "");
-                let row = ActionRow::new(identifier.as_str(), member.as_str(), member_group, field, "space", ContextAction::Wait, "lexical_short_pair", " ").weighing(1.0 / LEXICAL_PAIR_ANCHOR_VARIANTS as f64);
+                let row = ActionRow::new(identifier.as_str(), member.as_str(), member_group, field, "space", ContextAction::Wait, "lexical_short_pair", " ").weighing(1.0 / LEXICAL_PAIR_ANCHOR_VARIANTS.to::<f64>());
                 seeds.push(Seed {
                     identifier,
                     parent_family: family.clone(),

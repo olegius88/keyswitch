@@ -4,6 +4,7 @@
 //! `$KS_RESOURCES`; a test skips with a message when they are absent. Floats are compared by their bits. In a debug build
 //! only every 10th row of the big files is compared.
 
+use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_context::context_action_features::*;
@@ -419,12 +420,12 @@ fn key_event(value: &Value) -> KeyEvent {
     let a = value.as_array().expect("event");
     KeyEvent {
         pressed: a[0].as_bool().expect("flag"),
-        keycode: a[1].as_u64().expect("code") as u32,
+        keycode: a[1].as_u64().expect("code").to::<u32>(),
         key_name: a[2].as_str().expect("text").to_string(),
         character: a[3].as_str().expect("text").to_string(),
         characters: a[4].as_array().expect("characters").iter().map(|c| c.as_str().expect("text").to_string()).collect(),
-        group: a[5].as_i64().expect("group") as i32,
-        state: a[6].as_u64().expect("state") as u32,
+        group: a[5].as_i64().expect("group").to::<i32>(),
+        state: a[6].as_u64().expect("state").to::<u32>(),
         timestamp: a[7].as_i64().expect("time"),
         synthetic: a[8].as_bool().expect("flag"),
         deferred: a[9].as_bool().expect("flag"),
@@ -490,7 +491,7 @@ fn operation(name: &str) -> Operation {
 fn edit_of(operation_name: &Value, position: &Value, letter: &Value) -> Edit {
     Edit {
         operation: operation(operation_name.as_str().expect("operation")),
-        position: position.as_u64().expect("position") as usize,
+        position: position.as_u64().expect("position").to::<usize>(),
         letter: letter.as_str().and_then(|letter| letter.chars().next()),
     }
 }
@@ -538,7 +539,7 @@ fn typo_correction() {
     let locales = ["en_US", "ru_RU"];
     if let Some(rows) = rows("typo_judge.jsonl.gz") {
         for (index, row) in rows.iter().enumerate().step_by(STEP) {
-            let group = row["group"].as_u64().expect("group") as usize;
+            let group = (row["group"].as_u64().expect("group")).to::<usize>();
             let word = row["word"].as_str().expect("text");
             let reading = row["reading"].as_str().expect("text");
             let judgement = corrector.judge(word, locales[group], &[(locales[1 - group], reading)], row["capital"].as_bool().expect("flag"), &known);
@@ -570,7 +571,7 @@ fn typo_correction() {
     }
     if let Some(rows) = rows("typo_keys.jsonl.gz") {
         for (index, row) in rows.iter().enumerate() {
-            let group = row["group"].as_i64().expect("group") as i32;
+            let group = (row["group"].as_i64().expect("group")).to::<i32>();
             let mut templates = KeyTemplates::new();
             for event in row["learned"].as_array().expect("events").iter().chain(row["typed"].as_array().expect("events")) {
                 templates.observe(&key_event(event));
@@ -581,7 +582,7 @@ fn typo_correction() {
                 word: c[0].as_str().expect("text").to_string(),
                 edit: edit_of(&c[1], &c[2], &c[3]),
                 weight: c[4].as_i64().expect("weight"),
-                candidates: c[5].as_u64().expect("count") as usize,
+                candidates: c[5].as_u64().expect("count").to::<usize>(),
                 margin: float(&c[6]),
             };
             let found = corrected_keys(&typed, group, &choice, &templates).map_or(Value::Null, |keys| Value::Array(keys.iter().map(key_json).collect()));

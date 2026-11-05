@@ -24,8 +24,8 @@ impl EngineCore {
         let minimum = self._bounded_setting(
             "detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH,
             EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
-        ) as i64;
-        EarlySwitchPolicy { minimum_length: minimum as usize, ..EarlySwitchPolicy::default() }
+        ).to::<i64>();
+        EarlySwitchPolicy { minimum_length: minimum.to::<usize>(), ..EarlySwitchPolicy::default() }
     }
 
     /// Switch the layout as soon as the typed prefix proves it wrong.
@@ -61,9 +61,9 @@ impl EngineCore {
         let original = _text_for_group(&strokes, source_group);
         let alternatives = self.alternatives_of(&strokes, source_group);
         let mut decision = {
-            let indexes: Vec<(i64, &PrefixIndex)> = self._prefix_indexes.iter().enumerate().map(|(group, index)| (group as i64, &**index)).collect();
+            let indexes: Vec<(i64, &PrefixIndex)> = self._prefix_indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), &**index)).collect();
             let scorers: Vec<(i64, &dyn PrefixScorer)> =
-                self.models.iter().enumerate().map(|(group, model)| (group as i64, &**model as &dyn PrefixScorer)).collect();
+                self.models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), &**model as &dyn PrefixScorer)).collect();
             let texts: Vec<(i64, &str)> = alternatives.iter().map(|(group, text)| (*group, text.as_str())).collect();
             early_switch_decision(&indexes, &scorers, &original, &texts, source_group, &policy)
         };
@@ -180,9 +180,9 @@ impl EngineCore {
         for &end in boundaries.iter().rev() {
             let shown = format!("{typed}{}", &ahead[..end]);
             if let Some(lag) = caret_lag(&field.before, &field.after, &shown, true) {
-                let head = format!("{}{}", field.before, pystr::slice(&field.after, None, Some(lag as i64)));
+                let head = format!("{}{}", field.before, pystr::slice(&field.after, None, Some(lag.to::<i64>())));
                 if head.ends_with(&shown) {
-                    return Some((head[..head.len() - shown.len()].to_owned(), pystr::slice(&field.after, Some(lag as i64), None).to_owned()));
+                    return Some((head[..head.len() - shown.len()].to_owned(), pystr::slice(&field.after, Some(lag.to::<i64>()), None).to_owned()));
                 }
             }
         }
@@ -317,8 +317,8 @@ impl EngineCore {
         let target_group = self._source_group;
         let delay_ms = self._early_switch_at.map(|switched_at| ms(self.monotonic() - switched_at));
         let converted = key_of(KeyEvent {
-            character: event.character_for(target_group as i32).to_owned(),
-            group: target_group as i32,
+            character: event.character_for(target_group.to::<i32>()).to_owned(),
+            group: target_group.to::<i32>(),
             ..(**event).clone()
         });
         let mut strokes = self._strokes.clone();
@@ -501,7 +501,7 @@ impl EngineCore {
         };
         let mut reason = reason_name;
         let typed: Vec<KeyEvent> = keys.iter().map(|key| (**key).clone()).collect();
-        let mut strokes = if reason == "corrected" { corrected_keys(&typed, group as i32, choice, &self._typo_keys) } else { None };
+        let mut strokes = if reason == "corrected" { corrected_keys(&typed, group.to::<i32>(), choice, &self._typo_keys) } else { None };
         if reason == "corrected" && strokes.is_none() {
             reason = "no_key";
         } else if strokes.as_ref().is_some_and(|strokes| strokes.len() != keys.len()) && !self.backend.erases_any_length() {

@@ -13,6 +13,7 @@
 //! a null string where the Python would call a method on None is `AttributeError`. A field without a text pattern is no
 //! failure: Chromium and Qt windows expose a focused element long before they expose its text.
 
+use ks_cast::To as _;
 use std::ffi::c_void;
 use std::mem::{transmute_copy, zeroed};
 use std::ptr::{NonNull, null, null_mut};
@@ -45,7 +46,7 @@ use crate::windows_backend::SelectionReader;
 
 const IID_IUIAUTOMATION2: GUID = GUID::from_u128(0x34723aff_0c9d_49d0_9896_7ab52df8cd8a);
 const IID_IUIAUTOMATION_TEXT_PATTERN: GUID = GUID::from_u128(0x32eba289_3583_42c9_9c59_3b6d9a1e9b6a);
-const CONTEXT_LIMIT: i32 = FIELD_CONTEXT_MAX_CHARACTERS as i32;
+const CONTEXT_LIMIT: i32 = ks_cast::const_i32(FIELD_CONTEXT_MAX_CHARACTERS);
 
 // Vtable slots: IUnknown
 const QUERY_INTERFACE: usize = 0;
@@ -180,7 +181,7 @@ fn take_bstr(value: BSTR) -> Option<String> {
     // SAFETY: `value` is a live BSTR this code owns, SysStringLen gives its length in units, and it is freed once, after
     // the copy.
     unsafe {
-        let units = std::slice::from_raw_parts(value, SysStringLen(value) as usize);
+        let units = std::slice::from_raw_parts(value, SysStringLen(value).to::<usize>());
         let text = String::from_utf16_lossy(units);
         SysFreeString(value);
         Some(text)
@@ -321,7 +322,7 @@ fn selection_is_read_only(automation: &ComPtr, selection: &ComPtr) -> Result<boo
 fn process_for_window(window: i64) -> i64 {
     let mut pid = 0u32;
     // SAFETY: `pid` is a valid place; a stale window leaves it 0.
-    unsafe { GetWindowThreadProcessId(window as isize as _, &mut pid) };
+    unsafe { GetWindowThreadProcessId(window.to::<isize>() as _, &mut pid) };
     i64::from(pid)
 }
 
@@ -355,7 +356,7 @@ impl WindowsFieldReader {
     pub fn new() -> Result<Self, ReaderFailure> {
         // SAFETY: the reserved pointer must be null. S_FALSE also counts as an entry to the apartment that needs its
         // CoUninitialize; a thread already in another apartment gets RPC_E_CHANGED_MODE.
-        if unsafe { CoInitializeEx(null(), COINIT_MULTITHREADED as u32) } < 0 {
+        if unsafe { CoInitializeEx(null(), COINIT_MULTITHREADED.to::<u32>()) } < 0 {
             return Err(os_error());
         }
         let mut reader = WindowsFieldReader { automation: None, thread: thread::current().id(), com: true };
@@ -490,7 +491,7 @@ impl WindowsFieldReader {
         if selection_is_read_only(automation, &selection)? {
             return Err(RefusalReason::ReadOnly.into());
         }
-        let text = get_text(&selection, (SELECTION_COMMAND_MAX_CHARACTERS + 1) as i32)?.ok_or_else(attribute_error)?;
+        let text = get_text(&selection, (SELECTION_COMMAND_MAX_CHARACTERS + 1).low::<i32>())?.ok_or_else(attribute_error)?;
         if text.contains(UIA_EMBEDDED_OBJECT_CHARACTER) {
             return Err(RefusalReason::Untypeable.into());
         }
@@ -606,7 +607,7 @@ pub fn probe_uia() -> UiaProbe {
         Ok(pattern) => UiaProbe {
             available: true,
             focused_text_pattern: Some(pattern.is_some()),
-            focused_probe_ms: Some((started.elapsed().as_secs_f64() * MILLISECONDS_PER_SECOND).round_ties_even() as i64),
+            focused_probe_ms: Some(((started.elapsed().as_secs_f64() * MILLISECONDS_PER_SECOND).round_ties_even()).to::<i64>()),
             ..UiaProbe::default()
         },
         Err(failure) => UiaProbe {

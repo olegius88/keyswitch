@@ -3,6 +3,7 @@
 //! `try_load` turns the name into a status (`unavailable: ValueError`) and `str(error)` into a message, so both are
 //! kept. Python's own messages for a broken JSON document are not reproduced, only its class.
 
+use ks_cast::To as _;
 use std::fmt;
 use std::io;
 use std::path::Path;
@@ -68,7 +69,7 @@ pub(crate) fn read_limited(path: &Path, limit: usize) -> Result<Vec<u8>, LoadErr
     use std::io::Read;
     let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
     let mut content = Vec::new();
-    file.take(limit as u64 + 1).read_to_end(&mut content).map_err(|error| LoadError::os(&error, path))?;
+    file.take(limit.to::<u64>() + 1).read_to_end(&mut content).map_err(|error| LoadError::os(&error, path))?;
     Ok(content)
 }
 
@@ -96,7 +97,7 @@ pub(crate) fn py_equals_int(value: &serde_json::Value, number: i64) -> bool {
     match value {
         serde_json::Value::Bool(flag) => i64::from(*flag) == number,
         serde_json::Value::Number(found) => {
-            found.as_i64().map_or_else(|| found.as_f64() == Some(number as f64), |found| found == number)
+            found.as_i64().map_or_else(|| found.as_f64() == Some(number.to::<f64>()), |found| found == number)
         }
         _ => false,
     }

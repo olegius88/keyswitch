@@ -3,6 +3,7 @@
 //! `prefix_exposure_inventory`). No model, dictionary score or text of a test row takes part in selection, and no test
 //! text is printed. `freeze` and `technical` write rows; `reconcile` closes the physical families over them; `merge` joins
 //! the two without reading a test row; `inventory` lists what the prefix model has seen.
+use ks_cast::To as _;
 use crate::corpus::{CorpusRow, checksum, read_json, typo_variants};
 use crate::evaluate::{select_rows, sequence_plan};
 use crate::freeze::{Command, Sentence, SurfaceToken, Union, family_aliases, read_commands, read_conllu, row_identifier, select_sentences, sentence_rows, source_inventory};
@@ -482,7 +483,7 @@ pub fn reconcile(root: &Path, directory: &Path, source_root: &Path, report: &Pat
     let manifest = read_json(&directory.join("manifest.json"))?;
     let namespace = manifest["namespace"].as_str().ok_or("a namespace")?.to_owned();
     let sampling = &manifest["sampling"];
-    let bound = |name: &str| sampling[name].as_u64().map(|value| value as usize).ok_or_else(|| format!("sampling.{name}"));
+    let bound = |name: &str| sampling[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("sampling.{name}"));
     let (sentences, metadata, sources) = base_sentences(source_root, &namespace, bound("max_documents_per_source")?, bound("max_sentences_per_document")?)?;
     if Value::Array(sources) != manifest["sources"] {
         return Err("pinned source inventory differs from original freeze".to_owned());
@@ -866,7 +867,7 @@ fn inspect_gzip(path: &Path, mut raw: Option<&mut Sha256>) -> Result<Streamed, S
             raw.update(&line);
         }
         rows += 1;
-        size += line.len() as u64;
+        size += line.len().to::<u64>();
     }
     Ok(Streamed { sha256: checksum(path)?, content_sha256: hex(&hasher.finalize()), rows, raw_bytes: size })
 }
@@ -947,7 +948,7 @@ fn verify_origin(directory: &Path) -> Result<Origin, String> {
     for field in MEMBERSHIP_FIELDS {
         membership.insert(field, hash_list(&membership_value[field])?);
     }
-    if membership["row_ids_sha256"].len() as u64 != files["test"].rows {
+    if (membership["row_ids_sha256"].len()).to::<u64>() != files["test"].rows {
         return Err("test membership row count mismatch".to_owned());
     }
     if files["test"].rows != 0 && membership.values().any(Vec::is_empty) {
@@ -1082,7 +1083,7 @@ pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, out
         }
         files.insert(split.to_owned(), json!({"path": name, "sha256": checksum(&destination)?, "content_sha256": digest, "rows": rows, "raw_bytes": bytes, "gzip_members_from": ["base", "technical"]}));
     }
-    if membership["row_ids_sha256"].as_array().map(Vec::len).unwrap_or(0) as u64 != files["test"]["rows"].as_u64().unwrap_or(0) {
+    if (membership["row_ids_sha256"].as_array().map(Vec::len).unwrap_or(0)).to::<u64>() != files["test"]["rows"].as_u64().unwrap_or(0) {
         return Err("combined test membership row count mismatch".to_owned());
     }
     let membership_path = output.join("test-membership.json");

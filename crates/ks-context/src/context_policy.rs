@@ -1,5 +1,6 @@
 //! Contextual policy orchestration, independent of keyboard injection.
 
+use ks_cast::To as _;
 use crate::constants::{
     FIELD_CARET_LAG_MAX_CHARACTERS, FIELD_PENDING_MAX_CHARACTERS, MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, RUSSIAN_SLANG_MIN_TERM_BUCKET,
     WORD_QUOTES,
@@ -31,7 +32,7 @@ pub const PAUSE_WORD_START_REASON: &str = "на паузе это может б�
 pub const SUGGESTION_CONFIRMED_REASON: &str = "контекстная модель предлагает другую раскладку, детектор её подтверждает";
 
 /// The schema of the action model: an older model decides by the older rules (`self.model.feature_version`).
-const ACTION_MODEL: i64 = crate::constants::CONTEXT_ACTION_FEATURE_VERSION as i64;
+const ACTION_MODEL: i64 = ks_cast::const_i64(crate::constants::CONTEXT_ACTION_FEATURE_VERSION);
 
 /// An exception the policy raises: a `KeyError` of the detector, or a `ValueError` of the features.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,7 +198,7 @@ pub fn ends_with_typed(text: &str, typed: &str) -> bool {
         return true;
     }
     let (text_length, typed_length) = (pystr::len(text), pystr::len(typed));
-    let tail = if typed_length <= text_length { pystr::slice(text, Some((text_length - typed_length) as i64), None) } else { "" };
+    let tail = if typed_length <= text_length { pystr::slice(text, Some((text_length - typed_length).to::<i64>()), None) } else { "" };
     !typed.is_empty()
         && pystr::len(tail) == typed_length
         && pystr::slice(tail, Some(1), None) == pystr::slice(typed, Some(1), None)
@@ -212,7 +213,7 @@ pub fn ends_with_typed(text: &str, typed: &str) -> bool {
 /// typed at 40 ms a key into a GTK window of KDE Plasma kept its `e` in five of ten runs (27.10.2026).
 pub fn shown_ahead(before: &str, typed: &str, ahead: &str) -> usize {
     for shown in (2..=pystr::len(ahead)).rev() {
-        if before.ends_with(pystr::slice(ahead, None, Some(shown as i64))) && ends_with_typed(pystr::slice(before, None, Some(-(shown as i64))), typed) {
+        if before.ends_with(pystr::slice(ahead, None, Some(shown.to::<i64>()))) && ends_with_typed(pystr::slice(before, None, Some(-(shown as i64))), typed) {
             return shown;
         }
     }
@@ -247,7 +248,7 @@ pub fn typed_short_of(before: &str, after: &str, typed: &str) -> Option<String> 
 /// to end with `typed` itself, the boundary already part of it and nothing after it.
 pub fn caret_lag(before: &str, after: &str, typed: &str, exact: bool) -> Option<usize> {
     for lag in 0..=FIELD_CARET_LAG_MAX_CHARACTERS.min(pystr::len(after)) {
-        let head = format!("{before}{}", pystr::slice(after, None, Some(lag as i64)));
+        let head = format!("{before}{}", pystr::slice(after, None, Some(lag.to::<i64>())));
         if ends_with_typed(&head, typed) || (!exact && ends_with_typed(pystr::slice(&head, None, Some(-1)), typed)) {
             return Some(lag);
         }
@@ -457,12 +458,12 @@ impl ContextPolicy {
                     ignored_read = "field_input_buffer";
                 } else {
                     if let Some(lag) = caret_lag(&snapshot.before, &snapshot.after, &anchor, false).filter(|&lag| lag != 0) {
-                        let moved = pystr::slice(&snapshot.after, None, Some(lag as i64)).to_string();
-                        snapshot.after = pystr::slice(&snapshot.after, Some(lag as i64), None).to_string();
+                        let moved = pystr::slice(&snapshot.after, None, Some(lag.to::<i64>())).to_string();
+                        snapshot.after = pystr::slice(&snapshot.after, Some(lag.to::<i64>()), None).to_string();
                         snapshot.before.push_str(&moved);
                     }
                     let before = snapshot.before.clone();
-                    let anchor_length = pystr::len(&anchor) as i64;
+                    let anchor_length = pystr::len(&anchor).to::<i64>();
                     let behind = |text: &str, cut: i64| pystr::slice(text, None, Some(-cut)).to_string();
                     let ahead = options.typed_ahead.filter(|_| !anchor.is_empty()).map(|ahead| shown_ahead(&before, &anchor, &format!("{}{}", options.boundary_text, ahead())));
                     if !anchor.is_empty() && ends_with_typed(&before, &anchor) {
@@ -473,14 +474,14 @@ impl ContextPolicy {
                         field = snapshot;
                     } else if let Some(ahead) = ahead.filter(|&ahead| ahead != 0) {
                         // Asked after the read: every key the field shows was queued before the window got it.
-                        snapshot.before = behind(&before, anchor_length + ahead as i64);
+                        snapshot.before = behind(&before, anchor_length + ahead.to::<i64>());
                         field = snapshot;
                     } else if let Some(shown) = (!anchor.is_empty()).then(|| typed_short_of(&before, &snapshot.after, &anchor)).flatten() {
                         // The editor has not shown the last letters yet: the word is the one typed and is decided on
                         // its keys, and its correction waits for the field to show it (engine._waits_for_field).
                         // Refused as a changed field, `ашкуащч` stayed for `firefox` in Antigravity (the owner's
                         // typing, 19.10.2026), and a word in such an editor was never put to the model at its space.
-                        snapshot.before = behind(&before, pystr::len(&shown) as i64);
+                        snapshot.before = behind(&before, pystr::len(&shown).to::<i64>());
                         field = snapshot;
                         ignored_read = "field_behind";
                     } else {

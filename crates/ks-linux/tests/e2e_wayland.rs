@@ -5,6 +5,7 @@
 //! program is driven, down to a frozen main process and a killed helper. `KS_E2E_DESKTOP` names the desktop. Without them
 //! it says so and passes. The harness keeps it in the VM: nothing else should have its keyboard grabbed.
 
+use ks_cast::To as _;
 mod support;
 
 use std::collections::VecDeque;
@@ -121,7 +122,7 @@ struct UinputSetup {
     vendor: u16,
     product: u16,
     version: u16,
-    name: [u8; UINPUT_MAX_NAME_BYTES as usize],
+    name: [u8; UINPUT_MAX_NAME_BYTES],
     effects: u32,
 }
 
@@ -169,9 +170,9 @@ impl PhysicalKeyboard {
             for led in WAYLAND_FORWARDED_LEDS {
                 libc::ioctl(descriptor, UI_SET_LEDBIT, led);
             }
-            let mut name = [0_u8; UINPUT_MAX_NAME_BYTES as usize];
+            let mut name = [0_u8; UINPUT_MAX_NAME_BYTES];
             name[..device.len()].copy_from_slice(device.as_bytes());
-            let setup = UinputSetup { bus: BUS_USB, vendor: VENDOR_ID, product, version: WAYLAND_UINPUT_VERSION as u16, name, effects: 0 };
+            let setup = UinputSetup { bus: BUS_USB, vendor: VENDOR_ID, product, version: WAYLAND_UINPUT_VERSION.low::<u16>(), name, effects: 0 };
             if libc::ioctl(descriptor, UI_DEV_SETUP, &setup) < 0 || libc::ioctl(descriptor, UI_DEV_CREATE) < 0 {
                 return Err(io_error("the virtual keyboard"));
             }
@@ -181,7 +182,7 @@ impl PhysicalKeyboard {
 
     fn emit(&self, code: u16, value: i32) -> Result<(), String> {
         let now = libc::timeval { tv_sec: 0, tv_usec: 0 };
-        let events = [InputEvent { time: now, kind: EV_KEY as u16, code, value }, InputEvent { time: now, kind: EV_SYN as u16, code: SYN_REPORT, value: 0 }];
+        let events = [InputEvent { time: now, kind: EV_KEY.low::<u16>(), code, value }, InputEvent { time: now, kind: EV_SYN.low::<u16>(), code: SYN_REPORT, value: 0 }];
         // SAFETY: the bytes written are those of the array, which outlives the call.
         let written = unsafe { libc::write(self.descriptor, events.as_ptr().cast(), std::mem::size_of_val(&events)) };
         if written < 0 { Err(io_error("a key event")) } else { Ok(()) }
@@ -230,7 +231,7 @@ impl PhysicalKeyboard {
             let mut event = InputEvent { time: libc::timeval { tv_sec: 0, tv_usec: 0 }, kind: 0, code: 0, value: 0 };
             // SAFETY: the kernel writes at most the size of the event it is given.
             let read = unsafe { libc::read(self.descriptor, (&raw mut event).cast(), std::mem::size_of::<InputEvent>()) };
-            if read != std::mem::size_of::<InputEvent>() as isize {
+            if read != (std::mem::size_of::<InputEvent>()).bits::<isize>() {
                 break;
             }
             if u32::from(event.kind) == EV_LED {
@@ -322,9 +323,9 @@ impl PhysicalPointer {
                 let setup = AbsSetup { code: axis, info: [0, 0, ABS_MAX, 0, 0, 0] };
                 libc::ioctl(descriptor, UI_ABS_SETUP, &setup);
             }
-            let mut name = [0_u8; UINPUT_MAX_NAME_BYTES as usize];
+            let mut name = [0_u8; UINPUT_MAX_NAME_BYTES];
             name[..TABLET_NAME.len()].copy_from_slice(TABLET_NAME.as_bytes());
-            let setup = UinputSetup { bus: BUS_USB, vendor: VENDOR_ID, product: TABLET_PRODUCT_ID, version: WAYLAND_UINPUT_VERSION as u16, name, effects: 0 };
+            let setup = UinputSetup { bus: BUS_USB, vendor: VENDOR_ID, product: TABLET_PRODUCT_ID, version: WAYLAND_UINPUT_VERSION.low::<u16>(), name, effects: 0 };
             if libc::ioctl(descriptor, UI_DEV_SETUP, &setup) < 0 || libc::ioctl(descriptor, UI_DEV_CREATE) < 0 {
                 return Err(io_error("the virtual pointer"));
             }
@@ -334,7 +335,7 @@ impl PhysicalPointer {
 
     fn emit(&self, events: &[(u32, u16, i32)]) -> Result<(), String> {
         let now = libc::timeval { tv_sec: 0, tv_usec: 0 };
-        let packed: Vec<InputEvent> = events.iter().map(|(kind, code, value)| InputEvent { time: now, kind: *kind as u16, code: *code, value: *value }).collect();
+        let packed: Vec<InputEvent> = events.iter().map(|(kind, code, value)| InputEvent { time: now, kind: (*kind).low::<u16>(), code: *code, value: *value }).collect();
         // SAFETY: the bytes written are those of the vector, which outlives the call.
         let written = unsafe { libc::write(self.descriptor, packed.as_ptr().cast(), packed.len() * std::mem::size_of::<InputEvent>()) };
         if written < 0 { Err(io_error("a pointer event")) } else { Ok(()) }
@@ -342,7 +343,7 @@ impl PhysicalPointer {
 
     /// Presses and releases the left button at a logical point of the screen.
     fn click_at(&self, (x, y): (i64, i64), (left, top, width, height): (i64, i64, i64, i64)) -> Result<(), String> {
-        let scaled = |value: i64, origin: i64, size: i64| ((value - origin) * i64::from(ABS_MAX) / (size - 1).max(1)) as i32;
+        let scaled = |value: i64, origin: i64, size: i64| ((value - origin) * i64::from(ABS_MAX) / (size - 1).max(1)).low::<i32>();
         self.emit(&[(EV_ABS, ABS_X, scaled(x, left, width)), (EV_ABS, ABS_Y, scaled(y, top, height)), (EV_SYN, SYN_REPORT, 0)])?;
         std::thread::sleep(INTER_KEY);
         for value in [KEY_PRESS, KEY_RELEASE] {
@@ -610,7 +611,7 @@ fn diagnose(binary: &Path, desktop: &str, scratch: &Path) -> Result<(), String> 
 fn send_signal(child: u32, signal: i32) {
     // SAFETY: a signal to a process this test started.
     unsafe {
-        libc::kill(child as i32, signal);
+        libc::kill(child.bits::<i32>(), signal);
     }
 }
 
@@ -903,7 +904,7 @@ fn source(desktop: &str) -> Result<(), String> {
         }
     };
     let wait = |limit: Duration, condition: &mut dyn FnMut() -> bool| -> bool {
-        pump_until(limit.as_millis() as u64, || {
+        pump_until(limit.as_millis().low::<u64>(), || {
             drain();
             condition()
         })
@@ -1013,7 +1014,7 @@ fn source(desktop: &str) -> Result<(), String> {
             let origin = backend.window_origin(focus.window);
             let (ok, x, y, width, height) = target.bounds(widget)?;
             let Some((left, top)) = origin.filter(|_| ok) else { return Err(format!("cannot place the click: origin {origin:?}, bounds known {ok}")) };
-            Ok((left + (x + width / 2.0) as i64, top + (y + height / 2.0) as i64))
+            Ok((left + (x + width / 2.0).to::<i64>(), top + (y + height / 2.0).to::<i64>()))
         };
         switch(0)?;
         clear(&target)?;

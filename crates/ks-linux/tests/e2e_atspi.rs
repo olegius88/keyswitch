@@ -2,6 +2,7 @@
 //! a password field, which must say nothing. Runs under `packaging/e2e.sh`, with `KS_E2E` set; otherwise it says so and
 //! passes.
 
+use ks_cast::To as _;
 mod support;
 
 use std::sync::mpsc::channel;
@@ -82,7 +83,7 @@ fn run() -> Result<(), String> {
         entry.set_text(&format!("{PREFIX}{SUFFIX}"));
         // Focus and an old selection owner can queue a clear: it drains before the selection under test is made.
         pump(PREPARE_SETTLE);
-        entry.set_position(PREFIX.chars().count() as i32);
+        entry.set_position(PREFIX.chars().count().low::<i32>());
         if stage == 1 {
             entry.select_region(0, SELECTION_CHARACTERS);
         }

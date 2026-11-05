@@ -4,6 +4,7 @@
 //! connection only receives the RECORD stream (a blocked read on it must not hold the control one). Every call that can
 //! fail returns the failure as a value; nothing here panics on a server's answer.
 
+use ks_cast::To as _;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use x11rb::connection::Connection;
@@ -113,12 +114,12 @@ impl XcbApi {
             .types_rtrn?
             .into_iter()
             .map(|key_type| KeyType {
-                mods_mask: u16::from(key_type.mods_mask) as u8,
+                mods_mask: u16::from(key_type.mods_mask).low::<u8>(),
                 num_levels: key_type.num_levels,
                 entries: key_type
                     .map
                     .iter()
-                    .map(|entry| TypeEntry { active: entry.active, mods_mask: u16::from(entry.mods_mask) as u8, level: entry.level })
+                    .map(|entry| TypeEntry { active: entry.active, mods_mask: u16::from(entry.mods_mask).low::<u8>(), level: entry.level })
                     .collect(),
             })
             .collect();
@@ -214,7 +215,7 @@ impl X11Api for XcbApi {
 
     fn xkb_state(&self) -> Option<XkbState> {
         let reply = self.control.xkb_get_state(XKB_USE_CORE_KBD).ok()?.reply().ok()?;
-        Some(XkbState { group: u8::from(reply.group), locked_mods: u16::from(reply.locked_mods) as u8 })
+        Some(XkbState { group: u8::from(reply.group), locked_mods: u16::from(reply.locked_mods).low::<u8>() })
     }
 
     fn lock_group(&self, group: u8) -> bool {

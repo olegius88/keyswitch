@@ -3,6 +3,7 @@
 //! This policy intentionally lives outside the frozen intent-model detector. It does not change the certified
 //! classifier toolchain and only admits reviewed, exact lexicon hits with a large corpus-frequency advantage.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::detector::{DetectionDecision, DetectorError, GroupTexts, LanguageDetector};
 use crate::language_model::LanguageModel;
@@ -137,7 +138,7 @@ pub fn word_starts(model: &LanguageModel) -> Arc<WordStarts> {
     let mut counts: HashMap<String, u32> = HashMap::new();
     for (word, _) in model.frequencies.iter() {
         if pystr::len(word) > PAUSE_WORD_START_LETTERS {
-            *counts.entry(pystr::slice(word, None, Some(PAUSE_WORD_START_LETTERS as i64)).to_string()).or_insert(0) += 1;
+            *counts.entry(pystr::slice(word, None, Some(PAUSE_WORD_START_LETTERS.to::<i64>())).to_string()).or_insert(0) += 1;
         }
     }
     let starts = Arc::new(WordStarts { counts });
@@ -226,7 +227,7 @@ pub fn trusted_short_word_decision(
         if !target_score.exact || target_score.frequency < TRUSTED_SHORT_WORD_MINIMUM_FREQUENCY {
             continue;
         }
-        let ratio = (target_score.frequency + 1) as f64 / (source_score.frequency + 1) as f64;
+        let ratio = (target_score.frequency + 1).to::<f64>() / (source_score.frequency + 1).to::<f64>();
         if ratio < TRUSTED_SHORT_WORD_MINIMUM_RATIO && !(supported && ratio >= TRUSTED_SHORT_WORD_CONTEXT_RATIO) {
             continue;
         }

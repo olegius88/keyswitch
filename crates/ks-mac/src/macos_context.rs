@@ -5,6 +5,7 @@
 //! private, where the caret sits, how much text travels - is verified without a Mac. The attribute and role names are the
 //! documented values of Apple's constants, read from `AXAttributeConstants.h` and `AXRoleConstants.h`.
 
+use ks_cast::To as _;
 use ks_backend::constants::FIELD_CONTEXT_MAX_CHARACTERS as CONTEXT_LIMIT;
 use ks_backend::{
     FieldContext, FieldRole, ManagedFieldReader, ReaderFailure, RefusalReason, SelectedText, SelectionError, SelectionRefused,
@@ -158,7 +159,7 @@ pub enum SelectionAfter {
 /// Where the selection stands once `replacement` took the place of the one at `before`: still over it, a caret right after
 /// it, or somewhere this cannot tell. The ranges count UTF-16 units, as AXSelectedTextRange does.
 pub fn selection_after(before: Option<(i64, i64)>, after: Option<(i64, i64)>, replacement: &str) -> SelectionAfter {
-    let units = replacement.encode_utf16().count() as i64;
+    let units = replacement.encode_utf16().count().to::<i64>();
     let (Some(before), Some(after)) = (before, after) else {
         return SelectionAfter::Unknown;
     };

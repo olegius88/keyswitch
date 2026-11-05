@@ -1,4 +1,5 @@
 //! Persistent per-bot cooldown and conservative group pacing including catalog pins.
+use ks_cast::To as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,7 +39,7 @@ impl<'a, C: Client> RateLimitedClient<'a, C> {
     fn perform<T>(&self, action: impl FnOnce() -> Result<T>, mutation: bool, interval: f64) -> Result<T> {
         let cooldown = self.store.get_f64(&self.cooldown_key);
         if cooldown > (self.clock)() {
-            return Err(Error::telegram_with("Telegram временно ограничил запросы. Очередь сохранена.", (cooldown - (self.clock)()) as i64 + 1, 0));
+            return Err(Error::telegram_with("Telegram временно ограничил запросы. Очередь сохранена.", (cooldown - (self.clock)()).to::<i64>() + 1, 0));
         }
         if mutation {
             let stopped = || Error::Cancelled("Отправка остановлена. Очередь сохранена.".to_owned());
@@ -60,7 +61,7 @@ impl<'a, C: Client> RateLimitedClient<'a, C> {
         match action() {
             Err(Error::Telegram { retry_after, status_code, .. }) if retry_after != 0 || status_code == TELEGRAM_RATE_LIMIT_STATUS => {
                 let delay = (if retry_after != 0 { retry_after } else { DEFAULT_RETRY_AFTER_SECONDS }).max(1) + 1;
-                self.store.set(&self.cooldown_key, &json!((self.clock)() + delay as f64))?;
+                self.store.set(&self.cooldown_key, &json!((self.clock)() + delay.to::<f64>()))?;
                 Err(Error::telegram_with("Telegram запросил паузу; автоматический повтор после её окончания.", delay, TELEGRAM_RATE_LIMIT_STATUS))
             }
             other => other,

@@ -38,7 +38,7 @@ impl KeySwitchEngine {
             _ => vec!["en_US".to_owned(), "ru_RU".to_owned()],
         });
         let mut models = Vec::new();
-        for locale in locales.iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT as usize) {
+        for locale in locales.iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()) {
             models.push(resources.engine_language_model(locale)?);
         }
         let (intent_model, intent_model_status) = resources.intent_model();
@@ -397,7 +397,7 @@ impl EngineCore {
     }
 
     pub fn _apply_layout_selection(&mut self, group: i64) {
-        if let Err(error) = self.backend.switch_group(group as i32) {
+        if let Err(error) = self.backend.switch_group(group.to::<i32>()) {
             technical_event!(self.shared, "layout_selection_failed", "requested_group": group, "error": error.to_string());
             self.shared._update(Update {
                 last_error: Some(error.to_string()),

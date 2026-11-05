@@ -1,4 +1,5 @@
 //! Training-only sparse AdaGrad softmax over packed rows.
+use ks_cast::To as _;
 use std::collections::HashMap;
 
 use crate::{ACTIONS, LOG_LOSS_PROBABILITY_FLOOR};
@@ -15,7 +16,7 @@ pub struct Packed {
 
 impl Packed {
     pub fn build<'a>(rows: impl IntoIterator<Item = (&'a [(String, f64)], u8, f64)>, names: &[String]) -> Result<Packed, String> {
-        let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index as u32)).collect();
+        let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
         let mut result = Packed { offsets: vec![0], ..Packed::default() };
         for (features, label, importance) in rows {
             if usize::from(label) >= ACTIONS || !importance.is_finite() || importance <= 0.0 {
@@ -30,7 +31,7 @@ impl Packed {
                     result.values.push(*value);
                 }
             }
-            result.offsets.push(result.indices.len() as u64);
+            result.offsets.push(result.indices.len().to::<u64>());
             result.labels.push(label);
             result.importance.push(importance);
         }
@@ -44,8 +45,8 @@ impl Packed {
 
 fn probabilities(data: &Packed, row: usize, weights: &[f64], p: &mut [f64; ACTIONS]) {
     *p = [0.0; ACTIONS];
-    for position in data.offsets[row] as usize..data.offsets[row + 1] as usize {
-        let base = data.indices[position] as usize * ACTIONS;
+    for position in data.offsets[row].to::<usize>()..(data.offsets[row + 1]).to::<usize>() {
+        let base = data.indices[position].to::<usize>() * ACTIONS;
         for k in 0..ACTIONS {
             p[k] += weights[base + k] * data.values[position];
         }
@@ -71,8 +72,8 @@ pub fn epoch(data: &Packed, weights: &mut [f64], accumulators: &mut [f64], rate:
     let mut p = [0.0; ACTIONS];
     for row in 0..data.rows() {
         probabilities(data, row, weights, &mut p);
-        for position in data.offsets[row] as usize..data.offsets[row + 1] as usize {
-            let base = data.indices[position] as usize * ACTIONS;
+        for position in data.offsets[row].to::<usize>()..(data.offsets[row + 1]).to::<usize>() {
+            let base = data.indices[position].to::<usize>() * ACTIONS;
             for (k, probability) in p.iter().enumerate() {
                 let target = if k == usize::from(data.labels[row]) { 1.0 } else { 0.0 };
                 let gradient = data.importance[row] * (probability - target) * data.values[position];

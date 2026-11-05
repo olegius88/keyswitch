@@ -4,6 +4,7 @@
 //! Python's: same escapes, same float text (`repr`), same separators, same indentation, same key order.
 //! Reading is serde_json's job (with `float_roundtrip`, so that doubles equal Python's).
 
+use ks_cast::To as _;
 use crate::pynum::float_repr;
 use serde_json::Value;
 
@@ -43,7 +44,7 @@ pub fn json_string(s: &str, ensure_ascii: bool) -> String {
             '\t' => out.push_str("\\t"),
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c.to::<u32>())),
             // With ensure_ascii everything outside space..~ is escaped, DEL included.
             c if ensure_ascii && !(' '..='~').contains(&c) => {
                 let mut units = [0u16; 2];

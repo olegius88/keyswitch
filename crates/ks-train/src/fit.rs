@@ -1,5 +1,6 @@
 //! A fit of the context action model (`train_context_action_model.fit`): the curricula, the features, the epochs, the
 //! threshold and the seal. Every value that reaches the candidate is the one the Python trainer computed, to the bit.
+use ks_cast::To as _;
 use crate::captured::{CapturedSource, captured_source_curriculum, captured_sources};
 use crate::corpus::{CALIBRATION, CorpusRow, DEVELOPMENT, FITTING_SPLITS, TRAIN, checksum, load_split, read_json};
 use crate::curricula::{self, Curriculum, Decide};
@@ -140,7 +141,7 @@ fn frozen_heads(options: &Value) -> Result<BTreeMap<String, usize>, String> {
     let mut heads = BTreeMap::new();
     if let Some(table) = options.get("frozen_base").filter(|value| !value.is_null()).and_then(|value| value.get("heads")).and_then(Value::as_object) {
         for (name, head) in table {
-            heads.insert(head_prefix(name)?.to_owned(), head.int("maximum_features") as usize);
+            heads.insert(head_prefix(name)?.to_owned(), head.int("maximum_features").to::<usize>());
         }
     }
     Ok(heads)
@@ -186,7 +187,7 @@ pub fn load_inputs(root: &Path, resource_dir: &Path, corpus: &Path, options: Val
     let mut frames = HashMap::new();
     for split in FITTING_SPLITS {
         let rows = load_split(corpus, split)?;
-        let chosen = select_rows(&rows, options["maximum_source_rows"].int(split) as usize);
+        let chosen = select_rows(&rows, (options["maximum_source_rows"].int(split)).to::<usize>());
         let natural = action_rows(&tools, &chosen);
         if natural.is_empty() {
             return Err("empty fitting split".to_owned());
@@ -200,7 +201,7 @@ pub fn load_inputs(root: &Path, resource_dir: &Path, corpus: &Path, options: Val
     let mut detectors = HashMap::new();
     for profile in &profiles {
         let models = if profile == "reference_hunspell" { &lexicons_spelling } else { &portable };
-        let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group as i64, model.clone() as Arc<dyn LanguageScorer>)).collect();
+        let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
         detectors.insert(profile.clone(), LanguageDetector::new(scorers, intent.clone(), resources.protected_tokens()).map_err(|error| error.name.to_string())?);
     }
     let ortho = OrthoModel::load(&artifact_path(resource_dir), None, None, Some(resources)).map_err(|error| error.name.to_string())?;
@@ -363,8 +364,8 @@ impl Columns {
     pub fn feature_rows<'a>(&'a self, names: &'a [String]) -> impl Iterator<Item = (FeatureMap, u8, f64)> + 'a {
         let mut position = 0_usize;
         self.counts.iter().zip(self.labels.iter()).zip(self.importance.iter()).map(move |((count, label), importance)| {
-            let end = position + *count as usize;
-            let features: FeatureMap = (position..end).map(|entry| (names[self.ids[entry] as usize].clone(), self.values[entry])).collect();
+            let end = position + (*count).to::<usize>();
+            let features: FeatureMap = (position..end).map(|entry| (names[self.ids[entry].to::<usize>()].clone(), self.values[entry])).collect();
             position = end;
             (features, *label, *importance)
         })
@@ -383,7 +384,7 @@ impl Vocabulary {
         if let Some(found) = self.index.get(name) {
             return *found;
         }
-        let id = self.names.len() as u32;
+        let id = self.names.len().to::<u32>();
         self.names.push(name.to_owned());
         self.index.insert(name.to_owned(), id);
         id
@@ -406,9 +407,9 @@ fn featurize(inputs: &FitInputs, profile: &str, split: &str, frames: &[Frame]) -
             Frame::Row(row) => sorted_features(&inputs.tools, &frame_evidence(&inputs.tools, row, split, detector, Some(&inputs.ortho))),
             Frame::Span(span) => sorted_features(&inputs.tools, &span.evidence),
         };
-        chunk.counts.push(features.len() as u32);
+        chunk.counts.push(features.len().to::<u32>());
         for (name, value) in features {
-            let next = chunk.names.len() as u32;
+            let next = chunk.names.len().to::<u32>();
             let id = *local.entry(name.clone()).or_insert_with(|| {
                 chunk.names.push(name);
                 next
@@ -442,12 +443,12 @@ fn columns_of(inputs: &FitInputs, vocabulary: &mut Vocabulary, profile: &str, sp
     let mut columns = Columns::default();
     for chunk in done.into_inner().expect("the workers finished").into_iter().flatten() {
         let mapping: Vec<u32> = chunk.names.iter().map(|name| vocabulary.id(name)).collect();
-        columns.ids.extend(chunk.ids.iter().map(|id| mapping[*id as usize]));
+        columns.ids.extend(chunk.ids.iter().map(|id| mapping[(*id).to::<usize>()]));
         columns.values.extend_from_slice(&chunk.values);
         columns.counts.extend_from_slice(&chunk.counts);
     }
     for frame in frames {
-        let label = ACTION_NAMES.iter().position(|action| *action == frame.action()).expect("an action") as u8;
+        let label = (ACTION_NAMES.iter().position(|action| *action == frame.action()).expect("an action")).to::<u8>();
         let weight = frame.sample_weight();
         columns.labels.push(label);
         columns.weights.push(weight);
@@ -656,9 +657,9 @@ impl FeatureSet {
             let part = &self.columns[&(profile.clone(), TRAIN)];
             let mut position = 0;
             for (count, weight) in part.counts.iter().zip(part.weights.iter()) {
-                let end = position + *count as usize;
+                let end = position + (*count).to::<usize>();
                 for id in &part.ids[position..end] {
-                    let id = *id as usize;
+                    let id = (*id).to::<usize>();
                     let previous = values[id];
                     let increment = weight - errors[id];
                     let total = previous + increment;
@@ -678,17 +679,17 @@ impl FeatureSet {
         for part in parts {
             let mut position = 0;
             for (row, count) in part.counts.iter().enumerate() {
-                let end = position + *count as usize;
+                let end = position + (*count).to::<usize>();
                 let start_of_row = result.indices.len();
                 for entry in position..end {
-                    let target = column[part.ids[entry] as usize];
+                    let target = column[part.ids[entry].to::<usize>()];
                     if target >= 0 {
-                        result.indices.push(target as u32);
+                        result.indices.push(target.to::<u32>());
                         result.values.push(part.values[entry]);
                     }
                 }
                 debug_assert!(result.indices[start_of_row..].windows(2).all(|pair| pair[0] < pair[1]));
-                result.offsets.push(result.indices.len() as u64);
+                result.offsets.push(result.indices.len().to::<u64>());
                 result.labels.push(part.labels[row]);
                 result.importance.push(part.importance[row]);
                 position = end;
@@ -724,11 +725,11 @@ fn base_weights(names: &[String], base: &ContextModel) -> Vec<f64> {
 fn trainable_frames(data: &Packed, accumulators: &[f64]) -> Packed {
     let mut result = Packed { offsets: vec![0], ..Packed::default() };
     for row in 0..data.rows() {
-        let range = data.offsets[row] as usize..data.offsets[row + 1] as usize;
-        if data.indices[range.clone()].iter().any(|index| accumulators[*index as usize * ACTIONS].is_finite()) {
+        let range = data.offsets[row].to::<usize>()..(data.offsets[row + 1]).to::<usize>();
+        if data.indices[range.clone()].iter().any(|index| accumulators[(*index).to::<usize>() * ACTIONS].is_finite()) {
             result.indices.extend_from_slice(&data.indices[range.clone()]);
             result.values.extend_from_slice(&data.values[range]);
-            result.offsets.push(result.indices.len() as u64);
+            result.offsets.push(result.indices.len().to::<u64>());
             result.labels.push(data.labels[row]);
             result.importance.push(data.importance[row]);
         }
@@ -771,8 +772,8 @@ fn outside_lone_word(predictions: &[(String, Vec<f64>, Vec<u8>)], parts: &[&Colu
         let mut position = 0;
         let (mut subset, mut kept_labels) = (Vec::new(), Vec::new());
         for (index, count) in part.counts.iter().enumerate() {
-            let end = position + *count as usize;
-            if !part.ids[position..end].iter().any(|id| names[*id as usize].starts_with(ALONE_FEATURE_PREFIX)) {
+            let end = position + (*count).to::<usize>();
+            if !part.ids[position..end].iter().any(|id| names[(*id).to::<usize>()].starts_with(ALONE_FEATURE_PREFIX)) {
                 subset.extend_from_slice(&values[index * ACTIONS..(index + 1) * ACTIONS]);
                 kept_labels.push(labels[index]);
             }
@@ -786,7 +787,7 @@ fn outside_lone_word(predictions: &[(String, Vec<f64>, Vec<u8>)], parts: &[&Colu
         by_profile.insert(name.clone(), row);
     }
     json!({"rows": rows, "false_conversions": wrong, "converted_correctly": right, "convert_rows": possible,
-        "conversion_recall": if possible > 0 { right as f64 / possible as f64 } else { 0.0 }, "by_profile": by_profile})
+        "conversion_recall": if possible > 0 { right.to::<f64>() / possible.to::<f64>() } else { 0.0 }, "by_profile": by_profile})
 }
 
 fn selection_value(selection: &EpochSelection) -> Value {
@@ -810,8 +811,8 @@ fn own_rows(inputs: &FitInputs, frames: &[ActionRow], profile: &str, keep_import
                 packed.values.push(value);
             }
         }
-        packed.offsets.push(packed.indices.len() as u64);
-        let label = ACTION_NAMES.iter().position(|action| *action == row.action).expect("an action") as u8;
+        packed.offsets.push(packed.indices.len().to::<u64>());
+        let label = ACTION_NAMES.iter().position(|action| *action == row.action).expect("an action").to::<u8>();
         packed.labels.push(label);
         packed.importance.push(row.sample_weight * if label == 0 { keep_importance } else { 1.0 });
     }
@@ -927,14 +928,14 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     let start = base.as_ref().or(warm.as_ref());
     let own: Vec<&str> = std::iter::once(KEPT_FEATURE_PREFIX).chain(HEAD_PREFIXES.iter().map(|head| head.1)).collect();
     let carried = base.as_ref().map(carried_prefixes).unwrap_or_default();
-    let mut budgets: Vec<(String, usize)> = vec![(KEPT_FEATURE_PREFIX.to_owned(), kept_options.int("maximum_features") as usize)];
+    let mut budgets: Vec<(String, usize)> = vec![(KEPT_FEATURE_PREFIX.to_owned(), kept_options.int("maximum_features").to::<usize>())];
     budgets.extend(heads.iter().map(|(prefix, budget)| (prefix.clone(), *budget)));
     budgets.retain(|(prefix, _)| !carried.contains(prefix));
     let mut names: Vec<String> = match start {
         Some(model) => model.weights.names().map(str::to_owned).collect(),
         None => {
             let plain: HashMap<String, f64> = masses.iter().filter(|(name, _)| !own.iter().any(|prefix| name.starts_with(prefix))).map(|(name, mass)| (name.clone(), *mass)).collect();
-            select_features(&plain, minimum, options.int("maximum_features") as usize)?
+            select_features(&plain, minimum, options.int("maximum_features").to::<usize>())?
         }
     };
     for (prefix, budget) in &budgets {
@@ -942,7 +943,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
         names.extend(select_features(&part, minimum, *budget)?);
     }
     names.sort();
-    let index: HashMap<&str, u32> = names.iter().enumerate().map(|(position, name)| (name.as_str(), position as u32)).collect();
+    let index: HashMap<&str, u32> = names.iter().enumerate().map(|(position, name)| (name.as_str(), position.to::<u32>())).collect();
     let column: Vec<i64> = features.names.iter().map(|name| index.get(name.as_str()).map_or(-1, |position| i64::from(*position))).collect();
     let train_parts: Vec<&Columns> = profiles.iter().map(|profile| features.part(profile, TRAIN)).collect();
     let mut train = features.packed(&train_parts, &column);
@@ -969,7 +970,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
         println!("frames with a trainable feature: {} of {frames}", train.rows());
     }
     let rate = if warm.is_some() { options["warm_base"].float("learning_rate") } else { options.float("learning_rate") };
-    let epochs = options.int("epochs") as usize;
+    let epochs = options.int("epochs").to::<usize>();
 
     // The heads' own frames of DEVELOPMENT choose their epochs, as the kept-neighbour frames choose the kept-neighbour question's.
     let mut kept_check: Vec<(String, Packed)> = Vec::new();

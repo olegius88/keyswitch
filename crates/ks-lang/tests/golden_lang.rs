@@ -4,6 +4,7 @@
 //! `$KS_RESOURCES` (default: those of the Python tree); a test skips with a message when they are absent. Floats are
 //! compared by their bits. The first word of `words.txt` is the empty string, so the list is split on `\n` alone.
 
+use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::boundary_model::{self, BoundaryModel, Features};
 use ks_lang::boundary_policy::{self, BoundaryPolicy};
@@ -187,15 +188,15 @@ fn language_tables() {
                 };
                 fail.check("locale", name, model.locale.as_str(), header["locale"].as_str().unwrap());
                 fail.check("source", name, model.source.as_str(), header["source"].as_str().unwrap());
-                fail.check("words", name, model.frequencies.len() as u64, header["words"].as_u64().unwrap());
-                fail.check("bigrams", name, model.bigrams.len() as u64, header["bigrams"].as_u64().unwrap());
+                fail.check("words", name, model.frequencies.len().to::<u64>(), header["words"].as_u64().unwrap());
+                fail.check("bigrams", name, model.bigrams.len().to::<u64>(), header["bigrams"].as_u64().unwrap());
                 fail.check("maximum", name, model.maximum, header["maximum"].as_i64().unwrap());
                 fail.check("maximum_bigram", name, model.maximum_bigram, header["maximum_bigram"].as_i64().unwrap());
                 fail.check("_ngram_mean", name, hex(model._ngram_mean).as_str(), header["mean"].as_str().unwrap());
                 fail.check("_ngram_deviation", name, hex(model._ngram_deviation).as_str(), header["deviation"].as_str().unwrap());
                 for (slot, order) in [2, 3, 4].into_iter().enumerate() {
                     let (size, total) = model.gram_size(order);
-                    fail.check("gram size", name, size as u64, header["gram_sizes"][slot].as_u64().unwrap());
+                    fail.check("gram size", name, size.to::<u64>(), header["gram_sizes"][slot].as_u64().unwrap());
                     fail.check("gram total", name, total, header["gram_totals"][slot].as_u64().unwrap());
                 }
                 target = Target::Model(model);
@@ -203,8 +204,8 @@ fn language_tables() {
             (Value::Object(header), _) => {
                 let locale = header["locale"].as_str().unwrap();
                 let (unigrams, bigrams) = LanguageModel::_read_arpa(Path::new(&format!("/usr/share/onboard/models/{locale}.lm")));
-                fail.check("arpa words", locale, unigrams.len() as u64, header["words"].as_u64().unwrap());
-                fail.check("arpa bigrams", locale, bigrams.len() as u64, header["bigrams"].as_u64().unwrap());
+                fail.check("arpa words", locale, unigrams.len().to::<u64>(), header["words"].as_u64().unwrap());
+                fail.check("arpa bigrams", locale, bigrams.len().to::<u64>(), header["bigrams"].as_u64().unwrap());
                 target = Target::Arpa(unigrams, bigrams);
             }
             (_, Target::Model(model)) => match row[0].as_str().unwrap() {
@@ -327,7 +328,7 @@ fn ortho_words() {
     let meta: Value = serde_json::from_str(&header).expect("json");
     let fail = Failures::default();
     fail.check("status", "", status.as_str(), meta["status"].as_str().unwrap());
-    fail.check("order", "", model.order as u64, meta["order"].as_u64().unwrap());
+    fail.check("order", "", model.order.to::<u64>(), meta["order"].as_u64().unwrap());
     fail.check("version", "", model.version.as_str(), meta["version"].as_str().unwrap());
     fail.check("minimum_length", "", model.minimum_length, meta["minimum_length"].as_i64().unwrap());
     fail.check("collapse", "", model.collapse, meta["collapse"].as_i64());
@@ -424,7 +425,7 @@ fn packed_tables() {
             };
             let table = if header["table"] == "logprob" { &channel.logprob } else { &channel.backoff };
             let packed = table.packed().expect("the real tables pack");
-            fail.check("len", "", packed.len() as u64, header["len"].as_u64().unwrap());
+            fail.check("len", "", packed.len().to::<u64>(), header["len"].as_u64().unwrap());
             entries = Some(Box::new(packed.iter()));
         } else {
             let (gram, value) = entries.as_mut().unwrap().next().expect("an entry for each row");
@@ -453,7 +454,7 @@ fn packed_cases() {
         let packed = PackedGrams::pack(&table);
         fail.check("pack", name, packed.is_some(), row["packed"].as_bool().unwrap());
         if let Some(packed) = packed {
-            fail.check("len", name, packed.len() as u64, row["len"].as_u64().unwrap());
+            fail.check("len", name, packed.len().to::<u64>(), row["len"].as_u64().unwrap());
             fail.check("iter", name, packed.iter().map(|entry| entry.0).collect::<Vec<_>>(), strings(&row["iter"]).iter().map(|s| s.to_string()).collect::<Vec<_>>());
             for probe in row["probes"].as_array().unwrap() {
                 fail.check("get", probe[0].as_str().unwrap(), packed.get(probe[0].as_str().unwrap()).map(hex), probe[1].as_str().map(str::to_string));
@@ -552,7 +553,7 @@ fn lexicons() {
             fail.check("name", "", lexicon.name.as_str(), row["name"].as_str().unwrap());
             fail.check("version", "", lexicon.version.as_str(), row["version"].as_str().unwrap());
             fail.check("status", "", status.as_str(), row["status"].as_str().unwrap());
-            fail.check("len", "", lexicon.identifiers.len() as u64, row["len"].as_u64().unwrap());
+            fail.check("len", "", lexicon.identifiers.len().to::<u64>(), row["len"].as_u64().unwrap());
             fail.check("digest", "", digest_lines(lexicon.identifiers.iter()).as_str(), row["digest"].as_str().unwrap());
             for (word, want) in f.words.iter().zip(row["contains"].as_str().unwrap().chars()) {
                 fail.check("contains", word, lexicon.contains(word), want == '1');
@@ -562,7 +563,7 @@ fn lexicons() {
         } else {
             let locale = row["locale"].as_str().unwrap();
             let words = f.resources.supplement_words(locale).expect("the supplement loads");
-            fail.check("supplement len", locale, words.len() as u64, row["len"].as_u64().unwrap());
+            fail.check("supplement len", locale, words.len().to::<u64>(), row["len"].as_u64().unwrap());
             fail.check("supplement", locale, digest_lines(words.iter()).as_str(), row["digest"].as_str().unwrap());
         }
     }
@@ -643,8 +644,8 @@ fn early_switch_on_prefixes() {
     let header: Value = serde_json::from_str(&header).expect("json");
     let fail = Failures::default();
     for group in 0..2 {
-        fail.check("production len", "", production[group].len() as u64, header["production_len"][group].as_u64().unwrap());
-        fail.check("reference len", "", reference[group].len() as u64, header["reference_len"][group].as_u64().unwrap());
+        fail.check("production len", "", production[group].len().to::<u64>(), header["production_len"][group].as_u64().unwrap());
+        fail.check("reference len", "", reference[group].len().to::<u64>(), header["reference_len"][group].as_u64().unwrap());
     }
     let completed = for_each_row("early_prefixes.jsonl.gz", 1, |index, row| {
         let prefix = f.prefixes[index].as_str();
@@ -697,16 +698,16 @@ fn early_switch_misc() {
                 continue;
             }
             let stems = early_switch::_dictionary_stems(&path, ks_lang::constants::PREFIX_INDEX_DICTIONARY_MAX_BYTES);
-            fail.check("stems", locale, stems.len() as u64, row["len"].as_u64().unwrap());
+            fail.check("stems", locale, stems.len().to::<u64>(), row["len"].as_u64().unwrap());
             fail.check("stems digest", locale, digest_lines(stems.iter()).as_str(), row["digest"].as_str().unwrap());
-            fail.check("stems limited", locale, early_switch::_dictionary_stems(&path, 10).len() as u64, row["limited"].as_u64().unwrap());
+            fail.check("stems limited", locale, early_switch::_dictionary_stems(&path, 10).len().to::<u64>(), row["limited"].as_u64().unwrap());
             let source = format!("x; Hunspell: {}", path.display());
             fail.check("dictionary path", locale, early_switch::_hunspell_dictionary_path(&source), Some(path));
             let plain = f.resources.language_model(locale, std::iter::empty::<&str>()).frequencies.clone();
             index = Some(PrefixIndex::from_lexicon(plain, &source));
         } else if let Some(locale) = row.get("stems_index").and_then(Value::as_str) {
             if let Some(index) = &index {
-                fail.check("stems index len", locale, index.len() as u64, row["len"].as_u64().unwrap());
+                fail.check("stems index len", locale, index.len().to::<u64>(), row["len"].as_u64().unwrap());
             }
         } else if row[1].is_array() {
             if let Some(index) = &index {
@@ -756,7 +757,7 @@ fn boundary_words() {
     fail.check("policy threshold", "", hex(policy.threshold).as_str(), header["threshold"].as_str().unwrap());
     fail.check("policy version", "", policy.version.as_str(), header["version"].as_str().unwrap());
     fail.check("policy feature version", "", policy.feature_version, header["feature_version"].as_i64().unwrap());
-    fail.check("policy weights", "", policy.weights.len() as u64, header["weights"].as_u64().unwrap());
+    fail.check("policy weights", "", policy.weights.len().to::<u64>(), header["weights"].as_u64().unwrap());
     fail.check("policy default", "", true, header["policy_default"].as_bool().unwrap());
     fail.check("model default", "", f.resources.boundary_model().is_some(), header["model_default"].as_bool().unwrap());
     let Some(artifact) = golden("boundary-v1-test.json") else {
@@ -773,14 +774,14 @@ fn boundary_words() {
             let part = row[slot].as_array().unwrap();
             let alternative = pair.translate(word, from, to).unwrap();
             fail.check("alternative", word, alternative.as_str(), part[0].as_str().unwrap());
-            let length = pystr::len(word) as i64;
-            let tail = length - pystr::len(pystr::rstrip_chars(word, punctuation)) as i64;
+            let length = pystr::len(word).to::<i64>();
+            let tail = length - (pystr::len(pystr::rstrip_chars(word, punctuation))).to::<i64>();
             let count = tail.min(ks_lang::constants::BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS).min((length - 1).max(0)) + 1;
             let candidates: Vec<Features> = (0..count).map(|suffix| policy.extract(word, &alternative, suffix, source, target)).collect();
             fail.check("features", word, candidates.iter().map(features_digest).collect::<Vec<_>>(), texts(&part[1]));
             fail.check("probabilities", word, hexes(&policy.probabilities(&candidates).unwrap()), texts(&part[2]));
             let predicted = policy.predict(&candidates).unwrap();
-            fail.check("suffix_length", word, predicted.suffix_length.map(|length| length as u64), part[3].as_u64());
+            fail.check("suffix_length", word, predicted.suffix_length.map(|length| length.to::<u64>()), part[3].as_u64());
             fail.check("probability", word, hex(predicted.probability).as_str(), part[4].as_str().unwrap());
             fail.check("prediction version", word, predicted.version.as_str(), part[5].as_str().unwrap());
             let mut next = 6;
@@ -793,7 +794,7 @@ fn boundary_words() {
                 fail.check("features v1", word, old.iter().map(features_digest).collect::<Vec<_>>(), texts(&want[1]));
                 fail.check("probabilities v1", word, hexes(&legacy.probabilities(&old).unwrap()), texts(&want[2]));
                 let predicted = legacy.predict(&old).unwrap();
-                fail.check("suffix_length v1", word, predicted.suffix_length.map(|length| length as u64), want[3].as_u64());
+                fail.check("suffix_length v1", word, predicted.suffix_length.map(|length| length.to::<u64>()), want[3].as_u64());
                 fail.check("probability v1", word, hex(predicted.probability).as_str(), want[4].as_str().unwrap());
             }
             if index % 64 == 0 {

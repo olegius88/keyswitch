@@ -8,6 +8,7 @@
 //! (a handful of messages), so there is no libwayland either; the program runs without both libraries, and says why when it
 //! needs them.
 
+use ks_cast::To as _;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::fs::File;
@@ -71,7 +72,7 @@ pub fn clock_monotonic() -> f64 {
     let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: `now` is a valid, writable `timespec` for the call to fill in.
     unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
-    now.tv_sec as f64 + now.tv_nsec as f64 / 1e9
+    now.tv_sec.to::<f64>() + now.tv_nsec.to::<f64>() / 1e9
 }
 
 /// The failure of an operation on a path, worded as Python words an `OSError`: "[Errno 13] Permission denied: '/dev/uinput'".
@@ -101,7 +102,7 @@ pub fn bits_from_bytes(buffer: &[u8]) -> HashSet<u32> {
     for (index, value) in buffer.iter().enumerate() {
         for bit in 0..BITS_PER_BYTE {
             if (value >> bit) & 1 == 1 {
-                bits.insert((index * BITS_PER_BYTE + bit) as u32);
+                bits.insert((index * BITS_PER_BYTE + bit).low::<u32>());
             }
         }
     }
@@ -117,7 +118,7 @@ pub fn bits_from_sysfs(raw: &str) -> HashSet<u32> {
         let Ok(word) = u64::from_str_radix(token, 16) else { continue };
         for bit in 0..word_bits.min(64) {
             if (word >> bit) & 1 == 1 {
-                bits.insert((word_index * word_bits + bit) as u32);
+                bits.insert((word_index * word_bits + bit).low::<u32>());
             }
         }
     }
@@ -162,13 +163,13 @@ fn decode_input_event(bytes: &[u8]) -> RawInputEvent {
 fn read_raw(fd: RawFd, buffer: &mut [u8]) -> io::Result<usize> {
     // SAFETY: `buffer` is valid and writable for `buffer.len()` bytes.
     let count = unsafe { libc::read(fd, buffer.as_mut_ptr().cast::<c_void>(), buffer.len()) };
-    if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count as usize) }
+    if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count.bits::<usize>()) }
 }
 
 fn write_raw(fd: RawFd, data: &[u8]) -> io::Result<usize> {
     // SAFETY: `data` is valid for `data.len()` bytes.
     let count = unsafe { libc::write(fd, data.as_ptr().cast::<c_void>(), data.len()) };
-    if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count as usize) }
+    if count < 0 { Err(io::Error::last_os_error()) } else { Ok(count.bits::<usize>()) }
 }
 
 fn close_raw(fd: RawFd) -> io::Result<()> {
@@ -186,7 +187,7 @@ fn open_raw(path: &str, flags: c_int) -> io::Result<RawFd> {
 fn read_all_events(fd: RawFd) -> io::Result<Vec<RawInputEvent>> {
     let size = std::mem::size_of::<libc::input_event>();
     let mut events = Vec::new();
-    let mut buffer = vec![0u8; size * EVDEV_READ_BATCH_EVENTS as usize];
+    let mut buffer = vec![0u8; size * EVDEV_READ_BATCH_EVENTS.to::<usize>()];
     loop {
         let count = match read_raw(fd, &mut buffer) {
             Ok(count) => count,
@@ -241,7 +242,7 @@ impl LinuxHelperOs {
             let mut id = [0u8; 8];
             ioctl_buffer(fd, EVIOCGID, &mut id)?;
             let text = |request: libc::c_ulong| {
-                let mut buffer = vec![0u8; EVDEV_NAME_BUFFER_BYTES as usize];
+                let mut buffer = vec![0u8; EVDEV_NAME_BUFFER_BYTES.to::<usize>()];
                 // A device without a name or a location is not an error.
                 let _ = ioctl_buffer(fd, request, &mut buffer);
                 let end = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
@@ -259,10 +260,10 @@ impl LinuxHelperOs {
                 bustype: u32::from(u16::from_ne_bytes([id[0], id[1]])),
                 vendor: u32::from(u16::from_ne_bytes([id[2], id[3]])),
                 product: u32::from(u16::from_ne_bytes([id[4], id[5]])),
-                ev_bits: bits(EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES as usize),
-                key_bits: bits(EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES as usize),
-                rel_bits: bits(EVIOCGBIT_REL_8, EVDEV_SMALL_BITMAP_BYTES as usize),
-                abs_bits: bits(EVIOCGBIT_ABS_8, EVDEV_SMALL_BITMAP_BYTES as usize),
+                ev_bits: bits(EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES.to::<usize>()),
+                key_bits: bits(EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES.to::<usize>()),
+                rel_bits: bits(EVIOCGBIT_REL_8, EVDEV_SMALL_BITMAP_BYTES.to::<usize>()),
+                abs_bits: bits(EVIOCGBIT_ABS_8, EVDEV_SMALL_BITMAP_BYTES.to::<usize>()),
             })
         })();
         let _ = close_raw(fd);
@@ -289,7 +290,7 @@ impl HelperOs for LinuxHelperOs {
                 setup.extend_from_slice(&(number as u16).to_ne_bytes());
             }
             let mut name = VIRTUAL_KEYBOARD_NAME.to_vec();
-            name.resize(UINPUT_MAX_NAME_BYTES as usize, 0);
+            name.resize(UINPUT_MAX_NAME_BYTES, 0);
             setup.extend_from_slice(&name);
             setup.extend_from_slice(&0u32.to_ne_bytes());
             ioctl_buffer(fd, UI_DEV_SETUP, &mut setup)?;
@@ -348,13 +349,13 @@ impl HelperOs for LinuxHelperOs {
     }
 
     fn query_keys_down(&mut self, fd: i32) -> io::Result<HashSet<u32>> {
-        let mut buffer = vec![0u8; EVDEV_KEY_BITMAP_BYTES as usize];
+        let mut buffer = vec![0u8; EVDEV_KEY_BITMAP_BYTES.to::<usize>()];
         ioctl_buffer(fd, EVIOCGKEY_96, &mut buffer)?;
         Ok(bits_from_bytes(&buffer))
     }
 
     fn query_caps_lock(&mut self, fd: i32) -> bool {
-        let mut buffer = vec![0u8; EVDEV_SMALL_BITMAP_BYTES as usize];
+        let mut buffer = vec![0u8; EVDEV_SMALL_BITMAP_BYTES.to::<usize>()];
         ioctl_buffer(fd, EVIOCGLED_8, &mut buffer).is_ok() && bits_from_bytes(&buffer).contains(&LED_CAPSL)
     }
 
@@ -368,7 +369,7 @@ impl HelperOs for LinuxHelperOs {
 
     fn open_inotify(&mut self) -> io::Result<i32> {
         // SAFETY: `inotify_init1` takes only flags.
-        let fd = check(unsafe { libc::inotify_init1((IN_NONBLOCK | IN_CLOEXEC) as c_int) })?;
+        let fd = check(unsafe { libc::inotify_init1((IN_NONBLOCK | IN_CLOEXEC).bits::<c_int>()) })?;
         let watched = CString::new(DEV_INPUT_DIR).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error)).and_then(|path| {
             // SAFETY: `path` is a valid NUL-terminated string and `fd` an inotify descriptor.
             check(unsafe { libc::inotify_add_watch(fd, path.as_ptr(), IN_CREATE | IN_ATTRIB | IN_DELETE) })
@@ -382,17 +383,17 @@ impl HelperOs for LinuxHelperOs {
 
     fn read_inotify(&mut self, fd: i32) -> Vec<String> {
         let mut names = Vec::new();
-        let mut buffer = vec![0u8; INOTIFY_READ_BUFFER_BYTES as usize];
+        let mut buffer = vec![0u8; INOTIFY_READ_BUFFER_BYTES.to::<usize>()];
         loop {
             let count = match read_raw(fd, &mut buffer) {
                 Ok(0) | Err(_) => break,
                 Ok(count) => count,
             };
-            let header = INOTIFY_EVENT_HEADER_BYTES as usize;
+            let header = INOTIFY_EVENT_HEADER_BYTES.to::<usize>();
             let mut offset = 0;
             while offset + header <= count {
                 // `struct inotify_event`: wd, mask, cookie, then the length of the name that follows.
-                let length = u32::from_ne_bytes([buffer[offset + 12], buffer[offset + 13], buffer[offset + 14], buffer[offset + 15]]) as usize;
+                let length = u32::from_ne_bytes([buffer[offset + 12], buffer[offset + 13], buffer[offset + 14], buffer[offset + 15]]).to::<usize>();
                 offset += header;
                 let end = (offset + length).min(count);
                 let raw_name = buffer[offset..end].split(|byte| *byte == 0).next().unwrap_or(&[]);
@@ -440,7 +441,10 @@ pub fn run_wayland_input_helper(socket_fd: i32) -> i32 {
         // SAFETY: `action` is fully initialised, and the handler is an `extern "C" fn(c_int)`.
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = request_stop as extern "C" fn(c_int) as usize;
+            #[expect(clippy::as_conversions, clippy::fn_to_numeric_cast_any, reason = "libc declares the handler as an address, and a function has no safe way to become one")]
+            {
+                action.sa_sigaction = request_stop as extern "C" fn(c_int) as usize;
+            }
             libc::sigemptyset(&mut action.sa_mask);
             libc::sigaction(signal, &action, std::ptr::null_mut());
         }
@@ -596,7 +600,7 @@ impl XkbShared {
     fn install_from_text(&self, text: &[u8]) {
         let Ok(c_text) = CString::new(text) else { return };
         // SAFETY: `context` is valid and `c_text` NUL-terminated.
-        let keymap = unsafe { (self.xkb.keymap_new_from_string)(self.context, c_text.as_ptr(), WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 as c_int, 0) };
+        let keymap = unsafe { (self.xkb.keymap_new_from_string)(self.context, c_text.as_ptr(), WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1.bits::<c_int>(), 0) };
         if !keymap.is_null() {
             self.install_keymap(keymap);
         }
@@ -721,7 +725,7 @@ impl WaylandXkbMonitor {
         let locked = if state & LOCK_MASK != 0 && core.lock_mod >= 0 { 1u32 << core.lock_mod } else { 0 };
         // SAFETY: the state belongs to the keymap in `core`, which the mutex guards; the arguments are plain numbers.
         let codepoint = unsafe {
-            (self.shared.xkb.state_update_mask)(core.state, depressed, 0, locked, 0, 0, layout_index.max(0) as u32);
+            (self.shared.xkb.state_update_mask)(core.state, depressed, 0, locked, 0, 0, layout_index.max(0).low::<u32>());
             (self.shared.xkb.state_key_get_utf32)(core.state, keycode + WAYLAND_XKB_KEYCODE_OFFSET)
         };
         let character = if codepoint > 0 { char::from_u32(codepoint).map(String::from).unwrap_or_default() } else { String::new() };
@@ -741,12 +745,12 @@ impl WaylandXkbMonitor {
         }
         // SAFETY: as in `translate_key`.
         let symbol = unsafe {
-            (self.shared.xkb.state_update_mask)(core.state, 0, 0, 0, 0, 0, layout_index.max(0) as u32);
+            (self.shared.xkb.state_update_mask)(core.state, 0, 0, 0, 0, 0, layout_index.max(0).low::<u32>());
             (self.shared.xkb.state_key_get_one_sym)(core.state, keycode + WAYLAND_XKB_KEYCODE_OFFSET)
         };
         let mut name = String::new();
         if symbol > 0 {
-            let mut buffer = [0 as c_char; XKB_KEYSYM_NAME_BUFFER_BYTES as usize];
+            let mut buffer: [c_char; XKB_KEYSYM_NAME_BUFFER_BYTES] = [0; XKB_KEYSYM_NAME_BUFFER_BYTES];
             // SAFETY: `buffer` has the size passed, and the function NUL-terminates what it writes.
             let written = unsafe { (self.shared.xkb.keysym_get_name)(symbol, buffer.as_mut_ptr(), buffer.len()) };
             if written > 0 {
@@ -834,7 +838,7 @@ fn wl_string(text: &str) -> Vec<u8> {
 }
 
 fn wl_message(object: u32, opcode: u16, arguments: &[u8]) -> Vec<u8> {
-    let size = (8 + arguments.len()) as u32;
+    let size = (8 + arguments.len()).low::<u32>();
     let mut bytes = object.to_ne_bytes().to_vec();
     bytes.extend_from_slice(&((size << 16) | u32::from(opcode)).to_ne_bytes());
     bytes.extend_from_slice(arguments);
@@ -848,7 +852,7 @@ fn wl_u32(payload: &[u8], offset: usize) -> Option<u32> {
 
 /// A string at `offset` of an event's arguments, and where it ends.
 fn wl_read_string(payload: &[u8], offset: usize) -> Option<(String, usize)> {
-    let length = wl_u32(payload, offset)? as usize;
+    let length = (wl_u32(payload, offset)?).to::<usize>();
     let start = offset + 4;
     let text = payload.get(start..start + length)?;
     let content = text.split(|byte| *byte == 0).next().unwrap_or(&[]);
@@ -890,13 +894,13 @@ impl WlSocket {
         header.msg_control = control.as_mut_ptr().cast::<c_void>();
         header.msg_controllen = control.len() as _;
         // SAFETY: `header` points to buffers that stay alive and are as large as it says.
-        let count = check(unsafe { libc::recvmsg(self.stream.as_raw_fd(), &mut header, libc::MSG_CMSG_CLOEXEC) } as c_int)? as usize;
+        let count = (check((unsafe { libc::recvmsg(self.stream.as_raw_fd(), &mut header, libc::MSG_CMSG_CLOEXEC) }).low::<c_int>())?).to::<usize>();
         // SAFETY: `header` was filled in by the kernel; the control-message macros walk only what it reports.
         unsafe {
             let mut message = libc::CMSG_FIRSTHDR(&header);
             while !message.is_null() {
                 if (*message).cmsg_level == libc::SOL_SOCKET && (*message).cmsg_type == libc::SCM_RIGHTS {
-                    let payload = (*message).cmsg_len as usize - libc::CMSG_LEN(0) as usize;
+                    let payload = ((*message).cmsg_len).to::<usize>() - libc::CMSG_LEN(0).to::<usize>();
                     let data_pointer = libc::CMSG_DATA(message).cast::<RawFd>();
                     for index in 0..payload / std::mem::size_of::<RawFd>() {
                         // SAFETY (of the descriptor): the kernel installed it in this process for this message.
@@ -915,13 +919,13 @@ impl WlSocket {
         let header = self.input.get(..8)?;
         let object = u32::from_ne_bytes([header[0], header[1], header[2], header[3]]);
         let word = u32::from_ne_bytes([header[4], header[5], header[6], header[7]]);
-        let size = (word >> 16) as usize;
+        let size = (word >> 16).to::<usize>();
         if size < 8 || self.input.len() < size {
             return None;
         }
         let payload = self.input[8..size].to_vec();
         self.input.drain(..size);
-        Some(WlMessage { object, opcode: (word & 0xFFFF) as u16, payload })
+        Some(WlMessage { object, opcode: (word & 0xFFFF).to::<u16>(), payload })
     }
 
     pub fn take_descriptor(&mut self) -> Option<OwnedFd> {
@@ -989,7 +993,7 @@ fn dispatch_event(shared: &XkbShared, socket: &mut WlSocket, state: &mut WlClien
                 let mut text = Vec::new();
                 if let (WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, true, Some(descriptor)) = (format, size > 0, descriptor) {
                     let file = File::from(descriptor);
-                    text = vec![0u8; size as usize];
+                    text = vec![0u8; size.to::<usize>()];
                     if file.read_exact_at(&mut text, 0).is_err() {
                         text.clear();
                     }
@@ -1009,11 +1013,11 @@ fn dispatch_event(shared: &XkbShared, socket: &mut WlSocket, state: &mut WlClien
             }
             // wl_keyboard.repeat_info(rate, delay)
             5 => {
-                let delay = wl_u32(&message.payload, 4).unwrap_or(0) as i32;
+                let delay = wl_u32(&message.payload, 4).unwrap_or(0).bits::<i32>();
                 if delay > 0 {
-                    shared.repeat_delay_ms.store(delay as u32, Ordering::SeqCst);
+                    shared.repeat_delay_ms.store(delay.bits::<u32>(), Ordering::SeqCst);
                     if let Some(callback) = &shared.on_repeat_delay {
-                        callback(delay as u32);
+                        callback(delay.bits::<u32>());
                     }
                 }
             }
@@ -1039,7 +1043,7 @@ fn roundtrip(shared: &XkbShared, socket: &mut WlSocket, state: &mut WlClientStat
         if remaining.is_zero() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "no answer from the compositor"));
         }
-        if socket.wait_readable(None, remaining.as_millis() as i32).0 && socket.receive()? == 0 {
+        if socket.wait_readable(None, remaining.as_millis().low::<i32>()).0 && socket.receive()? == 0 {
             return Err(io::ErrorKind::UnexpectedEof.into());
         }
     }
@@ -1164,10 +1168,10 @@ fn signal_rule(sender: &str, interface: &str, member: &str, path: &str) -> Optio
 fn anchor_of(window: &Option<DesktopWindowInfo>, pointer: Option<(i64, i64)>) -> Option<ScreenAnchor> {
     let window_id = window.as_ref().map(|window| window.window_id);
     if let Some((x, y)) = pointer {
-        return Some(ScreenAnchor { x: x as i32, y: y as i32, window: window_id });
+        return Some(ScreenAnchor { x: x.low::<i32>(), y: y.low::<i32>(), window: window_id });
     }
     let (x, y) = window.as_ref()?.center()?;
-    Some(ScreenAnchor { x: x as i32, y: y as i32, window: window_id })
+    Some(ScreenAnchor { x: x.low::<i32>(), y: y.low::<i32>(), window: window_id })
 }
 
 #[derive(Default)]
@@ -1297,7 +1301,7 @@ impl DesktopAdapter for GnomeShellAdapter {
     }
 
     fn select_layout_index(&self, index: i64) -> bool {
-        let activated = self.bool_call("ActivateLayout", &(index as u32,));
+        let activated = self.bool_call("ActivateLayout", &(index.low::<u32>(),));
         if activated {
             self.shared.refresh_state();
         }
@@ -1322,11 +1326,11 @@ impl DesktopAdapter for GnomeShellAdapter {
     }
 
     fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
-        self.bool_call("MoveWindow", &(std::process::id(), LEARNING_PROMPT_WINDOW_TITLE, x as i32, y as i32))
+        self.bool_call("MoveWindow", &(std::process::id(), LEARNING_PROMPT_WINDOW_TITLE, x.low::<i32>(), y.low::<i32>()))
     }
 
     fn activate_window(&self, window: i64) -> bool {
-        self.bool_call("ActivateWindow", &(window as u32,))
+        self.bool_call("ActivateWindow", &(window.low::<u32>(),))
     }
 
     fn isolated_layout(&self) -> bool {
@@ -1532,7 +1536,7 @@ impl DesktopAdapter for KdePlasmaAdapter {
     }
 
     fn select_layout_index(&self, index: i64) -> bool {
-        let accepted = call_bool(&self.shared.connection, KDE_KEYBOARD_BUS_NAME, KDE_KEYBOARD_PATH, KDE_KEYBOARD_INTERFACE, "setLayout", &(index as u32,)).unwrap_or(false);
+        let accepted = call_bool(&self.shared.connection, KDE_KEYBOARD_BUS_NAME, KDE_KEYBOARD_PATH, KDE_KEYBOARD_INTERFACE, "setLayout", &(index.low::<u32>(),)).unwrap_or(false);
         if accepted {
             lock(&self.shared.data).current_layout = index;
         }
@@ -1629,9 +1633,9 @@ impl SwayShared {
         let exchange = (|| -> io::Result<Vec<u8>> {
             let socket = guard.as_mut().ok_or_else(|| io::Error::other("no socket"))?;
             socket.write_all(&encode_sway_ipc(message_type, payload))?;
-            let header = Self::recv_exact(socket, SWAY_IPC_HEADER_BYTES as usize)?;
+            let header = Self::recv_exact(socket, SWAY_IPC_HEADER_BYTES.to::<usize>())?;
             let (length, _reply_type) = decode_sway_ipc_header(&header).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.0))?;
-            Self::recv_exact(socket, length as usize)
+            Self::recv_exact(socket, length.to::<usize>())
         })();
         match exchange {
             Ok(body) => serde_json::from_slice(&body).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
@@ -1702,18 +1706,18 @@ impl SwayIpcAdapter {
         let mut socket = self.shared.open_socket()?;
         let subscribe = ks_text::pyjson::json_dumps(&serde_json::json!(["window", "input"]), &ks_text::pyjson::JsonOptions::default());
         socket.write_all(&encode_sway_ipc(SWAY_IPC_SUBSCRIBE, &subscribe))?;
-        let header = SwayShared::recv_exact(&mut socket, SWAY_IPC_HEADER_BYTES as usize)?;
+        let header = SwayShared::recv_exact(&mut socket, SWAY_IPC_HEADER_BYTES.to::<usize>())?;
         let (length, _) = decode_sway_ipc_header(&header).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.0))?;
-        SwayShared::recv_exact(&mut socket, length as usize)?;
+        SwayShared::recv_exact(&mut socket, length.to::<usize>())?;
         socket.set_read_timeout(None)?;
         let mut events = socket.try_clone()?;
         *lock(&self.subscription) = Some(socket);
         let shared = self.shared.clone();
         let handle = thread::Builder::new().name("keyswitch-sway-ipc".to_owned()).spawn(move || {
             while !shared.stop.load(Ordering::SeqCst) {
-                let Ok(header) = SwayShared::recv_exact(&mut events, SWAY_IPC_HEADER_BYTES as usize) else { return };
+                let Ok(header) = SwayShared::recv_exact(&mut events, SWAY_IPC_HEADER_BYTES.to::<usize>()) else { return };
                 let Ok((length, event_type)) = decode_sway_ipc_header(&header) else { return };
-                if SwayShared::recv_exact(&mut events, length as usize).is_err() {
+                if SwayShared::recv_exact(&mut events, length.to::<usize>()).is_err() {
                     return;
                 }
                 // A refresh that fails is tried again at the next event.
@@ -1778,7 +1782,7 @@ impl DesktopAdapter for SwayIpcAdapter {
         let _ = self.shared.refresh_tree();
         let window = self.active_window()?;
         let (x, y) = window.center().unwrap_or((window.x, window.y));
-        Some(ScreenAnchor { x: x as i32, y: y as i32, window: Some(window.window_id) })
+        Some(ScreenAnchor { x: x.low::<i32>(), y: y.low::<i32>(), window: Some(window.window_id) })
     }
 
     fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
@@ -2202,7 +2206,7 @@ impl NativeWaylandApi {
 
 /// `int(time.monotonic() * 1000) & 0xFFFFFFFF`: what the engine and the helper's key stamps are compared with.
 pub fn monotonic_ms() -> u32 {
-    ((clock_monotonic() * 1000.0) as u64 & u64::from(UINT32_MODULO_MASK)) as u32
+    ((clock_monotonic() * 1000.0).to::<u64>() & u64::from(UINT32_MODULO_MASK)).low::<u32>()
 }
 
 impl WaylandApi for NativeWaylandApi {

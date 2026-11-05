@@ -5,6 +5,7 @@
 //!
 //! `FieldContext` and `FieldRole` are those of `ks-backend`; they are exported here under the Python's names.
 
+use ks_cast::To as _;
 use crate::constants::FIELD_CONTEXT_TTL_SECONDS;
 use ks_text::pystr;
 use std::sync::Arc;
@@ -114,7 +115,7 @@ impl InputContext {
         }
         // A normal boundary has already reached the editor; an intercepted Enter has not. Only strip a single observed
         // boundary, never search backwards for an older occurrence of the same word.
-        let length = pystr::len(original) as i64;
+        let length = pystr::len(original).to::<i64>();
         if !original.is_empty() && self.text.ends_with(original) {
             return pystr::slice(&self.text, None, Some(-length)).to_string();
         }

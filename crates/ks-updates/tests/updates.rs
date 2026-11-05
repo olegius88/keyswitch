@@ -1,5 +1,6 @@
 //! The behaviour contract of the updater, over a fake opener (the cases of the Python tests that matter).
 
+use ks_cast::To as _;
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::io;
@@ -168,7 +169,7 @@ fn success_validates_request_and_platform_assets() {
         let release = GitHubReleaseClient::new("0.4.0", opener.clone()).latest_release(target).unwrap();
         assert_eq!(release.version.to_string(), "1.0.0");
         assert_eq!(release.asset.name, target.asset_name(release.version));
-        assert_eq!(release.asset.size, content.len() as u64);
+        assert_eq!(release.asset.size, content.len().to::<u64>());
         assert_eq!(release.asset.sha256, sha_hex(content));
         let requests = opener.requests.lock().unwrap();
         assert_eq!(requests[0].url, LATEST_RELEASE_URL);
@@ -263,7 +264,7 @@ fn download_success_and_progress() {
     let installed = client.download(&release, &directory, &mut |done, total| progress.push((done, total))).unwrap();
     assert_eq!(std::fs::read(&installed).unwrap(), content);
     assert!(!partial.exists());
-    assert_eq!(*progress.last().unwrap(), (content.len() as u64, content.len() as u64));
+    assert_eq!(*progress.last().unwrap(), (content.len().to::<u64>(), content.len().to::<u64>()));
     assert_eq!(closed.load(Ordering::SeqCst), 1);
     std::fs::remove_dir_all(directory).unwrap();
 }
@@ -281,7 +282,7 @@ fn every_integrity_failure_deletes_the_file_and_reports_an_error() {
         changed.asset.sha256 = sha.to_string();
         changed
     };
-    let length = content.len() as u64;
+    let length = content.len().to::<u64>();
     let zeros = "0".repeat(64);
     let mut read_error = FakeResponse::new(content, DOWNLOAD_URL).0;
     read_error.read_error = true;

@@ -165,7 +165,7 @@ impl EngineCore {
         // converted next word as its language context, exactly as a word after an
         // existing neighbour would be; the installed feature-version-2 model keeps
         // the decision it was certified with.
-        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION as i64);
+        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>());
         let planned_baseline = if new_features {
             self._planned_baseline(&previous.original, &vec![(group, alternative.clone())], previous.source_group, &decision.replacement, group)?
         } else {
@@ -233,7 +233,7 @@ impl EngineCore {
         let Some(previous_boundary) = previous.boundary.clone().filter(|boundary| boundary.character == " ") else {
             return Ok(None);
         };
-        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION as i64);
+        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>());
         let length = pystr::len(&previous.original);
         if !new_features
             || boundary.character != " "
@@ -325,7 +325,7 @@ impl EngineCore {
         let Some(previous_boundary) = previous.boundary.clone().filter(|boundary| boundary.character == " ") else {
             return Ok(None);
         };
-        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION as i64);
+        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>());
         if !new_features
             || word.segmentation_open
             || boundary.character != " "
@@ -610,7 +610,7 @@ impl EngineCore {
         }
         let start = plan.clone();
         let mut plan = plan.clone();
-        let mut next_replacement = pystr::slice(&plan.replacement, None, Some(first_characters as i64)).to_owned();
+        let mut next_replacement = pystr::slice(&plan.replacement, None, Some(first_characters.to::<i64>())).to_owned();
         // Enter/Tab has not reached the editor: it is neither in the text nor replaced. A sign
         // split off the converted word's end stays literal after the whole correction.
         let closing = plan.boundary.clone().filter(|boundary| !boundary.deferred);

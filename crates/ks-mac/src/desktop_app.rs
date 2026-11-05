@@ -1,4 +1,5 @@
 //! The program on macOS: AppKit owns the main thread, the models load in the background, the menu bar item comes up at once.
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,11 +80,11 @@ pub fn install_platform() {
     }
     fn local_clock() -> logsetup::LocalTime {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        let seconds = now.as_secs() as i64;
+        let seconds = now.as_secs().bits::<i64>();
         let mut tm = Tm::default();
         // SAFETY: both pointers are valid for the call.
         unsafe { localtime_r(&seconds, &mut tm) };
-        logsetup::LocalTime { year: tm.year + 1900, month: (tm.mon + 1) as u32, day: tm.mday as u32, hour: tm.hour as u32, minute: tm.min as u32, second: tm.sec as u32, millisecond: now.subsec_millis() }
+        logsetup::LocalTime { year: tm.year + 1900, month: (tm.mon + 1).bits::<u32>(), day: tm.mday.bits::<u32>(), hour: tm.hour.bits::<u32>(), minute: tm.min.bits::<u32>(), second: tm.sec.bits::<u32>(), millisecond: now.subsec_millis() }
     }
     logsetup::set_local_clock(local_clock);
     logsetup::set_platform_description("macOS");

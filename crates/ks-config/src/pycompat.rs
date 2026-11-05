@@ -9,6 +9,7 @@
 //!   a lone surrogate escape, a float that overflows and nesting deeper than 128 levels: Python reads those, serde_json
 //!   refuses them, so the Rust side treats such a file as unreadable. A file written by either program holds none of them.
 
+use ks_cast::To as _;
 use serde_json::{Number, Value};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -121,7 +122,7 @@ pub fn py_eq(a: &Value, b: &Value) -> bool {
             (Some(Ok(x)), Some(Ok(y))) => x == y,
             (Some(Err(x)), Some(Err(y))) => x == y,
             (Some(Ok(i)), Some(Err(f))) | (Some(Err(f)), Some(Ok(i))) => {
-                f.is_finite() && f.fract() == 0.0 && f.abs() < 1.0e38 && f as i128 == i
+                f.is_finite() && f.fract() == 0.0 && f.abs() < 1.0e38 && f.to::<i128>() == i
             }
             _ => false,
         },

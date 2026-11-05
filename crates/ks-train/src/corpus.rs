@@ -1,5 +1,6 @@
 //! One frozen split of a corpus, read as `freeze_context_action_corpus.load_split` reads it, and the edits its words
 //! are given (`typo_variants`). Reads exactly the split it is asked for, never a neighbouring file.
+use ks_cast::To as _;
 use crate::physical::{hex, hex_digest};
 use flate2::read::MultiGzDecoder;
 use ks_text::pystr;
@@ -138,7 +139,7 @@ pub(crate) fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>,
         }
         rows.push(row);
     }
-    if Some(rows.len() as u64) != record["rows"].as_u64() || record["content_sha256"].as_str() != Some(&hex(&content.finalize())) {
+    if Some(rows.len().to::<u64>()) != record["rows"].as_u64() || record["content_sha256"].as_str() != Some(&hex(&content.finalize())) {
         return Err("split content checksum or row count mismatch".to_owned());
     }
     Ok(rows)
@@ -155,8 +156,8 @@ pub fn typo_variants(original: &str, identifier: &str) -> Vec<String> {
     if length < TYPO_SOURCE_MIN_CHARACTERS {
         return Vec::new();
     }
-    let inside = 1 + (draw(&format!("delete-duplicate:{identifier}")) % (length - TYPO_DELETE_DUPLICATE_MARGIN_CHARACTERS) as u64) as usize;
-    let adjacent = 1 + (draw(&format!("transpose:{identifier}")) % (length - TYPO_TRANSPOSE_MARGIN_CHARACTERS) as u64) as usize;
+    let inside = 1 + (draw(&format!("delete-duplicate:{identifier}")) % (length - TYPO_DELETE_DUPLICATE_MARGIN_CHARACTERS).to::<u64>()).to::<usize>();
+    let adjacent = 1 + (draw(&format!("transpose:{identifier}")) % (length - TYPO_TRANSPOSE_MARGIN_CHARACTERS).to::<u64>()).to::<usize>();
     let collect = |parts: &[&[char]]| -> String { parts.iter().flat_map(|part| part.iter()).collect() };
     let variants = [
         collect(&[&letters[..inside], &letters[inside + 1..]]),

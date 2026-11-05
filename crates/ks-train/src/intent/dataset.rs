@@ -1,6 +1,7 @@
 //! The frozen lexical dataset of the layout-intent model (`train_intent_model`): the Onboard words, their physical key
 //! signatures and immutable splits, the symmetric typos, the quarantine of generated signatures that cross splits or
 //! languages, the hard-negative development rows and the fingerprints every later step is bound to.
+use ks_cast::To as _;
 use crate::physical::{hex, pair};
 use ks_lang::detector::{ProtectedTokens, is_protected_token};
 use ks_lang::intent_model::{CorrectionTrigger, TRIGGERS};
@@ -56,8 +57,14 @@ impl Split {
         }
     }
 
-    fn index(self) -> usize {
-        self as usize
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Train => 0,
+            Self::Development => 1,
+            Self::Calibration => 2,
+            Self::Threshold => 3,
+            Self::Test => 4,
+        }
     }
 }
 
@@ -90,7 +97,7 @@ pub fn stable_split(signature: &str) -> Split {
 
 fn training_trigger(signature: &str) -> CorrectionTrigger {
     let digest = sha(&[b"keyswitch:intent-v1:training-trigger\0", signature.as_bytes()]);
-    TRIGGERS[(draw(&digest) % TRIGGERS.len() as u64) as usize]
+    TRIGGERS[(draw(&digest) % TRIGGERS.len().to::<u64>()).to::<usize>()]
 }
 
 fn translate(text: &str, source: &str, target: &str) -> String {
@@ -599,7 +606,7 @@ pub fn signature_set_fingerprint<'a>(signatures: impl IntoIterator<Item = &'a st
 }
 
 fn bounded_string(value: &Value, label: &str) -> Result<String, String> {
-    let text = value.as_str().filter(|text| !text.is_empty() && text.chars().count() <= CORPUS_STRING_MAX_CHARACTERS && text.chars().all(|character| character as u32 >= ASCII_CONTROL_CHARACTER_LIMIT));
+    let text = value.as_str().filter(|text| !text.is_empty() && text.chars().count() <= CORPUS_STRING_MAX_CHARACTERS && text.chars().all(|character| character.to::<u32>() >= ASCII_CONTROL_CHARACTER_LIMIT));
     text.map(str::to_owned).ok_or_else(|| format!("{label} must be non-empty bounded text"))
 }
 
@@ -632,7 +639,7 @@ pub fn decode_hard_negative_corpus(raw: &[u8], config: &Value, dataset: &Dataset
         return Err("hard-negative dictionary provenance is not pinned".to_owned());
     }
     let rows = root["rows"].as_array().ok_or("hard-negative corpus rows must be an array")?;
-    if rows.len() as i64 != signature_count {
+    if rows.len().to::<i64>() != signature_count {
         return Err("hard-negative compact row count is inconsistent".to_owned());
     }
     let mut records: BTreeMap<String, (i64, String, String, String)> = BTreeMap::new();
@@ -655,18 +662,18 @@ pub fn decode_hard_negative_corpus(raw: &[u8], config: &Value, dataset: &Dataset
         if is_protected_token(&correct_typo, protected) || is_protected_token(&wrong_typo, protected) {
             return Err("hard-negative corpus contains a protected token".to_owned());
         }
-        records_by_group[correct_group as usize].push(signature.clone());
+        records_by_group[correct_group.to::<usize>()].push(signature.clone());
         if records.insert(signature, (correct_group, correct_typo, wrong_typo, variant_kind)).is_some() {
             return Err("hard-negative corpus contains duplicate signatures".to_owned());
         }
     }
-    if records_by_group.iter().enumerate().any(|(group, signatures)| signatures.len() as i64 != words_by_group[&(group as i64)]) {
+    if records_by_group.iter().enumerate().any(|(group, signatures)| signatures.len().to::<i64>() != words_by_group[&(group as i64)]) {
         return Err("hard-negative compact rows disagree with group counts".to_owned());
     }
     if signature_set_fingerprint(records.keys().map(String::as_str)) != physical_digest {
         return Err("hard-negative physical-signature SHA-256 mismatch".to_owned());
     }
-    let role_count = |split: Split| policy["words_per_group"][split.as_str()].as_u64().unwrap_or(0) as usize;
+    let role_count = |split: Split| (policy["words_per_group"][split.as_str()].as_u64().unwrap_or(0)).to::<usize>();
     let mut role_by_signature: HashMap<String, Split> = HashMap::new();
     let mut role_words: BTreeMap<&'static str, BTreeMap<i64, i64>> = Split::ALL.iter().map(|split| (split.as_str(), BTreeMap::from([(0, 0), (1, 0)]))).collect();
     for group in [0_usize, 1] {
@@ -681,7 +688,7 @@ pub fn decode_hard_negative_corpus(raw: &[u8], config: &Value, dataset: &Dataset
             for (_, signature) in &ordered[cursor..cursor + count] {
                 role_by_signature.insert((*signature).clone(), split);
             }
-            role_words.get_mut(split.as_str()).expect("a split").insert(group as i64, count as i64);
+            role_words.get_mut(split.as_str()).expect("a split").insert(group.to::<i64>(), count.to::<i64>());
             cursor += count;
         }
         if cursor != ordered.len() {
@@ -955,7 +962,7 @@ pub fn train_only_scorer_provenance(prepared: &PreparedLexicon, quarantine: &Var
             excluded += 1;
             continue;
         }
-        counts[record.group as usize] += 1;
+        counts[record.group.to::<usize>()] += 1;
         hasher.update(format!("{{\"frequency\":{},\"group\":{},\"physical_signature\":{},\"word\":{}}}\n", record.frequency, record.group, json_string(&record.physical_signature, false), json_string(&record.word, false)).as_bytes());
     }
     json!({"kind": "train-only-character-ngram", "algorithm_version": TRAIN_ONLY_SCORER_ALGORITHM_VERSION, "ngram_orders": LANGUAGE_MODEL_NGRAM_ORDERS, "score_mode": "character-ngram-only", "spellcheck_enabled": false, "word_counts_by_group": {"0": counts[0], "1": counts[1]}, "excluded_quarantined_identities": excluded, "source_sha256": hex(&hasher.finalize())})
@@ -965,7 +972,7 @@ pub fn train_only_scorer_provenance(prepared: &PreparedLexicon, quarantine: &Var
 pub fn read_frozen(root: &Path, spec: &Value) -> Result<Vec<u8>, String> {
     let relative = spec["path"].as_str().ok_or("a frozen file without a path")?;
     let bytes = std::fs::read(root.join(relative)).map_err(|error| format!("{relative}: {error}"))?;
-    if Some(hex(&Sha256::digest(&bytes)).as_str()) != spec["sha256"].as_str() || spec["bytes"].as_u64().is_some_and(|size| size as usize != bytes.len()) {
+    if Some(hex(&Sha256::digest(&bytes)).as_str()) != spec["sha256"].as_str() || spec["bytes"].as_u64().is_some_and(|size| size.to::<usize>() != bytes.len()) {
         return Err(format!("{relative} differs from the frozen source"));
     }
     Ok(bytes)

@@ -1,6 +1,7 @@
 //! The prefix candidate (`train_prefix_v2_model`, `prefix_v2_corpus`): a bounded counterfactual curriculum from already
 //! exposed old splits. Application and role variants receive both intended-layout states; the candidate is chosen on
 //! whole sequences, with no false conversion in either lexical profile.
+use ks_cast::To as _;
 use crate::corpus::{CALIBRATION, DEVELOPMENT, FITTING_SPLITS, TRAIN, checksum, read_json};
 use crate::fit::{provenance, readable};
 use crate::kernel::{self, Packed};
@@ -128,7 +129,7 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
     }
     let mut families: Vec<&String> = natural.keys().collect();
     families.sort_by_cached_key(|name| (digest(&json!([SELECTION_NAMESPACE, name])), (*name).clone()));
-    families.truncate(max_families as usize);
+    families.truncate(max_families.to::<usize>());
     let mut result = Vec::new();
     for family in families {
         let mut candidates: Vec<&ParentWord> = natural[family].iter().collect();
@@ -163,7 +164,7 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
                     result.push(row);
                 }
             }
-            if selected.len() == max_words_per_family as usize {
+            if selected.len() == max_words_per_family.to::<usize>() {
                 break;
             }
         }
@@ -255,7 +256,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
     let states: &[bool] = if categories_correct { &[false, true] } else { &[false] };
     let parent_length = pystr::len(&parent.original);
     let length_count = parent_length.min(maximum_prefix_length);
-    let weight = 1.0 / (family_count as f64 * variants.len() as f64 * PROFILES.len() as f64 * states.len() as f64 * length_count as f64);
+    let weight = 1.0 / (family_count.to::<f64>() * variants.len().to::<f64>() * PROFILES.len().to::<f64>() * states.len().to::<f64>() * length_count.to::<f64>());
     let mut names: HashMap<String, u32> = HashMap::new();
     let mut out = ParentFrames { frames: Vec::new(), names: Vec::new(), pairs: Vec::new(), sequences: Vec::new() };
     let (from, to) = if parent.group != 0 { ("ru", "us") } else { ("us", "ru") };
@@ -263,7 +264,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
         let context_key = json!([context.before, context.application, context.role.as_str()]);
         for (profile_number, profile) in PROFILES.iter().enumerate() {
             let pair_id = format!("prefix-v2-pair:{}", digest(&json!([parent.identifier, context_key, profile])));
-            let pair_number = out.pairs.len() as u32;
+            let pair_number = out.pairs.len().to::<u32>();
             out.pairs.push(pair_id.clone());
             let table = if profile_number == 0 { &indexes.portable } else { &indexes.hunspell };
             let model_of = |group: usize| -> &LanguageModel { &models[profile_number][group] };
@@ -273,13 +274,13 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                 let full = if *desired { pair().translate(&parent.original, from, to).expect("the pair of layouts") } else { parent.original.clone() };
                 assert_eq!(pystr::len(&full), parent_length, "prefix translation changed the parent length");
                 let sequence_id = format!("prefix-v2-sequence:{}", digest(&json!([pair_id, desired])));
-                let sequence_number = out.sequences.len() as u32;
+                let sequence_number = out.sequences.len().to::<u32>();
                 out.sequences.push(sequence_id);
                 for length in 1..=length_count {
-                    let original = pystr::slice(&full, None, Some(length as i64)).to_owned();
+                    let original = pystr::slice(&full, None, Some(length.to::<i64>())).to_owned();
                     let (source_layout, target_layout) = if source != 0 { ("ru", "us") } else { ("us", "ru") };
                     let alternate = pair().translate(&original, source_layout, target_layout).expect("the pair of layouts");
-                    let ambiguous = indexes.portable[source as usize].completions(&original).completions > 0;
+                    let ambiguous = indexes.portable[source.to::<usize>()].completions(&original).completions > 0;
                     let label = if *desired {
                         if length < PREFIX_V2_SHORT_PREFIX_CHARACTERS || ambiguous { PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL } else { 1 }
                     } else {
@@ -293,7 +294,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                     let features = values
                         .into_iter()
                         .map(|(name, value)| {
-                            let next = out.names.len() as u32;
+                            let next = out.names.len().to::<u32>();
                             let id = *names.entry(name.clone()).or_insert_with(|| {
                                 out.names.push(name);
                                 next
@@ -313,10 +314,10 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                         label,
                         parent_family: family,
                         sequence: sequence_number,
-                        length: length as u32,
-                        full_length: parent_length as u32,
+                        length: length.to::<u32>(),
+                        full_length: parent_length.to::<u32>(),
                         desired: *desired,
-                        profile: profile_number as u8,
+                        profile: profile_number.to::<u8>(),
                         sample_weight: weight,
                         supported,
                         pair: pair_number,
@@ -336,7 +337,7 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
         *family_counts.entry(&parent.family).or_insert(0) += 1;
     }
     let families: Vec<String> = family_counts.keys().map(|name| (*name).to_owned()).collect();
-    let family_number: HashMap<&str, u32> = families.iter().enumerate().map(|(index, name)| (name.as_str(), index as u32)).collect();
+    let family_number: HashMap<&str, u32> = families.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
     let next = AtomicUsize::new(0);
     let done: std::sync::Mutex<Vec<Option<ParentFrames>>> = std::sync::Mutex::new((0..parents.len()).map(|_| None).collect());
     std::thread::scope(|scope| {
@@ -362,7 +363,7 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
             .map(|name| {
                 *numbers.entry(name.clone()).or_insert_with(|| {
                     names.push(name.clone());
-                    (names.len() - 1) as u32
+                    (names.len() - 1).to::<u32>()
                 })
             })
             .collect();
@@ -370,14 +371,14 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
             frame.sequence += sequences;
             frame.pair += pairs;
             for feature in &mut frame.features {
-                feature.0 = mapping[feature.0 as usize];
+                feature.0 = mapping[feature.0.to::<usize>()];
             }
             frames.push(frame);
         }
-        sequences += part.sequences.len() as u32;
-        pairs += part.pairs.len() as u32;
+        sequences += part.sequences.len().to::<u32>();
+        pairs += part.pairs.len().to::<u32>();
     }
-    SplitFrames { frames, names, families, pairs: pairs as usize }
+    SplitFrames { frames, names, families, pairs: pairs.to::<usize>() }
 }
 
 /// `feature_vocabulary`: Kahan feature mass; family weight precedes class multipliers.
@@ -388,7 +389,7 @@ fn feature_vocabulary(split: &SplitFrames, minimum: f64, maximum: usize) -> Vec<
     for frame in &split.frames {
         for (id, value) in &frame.features {
             assert!(value.is_finite(), "invalid feature value");
-            let id = *id as usize;
+            let id = (*id).to::<usize>();
             let previous = totals[id];
             let corrected = frame.sample_weight - errors[id];
             let total = previous + corrected;
@@ -410,18 +411,18 @@ fn feature_vocabulary(split: &SplitFrames, minimum: f64, maximum: usize) -> Vec<
 }
 
 fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value) -> Packed {
-    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index as u32)).collect();
+    let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
     let column: Vec<Option<u32>> = split.names.iter().map(|name| vocabulary.get(name.as_str()).copied()).collect();
     let (keep, wait) = (cfg.float("keep_importance"), cfg.float("wait_importance"));
     let mut packed = Packed { offsets: vec![0], ..Packed::default() };
     for frame in &split.frames {
         for (id, value) in &frame.features {
-            if let Some(target) = column[*id as usize] {
+            if let Some(target) = column[(*id).to::<usize>()] {
                 packed.indices.push(target);
                 packed.values.push(*value);
             }
         }
-        packed.offsets.push(packed.indices.len() as u64);
+        packed.offsets.push(packed.indices.len().to::<u64>());
         packed.labels.push(frame.label);
         let factor = if frame.label == 0 {
             keep
@@ -456,7 +457,7 @@ fn best_action(scores: &[f64]) -> usize {
 /// `scores_from_probabilities` and `sequence_scores`: each sequence's candidate conversions.
 fn sequence_scores(split: &SplitFrames, probabilities: &[f64]) -> Vec<Sequence> {
     assert_eq!(probabilities.len(), split.frames.len() * ACTIONS, "invalid prefix probability dimensions");
-    let count = split.frames.iter().map(|frame| frame.sequence as usize + 1).max().unwrap_or(0);
+    let count = split.frames.iter().map(|frame| frame.sequence.to::<usize>() + 1).max().unwrap_or(0);
     let mut sequences = vec![Sequence::default(); count];
     for (index, frame) in split.frames.iter().enumerate() {
         let scores = &probabilities[index * ACTIONS..(index + 1) * ACTIONS];
@@ -464,7 +465,7 @@ fn sequence_scores(split: &SplitFrames, probabilities: &[f64]) -> Vec<Sequence> 
             scores.iter().all(|value| value.is_finite() && (0.0..=1.0).contains(value)) && (ks_lang::py_sum(scores.iter().copied()) - 1.0).abs() <= PROBABILITY_SUM_TOLERANCE,
             "invalid prefix probabilities"
         );
-        let value = &mut sequences[frame.sequence as usize];
+        let value = &mut sequences[frame.sequence.to::<usize>()];
         value.profile = frame.profile;
         value.desired = frame.desired;
         value.full_length = frame.full_length;
@@ -493,7 +494,7 @@ impl Metrics {
 fn sequence_metrics(scores: &[Sequence], threshold: f64) -> [Metrics; 2] {
     let mut results = [Metrics::default(); 2];
     for value in scores {
-        let counts = &mut results[value.profile as usize];
+        let counts = &mut results[value.profile.to::<usize>()];
         let first = value.candidates.iter().filter(|candidate| candidate.1 >= threshold).map(|candidate| candidate.0).min();
         counts.sequences += 1;
         counts.desired += i64::from(value.desired);
@@ -543,7 +544,7 @@ fn assess(scores: &[Sequence], thresholds: &[f64], loss: f64) -> Option<Selectio
         if metrics.iter().any(|row| row.false_conversions != 0) {
             continue;
         }
-        let recall = |row: &Metrics| row.converted_before_end as f64 / row.desired as f64;
+        let recall = |row: &Metrics| row.converted_before_end.to::<f64>() / row.desired.to::<f64>();
         let mut by_profile = Map::new();
         for (name, row) in PROFILES.iter().zip(&metrics) {
             let mut value = row.value();
@@ -553,7 +554,7 @@ fn assess(scores: &[Sequence], thresholds: &[f64], loss: f64) -> Option<Selectio
         let candidate = Selection {
             threshold,
             minimum_recall: recall(&metrics[0]).min(recall(&metrics[1])),
-            pooled_recall: (metrics[0].converted_before_end + metrics[1].converted_before_end) as f64 / (metrics[0].desired + metrics[1].desired) as f64,
+            pooled_recall: (metrics[0].converted_before_end + metrics[1].converted_before_end).to::<f64>() / (metrics[0].desired + metrics[1].desired).to::<f64>(),
             loss,
             by_profile: Value::Object(by_profile),
         };
@@ -568,7 +569,7 @@ fn calibration_passed(metrics: &[Metrics; 2], minimum_recall: f64) -> bool {
     if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
         return false;
     }
-    metrics.iter().all(|counts| counts.desired != 0 && counts.sequences != counts.desired && counts.false_conversions == 0 && counts.converted_before_end as f64 / counts.desired as f64 >= minimum_recall)
+    metrics.iter().all(|counts| counts.desired != 0 && counts.sequences != counts.desired && counts.false_conversions == 0 && counts.converted_before_end.to::<f64>() / counts.desired.to::<f64>() >= minimum_recall)
 }
 
 /// The inputs of a fit; what a seal pins.
@@ -639,11 +640,11 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let portable = reference_models(request.root, &resources, false)?;
     let spelling = reference_models(request.root, &resources, true)?;
     let indexes = indexes_of(&portable, &spelling);
-    let maximum_prefix_length = cfg.int("maximum_prefix_length") as usize;
+    let maximum_prefix_length = cfg.int("maximum_prefix_length").to::<usize>();
     let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, request.jobs);
     let train_frames = frames_of(TRAIN);
     println!("train: {} frames", train_frames.frames.len());
-    let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features") as usize);
+    let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());
     if names.is_empty() {
         return Err("no prefix features survive the family-mass cutoff".to_owned());
     }
@@ -700,7 +701,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let mut probabilities = Vec::with_capacity(calibration_frames.frames.len() * ACTIONS);
     for frame in &calibration_frames.frames {
         // The runtime's own softmax: what the installed candidate answers.
-        let values: indexmap_like::Map = frame.features.iter().map(|(id, value)| (calibration_frames.names[*id as usize].clone(), *value)).collect();
+        let values: indexmap_like::Map = frame.features.iter().map(|(id, value)| (calibration_frames.names[(*id).to::<usize>()].clone(), *value)).collect();
         probabilities.extend_from_slice(&model.predict_features(&values).probabilities);
     }
     let scores = sequence_scores(&calibration_frames, &probabilities);
@@ -724,7 +725,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         let mut amounts = vec![0.0_f64; frames.families.len()];
         let mut errors = vec![0.0_f64; frames.families.len()];
         for frame in &frames.frames {
-            let family = frame.parent_family as usize;
+            let family = frame.parent_family.to::<usize>();
             let previous = amounts[family];
             let corrected = frame.sample_weight - errors[family];
             let total = previous + corrected;

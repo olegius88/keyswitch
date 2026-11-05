@@ -6,6 +6,7 @@
 //! artifact stores integers and a scale, and a value is `raw / scale` computed when asked, the very float the dict
 //! held, so a gram costs five bytes of key and two of value instead of a float and an object.
 
+use ks_cast::To as _;
 use crate::constants::{PACKED_GRAM_KEY_BYTES, PACKED_GRAM_LAST_CODE, PACKED_GRAM_MAX_CHARACTERS, PACKED_GRAM_MIN_ENTRIES};
 use crate::ortho_model::OrthoModel;
 use crate::tables::{TableBuilder, WordTable};
@@ -43,7 +44,7 @@ fn sorted_keys<'a, I: Iterator<Item = &'a str> + Clone>(names: I, max_width: usi
     for name in names.clone() {
         let mut length = 0;
         for c in name.chars() {
-            seen[c as usize / 64] |= 1 << (c as usize % 64);
+            seen[c.to::<usize>() / 64] |= 1 << (c.to::<usize>() % 64);
             length += 1;
         }
         if length == 0 || length > max_width {
@@ -52,27 +53,27 @@ fn sorted_keys<'a, I: Iterator<Item = &'a str> + Clone>(names: I, max_width: usi
         width = width.max(length);
         count += 1;
     }
-    let alphabet: Vec<char> = (0..0x11_0000u32).filter(|&cp| seen[cp as usize / 64] >> (cp % 64) & 1 == 1).filter_map(char::from_u32).collect();
+    let alphabet: Vec<char> = (0..0x11_0000u32).filter(|&cp| seen[cp.to::<usize>() / 64] >> (cp % 64) & 1 == 1).filter_map(char::from_u32).collect();
     drop(seen);
     if alphabet.len() > PACKED_GRAM_LAST_CODE || alphabet.first() == Some(&'\0') {
         return None;
     }
     let width = width.max(1);
     // A direct table for the build: a million characters are translated here.
-    let mut codes = vec![0u8; alphabet.last().map_or(0, |&c| c as usize + 1)];
+    let mut codes = vec![0u8; alphabet.last().map_or(0, |&c| c.to::<usize>() + 1)];
     for (index, &c) in alphabet.iter().enumerate() {
-        codes[c as usize] = index as u8 + 1;
+        codes[c.to::<usize>()] = index.to::<u8>() + 1;
     }
     let mut buffer = vec![0u8; count * width];
     for (slot, name) in buffer.chunks_exact_mut(width).zip(names) {
         let length = name.chars().count();
         for (byte, c) in slot[width - length..].iter_mut().zip(name.chars()) {
-            *byte = codes[c as usize];
+            *byte = codes[c.to::<usize>()];
         }
     }
     drop(codes);
-    let key = |index: u32| &buffer[index as usize * width..(index as usize + 1) * width];
-    let mut order: Vec<u32> = (0..count as u32).collect();
+    let key = |index: u32| &buffer[index.to::<usize>() * width..(index.to::<usize>() + 1) * width];
+    let mut order: Vec<u32> = (0..count.to::<u32>()).collect();
     order.sort_by(|&a, &b| key(a).cmp(key(b)));
     let mut keys = Vec::with_capacity(count * width);
     let mut winners = Vec::with_capacity(count);
@@ -95,7 +96,7 @@ impl PackedGrams {
         if sorted.winners.len() < PACKED_GRAM_MIN_ENTRIES {
             return None;
         }
-        let values = sorted.winners.iter().map(|&index| table[index as usize].1).collect();
+        let values = sorted.winners.iter().map(|&index| table[index.to::<usize>()].1).collect();
         Some(PackedGrams { alphabet: sorted.alphabet, width: sorted.width, keys: sorted.keys, values: GramValues::Float(values), scale: 1.0 })
     }
 
@@ -106,7 +107,7 @@ impl PackedGrams {
         let mut key = [0u8; PACKED_GRAM_KEY_BYTES];
         let start = self.width - gram.len();
         for (byte, c) in key[start..self.width].iter_mut().zip(gram) {
-            *byte = self.alphabet.binary_search(c).ok()? as u8 + 1;
+            *byte = (self.alphabet.binary_search(c).ok()?).to::<u8>() + 1;
         }
         let key = &key[..self.width];
         let (mut low, mut high) = (0, self.len());
@@ -149,7 +150,7 @@ impl PackedGrams {
     /// The grams in the order of their keys (shorter ones first), with their values.
     pub fn iter(&self) -> impl Iterator<Item = (String, f64)> + '_ {
         self.keys.chunks_exact(self.width).enumerate().map(|(index, key)| {
-            let gram = key.iter().filter(|&&code| code != 0).map(|&code| self.alphabet[code as usize - 1]).collect();
+            let gram = key.iter().filter(|&&code| code != 0).map(|&code| self.alphabet[code.to::<usize>() - 1]).collect();
             (gram, self.value(index))
         })
     }
@@ -177,9 +178,9 @@ impl GramTable {
     pub(crate) fn from_raw<'a, I: Iterator<Item = &'a str> + Clone>(names: I, raw: &[i32]) -> GramTable {
         match sorted_keys(names.clone(), PACKED_GRAM_KEY_BYTES) {
             Some(sorted) => {
-                let picked = sorted.winners.iter().map(|&index| raw[index as usize]);
+                let picked = sorted.winners.iter().map(|&index| raw[index.to::<usize>()]);
                 let values = if raw.iter().all(|&value| i16::try_from(value).is_ok()) {
-                    GramValues::Small(picked.map(|value| value as i16).collect())
+                    GramValues::Small(picked.map(|value| value.to::<i16>()).collect())
                 } else {
                     GramValues::Int(picked.collect())
                 };
@@ -216,14 +217,14 @@ impl GramTable {
     pub fn get(&self, gram: &str) -> Option<f64> {
         match self {
             GramTable::Packed(packed) => packed.get(gram),
-            GramTable::Plain { table, scale, .. } => table.get(gram).map(|value| value as f64 / *scale),
+            GramTable::Plain { table, scale, .. } => table.get(gram).map(|value| value.to::<f64>() / *scale),
         }
     }
 
     pub fn get_chars(&self, gram: &[char]) -> Option<f64> {
         match self {
             GramTable::Packed(packed) => packed.get_chars(gram),
-            GramTable::Plain { table, scale, .. } => table.get(&gram.iter().collect::<String>()).map(|value| value as f64 / *scale),
+            GramTable::Plain { table, scale, .. } => table.get(&gram.iter().collect::<String>()).map(|value| value.to::<f64>() / *scale),
         }
     }
 

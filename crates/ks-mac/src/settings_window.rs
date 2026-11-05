@@ -1,5 +1,6 @@
 //! The settings window in AppKit: tabs built from the same setting descriptions as on Windows, the lists and actions beside
 //! them, the learning prompt and the rule editor.
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -126,7 +127,7 @@ fn with_ui<T>(action: impl FnOnce(&mut Ui) -> T) -> Option<T> {
 extern "C-unwind" fn control_changed(_this: &AnyObject, _selector: Sel, sender: *mut AnyObject) {
     // SAFETY: the sender is the control AppKit passes for the time of this call.
     let tag: isize = unsafe { msg_send![sender, tag] };
-    let index = tag as usize;
+    let index = tag.bits::<usize>();
     run_on_main(Box::new(move || {
         with_ui(|ui| ui.save_control(index));
     }));
@@ -311,7 +312,7 @@ impl Ui {
                     y += 26.0;
                 }
             }
-            let _: () = msg_send![control, setTag: index as isize];
+            let _: () = msg_send![control, setTag: index.bits::<isize>()];
         }
         add(page, control);
         self.controls.push(control);
@@ -790,7 +791,7 @@ pub fn rule_editor(prompt: Option<&LearningPrompt>) {
             for item in matches {
                 let _: () = msg_send![condition, addItemWithTitle: string(ks_engine::rule_editor::match_label(item))];
             }
-            let selected = matches.iter().position(|item| *item == draft.r#match).unwrap_or(0) as isize;
+            let selected = matches.iter().position(|item| *item == draft.r#match).unwrap_or(0).bits::<isize>();
             let _: () = msg_send![condition, selectItemAtIndex: selected];
             let allocated: Id = msg_send![class!(NSPopUpButton), alloc];
             let choice: Id = msg_send![allocated, initWithFrame: rect(0.0, 0.0, 340.0, 26.0), pullsDown: false];
@@ -798,7 +799,7 @@ pub fn rule_editor(prompt: Option<&LearningPrompt>) {
             for item in actions {
                 let _: () = msg_send![choice, addItemWithTitle: string(ks_engine::rule_editor::action_label(item))];
             }
-            let selected = actions.iter().position(|item| *item == draft.action).unwrap_or(0) as isize;
+            let selected = actions.iter().position(|item| *item == draft.action).unwrap_or(0).bits::<isize>();
             let _: () = msg_send![choice, selectItemAtIndex: selected];
             for view in [field, condition, choice] {
                 let _: () = msg_send![box_view, addSubview: view];
@@ -814,9 +815,9 @@ pub fn rule_editor(prompt: Option<&LearningPrompt>) {
                 let pattern: Id = msg_send![field, stringValue];
                 draft.pattern = text_of(pattern);
                 let index: isize = msg_send![condition, indexOfSelectedItem];
-                draft.r#match = matches[index.max(0) as usize];
+                draft.r#match = matches[index.max(0).bits::<usize>()];
                 let index: isize = msg_send![choice, indexOfSelectedItem];
-                draft.action = actions[index.max(0) as usize];
+                draft.action = actions[index.max(0).bits::<usize>()];
                 match build_rule(&draft) {
                     Ok(rule) => {
                         if let Err(error) = engine.add_learning_rule(rule, draft.editing.as_ref(), &draft.application) {

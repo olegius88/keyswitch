@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ks-cast.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 

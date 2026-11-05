@@ -2,6 +2,7 @@
 //! UD Russian-Taiga (`mixed_typing messages`), how often words occur (`terms`, `alnum`, `short`), whose text the captured
 //! files hold (`sources`), the messages of a class for one capture (`select_capture_messages`) and the fresh comments of
 //! the developer-chat test (`build_devchat_messages`).
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::mixed::{jobs_recipe_messages, recipe_lines_above, recipe_previous_line};
 use crate::physical::{hex, hex_digest, pair};
@@ -82,7 +83,7 @@ static HTML: LazyLock<Entities> = LazyLock::new(|| {
     Entities {
         named: value["html5"].as_object().expect("names").iter().map(|(name, value)| (name.clone(), text(value))).collect(),
         invalid_charrefs: value["invalid_charrefs"].as_object().expect("charrefs").iter().map(|(name, value)| (name.parse().expect("a number"), text(value))).collect(),
-        invalid_codepoints: value["invalid_codepoints"].as_array().expect("codepoints").iter().filter_map(Value::as_u64).map(|number| number as u32).collect(),
+        invalid_codepoints: value["invalid_codepoints"].as_array().expect("codepoints").iter().filter_map(Value::as_u64).map(|number| number.to::<u32>()).collect(),
     }
 });
 
@@ -876,7 +877,7 @@ fn holds(text: &str, class: TokenClass) -> bool {
 
 fn capture_split(question: i64, development_share: f64) -> &'static str {
     let digest = hex_digest(&format!("capture-split:{question}"));
-    let draw = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") as f64 / 16_f64.powi(CHOICE_HEX_DIGITS as i32);
+    let draw = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest").to::<f64>() / 16_f64.powi(CHOICE_HEX_DIGITS.to::<i32>());
     if draw < development_share { "dev" } else { "train" }
 }
 

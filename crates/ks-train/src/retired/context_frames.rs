@@ -1,5 +1,6 @@
 //! Model-blind action interventions on real phrases of the Tatoeba snapshot, not observed user intent. The frames of the
 //! rejected context-v2 and what they were built from.
+use ks_cast::To as _;
 use crate::ortho_inputs::{Assigned, assign, load_phrases};
 use crate::physical::{hex, hex_digest, pair};
 use ks_engine::unicode_category::category;
@@ -215,8 +216,8 @@ pub fn build(phrases: &[Assigned<'_>]) -> Result<Vec<Frame>, String> {
             }
             let text_field = sample % TEXT_FIELD_MODULUS == 0;
             let after = if text_field { text_of(&text[end..(end + AFTER_MAX).min(text.len())]) } else { String::new() };
-            let trigger = TRIGGERS[(sample % TRIGGERS.len() as u64) as usize];
-            let application = APPLICATIONS[(sample % APPLICATIONS.len() as u64) as usize];
+            let trigger = TRIGGERS[(sample % TRIGGERS.len().to::<u64>()).to::<usize>()];
+            let application = APPLICATIONS[(sample % APPLICATIONS.len().to::<u64>()).to::<usize>()];
             let role = if text_field { "text" } else { "unknown" };
             let family = smaller(&token, &wrong);
             let lexical = lexical_holdout(&family);
@@ -253,7 +254,7 @@ pub fn build(phrases: &[Assigned<'_>]) -> Result<Vec<Frame>, String> {
             // A spelling error is not automatically a layout error. The intended language here is known from the
             // intervention, not inferred from dictionary membership or a teacher's prediction.
             if split != "lexical_test" && sample % SPELLING_MODULUS == 0 && length >= SPELLING_MIN && pystr::isalpha(&token) {
-                let position = 1 + (sample % (length - SPELLING_EDGE) as u64) as usize;
+                let position = 1 + (sample % (length - SPELLING_EDGE).to::<u64>()).to::<usize>();
                 let typo: String = token.chars().enumerate().filter(|(index, _)| *index != position).map(|(_, character)| character).collect();
                 let alternate = translate(&typo, own, other)?;
                 let typo_family = smaller(&typo, &alternate);

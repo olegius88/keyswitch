@@ -9,6 +9,7 @@
 //! The container is read once and kept as it is: the weights and the fingerprints are read in place from the bytes of
 //! the file (little endian), without a second copy. The training side (`encode_model`, `write_model`) is not here.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::language_model::WordScore;
 use crate::load_error::LoadError;
@@ -81,7 +82,10 @@ impl LayoutDirection {
     }
 
     fn index(self) -> usize {
-        self as usize
+        match self {
+            Self::ZeroToOne => 0,
+            Self::OneToZero => 1,
+        }
     }
 }
 
@@ -132,7 +136,7 @@ impl IntentModelStatus {
         if self.available {
             let version = self.version.as_deref().filter(|version| !version.is_empty()).unwrap_or("unknown");
             return match self.checksum.as_deref().filter(|checksum| !checksum.is_empty()) {
-                Some(checksum) => format!("{version} · sha256:{}", pystr::slice(checksum, None, Some(VERSION_HASH_CHARACTERS as i64))),
+                Some(checksum) => format!("{version} · sha256:{}", pystr::slice(checksum, None, Some(VERSION_HASH_CHARACTERS.to::<i64>()))),
                 None => version.to_string(),
             };
         }
@@ -171,7 +175,7 @@ pub struct PlattParameters {
 
 /// Bound CPU/memory use, then apply the model's Unicode normalization.
 pub fn normalize_token(token: &str) -> String {
-    let bounded = pystr::slice(token, None, Some(INTENT_RAW_TOKEN_MAX_CHARACTERS as i64));
+    let bounded = pystr::slice(token, None, Some(INTENT_RAW_TOKEN_MAX_CHARACTERS.to::<i64>()));
     normalize::nfc(&pystr::casefold(&normalize::nfc(bounded)))
 }
 
@@ -183,7 +187,7 @@ pub fn fnv1a64(value: &str, seed: u64) -> u64 {
 /// Map one feature to a bucket and a deterministic collision sign.
 pub fn signed_feature_hash(feature: &str, dimension: i64, seed: u64) -> Result<(u64, i64), LoadError> {
     validate_dimension(dimension)?;
-    Ok(hashed_feature(feature, dimension as u64, seed))
+    Ok(hashed_feature(feature, dimension.to::<u64>(), seed))
 }
 
 fn hashed_feature(feature: &str, dimension: u64, seed: u64) -> (u64, i64) {
@@ -216,7 +220,7 @@ pub fn extract_features(
     validate_dimension(dimension)?;
     validate_membership_seed(membership_seed, hash_seed)?;
     let orders = validate_orders(ngram_orders)?;
-    let dimension = dimension as u64;
+    let dimension = dimension.to::<u64>();
 
     let mut additions: Vec<(u64, f64)> = Vec::new();
     let mut fingerprints: Vec<u64> = Vec::new();
@@ -225,7 +229,7 @@ pub fn extract_features(
             return;
         }
         let (bucket, sign) = hashed_feature(name, dimension, hash_seed);
-        additions.push((bucket, value * sign as f64));
+        additions.push((bucket, value * sign.to::<f64>()));
         if character {
             fingerprints.push(fnv1a64(name, membership_seed));
         }
@@ -234,7 +238,7 @@ pub fn extract_features(
     let original = normalize_token(evidence.original);
     let alternative = normalize_token(evidence.alternative);
     let (original_length, alternative_length) = (pystr::len(&original), pystr::len(&alternative));
-    let active_orders = orders.iter().filter(|&&order| (original_length + 2) as i64 >= order || (alternative_length + 2) as i64 >= order).count();
+    let active_orders = orders.iter().filter(|&&order| (original_length + 2).to::<i64>() >= order || (alternative_length + 2).to::<i64>() >= order).count();
     let order_scale = if active_orders > 0 { 1.0 / (active_orders as f64).sqrt() } else { 1.0 };
     add_character_features(&original, evidence.source_group, -order_scale, &orders, &mut add);
     add_character_features(&alternative, evidence.target_group, order_scale, &orders, &mut add);
@@ -243,7 +247,7 @@ pub fn extract_features(
     let length_bucket = length_bucket(original_length.max(alternative_length));
     let trigger = evidence.trigger.as_str();
 
-    add("dense:length_delta", (alternative_length as f64 - original_length as f64) / INTENT_RAW_TOKEN_MAX_CHARACTERS as f64, false);
+    add("dense:length_delta", (alternative_length.to::<f64>() - original_length.to::<f64>()) / INTENT_RAW_TOKEN_MAX_CHARACTERS.to::<f64>(), false);
     add(&format!("interaction:direction:{direction}:length:{length_bucket}"), 1.0, false);
     add(&format!("interaction:trigger:{trigger}:length:{length_bucket}"), 1.0, false);
     add(&format!("length:{length_bucket}"), 1.0, false);
@@ -258,7 +262,7 @@ pub fn extract_features(
         match values.last_mut() {
             Some(entry) if last == Some(bucket) => entry.1 += delta,
             _ => {
-                values.push((bucket as u32, 0.0 + delta));
+                values.push((bucket.to::<u32>(), 0.0 + delta));
                 last = Some(bucket);
             }
         }
@@ -276,7 +280,7 @@ fn add_character_features(token: &str, group_number: i64, polarity: f64, orders:
     offsets.push(bounded.len());
     let length = offsets.len() - 1;
     for &order in orders {
-        let order = order as usize;
+        let order = order.to::<usize>();
         if length < order {
             continue;
         }
@@ -301,7 +305,7 @@ fn add_character_features(token: &str, group_number: i64, polarity: f64, orders:
             name.clear();
             name.push_str(&prefix);
             name.push_str(gram);
-            add(&name, polarity * count as f64 / norm, true);
+            add(&name, polarity * count.to::<f64>() / norm, true);
         }
     }
 }
@@ -389,7 +393,7 @@ impl LinearNgramModel {
     }
 
     fn fingerprint(&self, index: usize) -> u64 {
-        let at = self.payload_start + self.dimension as usize * KSLM_WEIGHT_ENTRY_BYTES + index * KSLM_FINGERPRINT_ENTRY_BYTES;
+        let at = self.payload_start + self.dimension.to::<usize>() * KSLM_WEIGHT_ENTRY_BYTES + index * KSLM_FINGERPRINT_ENTRY_BYTES;
         u64::from_le_bytes(self.data[at..at + KSLM_FINGERPRINT_ENTRY_BYTES].try_into().expect("eight bytes"))
     }
 
@@ -411,7 +415,7 @@ impl LinearNgramModel {
         let features = extract_features(evidence, self.dimension, self.fnv_seed, self.membership_seed, &self.ngram_orders)?;
         let mut logit = self.bias;
         for &(bucket, value) in &features.values {
-            logit += f64::from(self.weight(bucket as usize)) * self.weight_scale * value;
+            logit += f64::from(self.weight(bucket.to::<usize>())) * self.weight_scale * value;
         }
         let direction = layout_direction(evidence.source_group, evidence.target_group)?;
         let calibration = self.platt_calibration[direction.index()];
@@ -424,7 +428,7 @@ impl LinearNgramModel {
             0.0
         } else {
             let supported = features.character_fingerprints.iter().filter(|&&fingerprint| self.is_supported(fingerprint)).count();
-            supported as f64 / features.character_fingerprints.len() as f64
+            supported.to::<f64>() / features.character_fingerprints.len().to::<f64>()
         };
         Ok(LinearPrediction { logit, probability, threshold, coverage, should_switch: calibrated >= threshold_logit, model_version: self.model_version.clone() })
     }
@@ -494,9 +498,9 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, LoadError> {
     use std::io::Read;
     let maximum = KSLM_MAX_CONTAINER_BYTES;
     let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
-    let hint = file.metadata().map(|meta| meta.len() as usize).unwrap_or(0).min(maximum) + 1;
+    let hint = file.metadata().map(|meta| meta.len().to::<usize>()).unwrap_or(0).min(maximum) + 1;
     let mut data = Vec::with_capacity(hint);
-    file.take(maximum as u64 + 1).read_to_end(&mut data).map_err(|error| LoadError::os(&error, path))?;
+    file.take(maximum.to::<u64>() + 1).read_to_end(&mut data).map_err(|error| LoadError::os(&error, path))?;
     if data.len() > maximum {
         return Err(format_error("KSLM file exceeds size limit"));
     }
@@ -509,7 +513,7 @@ pub fn crc32(data: &[u8]) -> u32 {
     let table = TABLE.get_or_init(|| {
         let mut table = [0u32; 256];
         for (index, slot) in table.iter_mut().enumerate() {
-            let mut value = index as u32;
+            let mut value = index.to::<u32>();
             for _ in 0..8 {
                 value = if value & 1 != 0 { 0xEDB8_8320 ^ (value >> 1) } else { value >> 1 };
             }
@@ -517,7 +521,7 @@ pub fn crc32(data: &[u8]) -> u32 {
         }
         table
     });
-    !data.iter().fold(!0u32, |crc, &byte| table[((crc ^ u32::from(byte)) & 0xFF) as usize] ^ (crc >> 8))
+    !data.iter().fold(!0u32, |crc, &byte| table[((crc ^ u32::from(byte)) & 0xFF).to::<usize>()] ^ (crc >> 8))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -538,7 +542,7 @@ fn decode_container(data: Vec<u8>, source_path: Option<PathBuf>) -> Result<Linea
     let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().expect("four bytes"));
     let half = |at: usize| u16::from_le_bytes(data[at..at + 2].try_into().expect("two bytes"));
     let (magic, schema, flags) = (&data[..4], half(4), half(6));
-    let (manifest_length, payload_length, payload_crc) = (word(8) as usize, word(12) as usize, word(16));
+    let (manifest_length, payload_length, payload_crc) = (word(8).to::<usize>(), word(12).to::<usize>(), word(16));
     let manifest_digest = &data[20..52];
     if magic != MAGIC {
         return Err(format_error("invalid KSLM magic"));
@@ -602,7 +606,7 @@ fn decode_container(data: Vec<u8>, source_path: Option<PathBuf>) -> Result<Linea
         }
     }
     Ok(LinearNgramModel {
-        dimension: dimension as i64,
+        dimension: dimension.to::<i64>(),
         data,
         manifest_start,
         payload_start,
@@ -698,7 +702,7 @@ fn read_manifest(manifest_bytes: &[u8]) -> Result<Manifest, LoadError> {
     let membership_seed = validate_seed_int(manifest_int(&manifest["membership_seed"], "membership_seed")?).map_err(as_format)?;
     validate_membership_seed(membership_seed, fnv_seed).map_err(as_format)?;
     let fingerprint_count = manifest_int(&manifest["supported_fingerprint_count"], "supported_fingerprint_count")?;
-    if !(0..=KSLM_MAX_FINGERPRINTS as i128).contains(&fingerprint_count) {
+    if !(0..=KSLM_MAX_FINGERPRINTS.to::<i128>()).contains(&fingerprint_count) {
         return Err(format_error("supported_fingerprint_count exceeds KSLM size limit"));
     }
     let orders_value = manifest["ngram_orders"].as_array().ok_or_else(|| format_error("ngram_orders must be an array"))?;
@@ -722,8 +726,8 @@ fn read_manifest(manifest_bytes: &[u8]) -> Result<Manifest, LoadError> {
     };
 
     Ok(Manifest {
-        dimension: dimension as usize,
-        fingerprint_count: fingerprint_count as usize,
+        dimension: dimension.to::<usize>(),
+        fingerprint_count: fingerprint_count.to::<usize>(),
         fnv_seed,
         membership_seed,
         orders,
@@ -1000,7 +1004,7 @@ fn canonical_string(text: &[u8], at: &mut usize) -> Option<String> {
                         if code >= 0x20 || matches!(code, 0x08 | 0x09 | 0x0a | 0x0c | 0x0d) || digits.iter().any(u8::is_ascii_uppercase) || digits[..2] != *b"00" {
                             return None;
                         }
-                        decoded.push(code as u8);
+                        decoded.push(code.to::<u8>());
                     }
                     _ => return None,
                 }

@@ -1,5 +1,6 @@
 //! The questions the engine asked while public text was typed the way a person types it (`tools/mixed_typing.py capture`),
 //! pinned by SHA-256 in their manifests, and the curricula read from them.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::curricula::{Counts, Curriculum, curated};
 use crate::physical::{hex, variant_choice};
@@ -162,7 +163,7 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
     let keep_unknown_share = options.float("keep_unknown_share");
     let unknown_keep_groups: Vec<i64> = options["unknown_keep_groups"].as_array().ok_or("unknown_keep_groups")?.iter().filter_map(Value::as_i64).collect();
     let weight_scale = options.float("weight_scale");
-    let minimum_characters = options.int("minimum_word_characters") as usize;
+    let minimum_characters = options.int("minimum_word_characters").to::<usize>();
     let excluded: Vec<&str> = options["excluded_file_markers"].as_array().ok_or("excluded_file_markers")?.iter().filter_map(Value::as_str).collect();
     let name = file_name(&source.path);
     if excluded.iter().any(|marker| name.contains(marker)) {
@@ -188,11 +189,11 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
     }
     let [mut keeps_ranked, mut converts] = ranked;
     let available = (keeps_ranked.len(), converts.len());
-    let share = convert_share.unwrap_or(available.1 as f64 / (available.0 + available.1).max(1) as f64);
+    let share = convert_share.unwrap_or(available.1.to::<f64>() / ((available.0 + available.1).max(1)).to::<f64>());
     converts.sort_by(|a, b| a.0.cmp(&b.0));
-    converts.truncate((budget as f64 * share) as usize);
+    converts.truncate((budget.to::<f64>() * share).to::<usize>());
     // Correctly typed words no lexicon knows are the keep answers a uniform sample nearly never draws.
-    let keep_budget = budget as usize - converts.len();
+    let keep_budget = budget.to::<usize>() - converts.len();
     keeps_ranked.sort_by(|a, b| a.0.cmp(&b.0));
     let unknown: Vec<usize> = keeps_ranked
         .iter()
@@ -200,7 +201,7 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
         .filter(|(_, entry)| unknown_keep_groups.contains(&entry.1.source_group) && !tools.plausible_reading(&entry.1.original, entry.1.source_group))
         .map(|(index, _)| index)
         .collect();
-    let chosen_unknown: Vec<usize> = unknown.iter().copied().take((keep_budget as f64 * keep_unknown_share) as usize).collect();
+    let chosen_unknown: Vec<usize> = unknown.iter().copied().take((keep_budget.to::<f64>() * keep_unknown_share).to::<usize>()).collect();
     let taken: HashSet<usize> = chosen_unknown.iter().copied().collect();
     let mut keeps: Vec<usize> = chosen_unknown.clone();
     keeps.extend((0..keeps_ranked.len()).filter(|index| !taken.contains(index)).take(keep_budget - chosen_unknown.len()));

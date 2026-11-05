@@ -1,4 +1,5 @@
 //! The Telegram Bot API over the system's `curl`: no TLS code of our own, and the token never on a command line.
+use ks_cast::To as _;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -243,7 +244,7 @@ impl Client for Telegram {
             && path.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'/' | b'-'))
             && !path.starts_with('/')
             && !path.split('/').any(|part| part == "..")
-            && info["file_size"].as_u64().unwrap_or(0) as usize <= limit;
+            && (info["file_size"].as_u64().unwrap_or(0)).to::<usize>() <= limit;
         if !good {
             return Err(wrong());
         }

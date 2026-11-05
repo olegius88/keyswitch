@@ -216,7 +216,7 @@ fn key_frame(frames: &[(u32, Vec<u8>)], index: usize) -> (u32, bool, u32, u32, u
 fn batch(req_id: u32, check: u32, known_seq: u32, items: &[(bool, u32)]) -> Vec<u8> {
     let mut body = req_id.to_be_bytes().to_vec();
     body.extend((items.len() as u16).to_be_bytes());
-    body.push(check as u8);
+    body.push(check.low::<u8>());
     body.extend(known_seq.to_be_bytes());
     for (pressed, code) in items {
         body.push(u8::from(*pressed));
@@ -246,11 +246,11 @@ fn frames_are_packed_and_read_incrementally() {
     assert!(reader.feed(&bytes[..4]).unwrap().is_empty());
     assert_eq!(reader.feed(&bytes[4..first.len() + 2]).unwrap(), vec![(HELPER_MSG_KEY, vec![1, 2, 3])]);
     assert_eq!(reader.feed(&bytes[first.len() + 2..]).unwrap(), vec![(HELPER_MSG_POINTER, Vec::new())]);
-    assert!(pack_frame(1, &vec![0; HELPER_MAX_FRAME_BYTES as usize + 1]).is_err());
+    assert!(pack_frame(1, &vec![0; HELPER_MAX_FRAME_BYTES.to::<usize>() + 1]).is_err());
     let mut oversized = vec![1u8];
     oversized.extend((HELPER_MAX_FRAME_BYTES + 1).to_be_bytes());
     assert!(FrameReader::new().feed(&oversized).is_err());
-    assert_eq!(&first[..5], &[HELPER_MSG_KEY as u8, 0, 0, 0, 3]);
+    assert_eq!(&first[..5], &[HELPER_MSG_KEY.low::<u8>(), 0, 0, 0, 3]);
 }
 
 #[test]
@@ -496,7 +496,7 @@ fn peer_pair() -> (HelperClient, UnixStream, Arc<Mutex<Vec<HelperKey>>>) {
 fn read_frame(stream: &mut UnixStream) -> (u32, Vec<u8>) {
     let mut header = [0u8; 5];
     stream.read_exact(&mut header).unwrap();
-    let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+    let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]).to::<usize>();
     let mut payload = vec![0u8; length];
     stream.read_exact(&mut payload).unwrap();
     (u32::from(header[0]), payload)
@@ -515,15 +515,15 @@ fn the_client_starts_asks_and_answers_the_helpers_keys() {
         key.push(1);
         key.extend((EVDEV_KEY_PAUSE as u16).to_be_bytes());
         key.extend(1234u32.to_be_bytes());
-        key.push(HELPER_KEY_NEEDS_VERDICT as u8);
+        key.push(HELPER_KEY_NEEDS_VERDICT.low::<u8>());
         helper_side.write_all(&pack_frame(HELPER_MSG_KEY, &key).unwrap()).unwrap();
         // The verdict and the request come from two threads of the client, in either order.
         let mut frames = vec![read_frame(&mut helper_side), read_frame(&mut helper_side)];
         frames.sort();
-        assert_eq!(frames[0], (HELPER_CMD_VERDICT, vec![0, 0, 0, 77, HELPER_VERDICT_SWALLOW as u8]));
+        assert_eq!(frames[0], (HELPER_CMD_VERDICT, vec![0, 0, 0, 77, HELPER_VERDICT_SWALLOW.low::<u8>()]));
         let (msg_type, payload) = frames.remove(1);
         assert_eq!(msg_type, HELPER_CMD_EMIT_BATCH);
-        assert_eq!(payload[6], HELPER_EMIT_TEXT as u8);
+        assert_eq!(payload[6], HELPER_EMIT_TEXT.low::<u8>());
         assert_eq!(u32::from_be_bytes([payload[7], payload[8], payload[9], payload[10]]), 5);
         helper_side.write_all(&pack_frame(HELPER_MSG_EMIT_ACK, &ack(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]), 2)).unwrap()).unwrap();
         let (msg_type, payload) = read_frame(&mut helper_side);

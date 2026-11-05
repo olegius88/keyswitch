@@ -20,6 +20,7 @@
 //! time is UTC, computed by hand from the system clock. The same goes for the description of the system in the
 //! first line ([`set_platform_description`], Python's `platform.platform()`).
 
+use ks_cast::To as _;
 use crate::config::SettingsStore;
 use crate::constants::{BYTES_PER_MEBIBYTE, DEFAULT_LOG_ROTATION, TECHNICAL_LOG_ROTATION};
 use crate::history::data_dir;
@@ -76,7 +77,7 @@ pub fn set_platform_description(description: &str) {
 /// The broken-down UTC time of `unix_milliseconds` since the epoch (the fallback clock).
 pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
     let seconds = unix_milliseconds.div_euclid(1000);
-    let millisecond = unix_milliseconds.rem_euclid(1000) as u32;
+    let millisecond = unix_milliseconds.rem_euclid(1000).to::<u32>();
     let days = seconds.div_euclid(86_400);
     let rest = seconds.rem_euclid(86_400);
     // Days since 1970-01-01 to a civil date (H. Hinnant's algorithm).
@@ -86,16 +87,16 @@ pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
     let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * month_index + 2) / 5 + 1) as u32;
-    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 } as u32;
-    let year = (year_of_era + era * 400 + i64::from(month <= 2)) as i32;
+    let day = (day_of_year - (153 * month_index + 2) / 5 + 1).to::<u32>();
+    let month = (if month_index < 10 { month_index + 3 } else { month_index - 9 }).to::<u32>();
+    let year = (year_of_era + era * 400 + i64::from(month <= 2)).to::<i32>();
     LocalTime {
         year,
         month,
         day,
-        hour: (rest / 3600) as u32,
-        minute: (rest % 3600 / 60) as u32,
-        second: (rest % 60) as u32,
+        hour: (rest / 3600).to::<u32>(),
+        minute: (rest % 3600 / 60).to::<u32>(),
+        second: (rest % 60).to::<u32>(),
         millisecond,
     }
 }
@@ -103,7 +104,7 @@ pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
 /// The current time in UTC.
 pub fn utc_now() -> LocalTime {
     let milliseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(after) => after.as_millis() as i64,
+        Ok(after) => after.as_millis().to::<i64>(),
         Err(before) => -(before.duration().as_millis() as i64),
     };
     utc_time(milliseconds)
@@ -291,7 +292,7 @@ impl HandlerState {
                 return Ok(false);
             }
             // The length of the text with its "\n", in characters, against the size of the file in bytes.
-            let length = line.chars().count() as u64 + 1;
+            let length = line.chars().count().to::<u64>() + 1;
             if self.position + length >= self.max_bytes {
                 // Never roll over anything other than a regular file.
                 if self.base_filename.exists() && !self.base_filename.is_file() {
@@ -316,7 +317,7 @@ impl HandlerState {
         if let Some(stream) = self.stream.as_mut() {
             stream.write_all(text.as_bytes())?;
             stream.flush()?;
-            self.position += text.len() as u64;
+            self.position += text.len().to::<u64>();
         }
         Ok(())
     }
@@ -471,7 +472,7 @@ pub fn log_status() -> Map<String, Value> {
 /// `log_status` for a given log file path.
 pub fn log_status_of(path: &Path) -> Map<String, Value> {
     let handler = file_handler();
-    let size = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(-1);
+    let size = std::fs::metadata(path).map(|m| m.len().to::<i64>()).unwrap_or(-1);
     let level = locked(&ROOT).level;
     let technical = handler.as_ref().is_some_and(|h| h.max_bytes() == TECHNICAL_LOG_ROTATION.0);
     let mut status = Map::new();
@@ -626,7 +627,7 @@ mod tests {
         let dir = directory("rotate");
         let path = dir.join("keyswitch.log");
         // Room for two lines: the third one does not fit.
-        let length = format_record(&record("")).chars().count() as u64;
+        let length = (format_record(&record("")).chars().count()).to::<u64>();
         let handler = RotatingFileHandler::new(&path, 2 * (length + 1) + 1, 2).unwrap();
         for _ in 0..8 {
             handler.emit(&record(""));
@@ -636,7 +637,7 @@ mod tests {
         assert_eq!(text("keyswitch.log.1").lines().count(), 2);
         assert_eq!(text("keyswitch.log.2").lines().count(), 2);
         assert!(!dir.join("keyswitch.log.3").exists());
-        assert!(text("keyswitch.log").lines().all(|line| line.chars().count() as u64 == length));
+        assert!(text("keyswitch.log").lines().all(|line| line.chars().count().to::<u64>() == length));
     }
 
     #[test]

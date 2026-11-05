@@ -110,7 +110,7 @@ impl EngineCore {
             plan = plan_selection(command, &text, i64::from(group), &self._layout_names())?;
             if plan.changes(&text) {
                 let read = selected.as_ref().expect("just read");
-                reselected = backend.replace_selection(read, &plan.replacement, plan.target_group.map(|group| group as i32))?;
+                reselected = backend.replace_selection(read, &plan.replacement, plan.target_group.map(|group| group.to::<i32>()))?;
             }
             Ok(())
         })();

@@ -1,6 +1,7 @@
 //! The external corpora of the layout-intent model (`evaluate_intent_model`, `preseal_intent_holdout`,
 //! `freeze_intent_development_corpus`): words of the frozen Hunspell dictionaries that the Onboard lexicon does not have,
 //! their physical typos neither language knows, and the receipts that fix them before any model is looked at.
+use ks_cast::To as _;
 use super::dataset::{self, DatasetBundle, DatasetConfig, HardNegativeCorpus, LexicalExample, LexiconWord, Split, physical_signature, row_physical_signature, signature_set_fingerprint};
 use crate::corpus::read_json;
 use crate::physical::{hex, pair};
@@ -116,7 +117,7 @@ pub fn deterministic_sample<T: Clone>(examples: &[T], requested: usize) -> Vec<T
     if requested == 1 {
         return vec![examples[0].clone()];
     }
-    (0..requested).map(|index| examples[py_round(index as f64 * (examples.len() - 1) as f64 / (requested - 1) as f64) as usize].clone()).collect()
+    (0..requested).map(|index| examples[(py_round(index.to::<f64>() * (examples.len() - 1).to::<f64>() / (requested - 1).to::<f64>())).to::<usize>()].clone()).collect()
 }
 
 pub struct SealedSignatureIndex {
@@ -231,15 +232,15 @@ pub fn build_lexical_disjoint_corpus(onboard: &[HashSet<String>; 2], minimum_wor
         if snapshot.provenance.locale != LOCALES[group] {
             return Err(format!("Hunspell snapshot group {group} must be {}", LOCALES[group]));
         }
-        let disjoint: Vec<&String> = snapshot.words.iter().filter(|word| !onboard[group].contains(*word) && !physical_signature(word, group as i64).is_empty()).collect();
+        let disjoint: Vec<&String> = snapshot.words.iter().filter(|word| !onboard[group].contains(*word) && !physical_signature(word, group.to::<i64>()).is_empty()).collect();
         let selected = deterministic_sample(&disjoint, minimum_words_per_group);
         counts[group] = selected.len();
         let (from, to) = if group == 0 { ("us", "ru") } else { ("ru", "us") };
         for word in selected {
             let wrong = pair().translate(word, from, to).expect("known layouts");
-            let signature = format!("hunspell:{}", physical_signature(word, group as i64));
-            examples.push(plain_row(word, &wrong, group as i64, CorrectionTrigger::Space, false, &signature, "hunspell-disjoint"));
-            examples.push(plain_row(&wrong, word, 1 - group as i64, CorrectionTrigger::Space, true, &signature, "hunspell-disjoint"));
+            let signature = format!("hunspell:{}", physical_signature(word, group.to::<i64>()));
+            examples.push(plain_row(word, &wrong, group.to::<i64>(), CorrectionTrigger::Space, false, &signature, "hunspell-disjoint"));
+            examples.push(plain_row(&wrong, word, 1 - group.to::<i64>(), CorrectionTrigger::Space, true, &signature, "hunspell-disjoint"));
         }
     }
     let corpus_sha256 = dataset::external_corpus_fingerprint(&examples);
@@ -279,7 +280,7 @@ pub fn build_unknown_typo_disjoint_corpus(onboard: &[HashSet<String>; 2], exclud
         if snapshot.provenance.locale != LOCALES[group] {
             return Err(format!("Hunspell snapshot group {group} must be {}", LOCALES[group]));
         }
-        let mut ordered: Vec<([u8; 32], String)> = snapshot.words.iter().filter(|word| !onboard[group].contains(*word)).filter_map(|word| { let signature = physical_signature(word, group as i64); (!signature.is_empty()).then(|| (namespaced(rank_namespace, &signature), signature)) }).collect();
+        let mut ordered: Vec<([u8; 32], String)> = snapshot.words.iter().filter(|word| !onboard[group].contains(*word)).filter_map(|word| { let signature = physical_signature(word, group.to::<i64>()); (!signature.is_empty()).then(|| (namespaced(rank_namespace, &signature), signature)) }).collect();
         ordered.sort_by(|a, b| a.0.cmp(&b.0));
         let mut selected: Vec<(String, String, String, &'static str)> = Vec::new();
         for (_, signature) in &ordered {
@@ -316,8 +317,8 @@ pub fn build_unknown_typo_disjoint_corpus(onboard: &[HashSet<String>; 2], exclud
             let base = format!("{SIGNATURE_PREFIX}{variant}");
             let kind = format!("hunspell-unknown-{kind}");
             for trigger in TRIGGERS {
-                examples.push(plain_row(&correct, &wrong, group as i64, trigger, false, &base, &kind));
-                examples.push(plain_row(&wrong, &correct, 1 - group as i64, trigger, true, &base, &kind));
+                examples.push(plain_row(&correct, &wrong, group.to::<i64>(), trigger, false, &base, &kind));
+                examples.push(plain_row(&wrong, &correct, 1 - group.to::<i64>(), trigger, true, &base, &kind));
             }
         }
     }
@@ -366,7 +367,7 @@ pub struct Corpora {
 pub fn model_blind_corpora(root: &Path, models: &[&LanguageModel; 2], protected: &ProtectedTokens, verify_frozen_source: bool) -> Result<(Value, Corpora), String> {
     let config = read_json(&root.join("model/intent_v1/config.json"))?;
     let shape = &config["dataset"];
-    let number = |name: &str| shape[name].as_u64().map(|value| value as usize).ok_or_else(|| format!("dataset.{name}"));
+    let number = |name: &str| shape[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("dataset.{name}"));
     let dataset_config = DatasetConfig { minimum_word_length: number("minimum_word_length")?, maximum_word_length: number("maximum_word_length")?, typo_augmentations: number("typo_augmentations")? };
     let words = super::pipeline::onboard_lexicon(root, &config, &dataset_config)?;
     let onboard = onboard_words(&words, dataset_config.minimum_word_length);
@@ -379,7 +380,7 @@ pub fn model_blind_corpora(root: &Path, models: &[&LanguageModel; 2], protected:
     dataset::assert_no_split_leakage(&whole, &Split::PRESEALED)?;
     let sealed_index = build_sealed_signature_index(&whole)?;
     let snapshots = [snapshot_of_model(models[0], LOCALES[0])?, snapshot_of_model(models[1], LOCALES[1])?];
-    let minimum = config["external_evaluation"]["minimum_words_per_group"].as_u64().ok_or("minimum_words_per_group")? as usize;
+    let minimum = (config["external_evaluation"]["minimum_words_per_group"].as_u64().ok_or("minimum_words_per_group")?).to::<usize>();
     let development = build_unknown_typo_disjoint_corpus(&onboard, &sealed_index.signatures, minimum, &snapshots, models, protected, DEVELOPMENT_RANK_NAMESPACE, DEVELOPMENT_CHOICE_NAMESPACE)?;
     let development_signatures = unknown_typo_physical_signatures(&development)?;
     let combined_exclusions: BTreeSet<String> = sealed_index.signatures.union(&development_signatures).cloned().collect();
@@ -391,7 +392,7 @@ pub fn model_blind_corpora(root: &Path, models: &[&LanguageModel; 2], protected:
     let frozen_development = if verify_frozen_source {
         let raw = dataset::read_frozen(root, &config["hard_negative_development"]["source"])?;
         let frozen = dataset::decode_hard_negative_corpus(&raw, &config, &dataset_config, protected)?;
-        if frozen.expanded_corpus_sha256 != development.corpus_sha256 || frozen.physical_signatures_sha256 != signature_set_fingerprint(development_signatures.iter().map(String::as_str)) || frozen.signature_count as usize != development_signatures.len() || frozen.words_by_group[&0] as usize != development.words_by_group[0] || frozen.words_by_group[&1] as usize != development.words_by_group[1] {
+        if frozen.expanded_corpus_sha256 != development.corpus_sha256 || frozen.physical_signatures_sha256 != signature_set_fingerprint(development_signatures.iter().map(String::as_str)) || frozen.signature_count.to::<usize>() != development_signatures.len() || frozen.words_by_group[&0].to::<usize>() != development.words_by_group[0] || frozen.words_by_group[&1].to::<usize>() != development.words_by_group[1] {
             return Err("frozen hard-negative source differs from model-blind development".to_owned());
         }
         Some(frozen)
@@ -414,7 +415,7 @@ pub fn preseal_receipt(config: &Value, corpora: &Corpora) -> Result<Value, Strin
     let frozen = corpora.frozen_development.as_ref().ok_or("preseal receipt requires the frozen development source")?;
     let policy = &config["hard_negative_development"];
     let roles: Map<String, Value> = Split::PRESEALED.iter().map(|split| (split.as_str().to_owned(), Value::Object(frozen.role_words_by_group[split.as_str()].iter().map(|(group, count)| (group.to_string(), json!(count))).collect()))).collect();
-    let examples: Map<String, Value> = Split::PRESEALED.iter().map(|split| (split.as_str().to_owned(), json!(frozen.by_split[*split as usize].len()))).collect();
+    let examples: Map<String, Value> = Split::PRESEALED.iter().map(|split| (split.as_str().to_owned(), json!(frozen.by_split[split.index()].len()))).collect();
     let (development, holdout) = (&corpora.development, &corpora.holdout);
     Ok(json!({
         "schema_version": 1,

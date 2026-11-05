@@ -1,5 +1,6 @@
 //! Authored regressions and engine replays of the boundary and prefix models (`evaluate_boundary_engine`,
 //! `evaluate_prefix_engine`): in-process keys over the model editor, not another independent quality test.
+use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
 use crate::fit::{provenance as tree_provenance, readable};
 use crate::physical::{hex_digest, pair};
@@ -128,16 +129,16 @@ fn engine(parts: Parts<'_>) -> Result<Engine, String> {
 impl Engine {
     fn type_key(&mut self, character: char, characters: [char; 2], keycode: usize, timestamp: usize) -> Result<(), String> {
         let group = self.backend.group();
-        let observed = characters[group as usize];
+        let observed = characters[group.to::<usize>()];
         let pressed = KeyEvent {
             pressed: true,
-            keycode: keycode as u32,
+            keycode: keycode.to::<u32>(),
             key_name: if observed == ' ' { "space".to_owned() } else { observed.to_string() },
             character: observed.to_string(),
             characters: characters.iter().map(char::to_string).collect(),
             group,
             state: 0,
-            timestamp: timestamp as i64,
+            timestamp: timestamp.to::<i64>(),
             ..KeyEvent::default()
         };
         let _ = character;
@@ -208,7 +209,7 @@ pub fn boundary_report(root: &Path, resources: &Arc<Resources>, scratch: &Path) 
 pub fn verify_boundary_report(report: &Value) -> Result<(), String> {
     let results = report["results"].as_object().filter(|table| table.len() == 3 && ["legacy_no_segmentation", "rejected_v1", "active_v2"].iter().all(|name| table.contains_key(*name))).ok_or("boundary-v2 engine comparisons missing")?;
     let active = &results["active_v2"];
-    if active["exact"].as_u64() != Some(SCENARIOS.len() as u64) || ["changed_correct", "length_mismatches", "injections_before_hard_boundary"].iter().any(|key| active[*key] != json!(0)) {
+    if active["exact"].as_u64() != Some(SCENARIOS.len().to::<u64>()) || ["changed_correct", "length_mismatches", "injections_before_hard_boundary"].iter().any(|key| active[*key] != json!(0)) {
         return Err("boundary-v2 exact-text gate failed".to_owned());
     }
     Ok(())
@@ -256,7 +257,7 @@ fn prefix_rows(root: &Path, split: &str) -> Result<Vec<PrefixRow>, String> {
                 text: row["text"].as_str().ok_or("a text")?.to_owned(),
                 before: row["before"].as_str().ok_or("a field")?.to_owned(),
                 application: row["application"].as_str().ok_or("an application")?.to_owned(),
-                source: row["source"].as_i64().ok_or("a source")? as i32,
+                source: (row["source"].as_i64().ok_or("a source")?).to::<i32>(),
                 desired: row["desired"].as_bool().ok_or("desired")?,
                 role: role_named(row["role"].as_str().ok_or("a role")?)?,
             });
@@ -386,7 +387,7 @@ pub fn prefix_report(root: &Path, resources: &Arc<Resources>, split: &str, scrat
     }
     let passed = results.values().all(|variant| {
         let (candidate, shipping) = (&variant["candidate"], &variant["shipping_no_prefix"]);
-        candidate["length_mismatches"] == 0 && candidate["changed_correct"] <= shipping["changed_correct"] && candidate["restored"] >= shipping["restored"] && candidate["early_restored"] as f64 >= PREFIX_EARLY_RESTORED_MIN_FRACTION * candidate["desired"] as f64
+        candidate["length_mismatches"] == 0 && candidate["changed_correct"] <= shipping["changed_correct"] && candidate["restored"] >= shipping["restored"] && (candidate["early_restored"]).to::<f64>() >= PREFIX_EARLY_RESTORED_MIN_FRACTION * (candidate["desired"]).to::<f64>()
     });
     let identifiers: Vec<i64> = selected.iter().map(|row| row.sequence).collect();
     Ok(json!({"schema_version": 1, "split": split, "selection": format!("{PREFIX_SEQUENCES_PER_CATEGORY} hash-ranked situations per category, selected before scoring"), "sequence_ids": identifiers, "provenance": runtime, "scope": PREFIX_SCOPE, "results": results, "examples": failures, "passed": passed}))
@@ -403,7 +404,7 @@ fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: Contex
         let early = early_at.is_some_and(|key| key < row.text.chars().count());
         for (key, value) in [
             ("sequences", 1), ("desired", i64::from(row.desired)), ("exact", i64::from(exact)), ("restored", i64::from(row.desired && exact)), ("changed_correct", i64::from(!row.desired && !exact)),
-            ("early_restored", i64::from(row.desired && exact && early)), ("length_mismatches", i64::from(actual.chars().count() != expected.chars().count())), ("injections", injections as i64),
+            ("early_restored", i64::from(row.desired && exact && early)), ("length_mismatches", i64::from(actual.chars().count() != expected.chars().count())), ("injections", injections.to::<i64>()),
         ] {
             *counts.entry(key).or_insert(0) += value;
         }
@@ -512,16 +513,16 @@ fn context_v2_replay(text: &str, target: i32, initial: i32, setting: &str, polic
         let alternate = other_of(desired, own, other);
         let characters = if target == 0 { [desired, alternate] } else { [alternate, desired] };
         let group = backend.group();
-        let observed = characters[group as usize];
+        let observed = characters[group.to::<usize>()];
         let pressed = KeyEvent {
             pressed: true,
-            keycode: serial as u32,
+            keycode: serial.to::<u32>(),
             key_name: if observed == ' ' { "space".to_owned() } else { observed.to_string() },
             character: observed.to_string(),
             characters: characters.iter().map(char::to_string).collect(),
             group,
             state: if ks_text::ucd::isupper(desired) { ks_backend::constants::SHIFT_MASK } else { 0 },
-            timestamp: serial as i64,
+            timestamp: serial.to::<i64>(),
             ..KeyEvent::default()
         };
         backend.type_key(&pressed);
@@ -569,7 +570,7 @@ pub fn context_v2_report(root: &Path, resources: &Arc<Resources>, scratch: &Path
                 *counts.entry(if correct { "preserved_correct" } else { "exactly_restored" }).or_insert(0) += i64::from(same);
                 *counts.entry("changed_correct").or_insert(0) += i64::from(correct && !same);
                 *counts.entry("length_mismatches").or_insert(0) += i64::from(actual.chars().count() != text.chars().count());
-                *counts.entry("injections").or_insert(0) += injections as i64;
+                *counts.entry("injections").or_insert(0) += injections.to::<i64>();
                 if !same && failures.len() < CONTEXT_V2_MAX_REPORTED_FAILURES {
                     failures.push(json!({"source_id": row.phrase.identifier, "initially_correct": correct, "expected": text, "actual": actual}));
                 }

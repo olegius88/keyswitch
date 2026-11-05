@@ -1,6 +1,7 @@
 //! Key-space orthotactics v2, rejected: every candidate built on it was unsafe or no better than the installed model. A
 //! replay rebuilds the key corpus, the frozen dictionary verdicts, the trusted labels, the candidate, its seal and the
 //! one-shot test report and compares all of them with the frozen files; none of it can install anything.
+use ks_cast::To as _;
 use super::read_object;
 use super::sources::ORTHO_V2;
 use crate::artifact::canonical;
@@ -94,7 +95,7 @@ fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> 
                 continue;
             }
             let bits = i128::from(128 - frequency.unsigned_abs().leading_zeros());
-            let weight = bits.min(MAXIMUM_LEXICON_WEIGHT).max(1) as i64;
+            let weight = bits.min(MAXIMUM_LEXICON_WEIGHT).max(1).to::<i64>();
             let entry = counts.entry((script.to_owned(), keys)).or_insert(weight);
             *entry = (*entry).max(weight);
         }
@@ -257,7 +258,7 @@ fn verify_labels(root: &Path) -> Result<(), String> {
             continue;
         }
         let recognised = shaped.iter().filter(|word| knows(script, word)).count();
-        if (recognised as f64) < VERIFIED_MIN_KNOWN_SHARE * shaped.len() as f64 {
+        if (recognised as f64) < VERIFIED_MIN_KNOWN_SHARE * shaped.len().to::<f64>() {
             *counts.entry(format!("{script}:too_unfamiliar")).or_default() += 1;
             continue;
         }
@@ -341,7 +342,7 @@ fn counts(rows: &[Row], order: usize) -> (Counts, Counts, Counts) {
 }
 
 fn build(rows: &[Row], settings: &Value) -> Result<Map<String, Value>, String> {
-    let order = settings["order"].as_u64().ok_or("no order")? as usize;
+    let order = (settings["order"].as_u64().ok_or("no order")?).to::<usize>();
     let discount = settings["discount"].as_f64().ok_or("no discount")?;
     let scale = settings["scale"].as_i64().ok_or("no scale")?;
     let (grams, prose, acronym) = counts(rows, order);
@@ -376,28 +377,28 @@ impl CountedModel {
         if payload["schema_version"] != json!(1) {
             return Err("unexpected counted artifact".to_owned());
         }
-        let scale = payload["scale"].as_i64().ok_or("no scale")? as f64;
+        let scale = (payload["scale"].as_i64().ok_or("no scale")?).to::<f64>();
         let (mut logprob, mut backoff, mut uniform) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
         for script in SCRIPTS {
             let channel = &payload["models"][script];
             let names = channel["grams"].as_str().ok_or("no grams")?.split('\n');
             let values = channel["logprob"].as_array().ok_or("no logprob")?;
-            logprob.insert(script, names.zip(values).map(|(name, value)| (name.to_owned(), value.as_i64().unwrap_or(0) as f64 / scale)).collect());
+            logprob.insert(script, names.zip(values).map(|(name, value)| (name.to_owned(), value.as_i64().unwrap_or(0).to::<f64>() / scale)).collect());
             let table = channel["backoff"].as_array().ok_or("no backoff")?;
-            backoff.insert(script, table.iter().map(|entry| (entry[0].as_str().unwrap_or("").to_owned(), entry[1].as_i64().unwrap_or(0) as f64 / scale)).collect());
-            uniform.insert(script, channel["uniform"].as_i64().ok_or("no uniform")? as f64 / scale);
+            backoff.insert(script, table.iter().map(|entry| (entry[0].as_str().unwrap_or("").to_owned(), entry[1].as_i64().unwrap_or(0).to::<f64>() / scale)).collect());
+            uniform.insert(script, (channel["uniform"].as_i64().ok_or("no uniform")?).to::<f64>() / scale);
         }
         let mut shape = BTreeMap::new();
         for name in ["prose_shape", "acronym_shape"] {
             let mut tables = BTreeMap::new();
             for script in SCRIPTS {
                 let table = payload[name][script].as_object().ok_or("no shape table")?;
-                tables.insert(script, table.iter().map(|(shape, value)| (shape.clone(), value.as_i64().unwrap_or(0) as f64 / scale)).collect());
+                tables.insert(script, table.iter().map(|(shape, value)| (shape.clone(), value.as_i64().unwrap_or(0).to::<f64>() / scale)).collect());
             }
             shape.insert(name, tables);
         }
-        let thresholds = SCRIPTS.iter().map(|script| (*script, payload["thresholds"][script].as_i64().unwrap_or(0) as f64 / scale)).collect();
-        Ok(CountedModel { order: payload["order"].as_u64().ok_or("no order")? as usize, version: payload["version"].as_str().unwrap_or("").to_owned(), logprob, backoff, uniform, shape, thresholds })
+        let thresholds = SCRIPTS.iter().map(|script| (*script, (payload["thresholds"][script].as_i64().unwrap_or(0)).to::<f64>() / scale)).collect();
+        Ok(CountedModel { order: (payload["order"].as_u64().ok_or("no order")?).to::<usize>(), version: payload["version"].as_str().unwrap_or("").to_owned(), logprob, backoff, uniform, shape, thresholds })
     }
 
     fn conditional(&self, script: &'static str, gram: &[char], buffer: &mut String) -> f64 {
@@ -498,7 +499,7 @@ fn measure(model: &CountedModel, samples: &[Sample], minimum: usize, known: &Kno
 }
 
 fn bucket_of(keys: &str, buckets: &[i64]) -> i64 {
-    let length = pystr::len(keys) as i64;
+    let length = pystr::len(keys).to::<i64>();
     buckets.iter().copied().find(|value| length <= *value).unwrap_or(buckets[buckets.len() - 1])
 }
 
@@ -556,7 +557,7 @@ struct Totals {
 
 impl Totals {
     fn false_per_10000(&self) -> f64 {
-        (FALSE_RATE_SCALE * self.false_occurrences) as f64 / self.negative_occurrences.max(1) as f64
+        (FALSE_RATE_SCALE * self.false_occurrences).to::<f64>() / self.negative_occurrences.max(1).to::<f64>()
     }
 
     fn rate_json(&self) -> f64 {
@@ -578,7 +579,7 @@ fn totals(counts: &Value) -> Totals {
         false_occurrences: summed("false_occurrences"),
         false_repeated_types: summed("false_repeated_types"),
         false_attested_types: summed("false_attested_types"),
-        recall: summed("recalled_types") as f64 / positives.max(1) as f64,
+        recall: summed("recalled_types").to::<f64>() / positives.max(1).to::<f64>(),
     }
 }
 
@@ -654,7 +655,7 @@ fn seal_of(payload: &Map<String, Value>, thresholds: &BTreeMap<&str, f64>, setti
 
 /// Fits the candidate and sets its thresholds on the development splits.
 fn fit(root: &Path, rows: &[Row], settings: &Value, known: &Known, pins: &Map<String, Value>) -> Result<(Vec<u8>, Vec<u8>), String> {
-    let minimum = settings["minimum_length"].as_u64().ok_or("no minimum length")? as usize;
+    let minimum = (settings["minimum_length"].as_u64().ok_or("no minimum length")?).to::<usize>();
     let scale = settings["scale"].as_i64().ok_or("no scale")?;
     let mut payload = build(rows, settings)?;
     payload.insert("minimum_length".to_owned(), json!(minimum));
@@ -681,7 +682,7 @@ fn fit(root: &Path, rows: &[Row], settings: &Value, known: &Known, pins: &Map<St
 /// The one-shot test, repeated as a regression: the report's every number.
 fn test_report(root: &Path, rows: &[Row], settings: &Value, known: &Known) -> Result<Vec<u8>, String> {
     let directory = root.join(DIRECTORY);
-    let minimum = settings["minimum_length"].as_u64().ok_or("no minimum length")? as usize;
+    let minimum = (settings["minimum_length"].as_u64().ok_or("no minimum length")?).to::<usize>();
     let buckets: Vec<i64> = settings["length_buckets"].as_array().ok_or("no buckets")?.iter().filter_map(Value::as_i64).collect();
     let seal = read_object(&directory.join("seal.json"))?;
     let table = seal.get("thresholds").and_then(Value::as_object).ok_or("no thresholds")?;
@@ -781,7 +782,7 @@ pub fn verify(root: &Path) -> Result<Value, String> {
     for (name, section) in [("mutually_unseen", "mutually_unseen"), ("gate", "gate_families"), ("test", "corpus_test")] {
         let counts = &report[section]["counts"];
         let summed = |field: &str| SCRIPTS.iter().map(|script| counts.get(format!("{script}:{field}")).and_then(Value::as_i64).unwrap_or(0)).sum::<i64>();
-        let recall = summed("recalled_types") as f64 / summed("positive_types").max(1) as f64;
+        let recall = summed("recalled_types").to::<f64>() / summed("positive_types").max(1).to::<f64>();
         measured.insert(name.to_owned(), json!({"negatives": summed("negative_types"), "false_types": summed("false_types"), "recall": py_round_ndigits(recall, RECALL_DECIMALS).expect("a finite recall")}));
     }
     Ok(json!({

@@ -3,6 +3,7 @@
 //! Groups, alternatives and the previous words are what the Python keeps in `dict[int, str]`: here a slice of
 //! `(group, text)` pairs in the dict's order (the caller keeps the keys unique), because the order decides ties.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::intent_model::{normalize_token, CorrectionTrigger, IntentModelInput, LinearNgramModel, LinearPrediction};
 use crate::language_model::{LanguageModel, WordScore};
@@ -362,7 +363,7 @@ impl LanguageDetector {
         }
 
         if target_score.known {
-            let length_relief = (effective_length.saturating_sub(HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS) as f64 * HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER).min(1.0);
+            let length_relief = (effective_length.saturating_sub(HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS).to::<f64>() * HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER).min(1.0);
             let mut required = HEURISTIC_KNOWN_TARGET_MIN_MARGIN.max(confidence_threshold - length_relief);
             if target_score.spell_known && !target_score.exact {
                 required += HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN;
@@ -400,7 +401,7 @@ impl LanguageDetector {
         // Unknown words can still be recognised by smoothed character n-grams, but only when the source looks
         // distinctly unnatural. The required margin decreases with length because longer sequences carry more
         // independent evidence.
-        let length_relief = HEURISTIC_NGRAM_RELIEF_CAP.min(effective_length.saturating_sub(HEURISTIC_NGRAM_RELIEF_START_CHARACTERS) as f64 * HEURISTIC_NGRAM_RELIEF_PER_CHARACTER);
+        let length_relief = HEURISTIC_NGRAM_RELIEF_CAP.min(effective_length.saturating_sub(HEURISTIC_NGRAM_RELIEF_START_CHARACTERS).to::<f64>() * HEURISTIC_NGRAM_RELIEF_PER_CHARACTER);
         let mut required = confidence_threshold + HEURISTIC_NGRAM_EXTRA_MARGIN - length_relief;
         if aggressive {
             required -= HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION;
@@ -492,7 +493,7 @@ fn script_of(c: char) -> u8 {
     if !ucd::isalpha(c) {
         return 0;
     }
-    let code = c as u32;
+    let code = c.to::<u32>();
     let at = SCRIPT_RUNS.partition_point(|run| run.1 < code);
     match SCRIPT_RUNS.get(at) {
         Some(run) if run.0 <= code => run.2,

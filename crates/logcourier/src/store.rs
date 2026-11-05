@@ -1,4 +1,5 @@
 //! The queue and the read positions, in the same SQLite file the previous version kept.
+use ks_cast::To as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -141,7 +142,7 @@ impl Store {
     }
 
     fn insert_bundle(&self, destination: &str, metadata: &Value, payload: &[u8], name: &str) -> Result<()> {
-        if self.queue_bytes()? + payload.len() as i64 > self.capacity {
+        if self.queue_bytes()? + payload.len().to::<i64>() > self.capacity {
             return Err(Error::QueueFull("Очередь заполнена. Сбор приостановлен; исходные файлы не удаляются.".to_owned()));
         }
         self.db.execute(

@@ -1,6 +1,7 @@
 //! Whether feature schema 2 still computes what the code that fitted context-v2 computed: declarations aside, its softmax,
 //! its features, its loader and its predictions, on the pinned probe plan. The answers were written down once by that code
 //! (`model/context_v2/compatibility/feature-two-observations.json.gz`), and this compares with them to the bit.
+use ks_cast::To as _;
 use crate::physical::hex;
 use flate2::read::MultiGzDecoder;
 use ks_context::context_action_features::extract_baseline_features;
@@ -107,7 +108,7 @@ fn bulky_content(label: &str, base: &[u8], baseline: &[u8]) -> Result<Vec<u8>, S
 /// Whether the loader of today agrees with the archived one on a probe.
 fn compare_load(index: usize, load: &Value, content: &[u8], folder: &Path, models: &Path) -> Result<(), String> {
     let path = folder.join(format!("payload-{index}.json"));
-    let padding = load["padding"].as_u64().unwrap_or(0) as usize;
+    let padding = (load["padding"].as_u64().unwrap_or(0)).to::<usize>();
     let mut bytes = content.to_vec();
     bytes.resize(content.len() + padding, b' ');
     std::fs::write(&path, &bytes).map_err(|error| error.to_string())?;
@@ -223,7 +224,7 @@ fn decode(text: &str) -> Result<Vec<u8>, String> {
         bits += 6;
         if bits >= 8 {
             bits -= 8;
-            bytes.push((buffer >> bits) as u8);
+            bytes.push((buffer >> bits).to::<u8>());
             buffer &= (1 << bits) - 1;
         }
     }

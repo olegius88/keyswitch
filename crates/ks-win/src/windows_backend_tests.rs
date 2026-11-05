@@ -41,7 +41,7 @@ const INPUT_DELAY_LATE_MS: i64 = ks_backend::constants::INPUT_DELAY_LATE_MS;
 const INPUT_DELAY_SLOW_CALLBACK_MS: i64 = ks_backend::constants::INPUT_DELAY_SLOW_CALLBACK_MS;
 const INPUT_DELAY_UNSTAMPED_MS: i64 = ks_backend::constants::INPUT_DELAY_UNSTAMPED_MS;
 const HOOK_GAP_MS: i64 = ks_backend::constants::HOOK_GAP_MS;
-const UNSEEN_TIMES: i64 = UNSEEN_INPUT_MIN_TIMES as i64;
+const UNSEEN_TIMES: i64 = ks_cast::const_i64(UNSEEN_INPUT_MIN_TIMES);
 
 fn saved_clipboard() -> ClipboardContents {
     ClipboardContents { formats: vec![(SELECTION_FIXTURE_CLIPBOARD_FORMAT, b"user data".to_vec())], complete: true }
@@ -1545,7 +1545,7 @@ fn the_hook_times_its_answer_and_counts_a_slow_one() {
     let api = FakeWindowsAPI::plain();
     let clock = FakeClock::stepping(0.0);
     let subject = backend_with(&api, Arc::clone(&clock) as Arc<dyn Clock>, script(|_| {}));
-    let seconds = INPUT_DELAY_SLOW_CALLBACK_MS as f64 / 1000.0;
+    let seconds = INPUT_DELAY_SLOW_CALLBACK_MS.to::<f64>() / 1000.0;
     api.state().ticks = HOOK_KEY_TIME_MS;
     clock.perf.lock().unwrap().extend([0.0, seconds]);
     subject.handle_native(NativeKeyEvent { foreign: true, ..native(true, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS) });
@@ -1874,7 +1874,7 @@ fn the_result_is_typed_as_characters_selected_back_and_the_layout_moved() {
     let api = FakeWindowsAPI::with_clipboard();
     let subject = reading_backend(&api, &script(|_| {}));
     assert!(subject.replace_selection(&selected_by(SOURCE_UIA, "ghbdtn"), "пр", Some(1)).unwrap());
-    let character = |pressed, unit: char| NativeInput { scan_code: unit as u32, unicode: true, ..NativeInput::new(pressed) };
+    let character = |pressed, unit: char| NativeInput { scan_code: unit.to::<u32>(), unicode: true, ..NativeInput::new(pressed) };
     let left = [NativeInput::extended_key(true, VK_LEFT), NativeInput::extended_key(false, VK_LEFT)];
     let mut expected = vec![character(true, 'п'), character(false, 'п'), character(true, 'р'), character(false, 'р')];
     expected.push(NativeInput::key(true, VK_SHIFT));
@@ -2136,12 +2136,12 @@ mod golden {
     fn stroke(value: &Value) -> KeyEvent {
         KeyEvent {
             pressed: true,
-            keycode: number(&value["keycode"]) as u32,
+            keycode: number(&value["keycode"]).low::<u32>(),
             key_name: "k".to_owned(),
             character: text(&value["character"]),
             characters: value["characters"].as_array().unwrap().iter().map(text).collect(),
-            group: number(&value["group"]) as i32,
-            state: number(&value["state"]) as u32,
+            group: number(&value["group"]).low::<i32>(),
+            state: number(&value["state"]).low::<u32>(),
             timestamp: 100,
             ..KeyEvent::default()
         }
@@ -2182,10 +2182,10 @@ mod golden {
             "current_layout" => state.current_layout = number(value),
             "foreground" => state.foreground = number(value),
             "ticks" => state.ticks = number(value),
-            "send_count" => state.send_count = value.as_u64().map(|count| count as usize),
+            "send_count" => state.send_count = value.as_u64().map(|count| count.to::<usize>()),
             "accept_switch" => state.accept_switch = flag(value),
             "apply_switch" => state.apply_switch = flag(value),
-            "released" => state.released_keys = numbers(value).into_iter().map(|key| key as u32).collect(),
+            "released" => state.released_keys = numbers(value).into_iter().map(|key| key.low::<u32>()).collect(),
             "window_class" => {
                 let foreground = state.foreground;
                 state.window_classes.insert(foreground, text(value));
@@ -2193,9 +2193,9 @@ mod golden {
             "caret" => state.caret = flag(value),
             "copied" => state.copied = Some(text(value)),
             "copies" => state.copies = flag(value),
-            "copy_delay" => state.copy_delay = number(value) as usize,
-            "busy_reads" => state.busy_reads = number(value) as usize,
-            "busy_texts" => state.busy_texts = number(value) as usize,
+            "copy_delay" => state.copy_delay = number(value).to::<usize>(),
+            "busy_reads" => state.busy_reads = number(value).to::<usize>(),
+            "busy_texts" => state.busy_texts = number(value).to::<usize>(),
             "saved_complete" => state.saved.complete = flag(value),
             "restores" => state.restores = value.as_array().unwrap().iter().map(flag).collect(),
             "last_input" => state.last_input = number(value),
@@ -2205,7 +2205,7 @@ mod golden {
                 script.editable = if value.is_string() { Err(provider_gone()) } else { Ok(flag(value)) };
             }
             "shown" => script.shown = value.as_str().map(str::to_owned),
-            "late" => script.late = number(value) as usize,
+            "late" => script.late = number(value).to::<usize>(),
             "factory_fails" => script.unavailable = flag(value),
             other => panic!("no such field: {other}"),
         }
@@ -2236,13 +2236,13 @@ mod golden {
         let boundary = (!op["boundary"].is_null()).then(|| stroke(&op["boundary"]));
         let outcome = subject.inject_correction(Injection {
             strokes: &all,
-            target_group: number(&op["target"]) as i32,
+            target_group: number(&op["target"]).low::<i32>(),
             boundary: boundary.as_ref(),
-            source_group: op["source"].as_i64().map(|group| group as i32),
+            source_group: op["source"].as_i64().map(|group| group.low::<i32>()),
             late: &late,
             trailing: &trailing,
-            kept_tail: number(&op["kept_tail"]) as usize,
-            erased: op["erased"].as_u64().map(|count| count as usize),
+            kept_tail: number(&op["kept_tail"]).to::<usize>(),
+            erased: op["erased"].as_u64().map(|count| count.to::<usize>()),
         });
         outcome.map_or_else(|error| json!(error_text(&error)), |count| json!(count))
     }
@@ -2252,8 +2252,8 @@ mod golden {
         match op["op"].as_str().unwrap() {
             "key" => json!(subject.handle_native(NativeKeyEvent {
                 pressed: flag(&op["pressed"]),
-                virtual_key: number(&op["vk"]) as u32,
-                scan_code: number(&op["scan"]) as u32,
+                virtual_key: number(&op["vk"]).low::<u32>(),
+                scan_code: number(&op["scan"]).low::<u32>(),
                 extended: flag(&op["extended"]),
                 injected: flag(&op["injected"]),
                 timestamp: number(&op["ts"]),
@@ -2272,7 +2272,7 @@ mod golden {
             }
             "inject" => inject(subject, op),
             "switch" => subject
-                .switch_group(number(&op["group"]) as i32)
+                .switch_group(number(&op["group"]).low::<i32>())
                 .map_or_else(|error| json!(error_text(&error)), |()| Value::Null),
             "group" => backend_result(subject.current_group()),
             "focused" => subject
@@ -2303,7 +2303,7 @@ mod golden {
             },
             "replace_selection" => {
                 let selected = selected_by(op["source"].as_str().unwrap(), op["selected"].as_str().unwrap());
-                let final_group = op["final"].as_i64().map(|group| group as i32);
+                let final_group = op["final"].as_i64().map(|group| group.low::<i32>());
                 match subject.replace_selection(&selected, op["replacement"].as_str().unwrap(), final_group) {
                     Ok(reselected) => json!(reselected),
                     Err(error) => json!(selection_error_text(&error)),

@@ -5,6 +5,7 @@
 //! extracts exactly those features, so an installed version-2 artifact decides as before while a version-3 one also
 //! sees which readings are misspellings.
 
+use ks_cast::To as _;
 use crate::boundary_model::{features as legacy_features, BoundaryModel, Features, MAX_SUFFIX};
 use crate::constants::*;
 use crate::language_model::LanguageModel;
@@ -64,7 +65,7 @@ pub fn features(original: &str, alternative: &str, suffix: i64, source: &Languag
     for character in BOUNDARY_AMBIGUOUS_PUNCTUATION.chars() {
         values.insert(format!("tail:has:{character}"), f64::from(removed.contains(character)));
     }
-    let length = pystr::len(original) as i64;
+    let length = pystr::len(original).to::<i64>();
     if version != BOUNDARY_V2_FEATURE_VERSION {
         // Misspellings: which reading could be a known word typed with one key missed.
         let end = length - suffix;
@@ -74,7 +75,7 @@ pub fn features(original: &str, alternative: &str, suffix: i64, source: &Languag
         values.insert("target_word:misspelling".into(), target_misspelled);
         values.insert("word:misspelling_either".into(), if target_misspelled > source_misspelled { target_misspelled } else { source_misspelled });
     }
-    let tail = length - pystr::len(pystr::rstrip_chars(original, BOUNDARY_AMBIGUOUS_PUNCTUATION)) as i64;
+    let tail = length - (pystr::len(pystr::rstrip_chars(original, BOUNDARY_AMBIGUOUS_PUNCTUATION))).to::<i64>();
     // `range(min(tail, MAX_SUFFIX, len(original) - 1) + 1)`: nothing for the empty token, whose bound is -1 + 1.
     let candidates = 0..tail.min(MAX_SUFFIX).min(length - 1) + 1;
     let mut known_candidates = 0;
@@ -145,8 +146,8 @@ impl BoundaryPolicy {
         let value = json_loads(&raw)?;
         // `value in (2, 3)`: 2.0 is 2, and `true` is 1, which is no version here.
         let feature_version = match value.get("feature_version") {
-            Some(Value::Number(number)) if value.is_object() => number.as_f64().map(|version| version as i64).filter(|version| {
-                SUPPORTED_FEATURE_VERSIONS.contains(version) && number.as_f64() == Some(*version as f64)
+            Some(Value::Number(number)) if value.is_object() => number.as_f64().map(|version| version.to::<i64>()).filter(|version| {
+                SUPPORTED_FEATURE_VERSIONS.contains(version) && number.as_f64() == Some((*version).to::<f64>())
             }),
             _ => None,
         };

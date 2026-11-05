@@ -4,6 +4,7 @@
 //! another thread is posted to the main loop with `glib::idle_add_once`, and runs there against the application kept in a
 //! thread-local, as the Windows application does.
 
+use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -607,12 +608,12 @@ impl App {
         {
             return;
         }
-        let source = glib::timeout_add_seconds_local_once(UPDATE_CHECK_INITIAL_DELAY_SECONDS as u32, || {
+        let source = glib::timeout_add_seconds_local_once(UPDATE_CHECK_INITIAL_DELAY_SECONDS.low::<u32>(), || {
             with_app(|app| {
                 app.update_initial.borrow_mut().take();
                 app.services.updates.check(true, false);
                 if app.flag("updates.check_automatically", true) {
-                    let periodic = glib::timeout_add_seconds_local(UPDATE_CHECK_INTERVAL_SECONDS as u32, || {
+                    let periodic = glib::timeout_add_seconds_local(UPDATE_CHECK_INTERVAL_SECONDS.low::<u32>(), || {
                         with_app(|app| {
                             app.services.updates.check(true, false);
                         });

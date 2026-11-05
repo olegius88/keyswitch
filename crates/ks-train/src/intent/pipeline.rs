@@ -1,4 +1,5 @@
 //! The whole fit of the layout-intent model, in the order of `train_intent_model.main`, and the sections of its manifest.
+use ks_cast::To as _;
 use super::dataset::{self, DatasetBundle, DatasetConfig, LexicalExample, PreparedLexicon, Split};
 use super::fit::{self, Confusion, FitConfig, Platt, Quantized, Scored, Selections, Veto, binary_gate, context_stress_gate, metrics_payload, selection_gate};
 use super::seal;
@@ -72,7 +73,7 @@ impl SafetyAudit {
 
     pub fn passes(&self, maximum: i64) -> bool {
         let expected: Vec<&str> = TRIGGERS.iter().map(|trigger| trigger.as_str()).collect();
-        maximum >= 0 && self.samples > 0 && self.protected_samples > 0 && self.collision_samples > 0 && self.triggers == expected && self.protected_triggers == expected && self.collision_triggers == expected && self.failures.len() as i64 <= maximum
+        maximum >= 0 && self.samples > 0 && self.protected_samples > 0 && self.collision_samples > 0 && self.triggers == expected && self.protected_triggers == expected && self.collision_triggers == expected && self.failures.len().to::<i64>() <= maximum
     }
 
     pub fn payload(&self) -> Value {
@@ -197,7 +198,7 @@ pub fn onboard_lexicon(root: &Path, raw_config: &Value, dataset_config: &Dataset
 /// `dataset` of the config.
 pub fn dataset_config(raw_config: &Value) -> Result<DatasetConfig, String> {
     let shape = &raw_config["dataset"];
-    let number = |name: &str| shape[name].as_u64().map(|value| value as usize).ok_or_else(|| format!("dataset.{name}"));
+    let number = |name: &str| shape[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("dataset.{name}"));
     Ok(DatasetConfig { minimum_word_length: number("minimum_word_length")?, maximum_word_length: number("maximum_word_length")?, typo_augmentations: number("typo_augmentations")? })
 }
 
@@ -285,7 +286,7 @@ fn recall_target_threshold(items: &[Scored<'_>], target: f64, typos_only: bool) 
         return Err(format!("selection diagnostics require {} examples", if typos_only { "typo-positive" } else { "positive" }));
     }
     scores.sort_by(|a, b| b.partial_cmp(a).expect("finite logits"));
-    let required = scores.len().min((target * scores.len() as f64).ceil().max(1.0) as usize);
+    let required = scores.len().min(((target * scores.len().to::<f64>()).ceil().max(1.0)).to::<usize>());
     Ok(scores[required - 1])
 }
 

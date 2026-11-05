@@ -1,5 +1,6 @@
 //! The model editor and the fake clock a battery is typed over, and the models one replay shares between its engines.
 
+use ks_cast::To as _;
 use ks_backend::{BackendError, BackendProbe, FieldContext, FieldReader, FieldRole, FocusInfo, InputBackend, Injection, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
 use ks_config::history::HistoryStore;
@@ -57,7 +58,7 @@ pub static KEYS: LazyLock<Vec<PhysicalKey>> = LazyLock::new(|| {
     let mut keys = Vec::new();
     for (shift, us, ru) in rows {
         for (index, (left, right)) in us.chars().zip(ru.chars()).enumerate() {
-            keys.push(PhysicalKey { characters: [left, right], shift, keycode: index as u32 + PHYSICAL_KEY_KEYCODE_BASE });
+            keys.push(PhysicalKey { characters: [left, right], shift, keycode: index.to::<u32>() + PHYSICAL_KEY_KEYCODE_BASE });
         }
     }
     keys
@@ -393,7 +394,7 @@ impl Session {
     }
 
     fn stamp(&self) -> i64 {
-        ks_text::py_round(self.clock.now() * MILLISECONDS_PER_SECOND) as i64
+        (ks_text::py_round(self.clock.now() * MILLISECONDS_PER_SECOND)).to::<i64>()
     }
 
     pub fn tap(&mut self, event: KeyEvent) {

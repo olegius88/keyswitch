@@ -1,5 +1,6 @@
 //! The authored scenario families (`train_context_model.build_corpus`), reused as distinct old TRAIN situations, never
 //! their evaluation labels (`historical_curriculum`).
+use ks_cast::To as _;
 use crate::captured::role_of;
 use crate::corpus::read_json;
 use crate::physical::{hex, pair};
@@ -121,7 +122,7 @@ impl Builder<'_> {
     }
 
     fn known(&self, group: i64, word: &str) -> bool {
-        self.models[group as usize].score(word).known
+        self.models[group.to::<usize>()].score(word).known
     }
 }
 
@@ -544,7 +545,7 @@ pub fn historical_curriculum(tools: &Tools, detector: &LanguageDetector, models:
     }
     // Keep the fixed parent budget and equal mass for each represented action.
     for (frame, parent) in result.iter_mut().zip(parents) {
-        frame.sample_weight = 1.0 / (actions[&parent].len() as f64 * variants[&(parent, frame.action)] as f64);
+        frame.sample_weight = 1.0 / (actions[&parent].len().to::<f64>() * (variants[&(parent, frame.action)]).to::<f64>());
     }
     Ok(result)
 }

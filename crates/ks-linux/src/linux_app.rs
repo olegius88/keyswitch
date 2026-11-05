@@ -2,6 +2,7 @@
 //!
 //! The windows, the tray and the rule prompt come with the GTK port; until then a run without `--headless` says so.
 
+use ks_cast::To as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -289,7 +290,7 @@ pub fn python_float(value: f64) -> String {
     if !(-4..6).contains(&exponent) {
         return format!("{}e{}{:02}", trim_zeros(mantissa), if exponent < 0 { '-' } else { '+' }, exponent.abs());
     }
-    trim_zeros(&format!("{value:.*}", (5 - exponent).max(0) as usize))
+    trim_zeros(&format!("{value:.*}", ((5 - exponent).max(0)).to::<usize>()))
 }
 
 /// The engine of this platform, built on the loader's thread: every model is read there.

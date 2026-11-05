@@ -10,6 +10,7 @@
 //! backend trait speaks in (`supports_selection`, `read_selection`, `replace_selection`); they are re-exported here.
 //! Python's `SelectionBackend` protocol is that part of the backend trait, so there is no second trait for it.
 
+use ks_cast::To as _;
 use crate::constants::{
     BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT,
     HOTKEY_SELECTION_TRANSLITERATE, SELECTION_COMMAND_MAX_CHARACTERS,
@@ -35,7 +36,7 @@ pub fn refusal_message(reason: RefusalReason) -> String {
         ReadOnly => "Выделенный текст нельзя изменить".to_string(),
         TooLong => format!(
             "Выделение не изменено: предел — {}",
-            quantity(SELECTION_COMMAND_MAX_CHARACTERS as f64, CHARACTERS)
+            quantity(SELECTION_COMMAND_MAX_CHARACTERS.to::<f64>(), CHARACTERS)
         ),
         LineBreaks => "Выделение из нескольких строк не меняется: перевод строки набирался бы как Enter".to_string(),
         Untypeable => "Выделение не изменено: в нём есть знаки, которых нет на раскладках EN и RU".to_string(),
@@ -149,7 +150,7 @@ pub fn plan_selection(
         }
         SelectionCommand::Layout => {
             let current = if 0 <= current_group && (current_group as usize) < layout_names.len() {
-                layout_names[current_group as usize].as_str()
+                layout_names[current_group.to::<usize>()].as_str()
             } else {
                 ""
             };
@@ -158,8 +159,8 @@ pub fn plan_selection(
             match (index_of(conversion.source), index_of(conversion.target)) {
                 (Some(source), Some(target)) => Ok(SelectionPlan {
                     replacement: conversion.text,
-                    source_group: Some(source as i64),
-                    target_group: Some(target as i64),
+                    source_group: Some(source.to::<i64>()),
+                    target_group: Some(target.to::<i64>()),
                 }),
                 _ => Err(SelectionRefused::new(RefusalReason::NoLayout)),
             }
@@ -184,17 +185,17 @@ pub fn typing_runs(
     let mut runs: Vec<(i64, Vec<KeyChoice>)> = Vec::new();
     let mut group = start_group;
     for character in text.chars() {
-        let in_group = 0 <= group && (group as usize) < tables.len() && tables[group as usize].contains_key(&character);
+        let in_group = 0 <= group && (group as usize) < tables.len() && tables[group.to::<usize>()].contains_key(&character);
         if !in_group {
             match tables.iter().position(|table| table.contains_key(&character)) {
-                Some(index) => group = index as i64,
+                Some(index) => group = index.to::<i64>(),
                 None => return Err(SelectionRefused::new(RefusalReason::Untypeable)),
             }
         }
         if runs.last().is_none_or(|run| run.0 != group) {
             runs.push((group, Vec::new()));
         }
-        let key = tables[group as usize][&character];
+        let key = tables[group.to::<usize>()][&character];
         runs.last_mut().expect("a run was just pushed").1.push(key);
     }
     Ok(runs)
@@ -273,7 +274,7 @@ pub const JOINED_CATEGORY_RANGES: &[(u32, u32)] = &[
 
 /// Whether the character is of category Mn, Me or Cf.
 pub fn joined_category(character: char) -> bool {
-    let code = character as u32;
+    let code = character.to::<u32>();
     let index = JOINED_CATEGORY_RANGES.partition_point(|range| range.1 < code);
     JOINED_CATEGORY_RANGES.get(index).is_some_and(|range| range.0 <= code)
 }
@@ -284,7 +285,7 @@ pub fn joined_category(character: char) -> bool {
 /// emoji sequence as a whole, and some editors count a character above the Basic Multilingual Plane as two; such a
 /// result is left unselected rather than selected wrong.
 pub fn caret_steps(text: &str) -> Option<usize> {
-    if text.chars().any(|character| character as u32 > BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT || joined_category(character)) {
+    if text.chars().any(|character| character.to::<u32>() > BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT || joined_category(character)) {
         return None;
     }
     Some(text.chars().count())

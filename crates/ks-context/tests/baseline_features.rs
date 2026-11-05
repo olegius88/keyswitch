@@ -1,4 +1,5 @@
 //! The frozen baseline model of the sealed tests answers as the trainer that fitted it wrote its features.
+use ks_cast::To as _;
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::context_action_features::extract_baseline_features;
 use ks_context::context_model::{ContextEvidence, ContextModel};
@@ -21,8 +22,8 @@ fn float_of_hex(text: &str) -> f64 {
     let (mantissa, exponent) = body.split_once('p').expect("a hex float");
     let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
     let digits = u64::from_str_radix(&format!("{whole}{fraction}"), 16).expect("hex digits");
-    let exponent: i32 = exponent.parse::<i32>().expect("an exponent") - 4 * fraction.len() as i32;
-    sign * digits as f64 * 2_f64.powi(exponent)
+    let exponent: i32 = exponent.parse::<i32>().expect("an exponent") - 4 * fraction.len().to::<i32>();
+    sign * digits.to::<f64>() * 2_f64.powi(exponent)
 }
 
 #[test]

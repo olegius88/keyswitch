@@ -9,6 +9,7 @@
 //! `context_action_features` imports `ContextEvidence` and `term_bucket` from here and this module imports its
 //! extractor; in Rust both are modules of one crate, so the cycle is only two `use` lines.
 
+use ks_cast::To as _;
 use crate::constants::{
     ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX, ALNUM_FEATURE_PREFIX, BOUNDARY_MISSING_LETTERS, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_DOUBTFUL_KEEP_PROBABILITY, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, CONTEXT_TYPO_MIN_CHARACTERS, CYRLETTER_FEATURE_PREFIX,
@@ -329,7 +330,7 @@ impl TermTables {
 
 /// `bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, count)`.
 pub fn bucket_of(count: u64) -> usize {
-    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS.partition_point(|&bound| bound as u64 <= count)
+    CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS.partition_point(|&bound| bound.to::<u64>() <= count)
 }
 
 const BUCKET_NAMES: [&str; 6] = ["0", "1", "2", "3", "4", "5"];
@@ -410,7 +411,7 @@ impl ContextModel {
             weights,
             version: version.to_string(),
             conversion_threshold,
-            feature_version: CONTEXT_ACTION_FEATURE_VERSION as i64,
+            feature_version: CONTEXT_ACTION_FEATURE_VERSION.to::<i64>(),
             answers_letters: flags.0,
             answers_variables: flags.1,
             answers_alnum: flags.2,
@@ -432,7 +433,7 @@ impl ContextModel {
             max_entries: MAX_CONTEXT_ACTION_MODEL_FEATURES,
             max_name_characters: MAX_CONTEXT_FEATURE_NAME_CHARACTERS,
             name_required: false,
-            max_magnitude: Some(MAX_CONTEXT_WEIGHT_MAGNITUDE as f64),
+            max_magnitude: Some(MAX_CONTEXT_WEIGHT_MAGNITUDE.to::<f64>()),
             entry_error: "invalid context feature",
             weight_error: "invalid context weight",
             table_error: "invalid context weights",
@@ -442,14 +443,14 @@ impl ContextModel {
         let payload = &artifact.payload;
         // An action model (schema 3) is written one feature to a line and may be larger; every other schema keeps its limit.
         let feature_version = integer(payload.get("feature_version"));
-        if length > MAX_CONTEXT_MODEL_BYTES as u64 && feature_version != Some(CONTEXT_ACTION_FEATURE_VERSION as i64) {
+        if length > MAX_CONTEXT_MODEL_BYTES.to::<u64>() && feature_version != Some(CONTEXT_ACTION_FEATURE_VERSION.to::<i64>()) {
             return Err(LoadError::value("context model is too large"));
         }
         let actions_match = payload.get("actions").and_then(Value::as_array).is_some_and(|actions| {
             actions.len() == ACTIONS.len() && actions.iter().zip(ACTIONS).all(|(found, wanted)| found.as_str() == Some(wanted.as_str()))
         });
         // Schema 2 is the frozen baseline the sealed tests compare a candidate with; no such model is shipped.
-        if !matches!(feature_version, Some(version) if version == CONTEXT_ACTION_FEATURE_VERSION as i64 || version == BASELINE_FEATURE_VERSION) || !actions_match {
+        if !matches!(feature_version, Some(version) if version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>() || version == BASELINE_FEATURE_VERSION) || !actions_match {
             return Err(LoadError::value("incompatible context model"));
         }
         let feature_version = feature_version.expect("checked above");

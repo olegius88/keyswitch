@@ -3,6 +3,7 @@
 //! on the other; `clean`, every word judged as typed; `field`, every word of the owner's typing, with the personal
 //! dictionary growing as it would in use. Only development splits are read, never a test file. Lists of words go to the
 //! private output folder.
+use ks_cast::To as _;
 use crate::physical::{hex_digest, pair};
 use crate::tools::reference_models;
 use flate2::read::MultiGzDecoder;
@@ -140,7 +141,7 @@ impl Knowledge {
 
 /// `make_typo`: one slip in a lowercase word that the operation undoes, chosen by `seed`.
 fn make_typo(word: &[char], operation: Operation, seed: u64, neighbours: &HashMap<char, String>) -> Option<String> {
-    let letters = word.len() as u64;
+    let letters = word.len().to::<u64>();
     let joined = |parts: &[&[char]]| -> String { parts.iter().flat_map(|part| part.iter()).collect() };
     match operation {
         Operation::Transposition => {
@@ -148,30 +149,30 @@ fn make_typo(word: &[char], operation: Operation, seed: u64, neighbours: &HashMa
             if places.is_empty() {
                 return None;
             }
-            let place = places[(seed % places.len() as u64) as usize];
+            let place = places[(seed % places.len().to::<u64>()).to::<usize>()];
             Some(joined(&[&word[..place], &[word[place + 1], word[place]], &word[place + TRANSPOSED_LETTERS..]]))
         }
         Operation::Insertion => {
-            let place = (seed % letters) as usize;
+            let place = (seed % letters).to::<usize>();
             Some(joined(&[&word[..place], &word[place + 1..]]))
         }
         Operation::Substitution => {
-            let place = (seed % letters) as usize;
+            let place = (seed % letters).to::<usize>();
             let options: Vec<char> = neighbours.get(&word[place]).map_or_else(Vec::new, |text| text.chars().collect());
             if options.is_empty() {
                 return None;
             }
-            Some(joined(&[&word[..place], &[options[((seed / letters) % options.len() as u64) as usize]], &word[place + 1..]]))
+            Some(joined(&[&word[..place], &[options[((seed / letters) % options.len().to::<u64>()).to::<usize>()]], &word[place + 1..]]))
         }
         Operation::Deletion => {
-            let place = (seed % (letters + 1)) as usize;
+            let place = (seed % (letters + 1)).to::<usize>();
             let around: Vec<char> = [place.checked_sub(1), Some(place)].into_iter().flatten().filter(|index| *index < word.len()).map(|index| word[index]).collect();
             let mut extra: BTreeSet<char> = around.iter().copied().collect();
             for letter in &around {
                 extra.extend(neighbours.get(letter).map_or_else(Vec::new, |text| text.chars().collect::<Vec<char>>()));
             }
             let sorted: Vec<char> = extra.into_iter().collect();
-            Some(joined(&[&word[..place], &[sorted[((seed / (letters + 1)) % sorted.len() as u64) as usize]], &word[place..]]))
+            Some(joined(&[&word[..place], &[sorted[((seed / (letters + 1)) % sorted.len().to::<u64>()).to::<usize>()]], &word[place..]]))
         }
     }
 }
@@ -214,8 +215,8 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
                 }
                 let lexicon = corrector.lexicon(locale).ok_or("a locale without a list")?;
                 let Some(weight) = lexicon.weight(&lower) else { continue };
-                let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len() as u64) as usize];
-                let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len() as u64, corrector.neighbours_of(locale)) else { continue };
+                let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len().to::<u64>()).to::<usize>()];
+                let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len().to::<u64>(), corrector.neighbours_of(locale)) else { continue };
                 if typo == lower {
                     continue;
                 }
@@ -256,7 +257,7 @@ fn score(samples: &[Sample], policy: &TypoPolicy, half: u64) -> Value {
         let (right, wrong) = (*counts.get("right").unwrap_or(&0), *counts.get("wrong").unwrap_or(&0));
         let corrected = right + wrong;
         let left: Map<String, Value> = counts.iter().filter(|(reason, _)| *reason != "right" && *reason != "wrong").map(|(reason, count)| (reason.clone(), json!(count))).collect();
-        (key, json!({"samples": total, "right": right, "wrong": wrong, "right_share": if total != 0 { right as f64 / total as f64 } else { 0.0 }, "wrong_share_of_corrections": if corrected != 0 { wrong as f64 / corrected as f64 } else { 0.0 }, "left": left, "real_word_typos": counts.get("occurs").copied().unwrap_or(0)}))
+        (key, json!({"samples": total, "right": right, "wrong": wrong, "right_share": if total != 0 { right.to::<f64>() / total.to::<f64>() } else { 0.0 }, "wrong_share_of_corrections": if corrected != 0 { wrong.to::<f64>() / corrected.to::<f64>() } else { 0.0 }, "left": left, "real_word_typos": counts.get("occurs").copied().unwrap_or(0)}))
     }).collect())
 }
 
@@ -265,11 +266,11 @@ fn wilson_upper(wrong: i64, total: i64) -> f64 {
         return 1.0;
     }
     let z_squared = WILSON_Z * WILSON_Z;
-    let share = wrong as f64 / total as f64;
-    let twice = (total + total) as f64;
+    let share = wrong.to::<f64>() / total.to::<f64>();
+    let twice = (total + total).to::<f64>();
     let centre = share + z_squared / twice;
-    let spread = WILSON_Z * (share * (1.0 - share) / total as f64 + z_squared / (twice * twice)).sqrt();
-    (centre + spread) / (1.0 + z_squared / total as f64)
+    let spread = WILSON_Z * (share * (1.0 - share) / total.to::<f64>() + z_squared / (twice * twice)).sqrt();
+    (centre + spread) / (1.0 + z_squared / total.to::<f64>())
 }
 
 fn policy_record(policy: &TypoPolicy) -> Value {
@@ -302,9 +303,9 @@ fn tune(samples: &[Sample]) -> Result<(TypoPolicy, Vec<Value>), String> {
                         let policy = TypoPolicy { candidate_min_count: minimum, posterior_ratio: ratio, log_probabilities: channel };
                         let (floor, threshold) = (policy.minimum_weight(), ratio.ln());
                         let taken: Vec<bool> = choices.iter().filter(|(weight, chosen, margin, _)| *weight >= floor && *chosen >= floor && *margin >= threshold).map(|choice| choice.3).collect();
-                        let right = taken.iter().filter(|value| **value).count() as i64;
-                        let wrong = taken.len() as i64 - right;
-                        let upper = wilson_upper(wrong, taken.len() as i64);
+                        let right = taken.iter().filter(|value| **value).count().to::<i64>();
+                        let wrong = taken.len().to::<i64>() - right;
+                        let upper = wilson_upper(wrong, taken.len().to::<i64>());
                         let feasible = upper <= MAX_WRONG_SHARE;
                         let in_scope: i64 = population.iter().filter(|(weight, _)| **weight >= floor).map(|(_, count)| *count).sum();
                         tried.push(json!({"policy": policy_record(&policy), "samples": in_scope, "right": right, "wrong": wrong, "wrong_share_upper_bound": upper, "feasible": feasible}));
@@ -354,7 +355,7 @@ fn clean(directory: &Path, corrector: &TypoCorrector, knowledge: &Knowledge, out
         }
     }
     std::fs::write(out.join("clean-corrections.tsv"), format!("corpus\tkind\tlocale\tqid\tword\tcorrection\toperation\tcount_order\tmargin\ttext\n{}\n", rows.join("\n"))).map_err(|error| error.to_string())?;
-    let mut report: Map<String, Value> = words.iter().map(|(key, count)| { let fixed = corrections.get(key).copied().unwrap_or(0); (key.clone(), json!({"words": count, "eligible": eligible.get(key).copied().unwrap_or(0), "corrections": fixed, "per_10000_words": (fixed * PROSE_WORDS_PER_FALSE) as f64 / *count as f64})) }).collect();
+    let mut report: Map<String, Value> = words.iter().map(|(key, count)| { let fixed = corrections.get(key).copied().unwrap_or(0); (key.clone(), json!({"words": count, "eligible": eligible.get(key).copied().unwrap_or(0), "corrections": fixed, "per_10000_words": (fixed * PROSE_WORDS_PER_FALSE).to::<f64>() / (*count).to::<f64>()})) }).collect();
     report.insert("accepted".to_owned(), json!({"prose_words_per_false_correction": PROSE_WORDS_PER_FALSE, "forum_words_per_false_correction": FORUM_WORDS_PER_FALSE, "code": 0}));
     Ok(Value::Object(report))
 }
@@ -373,7 +374,7 @@ fn stamp_seconds(text: &str, local_offset: i64) -> Option<f64> {
     let of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
     let days = era * 146_097 + of_era * 365 + of_era / 4 - of_era / 100 + of_year - 719_468;
     let micros: f64 = format!("0.{fraction}").parse().ok()?;
-    Some((days * 86_400 + hour * 3_600 + minute * 60 + second - local_offset) as f64 + micros)
+    Some((days * 86_400 + hour * 3_600 + minute * 60 + second - local_offset).to::<f64>() + micros)
 }
 
 fn kept_of(item: &Value) -> &str {
@@ -468,7 +469,7 @@ fn field_words(manifest: &Path, corrector: &TypoCorrector, knowledge: &Knowledge
     }
     let _ = std::fs::remove_dir_all(&scratch);
     let harmful: Vec<&Vec<String>> = rows.iter().filter(|(device, word, _)| vocabulary[device].contains(word)).map(|row| &row.2).collect();
-    counts.insert("corrections_of_words_that_became_the_owner_s".to_owned(), harmful.len() as i64);
+    counts.insert("corrections_of_words_that_became_the_owner_s".to_owned(), harmful.len().to::<i64>());
     let header = "device\tbattery\tapp\ttime\tword\tcorrection\toperation\tcount_order\tmargin\tmark\tretyped_next\n";
     let table = |lines: Vec<&Vec<String>>| format!("{header}{}", lines.iter().map(|row| row.join("\t") + "\n").collect::<String>());
     std::fs::write(out.join("field-corrections.tsv"), table(rows.iter().map(|row| &row.2).collect())).map_err(|error| error.to_string())?;
@@ -551,8 +552,8 @@ fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> 
                 if seed % SAMPLE_MODULUS != 0 || weight < corrector.policy.minimum_weight() {
                     continue;
                 }
-                let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len() as u64) as usize];
-                let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len() as u64, corrector.neighbours_of(locale)) else { continue };
+                let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len().to::<u64>()).to::<usize>()];
+                let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len().to::<u64>(), corrector.neighbours_of(locale)) else { continue };
                 if typo == lower || typo.chars().count() < MIN_LETTERS || lexicon.occurs(&typo) {
                     continue;
                 }
@@ -569,10 +570,10 @@ fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> 
     }
     let mut floors = Map::new();
     for floor in VOCABULARY_MIN_COUNTS {
-        let shares: Map<String, Value> = typos.iter().map(|(key, total)| (key.clone(), json!(lost[&floor].get(key).copied().unwrap_or(0) as f64 / *total as f64))).collect();
+        let shares: Map<String, Value> = typos.iter().map(|(key, total)| (key.clone(), json!(lost[&floor].get(key).copied().unwrap_or(0).to::<f64>() / (*total).to::<f64>()))).collect();
         floors.insert(floor.to_string(), json!({"clean_corrections_left_as_typed": removed[&floor], "synthetic_typos_lost": shares}));
     }
-    let chosen = VOCABULARY_MIN_COUNTS.iter().copied().find(|floor| typos.iter().all(|(key, total)| lost[floor].get(key).copied().unwrap_or(0) as f64 <= VOCABULARY_MAX_RECALL_LOSS * *total as f64)).ok_or("no count keeps the recall")?;
+    let chosen = VOCABULARY_MIN_COUNTS.iter().copied().find(|floor| typos.iter().all(|(key, total)| lost[floor].get(key).copied().unwrap_or(0).to::<f64>() <= VOCABULARY_MAX_RECALL_LOSS * (*total).to::<f64>())).ok_or("no count keeps the recall")?;
     Ok(json!({"synthetic_typos_no_list_holds": typos, "floors": floors, "chosen": chosen}))
 }
 

@@ -3,6 +3,7 @@
 //! The Python reaches AT-SPI through libatspi's GObject bindings. Here the accessibility bus is spoken to directly
 //! (`atspi_bus`), and this file holds what the reader decides, over the small `AtspiApi` a fake can replace in tests.
 
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
@@ -203,9 +204,9 @@ impl AtspiFieldReader {
         if caret < 0 {
             return Ok(None);
         }
-        let limit = FIELD_CONTEXT_MAX_CHARACTERS as i32;
+        let limit = ks_cast::const_i32(FIELD_CONTEXT_MAX_CHARACTERS);
         let before = self.api.get_text(&node, (caret - limit).max(0), caret)?;
-        let after = self.api.get_text(&node, caret, self.api.character_count(&node)?.min(caret + FIELD_AFTER_CARET_MAX_CHARACTERS as i32))?;
+        let after = self.api.get_text(&node, caret, self.api.character_count(&node)?.min(caret + FIELD_AFTER_CARET_MAX_CHARACTERS.low::<i32>()))?;
         // GTK4 can expose a hidden Entry as ordinary TEXT while GetText returns only password masks. Treat that evidence
         // conservatively; never feed masked fields to the model.
         if only_password_masks(&format!("{before}{after}")) {
@@ -250,7 +251,7 @@ impl AtspiFieldReader {
         let span = if selections != 0 { Some(api.get_selection(&node, 0).map_err(unsupported)?) } else { None };
         let Some((start, end)) = span.filter(|(start, end)| end > start) else { return Err(refused(RefusalReason::NoSelection)) };
         // One character past the bound is read, so that a longer selection is told apart.
-        let stop = end.min(start + SELECTION_COMMAND_MAX_CHARACTERS as i32 + 1);
+        let stop = end.min(start + SELECTION_COMMAND_MAX_CHARACTERS.low::<i32>() + 1);
         let selected = api.get_text(&node, start, stop).map_err(unsupported)?;
         if only_password_masks(&selected) {
             return Err(refused(RefusalReason::SensitiveField));
@@ -291,15 +292,15 @@ impl AtspiFieldReader {
         if !api.delete_text(&read.node, read.start, read.end).map_err(call_failed)? {
             return Err(refused(RefusalReason::NotSettable));
         }
-        if !api.insert_text(&read.node, read.start, replacement, replacement.len() as i32).map_err(call_failed)? {
+        if !api.insert_text(&read.node, read.start, replacement, replacement.len().low::<i32>()).map_err(call_failed)? {
             // The selection is gone and nothing came in its place: the selected text is put back.
-            let restored = api.insert_text(&read.node, read.start, &read.selected, read.selected.len() as i32).unwrap_or(false);
+            let restored = api.insert_text(&read.node, read.start, &read.selected, read.selected.len().low::<i32>()).unwrap_or(false);
             return Err(SelectionError::Failed(BackendError::Failed(format!(
                 "AT-SPI не вставил новый текст; выделенный текст {}",
                 if restored { "возвращён" } else { "не вернулся" }
             ))));
         }
-        let length = replacement.chars().count() as i32;
+        let length = replacement.chars().count().low::<i32>();
         Ok(Some(api.set_selection(&read.node, 0, read.start, read.start + length).unwrap_or(false)))
     }
 }

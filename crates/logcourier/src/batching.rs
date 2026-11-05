@@ -1,4 +1,5 @@
 //! Coalesce unsent legacy fragments transactionally, without changing their bytes.
+use ks_cast::To as _;
 use serde_json::{Value, json};
 use sqlite::params;
 
@@ -87,7 +88,7 @@ pub fn compact_with(store: &Store, config: &Config, limit: usize, max_fragments:
     }
     let transaction = store.db.unchecked_transaction()?;
     let before: usize = selected.iter().map(|row| row.payload.as_ref().map_or(0, Vec::len)).sum();
-    if store.queue_bytes()? - before as i64 + payload.len() as i64 > store.capacity {
+    if store.queue_bytes()? - before.to::<i64>() + payload.len().to::<i64>() > store.capacity {
         return Err(Error::QueueFull("Для упаковки не хватает места в очереди. Фрагменты сохранены.".to_owned()));
     }
     for row in &selected {

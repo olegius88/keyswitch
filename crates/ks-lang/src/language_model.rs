@@ -7,6 +7,7 @@
 //!
 //! `@lru_cache` of `score` is not carried over: it is a pure function, cheap here, and the cache held up to 65 536 scores.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::pysum::py_sum;
 use crate::spellcheck::{split_path_list, DisabledSpellChecker, SpellChecker};
@@ -143,7 +144,7 @@ impl GramCounter {
             keys: K::into_keys(entries.iter().map(|entry| entry.0).collect()),
             counts: entries.iter().map(|entry| entry.1).collect(),
             total,
-            denominator: total as f64 + LANGUAGE_MODEL_GRAM_SMOOTHING * vocabulary as f64,
+            denominator: total.to::<f64>() + LANGUAGE_MODEL_GRAM_SMOOTHING * vocabulary.to::<f64>(),
         }
     }
 
@@ -182,7 +183,7 @@ impl GramCounts {
     fn build(frequencies: &WordTable) -> Self {
         let eligible = |word: &str| pystr::len(word) >= LANGUAGE_MODEL_MIN_WORD_CHARACTERS && pystr::isalpha(word);
         let mut seen = vec![0u64; 0x11_0000 / 64];
-        let mut mark = |c: char| seen[c as usize / 64] |= 1 << (c as usize % 64);
+        let mut mark = |c: char| seen[c.to::<usize>() / 64] |= 1 << (c.to::<usize>() % 64);
         mark('^');
         mark('$');
         for (word, _frequency) in frequencies.iter() {
@@ -191,7 +192,7 @@ impl GramCounts {
             }
         }
         let alphabet: Vec<char> =
-            (0..0x11_0000u32).filter(|&cp| seen[cp as usize / 64] >> (cp % 64) & 1 == 1).filter_map(char::from_u32).collect();
+            (0..0x11_0000u32).filter(|&cp| seen[cp.to::<usize>() / 64] >> (cp % 64) & 1 == 1).filter_map(char::from_u32).collect();
         drop(seen);
         if alphabet.len() <= PACKED_GRAM_LAST_CODE { Self::counted::<u32>(frequencies, Some(alphabet)) } else { Self::counted::<u128>(frequencies, None) }
     }
@@ -207,7 +208,7 @@ impl GramCounts {
             // The source counts are highly skewed. Logarithmic weighting keeps frequent words important without
             // erasing legitimate rare forms.
             let log = (frequency.max(1) as f64).log2();
-            let weight = (log as i64 + 1).clamp(1, LANGUAGE_MODEL_MAX_GRAM_WEIGHT) as u32;
+            let weight = ((log.to::<i64>() + 1).clamp(1, LANGUAGE_MODEL_MAX_GRAM_WEIGHT)).to::<u32>();
             codes.clear();
             codes.push(encode('^'));
             codes.extend(word.chars().map(encode));
@@ -237,8 +238,8 @@ impl GramCounts {
 
 fn encode_with(alphabet: Option<&[char]>, c: char) -> u32 {
     match alphabet {
-        Some(alphabet) => alphabet.binary_search(&c).map_or(0, |index| index as u32 + 1),
-        None => c as u32,
+        Some(alphabet) => alphabet.binary_search(&c).map_or(0, |index| index.to::<u32>() + 1),
+        None => c.to::<u32>(),
     }
 }
 
@@ -340,13 +341,13 @@ impl LanguageModel {
 
     /// The raw scores of the most frequent words, most frequent first and then by word.
     fn calibration(&self) -> Vec<f64> {
-        let mut order: Vec<u32> = (0..self.frequencies.len() as u32).collect();
+        let mut order: Vec<u32> = (0..self.frequencies.len().to::<u32>()).collect();
         // The table is sorted by word and the sort is stable: (-frequency, word).
-        order.sort_by_key(|&index| std::cmp::Reverse(self.frequencies.value_at(index as usize)));
+        order.sort_by_key(|&index| std::cmp::Reverse(self.frequencies.value_at(index.to::<usize>())));
         order.truncate(LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT);
         order
             .iter()
-            .map(|&index| self.frequencies.words().get(index as usize))
+            .map(|&index| self.frequencies.words().get(index.to::<usize>()))
             .filter(|word| pystr::len(word) >= LANGUAGE_MODEL_CALIBRATION_MIN_CHARACTERS && pystr::isalpha(word))
             .map(|word| self._raw_ngram_score(word))
             .collect()
@@ -496,7 +497,7 @@ impl LanguageModel {
             let counter = &self._gram_counts.counters[slot];
             let grams = codes.windows(order);
             let count = grams.len();
-            order_scores[scored] = py_sum(grams.map(|gram| ((f64::from(counter.get(gram)) + LANGUAGE_MODEL_GRAM_SMOOTHING) / counter.denominator).ln())) / count as f64;
+            order_scores[scored] = py_sum(grams.map(|gram| ((f64::from(counter.get(gram)) + LANGUAGE_MODEL_GRAM_SMOOTHING) / counter.denominator).ln())) / count.to::<f64>();
             scored += 1;
         }
         fmean(&order_scores[..scored]).unwrap_or(LANGUAGE_MODEL_EMPTY_TOKEN_SCORE)
@@ -523,7 +524,7 @@ impl LanguageModel {
         }
         let mut indices: Vec<usize> = (0..length).collect();
         if length > limit {
-            indices = (0..limit).map(|index| py_round((index * (length - 1)) as f64 / (limit - 1) as f64) as usize).collect();
+            indices = (0..limit).map(|index| (py_round((index * (length - 1)).to::<f64>() / (limit - 1).to::<f64>())).to::<usize>()).collect();
             indices.dedup();
         }
         let scores = indices.into_iter().map(|index| {
@@ -559,7 +560,7 @@ impl LanguageModel {
         let trigrams = codes.windows(LANGUAGE_MODEL_TRIGRAM_ORDER);
         let count = trigrams.len();
         let hits = trigrams.filter(|gram| counter.get(gram) != 0).count();
-        let ratio = hits as f64 / count as f64;
+        let ratio = hits.to::<f64>() / count.to::<f64>();
         let invalid_ratio = 1.0 - ratio;
         let score = self.ngram_score(&normalized);
         let limited = if score < LANGUAGE_MODEL_NATURALNESS_MAX { score } else { LANGUAGE_MODEL_NATURALNESS_MAX };

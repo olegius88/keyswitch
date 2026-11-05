@@ -8,6 +8,7 @@
 //!
 //! With --candidate the tag is vX.Y.Z-rcN and the release a pre-release: the update check of an installed program does not
 //! see it, and the APT repository stays as it is. Without it the tag replaces the published version for everybody.
+use ks_cast::To as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -109,7 +110,7 @@ fn changelog_sections(text: &str) -> Vec<(String, Vec<String>)> {
 
 /// Today in the UTC calendar: days since the epoch to a date (Howard Hinnant's `civil_from_days`).
 fn today() -> String {
-    let seconds = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs()) as i64;
+    let seconds = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>();
     let days = seconds / SECONDS_PER_DAY + 719_468;
     let era = days.div_euclid(146_097);
     let of_era = days.rem_euclid(146_097);

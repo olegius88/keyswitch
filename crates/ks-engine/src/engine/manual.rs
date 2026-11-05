@@ -371,7 +371,7 @@ impl EngineCore {
             self.shared._update(Update { last_action: Some("Нет слова для ручного преобразования".to_owned()), ..Update::default() });
             return;
         };
-        if let Err(error) = self.backend.switch_group(target as i32) {
+        if let Err(error) = self.backend.switch_group(target.to::<i32>()) {
             technical_event!(
                 self.shared, "layout_switch_failed",
                 "source": "convert_last",

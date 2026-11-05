@@ -286,11 +286,11 @@ fn characters_follow_shift_caps_lock_and_the_group_fallback() {
     let backend = opened(&fake);
     let shared = &backend.shared;
     assert_eq!(shared.character_for_keycode(&*fake, A, 0, 0), "a");
-    assert_eq!(shared.character_for_keycode(&*fake, A, 0, SHIFT_MASK as u16), "A");
-    assert_eq!(shared.character_for_keycode(&*fake, A, 0, LOCK_MASK as u16), "A", "caps lock turns a letter over");
-    assert_eq!(shared.character_for_keycode(&*fake, A, 0, (LOCK_MASK | SHIFT_MASK) as u16), "a", "shift and caps lock cancel");
+    assert_eq!(shared.character_for_keycode(&*fake, A, 0, SHIFT_MASK.low::<u16>()), "A");
+    assert_eq!(shared.character_for_keycode(&*fake, A, 0, LOCK_MASK.low::<u16>()), "A", "caps lock turns a letter over");
+    assert_eq!(shared.character_for_keycode(&*fake, A, 0, (LOCK_MASK | SHIFT_MASK).low::<u16>()), "a", "shift and caps lock cancel");
     assert_eq!(shared.character_for_keycode(&*fake, COMMA, 1, 0), "б");
-    assert_eq!(shared.character_for_keycode(&*fake, COMMA, 0, LOCK_MASK as u16), ",", "caps lock leaves a sign");
+    assert_eq!(shared.character_for_keycode(&*fake, COMMA, 0, LOCK_MASK.low::<u16>()), ",", "caps lock leaves a sign");
     // Space has only group 0: the lookup applies the group fallback.
     assert_eq!(shared.character_for_keycode(&*fake, SPACE, 1, 0), " ");
     // Backspace is no printable character, and an unknown key has none.
@@ -521,7 +521,7 @@ fn a_boundary_that_means_the_same_in_both_layouts_goes_with_the_word() {
 fn caps_lock_flips_the_shift_of_a_letter_and_only_of_a_letter() {
     let fake = Fake::new();
     let backend = opened(&fake);
-    fake.with(|state| state.locked_mods = LOCK_MASK as u8);
+    fake.with(|state| state.locked_mods = LOCK_MASK.low::<u8>());
     // The user typed with caps lock on: the stroke is a lower-case letter at the shift level. Typed again with the lock on,
     // the letter needs a shift of its own to come out as it was.
     let mut typed = stroke(false);

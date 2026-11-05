@@ -1,5 +1,6 @@
 //! Privacy-conscious correction history (only corrected word pairs).
 
+use ks_cast::To as _;
 use crate::config::home_dir;
 use crate::constants::{DEFAULT_HISTORY_LIMIT, HISTORY_CONFIDENCE_DECIMALS};
 use crate::logsetup::utc_now;
@@ -96,14 +97,14 @@ pub fn history_limit(value: &Value) -> i64 {
             None => match n.as_u64() {
                 Some(u) => Some(i128::from(u)),
                 // int(float): the fraction is cut off; an infinity or a NaN has no int.
-                None => n.as_f64().filter(|f| f.is_finite()).map(|f| f.trunc() as i128),
+                None => n.as_f64().filter(|f| f.is_finite()).map(|f| f.trunc().to::<i128>()),
             },
         },
         Value::String(text) => py_int(text),
         _ => None,
     };
     match parsed {
-        Some(count) => count.clamp(1, i128::from(i64::MAX)) as i64,
+        Some(count) => (count.clamp(1, i128::from(i64::MAX))).to::<i64>(),
         None => DEFAULT_HISTORY_LIMIT,
     }
 }
@@ -202,8 +203,8 @@ impl HistoryStore {
             drop(handle);
             let limit = self.limit();
             let rows = self.read_rows(Some(limit.saturating_add(1)))?;
-            if rows.len() as i64 > limit {
-                self.rewrite(&rows[rows.len() - limit as usize..])?;
+            if rows.len().to::<i64>() > limit {
+                self.rewrite(&rows[rows.len() - limit.to::<usize>()..])?;
             }
             callbacks = self.callbacks();
         }
@@ -228,7 +229,7 @@ impl HistoryStore {
         if let Some(limit) = limit {
             // result[-limit:]: a limit of zero is "-0", the whole list.
             if limit > 0 && (limit as usize) < rows.len() {
-                rows.drain(..rows.len() - limit as usize);
+                rows.drain(..rows.len() - limit.to::<usize>());
             }
         }
         Ok(rows)

@@ -14,6 +14,8 @@ fn main() {
 
 #[cfg(windows)]
 mod scenario {
+    use ks_cast::To as _;
+
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -114,15 +116,15 @@ mod scenario {
                 if window.is_null() {
                     return Err("the window was not created".to_owned());
                 }
-                let style = WS_CHILD | WS_VISIBLE | WS_BORDER | (ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL) as u32;
+                let style = WS_CHILD | WS_VISIBLE | WS_BORDER | (ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL).to::<u32>();
                 let edit = CreateWindowExW(0, edit_class.as_ptr(), empty.as_ptr(), style, 0, 0, 620, 200, window, std::ptr::null_mut(), instance, std::ptr::null());
                 if edit.is_null() {
                     return Err("the edit control was not created".to_owned());
                 }
-                EDIT.store(edit as isize, Ordering::SeqCst);
+                EDIT.store(edit.to::<isize>(), Ordering::SeqCst);
                 ShowWindow(window, SW_SHOW);
-                let english = LoadKeyboardLayoutW(wide("00000409").as_ptr(), 0) as isize as i64;
-                let russian = LoadKeyboardLayoutW(wide("00000419").as_ptr(), 0) as isize as i64;
+                let english = ((LoadKeyboardLayoutW(wide("00000409").as_ptr(), 0)).to::<isize>()).to::<i64>();
+                let russian = ((LoadKeyboardLayoutW(wide("00000419").as_ptr(), 0)).to::<isize>()).to::<i64>();
                 if english == 0 || russian == 0 {
                     return Err("the layouts could not be loaded".to_owned());
                 }
@@ -134,15 +136,15 @@ mod scenario {
             // SAFETY: the buffer has room for the length asked of the control and its terminator.
             unsafe {
                 let length = GetWindowTextLengthW(self.edit);
-                let mut buffer = vec![0_u16; length as usize + 2];
-                let written = GetWindowTextW(self.edit, buffer.as_mut_ptr(), buffer.len() as i32);
-                String::from_utf16_lossy(&buffer[..written.max(0) as usize])
+                let mut buffer = vec![0_u16; length.to::<usize>() + 2];
+                let written = GetWindowTextW(self.edit, buffer.as_mut_ptr(), buffer.len().low::<i32>());
+                String::from_utf16_lossy(&buffer[..written.max(0).to::<usize>()])
             }
         }
 
         fn group(&self) -> i32 {
             // SAFETY: the layout of this thread, which owns the edit control.
-            let language = unsafe { GetKeyboardLayout(0) } as usize as u32 & 0xffff;
+            let language = ((unsafe { GetKeyboardLayout(0) }).to::<usize>()).low::<u32>() & 0xffff;
             match language {
                 ENGLISH => 0,
                 RUSSIAN => 1,
@@ -188,7 +190,7 @@ mod scenario {
         }
 
         fn activate(&self) {
-            self.api.activate_window(self.window as isize as i64);
+            self.api.activate_window((self.window.to::<isize>()).to::<i64>());
             // SAFETY: the edit control belongs to this thread.
             unsafe {
                 SetFocus(self.edit);

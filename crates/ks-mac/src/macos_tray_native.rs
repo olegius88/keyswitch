@@ -6,6 +6,8 @@ pub use native::StatusItem;
 
 #[cfg(target_os = "macos")]
 mod native {
+    use ks_cast::To as _;
+
     use std::ffi::c_void;
     use std::sync::{Arc, Mutex, OnceLock};
 
@@ -79,7 +81,7 @@ mod native {
                     let allocated: Id = msg_send![class!(NSMenuItem), alloc];
                     let item: Id = msg_send![allocated, initWithTitle: string(&entry.label), action: action, keyEquivalent: string("")];
                     let _: () = msg_send![item, setTarget: target];
-                    let _: () = msg_send![item, setTag: index as isize];
+                    let _: () = msg_send![item, setTag: index.bits::<isize>()];
                     let _: () = msg_send![item, setEnabled: entry.enabled && entry.action.is_some()];
                     if let Some(checked) = entry.checked {
                         let _: () = msg_send![item, setState: if checked { CONTROL_STATE_ON } else { CONTROL_STATE_OFF }];
@@ -131,9 +133,9 @@ mod native {
                     let _: () = msg_send![menu, setDelegate: target];
                     let _: () = msg_send![item, setMenu: menu];
                     let mut guard = locked();
-                    guard.item = item as usize;
-                    guard.menu = menu as usize;
-                    guard.target = target as usize;
+                    guard.item = item.to::<usize>();
+                    guard.menu = menu.to::<usize>();
+                    guard.target = target.to::<usize>();
                     guard.handler = Some(handler);
                 }
                 Ok(())

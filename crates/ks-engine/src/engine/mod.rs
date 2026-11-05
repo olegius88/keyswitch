@@ -6,6 +6,7 @@
 //! (`shared::Guarded`: the snapshot, the learning prompt, the callbacks); it is never held while calling out. What the
 //! keyboard hook reads (`consumes_key`) is atomics in `Shared`; `enqueue` takes only the inbox's short lock.
 
+use ks_cast::To as _;
 mod commit;
 mod decide;
 mod early;
@@ -207,7 +208,7 @@ impl EngineCore {
             None => Arc::new(default_learning_store(&settings, &history).map_err(|error| EngineError(error.to_string()))?),
         };
         let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> =
-            models.iter().enumerate().map(|(group, model)| (group as i64, model.clone() as Arc<dyn LanguageScorer>)).collect();
+            models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
         let classifier: Option<Arc<dyn IntentClassifier>> = intent_model.map(|model| model as _);
         let detector = LanguageDetector::new(scorers, classifier, protected_tokens)?;
         let personal_settings = settings.clone();
@@ -217,7 +218,7 @@ impl EngineCore {
         );
         let snapshot = EngineSnapshot {
             enabled: settings.with_value("enabled", |value| value.is_none_or(truthy)),
-            correction_count: history.read(None).map_or(0, |entries| entries.len() as i64),
+            correction_count: history.read(None).map_or(0, |entries| entries.len().to::<i64>()),
             ..EngineSnapshot::default()
         };
         let shared = Shared::new(settings.clone(), backend.clone(), clock.clone(), models.len(), snapshot);
@@ -354,12 +355,12 @@ impl EngineCore {
 
     #[inline]
     pub(crate) fn model(&self, group: i64) -> &Arc<LanguageModel> {
-        &self.models[group as usize]
+        &self.models[group.to::<usize>()]
     }
 
     /// `[group for group in self.models if group != source_group]`.
     pub(crate) fn other_groups(&self, source_group: i64) -> Vec<i64> {
-        (0..self.models.len() as i64).filter(|&group| group != source_group).collect()
+        (0..self.models.len().to::<i64>()).filter(|&group| group != source_group).collect()
     }
 
     /// `{group: self._text_for_group(strokes, group) for group in self.models if group != source_group}`.
@@ -419,8 +420,7 @@ impl EngineCore {
     }
 
     pub(crate) fn _minimum_word_length(&self) -> i64 {
-        self._bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX)
-            as i64
+        self._bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX).to::<i64>()
     }
 
     /// `known` of the policy built with an engine's models, as `KeySwitchEngine.__init__` hands it over: the orthotactic
@@ -455,7 +455,7 @@ pub fn default_learning_store(
 /// `_text_for_group`.
 #[inline]
 pub fn _text_for_group(strokes: &[Stroke], group: i64) -> String {
-    let group = group as i32;
+    let group = group.to::<i32>();
     let mut text = String::with_capacity(strokes.len() * 2);
     for stroke in strokes {
         text.push_str(stroke.character_for(group));
@@ -466,7 +466,7 @@ pub fn _text_for_group(strokes: &[Stroke], group: i64) -> String {
 /// Rounded milliseconds, as `round(seconds * MILLISECONDS_PER_SECOND)`.
 #[inline]
 pub(crate) fn ms(seconds: f64) -> i64 {
-    ks_text::py_round(seconds * MILLISECONDS_PER_SECOND) as i64
+    ks_text::py_round(seconds * MILLISECONDS_PER_SECOND).to::<i64>()
 }
 
 /// `round(value, LOGGED_SCORE_DECIMALS)`.

@@ -1,5 +1,6 @@
 //! One entry into the engine from outside: the Python's name and arguments, called on the Rust engine.
 
+use ks_cast::To as _;
 use super::backend::key_from;
 use super::compare::disposition_value;
 use ks_config::history::HistoryEntry;
@@ -125,7 +126,7 @@ fn plan_from(value: &Value) -> Option<CorrectionPlan> {
     plan.head = strokes_from(value.get("head"));
     plan.sign_replayed = value["sign_replayed"].as_bool()?;
     plan.typed = text("typed");
-    plan.kept_tail = value["kept_tail"].as_u64()? as usize;
+    plan.kept_tail = (value["kept_tail"].as_u64()?).to::<usize>();
     plan.replaced_strokes = strokes_from(value.get("replaced_strokes"));
     plan.replaced = strokes_from(value.get("replaced"));
     Some(plan)

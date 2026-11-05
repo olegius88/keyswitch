@@ -1,5 +1,6 @@
 //! Optional, explicitly enabled accessibility reads outside keyboard hooks.
 
+use ks_cast::To as _;
 use crate::constants::{FIELD_READER_RETRY_DELAYS_SECONDS, MILLISECONDS_PER_SECOND};
 use ks_backend::{FieldContext, FieldReader, FieldRole, ManagedFieldReader, ReaderFailure};
 use ks_context::input_context::Clock;
@@ -157,7 +158,7 @@ impl FieldReader for PlatformFieldReader {
         let result = READER.with_borrow(|reader| reader.as_ref().expect("just opened").read(application, window));
         // How long the provider took is a fact about the provider, and the only way to tell "too slow for the timeout"
         // from "cannot do it at all" without printing anything the user typed.
-        self.state()._last_read_ms = Some(ks_text::py_round(((self.clock)() - started) * MILLISECONDS_PER_SECOND) as i64);
+        self.state()._last_read_ms = Some((ks_text::py_round(((self.clock)() - started) * MILLISECONDS_PER_SECOND)).to::<i64>());
         match result {
             Err(failure) => self.fail("read", failure),
             Ok(result) => {

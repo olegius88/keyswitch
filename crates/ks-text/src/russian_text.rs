@@ -11,6 +11,7 @@
 //! "за 5 секунд", "на 3 секунды", "раз в 6 часов", "доступно 10 секунд") or the nominative;
 //! in both a fraction takes the genitive singular, which is the second form.
 
+use ks_cast::To as _;
 use crate::bigint::BigUint;
 use crate::constants::russian_text::{
     RUSSIAN_PLURAL_ELEVEN_EXCEPTION, RUSSIAN_PLURAL_FEW_LAST_DIGITS, RUSSIAN_PLURAL_MOD_HUNDRED,
@@ -48,14 +49,14 @@ pub fn russian_number(value: f64) -> String {
 /// `abs(int(value))` of an integral float taken modulo `m`.
 fn abs_int_mod(value: f64, m: u32) -> u32 {
     let bits = value.abs().to_bits();
-    let exp = ((bits >> 52) & 0x7FF) as i64;
+    let exp = ((bits >> 52) & 0x7FF).bits::<i64>();
     if exp == 0 {
         return 0;
     }
     let mantissa = (bits & ((1u64 << 52) - 1)) | (1 << 52);
     let shift = exp - 1075;
     let big = BigUint::from_u64(mantissa);
-    let big = if shift >= 0 { big.shl(shift as u64) } else { big.shr((-shift) as u64) };
+    let big = if shift >= 0 { big.shl(shift.bits::<u64>()) } else { big.shr((-shift).bits::<u64>()) };
     big.rem_small(m)
 }
 

@@ -3,6 +3,7 @@
 //!
 //! Where Python raises, the function returns `None` (or an `Err` that names the error); nothing panics.
 
+use ks_cast::To as _;
 use crate::bigint::BigUint;
 use crate::ucd;
 
@@ -35,7 +36,7 @@ pub fn float_repr(x: f64) -> String {
     let digits: String = mantissa.chars().filter(|&c| c != '.').collect();
     let exp10: i32 = exponent.parse().expect("exponent");
     let decpt = exp10 + 1;
-    let n = digits.len() as i32;
+    let n = digits.len().low::<i32>();
     let mut out = String::from(sign);
     if !(-4..16).contains(&exp10) {
         out.push_str(&digits[..1]);
@@ -48,16 +49,16 @@ pub fn float_repr(x: f64) -> String {
         out.push_str(&format!("{:02}", exp10.abs()));
     } else if decpt <= 0 {
         out.push_str("0.");
-        out.extend(std::iter::repeat_n('0', (-decpt) as usize));
+        out.extend(std::iter::repeat_n('0', (-decpt).to::<usize>()));
         out.push_str(&digits);
     } else if decpt >= n {
         out.push_str(&digits);
-        out.extend(std::iter::repeat_n('0', (decpt - n) as usize));
+        out.extend(std::iter::repeat_n('0', (decpt - n).to::<usize>()));
         out.push_str(".0");
     } else {
-        out.push_str(&digits[..decpt as usize]);
+        out.push_str(&digits[..decpt.to::<usize>()]);
         out.push('.');
-        out.push_str(&digits[decpt as usize..]);
+        out.push_str(&digits[decpt.to::<usize>()..]);
     }
     out
 }
@@ -213,7 +214,7 @@ pub fn py_round_to_int(x: f64) -> Option<i128> {
         return None;
     }
     let r = py_round(x);
-    if r.abs() >= 1.7e38 { None } else { Some(r as i128) }
+    if r.abs() >= 1.7e38 { None } else { Some(r.to::<i128>()) }
 }
 
 /// `round(x, ndigits)`: correctly rounded through the exact decimal value (halves to even, on the exact
@@ -233,9 +234,9 @@ pub fn py_round_ndigits(x: f64, ndigits: i64) -> Option<f64> {
         return Some(x);
     }
     let rounded = if ndigits >= 0 {
-        format!("{:.*}", ndigits as usize, x).parse::<f64>().ok()?
+        format!("{:.*}", ndigits.to::<usize>(), x).parse::<f64>().ok()?
     } else {
-        round_to_tens(x, (-ndigits) as usize).parse::<f64>().ok()?
+        round_to_tens(x, (-ndigits).to::<usize>()).parse::<f64>().ok()?
     };
     if rounded.is_infinite() { None } else { Some(rounded) }
 }
@@ -378,14 +379,14 @@ pub fn fmean(values: &[f64]) -> Option<f64> {
     if values.is_empty() {
         return None;
     }
-    Some(fsum(values).ok()? / values.len() as f64)
+    Some(fsum(values).ok()? / values.len().to::<f64>())
 }
 
 /// Split a finite double into `(negative, mantissa, exponent)` with `|x| = mantissa * 2^exponent`.
 fn decompose(x: f64) -> (bool, u64, i32) {
     let bits = x.to_bits();
     let negative = bits >> 63 == 1;
-    let exp_bits = ((bits >> 52) & 0x7FF) as i32;
+    let exp_bits = ((bits >> 52) & 0x7FF).to::<i32>();
     let frac = bits & ((1u64 << 52) - 1);
     if exp_bits == 0 { (negative, frac, -1074) } else { (negative, frac | (1 << 52), exp_bits - 1075) }
 }
@@ -393,9 +394,9 @@ fn decompose(x: f64) -> (bool, u64, i32) {
 /// `statistics._float_sqrt_of_frac(n, m)`: the square root of n/m, correctly rounded.
 fn float_sqrt_of_frac(n: &BigUint, m: &BigUint) -> f64 {
     const SQRT_BIT_WIDTH: i64 = 2 * 53 + 3;
-    let q = (n.bit_length() as i64 - m.bit_length() as i64 - SQRT_BIT_WIDTH).div_euclid(2);
+    let q = (n.bit_length().bits::<i64>() - m.bit_length().bits::<i64>() - SQRT_BIT_WIDTH).div_euclid(2);
     // Round-to-odd integer square root of n/m (with the scale folded into n or m).
-    let (nn, mm) = if q >= 0 { (n.clone(), m.shl(2 * q as u64)) } else { (n.shl((-2 * q) as u64), m.clone()) };
+    let (nn, mm) = if q >= 0 { (n.clone(), m.shl(2 * q.bits::<u64>())) } else { (n.shl((-2 * q).bits::<u64>()), m.clone()) };
     let (quotient, _) = nn.divrem(&mm);
     let a = quotient.isqrt();
     let inexact = a.mul(&a).mul(&mm) != nn;
@@ -421,7 +422,7 @@ pub fn pstdev(values: &[f64]) -> Option<f64> {
         if mant == 0 {
             continue;
         }
-        let x = BigUint::from_u64(mant).shl((exp - emin) as u64);
+        let x = BigUint::from_u64(mant).shl((exp - emin).to::<u64>());
         squares = squares.add(&x.mul(&x));
         if neg {
             negative = negative.add(&x);
@@ -430,7 +431,7 @@ pub fn pstdev(values: &[f64]) -> Option<f64> {
         }
     }
     let sum_abs = if positive >= negative { positive.sub(&negative) } else { negative.sub(&positive) };
-    let count = BigUint::from_u64(n as u64);
+    let count = BigUint::from_u64(n.to::<u64>());
     // mean square deviation = (n * sum(X^2) - sum(X)^2) / n^2 * 2^(2 emin)
     let numerator = count.mul(&squares).sub(&sum_abs.mul(&sum_abs));
     if numerator.is_zero() {
@@ -439,9 +440,9 @@ pub fn pstdev(values: &[f64]) -> Option<f64> {
     let denominator = count.mul(&count);
     let scale = 2 * i64::from(emin);
     let (numerator, denominator) = if scale >= 0 {
-        (numerator.shl(scale as u64), denominator)
+        (numerator.shl(scale.bits::<u64>()), denominator)
     } else {
-        (numerator, denominator.shl((-scale) as u64))
+        (numerator, denominator.shl((-scale).bits::<u64>()))
     };
     Some(float_sqrt_of_frac(&numerator, &denominator))
 }
@@ -702,7 +703,7 @@ pub fn float_hex(x: f64) -> String {
     }
     let bits = x.to_bits();
     let sign = if bits >> 63 == 1 { "-" } else { "" };
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let exponent = ((bits >> 52) & 0x7ff).bits::<i64>();
     let fraction = bits & ((1_u64 << 52) - 1);
     if exponent == 0 && fraction == 0 {
         return format!("{sign}0x0.0p+0");

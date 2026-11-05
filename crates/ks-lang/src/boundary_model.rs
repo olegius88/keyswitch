@@ -4,6 +4,7 @@
 //! boundary/idle; this model then compares the whole word with a word followed by literal punctuation. An uncertain
 //! result must not authorize an automatic rewrite.
 
+use ks_cast::To as _;
 use crate::constants::*;
 use crate::language_model::LanguageModel;
 use crate::load_error::{json_loads, py_equals_int, read_all, LoadError};
@@ -32,12 +33,12 @@ fn clamped(value: f64, low: f64, high: f64) -> f64 {
 
 /// Numeric evidence only: no word IDs, apps or private context memorized.
 pub fn features(original: &str, alternative: &str, suffix_length: i64, source: &LanguageModel, target: &LanguageModel) -> Features {
-    let end = pystr::len(original) as i64 - suffix_length;
+    let end = pystr::len(original).to::<i64>() - suffix_length;
     let scale = BOUNDARY_FEATURE_LENGTH_SCALE_CHARACTERS;
     let mut result = Features::with_capacity(16);
     result.insert("bias".into(), 1.0);
-    result.insert("suffix".into(), suffix_length.min(MAX_SUFFIX) as f64 / MAX_SUFFIX as f64);
-    result.insert("length".into(), end.min(scale) as f64 / scale as f64);
+    result.insert("suffix".into(), suffix_length.min(MAX_SUFFIX).to::<f64>() / MAX_SUFFIX.to::<f64>());
+    result.insert("length".into(), end.min(scale).to::<f64>() / scale.to::<f64>());
     result.insert("whole".into(), f64::from(suffix_length == 0));
     for (name, text, model) in [("source_word", pystr::slice(original, None, Some(end)), source), ("target_word", pystr::slice(alternative, None, Some(end)), target)] {
         let score = model.score(text);

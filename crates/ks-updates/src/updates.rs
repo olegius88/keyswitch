@@ -1,5 +1,6 @@
 //! Strict GitHub Releases update discovery and verified package download.
 
+use ks_cast::To as _;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -375,7 +376,7 @@ impl GitHubReleaseClient {
             if count == 0 {
                 break;
             }
-            downloaded += count as u64;
+            downloaded += count.to::<u64>();
             if downloaded > release.asset.size {
                 return fail("Размер загруженного обновления превышает объявленный");
             }

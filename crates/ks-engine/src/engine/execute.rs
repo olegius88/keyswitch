@@ -689,11 +689,11 @@ impl EngineCore {
     /// The backend's injection for this plan.
     fn _inject(&mut self, plan: &CorrectionPlan, late: &[Stroke]) -> Result<i32, BackendError> {
         let late = owned(late);
-        let source = Some(plan.source_group as i32);
+        let source = Some(plan.source_group.to::<i32>());
         if plan.mode == "sign" {
             // Every key of the token, the signs after it and its boundary go out as literals of the layout the
             // sign belongs to; nothing is converted, and the backend restores the current layout after them.
-            let meant = self.other_groups(plan.source_group)[0] as i32;
+            let meant = (self.other_groups(plan.source_group)[0]).to::<i32>();
             let literal: Vec<KeyEvent> = plan
                 .strokes
                 .iter()
@@ -703,7 +703,7 @@ impl EngineCore {
                 .collect();
             return self.backend.inject_correction(Injection {
                 strokes: &[],
-                target_group: plan.source_group as i32,
+                target_group: plan.source_group.to::<i32>(),
                 boundary: None,
                 source_group: source,
                 late: &late,
@@ -717,7 +717,7 @@ impl EngineCore {
         let boundary = plan.boundary.as_ref().map(|boundary| (**boundary).clone());
         let mut injection = Injection {
             strokes: &strokes,
-            target_group: plan.target_group as i32,
+            target_group: plan.target_group.to::<i32>(),
             boundary: boundary.as_ref(),
             source_group: source,
             late: &late,

@@ -9,6 +9,7 @@
 //! One thread, the message loop's, owns everything here. State sits in one `Ui` kept in a thread-local; no `RefCell` of it
 //! is held across a call that can send a message back into the window.
 
+use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ptr::{null, null_mut};
@@ -262,7 +263,7 @@ fn system_dark() -> bool {
 /// Registers the classes and makes the hidden frame window.
 pub fn create(services: Services) -> Option<HWND> {
     let controls = INITCOMMONCONTROLSEX {
-        dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+        dwSize: (std::mem::size_of::<INITCOMMONCONTROLSEX>()).low::<u32>(),
         dwICC: ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES | ICC_UPDOWN_CLASS,
     };
     // SAFETY: the structure is fully initialised and lives through the call; the class descriptions point at strings that
@@ -307,7 +308,7 @@ pub fn create(services: Services) -> Option<HWND> {
     let style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
     let mut frame = RECT { left: 0, top: 0, right: scaled(MAIN_WINDOW_WIDTH_PIXELS, dpi), bottom: scaled(MAIN_WINDOW_HEIGHT_PIXELS, dpi) };
     // SAFETY: fills the rectangle it is given.
-    unsafe { AdjustWindowRectExForDpi(&mut frame, style, 0, 0, dpi as u32) };
+    unsafe { AdjustWindowRectExForDpi(&mut frame, style, 0, 0, dpi.bits::<u32>()) };
     let window = w32::create_window(
         SETTINGS_WINDOW_CLASS,
         SETTINGS_WINDOW_TITLE,
@@ -321,7 +322,7 @@ pub fn create(services: Services) -> Option<HWND> {
         return None;
     }
     // SAFETY: a plain query for the window just made.
-    let window_dpi = unsafe { GetDpiForWindow(window) } as i32;
+    let window_dpi = (unsafe { GetDpiForWindow(window) }).bits::<i32>();
     let snapshot = services.engine.snapshot();
     let updates = update_view(&services.updates.snapshot());
     let state = State {
@@ -358,7 +359,7 @@ pub fn create(services: Services) -> Option<HWND> {
 
 fn unsafe_system_dpi() -> i32 {
     // SAFETY: a plain query.
-    let dpi = unsafe { GetDpiForSystem() } as i32;
+    let dpi = (unsafe { GetDpiForSystem() }).bits::<i32>();
     if dpi > 0 { dpi } else { BASE_DPI }
 }
 
@@ -477,7 +478,7 @@ fn low_word(value: usize) -> usize {
 }
 
 fn high_word(value: usize) -> u32 {
-    ((value >> 16) & 0xFFFF) as u32
+    ((value >> 16) & 0xFFFF).low::<u32>()
 }
 
 impl Ui {
@@ -520,14 +521,14 @@ impl Ui {
                 let mut outer = RECT { left: 0, top: 0, right: scaled(MAIN_WINDOW_MIN_WIDTH_PIXELS, dpi), bottom: scaled(MAIN_WINDOW_MIN_HEIGHT_PIXELS, dpi) };
                 // SAFETY: fills the rectangle; `lparam` points at the structure the system gave for this message.
                 unsafe {
-                    AdjustWindowRectExForDpi(&mut outer, WS_OVERLAPPEDWINDOW, 0, 0, dpi as u32);
+                    AdjustWindowRectExForDpi(&mut outer, WS_OVERLAPPEDWINDOW, 0, 0, dpi.bits::<u32>());
                     let info = &mut *(lparam as *mut MINMAXINFO);
                     info.ptMinTrackSize = POINT { x: outer.right - outer.left, y: outer.bottom - outer.top };
                 }
                 Some(0)
             }
             WM_DPICHANGED => {
-                let dpi = low_word(wparam) as i32;
+                let dpi = low_word(wparam).low::<i32>();
                 // SAFETY: for this message `lparam` points at the suggested rectangle.
                 let suggested = unsafe { *(lparam as *const RECT) };
                 self.dpi.set(dpi);
@@ -660,7 +661,7 @@ impl Ui {
         controls.sidebar_labels.push(label("умная раскладка EN / RU", fonts.base));
         for (index, (_, title)) in PAGE_NAMES.iter().enumerate() {
             let id = self.new_id(Action::Navigate(index));
-            let button = w32::create_window("BUTTON", title, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32, 0, self.window, id, (0, 0, 10, 10));
+            let button = w32::create_window("BUTTON", title, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW.to::<u32>(), 0, self.window, id, (0, 0, 10, 10));
             controls.navigation.push(button);
         }
         let state = self.state.borrow();
@@ -754,11 +755,11 @@ impl Ui {
         let controls = self.controls.borrow();
         let muted = controls.sidebar_labels.get(1) == Some(&control) || controls.sidebar_status == control;
         w32::set_label_colors(hdc, if muted { palette.sidebar_muted } else { palette.sidebar_text }.colorref(), palette.sidebar.colorref());
-        Some(resources.brushes.sidebar as LRESULT)
+        Some(resources.brushes.sidebar.to::<LRESULT>())
     }
 
     fn draw_item(&self, item: &DRAWITEMSTRUCT) {
-        let id = item.CtlID as usize;
+        let id = item.CtlID.to::<usize>();
         let action = id.checked_sub(ID_BASE).and_then(|index| self.actions.borrow().get(index).copied());
         let resources = self.resources.borrow();
         let Some(resources) = resources.as_ref() else { return };
@@ -909,7 +910,7 @@ impl Ui {
                 continue;
             }
             apply_moves(&moves, scroll);
-            let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_RANGE | SIF_PAGE | SIF_POS, nMin: 0, nMax: content.max(1) - 1, nPage: client.bottom.max(0) as u32, nPos: scroll, nTrackPos: 0 };
+            let info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_RANGE | SIF_PAGE | SIF_POS, nMin: 0, nMax: content.max(1) - 1, nPage: client.bottom.max(0).bits::<u32>(), nPos: scroll, nTrackPos: 0 };
             // SAFETY: the structure is fully initialised and lives through the call.
             unsafe { SetScrollInfo(page.panel, SB_VERT, &info, 1) };
             // A scroll bar that appeared or went changes the width the page has: lay out once more.
@@ -931,7 +932,7 @@ impl Ui {
             return;
         }
         page.scroll.set(target);
-        let info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_POS, nMin: 0, nMax: 0, nPage: 0, nPos: target, nTrackPos: 0 };
+        let info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_POS, nMin: 0, nMax: 0, nPage: 0, nPos: target, nTrackPos: 0 };
         // SAFETY: the structure is fully initialised; the panel is ours; scrolling moves its children with it.
         unsafe {
             SetScrollInfo(page.panel, SB_VERT, &info, 1);
@@ -961,11 +962,11 @@ impl Ui {
                 let page = self.page_of(panel)?;
                 let client = w32::client_rect(panel);
                 let step = scaled(PAGE_SCROLL_STEP_PIXELS, self.dpi.get());
-                let mut info = SCROLLINFO { cbSize: std::mem::size_of::<SCROLLINFO>() as u32, fMask: SIF_ALL, nMin: 0, nMax: 0, nPage: 0, nPos: 0, nTrackPos: 0 };
+                let mut info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_ALL, nMin: 0, nMax: 0, nPage: 0, nPos: 0, nTrackPos: 0 };
                 // SAFETY: the structure is initialised and lives through the call.
                 unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetScrollInfo(panel, SB_VERT, &mut info) };
                 let current = page.scroll.get();
-                let target = match low_word(wparam) as i32 {
+                let target = match low_word(wparam).low::<i32>() {
                     code if code == SB_LINEUP => current - step,
                     code if code == SB_LINEDOWN => current + step,
                     code if code == SB_PAGEUP => current - client.bottom,
@@ -980,7 +981,7 @@ impl Ui {
             }
             WM_MOUSEWHEEL => {
                 let page = self.page_of(panel)?;
-                let notches = ((wparam >> 16) as u16 as i16) as i32;
+                let notches = ((wparam >> 16).low::<u16>() as i16).to::<i32>();
                 let lines = -notches * WHEEL_STEPS_PER_NOTCH * scaled(PAGE_SCROLL_STEP_PIXELS, self.dpi.get()) / WHEEL_DELTA;
                 self.scroll_to(&page, page.scroll.get() + lines);
                 Some(0)
@@ -1016,10 +1017,10 @@ impl Ui {
                         LabelStyle::CardTitleModified => palette.accent,
                     };
                     w32::set_label_colors(hdc, color.colorref(), palette.content.colorref());
-                    return Some(resources.brushes.content as LRESULT);
+                    return Some(resources.brushes.content.to::<LRESULT>());
                 }
                 w32::set_label_colors(hdc, palette.foreground.colorref(), palette.field.colorref());
-                Some(resources.brushes.field as LRESULT)
+                Some(resources.brushes.field.to::<LRESULT>())
             }
             _ => None,
         }
@@ -1256,7 +1257,7 @@ impl Ui {
                 w32::set_modified(setting.title, modified);
             } else if let Some(page) = self.pages.borrow().iter().flatten().find(|page| page.styles.borrow().contains_key(&(setting.title as isize))) {
                 page.styles.borrow_mut().insert(
-                    setting.title as isize,
+                    setting.title.to::<isize>(),
                     if modified { LabelStyle::CardTitleModified } else { LabelStyle::CardTitle },
                 );
                 w32::invalidate(setting.title);
@@ -1709,7 +1710,7 @@ struct Layout<'a> {
 fn apply_moves(moves: &[(HWND, i32, i32, i32, i32)], scroll: i32) {
     // SAFETY: the windows are ours; a window that failed to move leaves the batch intact.
     unsafe {
-        let mut batch = BeginDeferWindowPos(moves.len() as i32);
+        let mut batch = BeginDeferWindowPos(moves.len().low::<i32>());
         for (hwnd, x, y, w, h) in moves {
             if batch.is_null() {
                 break;
@@ -1919,7 +1920,7 @@ impl Builder<'_> {
     fn label_window(&self, text: &str, style: LabelStyle) -> HWND {
         let hwnd = w32::create_window("STATIC", text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 0, self.panel, 0, (0, 0, 10, 10));
         w32::set_font(hwnd, label_font(&self.ui.fonts(), style));
-        self.page.styles.borrow_mut().insert(hwnd as isize, style);
+        self.page.styles.borrow_mut().insert(hwnd.to::<isize>(), style);
         hwnd
     }
 
@@ -1940,7 +1941,7 @@ impl Builder<'_> {
     fn button_cell(&self, text: &str, button: Button, gap: i32) -> (RowCell, HWND) {
         let fonts = self.ui.fonts();
         let id = self.id(Action::Button(button));
-        let hwnd = w32::create_window("BUTTON", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON as u32, 0, self.panel, id, (0, 0, 10, 10));
+        let hwnd = w32::create_window("BUTTON", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON.to::<u32>(), 0, self.panel, id, (0, 0, 10, 10));
         w32::set_font(hwnd, fonts.base);
         w32::apply_control_theme(hwnd, self.ui.dark.get().unwrap_or(false), Themed::Explorer);
         let width = w32::text_width(fonts.base, text) + 2 * self.px(BUTTON_PADDING_X_PIXELS);
@@ -1959,7 +1960,7 @@ impl Builder<'_> {
     }
 
     fn edit_cell(&self, gap: i32) -> (RowCell, HWND) {
-        let hwnd = self.edit_window(ES_AUTOHSCROLL as u32, "");
+        let hwnd = self.edit_window(ES_AUTOHSCROLL.to::<u32>(), "");
         (RowCell { hwnd, width: 0, height: self.px(ROW_HEIGHT_PIXELS), extra: 0, gap: self.px(gap) }, hwnd)
     }
 
@@ -1967,7 +1968,7 @@ impl Builder<'_> {
         let hwnd = w32::create_window(
             "LISTBOX",
             "",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_BORDER | LBS_NOTIFY as u32,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_BORDER | LBS_NOTIFY.to::<u32>(),
             0,
             self.panel,
             0,
@@ -2004,7 +2005,7 @@ impl Builder<'_> {
         let (title, control, updown);
         let fonts = ui.fonts();
         if spec.kind == ControlKind::Bool {
-            title = w32::create_window("BUTTON", &spec.title, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW as u32, 0, self.panel, id, (0, 0, 10, 10));
+            title = w32::create_window("BUTTON", &spec.title, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW.to::<u32>(), 0, self.panel, id, (0, 0, 10, 10));
             w32::set_checked(title, stored.as_ref().is_some_and(truthy));
             control = null_mut();
             updown = null_mut();
@@ -2013,7 +2014,7 @@ impl Builder<'_> {
             updown = null_mut();
             match spec.kind {
                 ControlKind::Choice => {
-                    control = w32::create_window("COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST as u32, 0, self.panel, id, (0, 0, 10, 10));
+                    control = w32::create_window("COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST.to::<u32>(), 0, self.panel, id, (0, 0, 10, 10));
                     w32::set_font(control, fonts.base);
                     w32::apply_control_theme(control, dark, Themed::Field);
                     w32::combo_reset(control, &spec.choices.iter().map(|(_, label)| label.clone()).collect::<Vec<_>>());
@@ -2022,13 +2023,13 @@ impl Builder<'_> {
                     w32::guard_wheel(control);
                 }
                 ControlKind::Int | ControlKind::Float => {
-                    control = w32::create_window("EDIT", &control_text(spec, stored.as_ref()), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL as u32, WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
+                    control = w32::create_window("EDIT", &control_text(spec, stored.as_ref()), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
                     w32::set_font(control, fonts.base);
                     w32::apply_control_theme(control, dark, Themed::Field);
                     w32::guard_wheel(control);
                 }
                 _ => {
-                    control = w32::create_window("EDIT", &control_text(spec, stored.as_ref()), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL as u32, WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
+                    control = w32::create_window("EDIT", &control_text(spec, stored.as_ref()), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
                     w32::set_font(control, fonts.base);
                     w32::apply_control_theme(control, dark, Themed::Field);
                 }
@@ -2045,7 +2046,7 @@ impl Builder<'_> {
         };
         let description = self.label_window(&spec.description, LabelStyle::Muted);
         let reset_id = self.id(Action::Reset(index));
-        let reset = w32::create_window("BUTTON", RESET_BUTTON_LABEL, WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON as u32, 0, self.panel, reset_id, (0, 0, 10, 10));
+        let reset = w32::create_window("BUTTON", RESET_BUTTON_LABEL, WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON.to::<u32>(), 0, self.panel, reset_id, (0, 0, 10, 10));
         w32::set_font(reset, fonts.small);
         w32::apply_control_theme(reset, dark, Themed::Explorer);
         self.add_tooltip(reset);
@@ -2058,7 +2059,7 @@ impl Builder<'_> {
             if spec.kind == ControlKind::Bool {
                 w32::set_modified(title, true);
             } else {
-                self.page.styles.borrow_mut().insert(title as isize, LabelStyle::CardTitleModified);
+                self.page.styles.borrow_mut().insert(title.to::<isize>(), LabelStyle::CardTitleModified);
             }
         }
         Node::Setting(SettingNode { index, kind: spec.kind, title, control, updown, reset, description, marker: RECT { left: 0, top: 0, right: 0, bottom: 0 } })
@@ -2072,12 +2073,12 @@ impl Builder<'_> {
         let text = wide(RESET_BUTTON_HINT);
         // SAFETY: TTTOOLINFOW is plain data; the text lives through the call, which copies it.
         let mut info: TTTOOLINFOW = unsafe { std::mem::zeroed() };
-        info.cbSize = std::mem::size_of::<TTTOOLINFOW>() as u32;
+        info.cbSize = (std::mem::size_of::<TTTOOLINFOW>()).low::<u32>();
         info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
         info.hwnd = self.panel;
-        info.uId = tool as usize;
+        info.uId = tool.to::<usize>();
         info.lpszText = text.as_ptr() as *mut u16;
-        w32::send(tooltip, TTM_ADDTOOLW, 0, &info as *const TTTOOLINFOW as LPARAM);
+        w32::send(tooltip, TTM_ADDTOOLW, 0, (&info as *const TTTOOLINFOW).to::<LPARAM>());
     }
 
     fn settings_section(&mut self, title: &str, specs: &[SettingSpec]) -> Node {
@@ -2113,7 +2114,7 @@ impl Builder<'_> {
         );
         // The field is typed in as any other program is, and the engine has to be told when it has the keyboard.
         let id = self.id(Action::TestField);
-        let entry = w32::create_window("EDIT", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL as u32, WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
+        let entry = w32::create_window("EDIT", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
         w32::set_font(entry, self.ui.fonts().test);
         w32::apply_control_theme(entry, self.ui.dark.get().unwrap_or(false), Themed::Field);
         let height = w32::line_height(self.ui.fonts().test) + self.px(8);
@@ -2169,7 +2170,7 @@ impl Builder<'_> {
         let (remove, _) = self.button_cell("Удалить", Button::RemoveApplication, 0);
         let buttons = flow_row(vec![active, pick, self.spacer(), remove], self.px(GROUP_GAP_PIXELS));
         let combo_id = self.id(Action::Other);
-        let combo = w32::create_window("COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST as u32, 0, self.panel, combo_id, (0, 0, 10, 10));
+        let combo = w32::create_window("COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST.to::<u32>(), 0, self.panel, combo_id, (0, 0, 10, 10));
         w32::set_font(combo, self.ui.fonts().base);
         w32::apply_control_theme(combo, self.ui.dark.get().unwrap_or(false), Themed::Field);
         w32::combo_set_field_height(combo, self.px(ROW_HEIGHT_PIXELS) - 6);
@@ -2309,7 +2310,7 @@ impl Builder<'_> {
         let text = w32::create_window(
             "EDIT",
             "",
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_BORDER | (ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL) as u32,
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | WS_BORDER | (ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL).to::<u32>(),
             0,
             self.panel,
             0,
