@@ -27,8 +27,10 @@ pub mod promote;
 pub mod receipt;
 pub mod replay;
 pub mod selection;
+pub mod small_tools;
 pub mod spans;
 pub mod tools;
+pub mod typo_frequency;
 
 pub const ACTIONS: usize = 4;
 pub const FEATURE_MASS_TOLERANCE: f64 = 1e-9;

@@ -14,10 +14,15 @@
 //! `short --leipzig <dir> --out <file>`, `sources --manifest <file> --messages <dir> --tatoeba <dir>`,
 //! `select --messages <file> [--members <file>...] --class <name> --development-share R --out <dir> [--prefix P] [--only-ids <file>]`,
 //! `devchat-messages --comments <dir> --dump <zst> --out <dir> [--earlier <file>...]` (each with `--tree <root>`)
+//! `ks-train typo-frequency --tree <root> [--private <folder>] [--verify]`
+//! `ks-train carry --tree <root> --pair <file> --refit <head>... --output <file>`, `doctor --tree <root> [--corpus <folder>] [--ledger <folder>] [--stage <name>...]`,
+//! `supplement --tree <root> --verify | --input <file> [--output <file>] [--receipt <file>] [--removed-list <file>]`,
+//! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
 //! line per frame with floats as C99 hex, to be compared with another trainer's.
+use ks_text::JsonOptions;
 use ks_train::fit::{FitRequest, NoStages, fit};
 use std::path::{Path, PathBuf};
 
@@ -90,6 +95,22 @@ fn main() {
             }
         }
         return;
+    }
+    if matches!(arguments.first().map(String::as_str), Some("carry" | "doctor" | "supplement" | "apt-build" | "apt-verify")) {
+        std::process::exit(small_command(&arguments));
+    }
+    if arguments.first().map(String::as_str) == Some("typo-frequency") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let private = option(&arguments, "--private").map_or_else(|| root.join(".t"), PathBuf::from);
+        let paths = ks_train::typo_frequency::Paths::in_private(&private);
+        match ks_train::typo_frequency::command(&root, &paths, arguments.iter().any(|argument| argument == "--verify")) {
+            Ok(true) => return,
+            Ok(false) => std::process::exit(1),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
     }
     if arguments.first().map(String::as_str) == Some("engine") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
@@ -332,6 +353,56 @@ fn cycle_command(arguments: &[String]) -> i32 {
                 check_only: arguments.iter().any(|argument| argument == "--check-only"),
                 jobs,
             })
+        }
+    };
+    match result {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// The short tools of a cycle and a release.
+fn small_command(arguments: &[String]) -> i32 {
+    use ks_train::small_tools as tools;
+    let path = |name: &str| option(arguments, name).map(PathBuf::from);
+    let required = |name: &str| path(name).unwrap_or_else(|| panic!("{name} is required"));
+    let root = required("--tree");
+    let private = root.join(".t/reliable-release-2026-09-12");
+    let printed = |text: String| {
+        println!("{text}");
+        Ok(0)
+    };
+    let pretty = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..JsonOptions::default() };
+    let result: Result<i32, String> = match arguments[0].as_str() {
+        "carry" => {
+            let refit: Vec<String> = all_of(arguments, "--refit").into_iter().map(str::to_owned).collect();
+            tools::carry(&root, &required("--pair"), &refit, &required("--output")).and_then(|value| printed(ks_text::json_dumps(&value, &pretty)))
+        }
+        "doctor" => {
+            let (corpus, ledger) = (path("--corpus").unwrap_or_else(|| private.join("context-action-corpus")), path("--ledger").unwrap_or_else(|| private.join("context-action-test-ledger")));
+            let stages: Vec<String> = all_of(arguments, "--stage").into_iter().map(str::to_owned).collect();
+            Ok(tools::doctor(&root, &corpus, &ledger, &stages))
+        }
+        "supplement" => {
+            if arguments.iter().any(|argument| argument == "--verify") {
+                tools::verify_supplement(&root).and_then(|value| printed(ks_text::json_dumps(&value, &pretty)))
+            } else {
+                let (output, receipt) = (path("--output").unwrap_or_else(|| root.join("resources/lexicon-supplement-ru_RU.json")), path("--receipt").unwrap_or_else(|| root.join("resources/lexicon-supplement-ru_RU.receipt.json")));
+                let removed = path("--removed-list");
+                tools::filter_supplement(&root, &required("--input"), &output, &receipt, removed.as_deref()).and_then(|value| printed(ks_text::json_dumps(&value, &pretty)))
+            }
+        }
+        "apt-build" => {
+            let packages: Vec<PathBuf> = all_of(arguments, "--package").into_iter().map(PathBuf::from).collect();
+            let passphrase = path("--passphrase-file");
+            tools::apt_build(&root, &required("--repository"), &packages, passphrase.as_deref()).and_then(printed)
+        }
+        _ => {
+            let key = path("--public-key");
+            tools::apt_verify(&root, &required("--repository"), option(arguments, "--expect-version").expect("--expect-version is required"), key.as_deref()).and_then(printed)
         }
     };
     match result {
