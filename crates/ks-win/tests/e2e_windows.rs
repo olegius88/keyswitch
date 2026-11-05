@@ -337,6 +337,8 @@ mod scenario {
             // The scenario types with SendInput, which Windows marks as injected by another program; the setting
             // lets the program treat it as typing.
             ("detection.injected_input", json!(true)),
+            // A scenario that fails on a runner cannot be examined afterwards: the log says what the engine saw.
+            ("diagnostics.technical_logging", json!(true)),
         ];
         for (path, value) in base.iter().cloned().chain(extra.iter().cloned()) {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;

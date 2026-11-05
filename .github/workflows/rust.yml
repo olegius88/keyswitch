@@ -134,15 +134,13 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus
       - name: Tests
         run: cargo test -p ks-linux
       - name: Build
         run: packaging/build-rust-deb.sh out
       - name: What the package holds
         run: cargo run --release -p ks-train --bin ks-train -- deb-check --tree "$PWD" "$(ls out/keyswitch_*.deb)"
-      - name: The real tests in a private X server, and the package itself
-        run: packaging/e2e.sh "$(ls out/keyswitch_*.deb)"
       - name: Install and start
         run: |
           sudo apt-get install -y ./out/keyswitch_*.deb
@@ -153,6 +151,27 @@ jobs:
           name: keyswitch-deb
           path: out/keyswitch_*.deb
           retention-days: 14
+
+  linux-e2e:
+    # On the newer image: GTK 4.14 of the image the package is built on leaves a field made hidden at run time readable as
+    # plain text over AT-SPI, which a password entry of any version is not.
+    name: The real tests on Linux, and the package
+    needs: deb
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain, GTK development files and what the tests drive
+        run: |
+          rustup toolchain install stable --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin
+      - uses: actions/download-artifact@v7
+        with:
+          name: keyswitch-deb
+          path: out
+      - name: The real tests in a private X server, and the package itself
+        run: packaging/e2e.sh "$(ls out/keyswitch_*.deb)"
 
   macos:
     name: macOS bundle, ${{ matrix.architecture }}
@@ -268,7 +287,7 @@ jobs:
     # one. Dropping the two flags below is the decision that this build replaces the published one.
     name: Publish the files of a tag
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, windows-installer, deb, macos, logcourier]
+    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
