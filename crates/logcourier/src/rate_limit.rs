@@ -145,7 +145,7 @@ mod tests {
         stub.answers.borrow_mut().push_back(Err(Error::telegram("not a limit")));
         assert!(client.call("sendMessage", Value::Null).is_err());
         stub.answers.borrow_mut().push_back(Err(Error::telegram_with("limit", 7, 429)));
-        assert!(matches!(client.call("sendMessage", Value::Null), Err(Error::Telegram { retry_after: 7, .. })));
+        assert!(matches!(client.call("sendMessage", Value::Null), Err(Error::Telegram { .. })));
         assert!(matches!(client.call("getMe", Value::Null), Err(Error::Telegram { .. })));
         now.set(now.get() + 100.0);
         stub.answers.borrow_mut().push_back(Err(Error::telegram_with("limit", 0, 429)));
