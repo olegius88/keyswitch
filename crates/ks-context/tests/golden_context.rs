@@ -592,6 +592,79 @@ fn typo_correction() {
     failures.finish("typo");
 }
 
+/// The questions the model asks again, each with the words it asks about, in every position of a phrase.
+#[test]
+fn every_question_is_asked_in_every_position() {
+    let Some((_, models)) = paths() else { return };
+    let tables = TermTables::load(&models).expect("tables");
+    let model = ContextModel::load(&models).expect("the context model");
+    let pairs = [
+        ("ю", "."), (".", "ю"), ("б", ","), (",", "б"), ("1ю", "1."), ("ю5", ".5"), ("3б14", "3,14"), ("э'", "''"), ("'f", "эа"), ("v67", "м67"), ("м67", "v67"), ("c2h5", "с2р5"), ("J.K.", "О.Л."), ("О.Л.", "J.K."), ("США", "CIF"), ("DKRCV", "ВЛКСМ"),
+        ("ЗОР", "PHP"), ("кз", "rp"), ("rp", "кз"), ("tot", "еще"), ("еще", "tot"), ("Ы", "S"), ("S", "Ы"), ("а", "f"), ("f", "а"), ("d", "в"), ("в", "d"), ("b", "и"), ("и", "b"), ("x", "ч"), ("ч", "x"), ("X", "Ч"), ("Ч", "X"), ("ж", "z"), ("Ж", "Z"), ("ABC1", "ФИС1"), ("A1b2C3d4E5f6G7h8", "Ф1и2С3в4У5а6П7р8"),
+    ];
+    let befores = ["", " ", "для ", "текст ", "Текст. ", "x = ", "a b ", "1 ", "ABC ", "Да: ", "foo.", "\"", "вот, ", "the "];
+    let afters = ["", " ", "=", "+", "12", "-", "--", "a", "==", "=1", "%", "abcdefghijklmnopqrstuvwxyz=", "да", "the", "1.5", ")"];
+    let origins = [AfterOrigin::None, AfterOrigin::Field, AfterOrigin::PlannedNextConversion, AfterOrigin::KeptNextWord];
+    let score = WordScore { value: 0.5, known: false, frequency: 5, gram_ratio: 0.5, exact: false, spell_known: false, ngram_score: -2.0, invalid_ratio: 0.1, raw_ngram_score: -2.0 };
+    for (original, alternative) in pairs {
+        for before in befores {
+            for after in afters {
+                for origin in origins {
+                    for trigger in ks_lang::intent_model::TRIGGERS {
+                        for source_group in [0, 1] {
+                            let field = FieldContext { application: "app".to_string(), field_id: "1".to_string(), before: before.to_string(), after: after.to_string(), role: FieldRole::Text, selection: false, sensitive: false, source: "test".to_string() };
+                            let item = ContextEvidence {
+                                original: original.to_string(),
+                                alternative: alternative.to_string(),
+                                source_group,
+                                field,
+                                trigger: trigger.as_str().to_string(),
+                                baseline_convert: source_group == 0,
+                                source_known: false,
+                                target_known: true,
+                                score_delta: 1.5,
+                                source_score: Some(score.clone()),
+                                target_score: Some(score.clone()),
+                                model_probability: None,
+                                model_threshold: None,
+                                literal_tail: String::new(),
+                                ortho_score: Some(if source_group == 0 { -0.5 } else { 0.5 }),
+                                ortho_threshold: Some(0.1),
+                                boundary_text: " ".to_string(),
+                                after_origin: origin,
+                                before_origin: BeforeOrigin::Field,
+                                source_identifier: false,
+                                target_identifier: false,
+                                source_typo: false,
+                                target_typo: false,
+                                source_opening: false,
+                                target_opening: false,
+                                inside: false,
+                                term_counts_dropped: false,
+                            };
+                            let _ = questions(&item, &tables);
+                            let _ = extract_action_features(&item, &tables);
+                            assert!((0.0..=1.0).contains(&model.predict(&item).probability));
+                            if original == "ч" && before == "для " && after == "=" && origin == AfterOrigin::KeptNextWord {
+                                let refused = |change: &dyn Fn(&mut ContextEvidence)| {
+                                    let mut broken = item.clone();
+                                    change(&mut broken);
+                                    extract_action_features(&broken, &tables).err().map(|error| error.to_string())
+                                };
+                                assert!(refused(&|broken| broken.source_group = 5).is_some());
+                                assert!(refused(&|broken| broken.score_delta = f64::NAN).is_some());
+                                assert!(refused(&|broken| broken.source_score.as_mut().unwrap().frequency = -1).is_some());
+                                assert!(refused(&|broken| broken.field.after = "x".repeat(1000)).is_some());
+                                assert!(refused(&|broken| { broken.after_origin = AfterOrigin::PlannedNextConversion; broken.field.after = "x".repeat(1000); }).is_some());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Every shape of text a caller can hand over, in a grid: the answers are the recorded tests' business, this one says that
 /// no combination stops the program, and that a prediction is always a number between 0 and 1.
 #[test]
