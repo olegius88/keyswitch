@@ -109,6 +109,8 @@ fn sync_tray() {
     });
 }
 
+const INSTANCE_LOCK_FILE: &str = "keyswitch.lock";
+
 fn sync_autostart() {
     with_app(|app| {
         let settings = &app.services.settings;
@@ -270,7 +272,27 @@ fn ensure_permission(backend: &MacBackend) {
     println!("{PERMISSION_GRANTED_MESSAGE}");
 }
 
+/// Two copies would both correct the same word and garble it, so a second one started directly (the system stops only
+/// those it starts itself) ends at once. The lock goes away with the process.
+fn only_copy() -> Result<Option<std::fs::File>, ()> {
+    let directory = ks_config::history::data_dir();
+    if std::fs::create_dir_all(&directory).is_err() {
+        return Ok(None);
+    }
+    let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(directory.join(INSTANCE_LOCK_FILE)) else {
+        return Ok(None);
+    };
+    match file.try_lock() {
+        Err(std::fs::TryLockError::WouldBlock) => Err(()),
+        _ => Ok(Some(file)),
+    }
+}
+
 pub fn run(hidden: bool, no_engine: bool) -> i32 {
+    let Ok(_instance_lock) = only_copy() else {
+        println!("KeySwitch уже запущен");
+        return 0;
+    };
     let settings = Arc::new(SettingsStore::new(None));
     logsetup::follow_settings(&settings, None);
     let limit = history_limit(&settings.get("history.limit").unwrap_or(Value::from(ks_config::constants::DEFAULT_HISTORY_LIMIT)));
