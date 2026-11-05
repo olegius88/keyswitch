@@ -154,7 +154,6 @@ impl Store {
         Ok(())
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub fn enqueue(&self, source: &str, identity: &str, offset: i64, anchor: &str, destination: &str, metadata: &Value, payload: &[u8], name: &str, version: Option<&str>) -> Result<()> {
         let transaction = self.db.unchecked_transaction()?;
         self.insert_bundle(destination, metadata, payload, name)?;

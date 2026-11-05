@@ -1,7 +1,7 @@
 //! The selection hotkeys: a command waits for its keys to come up, then reads the selection and types the result.
 
 use super::logging::technical_event;
-use super::{Value, pystr, EngineCore, MANUAL_RELEASE_TIMEOUT_SECONDS, sorted_keycodes, Update, InputBackend, ms};
+use super::{Value, pystr, EngineCore, MANUAL_RELEASE_TIMEOUT_SECONDS, sorted_keycodes, Update, ms};
 use ks_backend::{RefusalReason, SelectedText, SelectionError, SelectionRefused};
 use ks_config::selection_commands::{checked_selection, command_of_hotkey, plan_selection, refusal_message, PendingSelection, SelectionCommand, SelectionPlan};
 use serde_json::{json, Map};
@@ -158,7 +158,7 @@ impl EngineCore {
             let protects = self.flag("detection.respect_manual_layout", true);
             self.manual_layout_group = protects.then_some(target);
             self.manual_layout_observed_at = Some(self.monotonic());
-            self.manual_layout_source = "selection_layout".to_owned();
+            "selection_layout".clone_into(&mut self.manual_layout_source);
             self.manual_layout_word = false;
             self.shared.update(Update { current_group: Some(target), ..Update::default() });
         }

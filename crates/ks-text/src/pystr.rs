@@ -332,8 +332,8 @@ pub fn split_max(s: &str, maxsplit: i64) -> Vec<&str> {
             break;
         }
         if let Some(i) = rest.find(is_ws) {
-            parts.push(&rest[..i]);
-            rest = &rest[i..];
+            parts.push(rest.get(..i).unwrap_or_default());
+            rest = rest.get(i..).unwrap_or_default();
             left -= 1;
         } else {
             parts.push(rest);
@@ -388,11 +388,11 @@ pub fn splitlines(s: &str, keepends: bool) -> Vec<&str> {
             iter.next();
             end += 1;
         }
-        lines.push(if keepends { &s[start..end] } else { &s[start..i] });
+        lines.push(if keepends { s.get(start..end).unwrap_or_default() } else { s.get(start..i).unwrap_or_default() });
         start = end;
     }
     if start < s.len() {
-        lines.push(&s[start..]);
+        lines.push(s.get(start..).unwrap_or_default());
     }
     lines
 }
@@ -467,8 +467,8 @@ pub fn slice(s: &str, start: Option<i64>, stop: Option<i64>) -> &str {
         return "";
     }
     let from = byte_offset(s, a);
-    let to = from + byte_offset(&s[from..], b - a);
-    &s[from..to]
+    let to = from + byte_offset(s.get(from..).unwrap_or_default(), b - a);
+    s.get(from..to).unwrap_or_default()
 }
 
 /// `s[start:stop:step]` with any non-zero step; `None` for a zero step (Python raises `ValueError`).
@@ -527,9 +527,9 @@ pub fn find(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
         return -1;
     }
     let from = byte_offset(s, a);
-    let to = from + byte_offset(&s[from..], b - a);
-    match s[from..to].find(sub) {
-        Some(i) => (a + len(&s[from..from + i])).to::<i64>(),
+    let to = from + byte_offset(s.get(from..).unwrap_or_default(), b - a);
+    match s.get(from..to).unwrap_or_default().find(sub) {
+        Some(i) => (a + len(s.get(from..from + i).unwrap_or_default())).to::<i64>(),
         None => -1,
     }
 }
@@ -542,9 +542,9 @@ pub fn rfind(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
         return -1;
     }
     let from = byte_offset(s, a);
-    let to = from + byte_offset(&s[from..], b - a);
-    match s[from..to].rfind(sub) {
-        Some(i) => (a + len(&s[from..from + i])).to::<i64>(),
+    let to = from + byte_offset(s.get(from..).unwrap_or_default(), b - a);
+    match s.get(from..to).unwrap_or_default().rfind(sub) {
+        Some(i) => (a + len(s.get(from..from + i).unwrap_or_default())).to::<i64>(),
         None => -1,
     }
 }
@@ -557,8 +557,8 @@ pub fn count(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> usize 
         return 0;
     }
     let from = byte_offset(s, a);
-    let to = from + byte_offset(&s[from..], b - a);
-    let window = &s[from..to];
+    let to = from + byte_offset(s.get(from..).unwrap_or_default(), b - a);
+    let window = s.get(from..to).unwrap_or_default();
     if sub.is_empty() { len(window) + 1 } else { window.matches(sub).count() }
 }
 
@@ -606,7 +606,7 @@ pub fn zfill(s: &str, width: usize) -> String {
     }
     let zeros = width - n;
     let (sign, rest) = match s.chars().next() {
-        Some(c @ ('+' | '-')) => (Some(c), &s[1..]),
+        Some(c @ ('+' | '-')) => (Some(c), s.get(1..).unwrap_or_default()),
         _ => (None, s),
     };
     let mut out = String::new();

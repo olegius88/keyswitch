@@ -177,7 +177,6 @@ pub fn is_short_word_override(decision: &DetectionDecision) -> bool {
 /// previous word to be in the target language (`context_group`); two-letter entries stand on their own. The
 /// message-start exception for a lone letter lives in `word_decision::automatic_word_decision`, outside this table, so
 /// the frozen context-v1 training input stays what it was.
-#[expect(clippy::too_many_arguments)]
 pub fn trusted_short_word_decision(
     detector: &LanguageDetector,
     original: &str,

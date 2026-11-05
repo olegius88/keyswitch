@@ -354,12 +354,12 @@ fn keys_reach_the_listener_with_their_characters_and_the_filter_decides() {
 #[test]
 fn modifiers_released_unseen_are_forgotten_after_a_gap() {
     let (api, backend, _events) = make();
-    backend.handle_native(key(EVDEV_KEY_LEFTSHIFT, 1, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_LEFTSHIFT, 1, true));
     api.st().released_keys.insert(EVDEV_KEY_LEFTSHIFT);
     // Soon after, in the same window: nothing is asked of the helper.
-    backend.handle_native(NativeKeyEvent { seq: 2, ..NativeKeyEvent::new(true, EVDEV_KEY_A, 1000 + MODIFIER_RECHECK_GAP_MS - 1) });
+    let _ = backend.handle_native(NativeKeyEvent { seq: 2, ..NativeKeyEvent::new(true, EVDEV_KEY_A, 1000 + MODIFIER_RECHECK_GAP_MS - 1) });
     assert!(lock(&backend.inner.state).pressed.contains(&EVDEV_KEY_LEFTSHIFT));
-    backend.handle_native(NativeKeyEvent { seq: 3, ..NativeKeyEvent::new(true, EVDEV_KEY_Q, 1000 + 3 * MODIFIER_RECHECK_GAP_MS) });
+    let _ = backend.handle_native(NativeKeyEvent { seq: 3, ..NativeKeyEvent::new(true, EVDEV_KEY_Q, 1000 + 3 * MODIFIER_RECHECK_GAP_MS) });
     assert!(!lock(&backend.inner.state).pressed.contains(&EVDEV_KEY_LEFTSHIFT));
 }
 
@@ -492,7 +492,7 @@ fn a_sign_missing_from_the_target_layout_waits_before_each_switch() {
 #[test]
 fn a_held_key_typed_by_the_helper_leaves_the_hold_and_the_correction_is_refused() {
     let (api, backend, events) = make();
-    backend.handle_native(key(EVDEV_KEY_A, SEQ_FIRST, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_A, SEQ_FIRST, true));
     backend.hold_input();
     assert_eq!(lock(&backend.inner.state).hold_known_seq, SEQ_FIRST);
     assert!(backend.handle_native(key(EVDEV_KEY_Q, SEQ_SECOND, true)));
@@ -507,15 +507,15 @@ fn a_held_key_typed_by_the_helper_leaves_the_hold_and_the_correction_is_refused(
     assert!(!lock(&backend.inner.state).holding);
 
     // A forced key whose answer is gone, or was a pass, changes nothing.
-    backend.handle_native(forced(EVDEV_KEY_A, SEQ_THIRD));
-    backend.handle_native(key(EVDEV_KEY_A, SEQ_THIRD, true));
-    backend.handle_native(forced(EVDEV_KEY_A, SEQ_THIRD));
+    let _ = backend.handle_native(forced(EVDEV_KEY_A, SEQ_THIRD));
+    let _ = backend.handle_native(key(EVDEV_KEY_A, SEQ_THIRD, true));
+    let _ = backend.handle_native(forced(EVDEV_KEY_A, SEQ_THIRD));
     assert!(!lock(&backend.inner.state).hold_broken);
     // A held key already typed again before the helper's word came.
     backend.hold_input();
     assert!(backend.handle_native(key(EVDEV_KEY_Z, SEQ_FIRST, true)));
     lock(&backend.inner.state).held.clear();
-    backend.handle_native(forced(EVDEV_KEY_Z, SEQ_FIRST));
+    let _ = backend.handle_native(forced(EVDEV_KEY_Z, SEQ_FIRST));
     assert!(!lock(&backend.inner.state).hold_broken);
 }
 
@@ -524,7 +524,7 @@ fn a_consumed_hotkey_typed_by_the_helper_lets_its_release_through() {
     let (_api, backend, _events) = make();
     backend.set_key_filter(filter(|event| if event.key_name == "Pause" { KeyDisposition::Consume } else { KeyDisposition::Pass }));
     assert!(backend.handle_native(key(EVDEV_KEY_PAUSE, SEQ_FIRST, true)));
-    backend.handle_native(forced(EVDEV_KEY_PAUSE, SEQ_FIRST));
+    let _ = backend.handle_native(forced(EVDEV_KEY_PAUSE, SEQ_FIRST));
     assert!(!backend.handle_native(key(EVDEV_KEY_PAUSE, SEQ_SECOND, false)));
 }
 
@@ -538,7 +538,7 @@ fn a_withheld_enter_typed_by_the_helper_is_not_typed_again() {
     backend.set_key_filter(defer_enter());
     assert!(backend.handle_native(key(EVDEV_KEY_ENTER, SEQ_FIRST, true)));
     // The helper reports the forced key before any later one (its queue is typed after it).
-    backend.handle_native(forced(EVDEV_KEY_ENTER, SEQ_FIRST));
+    let _ = backend.handle_native(forced(EVDEV_KEY_ENTER, SEQ_FIRST));
     assert!(lock(&backend.inner.state).deferred_action.is_none());
     assert!(!backend.handle_native(key(EVDEV_KEY_ENTER, SEQ_SECOND, false)));
     assert_eq!(error_text(backend.inject_correction(injection(&[letter(EVDEV_KEY_A)], 1, None))), INPUT_AHEAD_ERROR);
@@ -573,7 +573,7 @@ fn a_withheld_enter_is_typed_checked_against_its_own_key() {
     assert!(backend.handle_native(key(EVDEV_KEY_ENTER, SEQ_SECOND, false)));
     assert!(backend.handle_native(key(EVDEV_KEY_ENTER, SEQ_THIRD, true)));
     assert_eq!(backend.complete_action(false).unwrap(), 0);
-    backend.handle_native(forced(EVDEV_KEY_ENTER, SEQ_THIRD));
+    let _ = backend.handle_native(forced(EVDEV_KEY_ENTER, SEQ_THIRD));
     assert!(!lock(&backend.inner.state).action_forced);
     assert!(!lock(&backend.inner.state).consumed_keys.contains(&EVDEV_KEY_ENTER));
 }
@@ -595,7 +595,7 @@ fn keys_typed_unasked_reach_the_engine_and_spoil_a_hold() {
 #[test]
 fn a_correction_the_helper_refuses_changes_no_text() {
     let (api, backend, _events) = make();
-    backend.handle_native(key(EVDEV_KEY_A, SEQ_FIRST, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_A, SEQ_FIRST, true));
     backend.hold_input();
     api.st().refuse_checked = true;
     assert_eq!(error_text(backend.inject_correction(injection(&[letter(EVDEV_KEY_A)], 1, None))), INPUT_AHEAD_ERROR);
@@ -606,8 +606,8 @@ fn a_correction_the_helper_refuses_changes_no_text() {
 fn a_grab_change_forgets_held_keys_and_resets_the_word() {
     let (_api, backend, events) = make();
     backend.set_key_filter(filter(|event| if event.key_name == "Pause" { KeyDisposition::Consume } else { KeyDisposition::Pass }));
-    backend.handle_native(key(EVDEV_KEY_LEFTSHIFT, SEQ_FIRST, true));
-    backend.handle_native(key(EVDEV_KEY_PAUSE, SEQ_SECOND, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_LEFTSHIFT, SEQ_FIRST, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_PAUSE, SEQ_SECOND, true));
     backend.hold_input();
     assert!(!backend.handle_native(NativeKeyEvent { input_reset: true, ..NativeKeyEvent::new(true, 0, 1000) }));
     {
@@ -616,7 +616,7 @@ fn a_grab_change_forgets_held_keys_and_resets_the_word() {
     }
     assert_eq!(lock(&events).last().unwrap().group, POINTER_EVENT_GROUP);
     backend.release_input().unwrap();
-    backend.handle_native(NativeKeyEvent { input_reset: true, ..NativeKeyEvent::new(true, 0, 1000) });
+    let _ = backend.handle_native(NativeKeyEvent { input_reset: true, ..NativeKeyEvent::new(true, 0, 1000) });
     assert!(!lock(&backend.inner.state).hold_broken);
 }
 
@@ -624,7 +624,7 @@ fn a_grab_change_forgets_held_keys_and_resets_the_word() {
 fn releases_of_keys_down_when_a_hold_began_pass_but_not_a_modifier_or_a_held_press() {
     let (_api, backend, _events) = make();
     for code in [EVDEV_KEY_A, EVDEV_KEY_Q, EVDEV_KEY_LEFTSHIFT] {
-        backend.handle_native(key(code, SEQ_FIRST, true));
+        let _ = backend.handle_native(key(code, SEQ_FIRST, true));
     }
     backend.hold_input();
     // The client repeats a key whose release is kept back: the release goes on.
@@ -651,7 +651,7 @@ fn held_keys_are_replayed_in_order_when_the_hold_ends() {
     assert!(!lock(&backend.inner.state).holding);
     // A replayed key the filter consumes is not typed.
     backend.hold_input();
-    backend.handle_native(key(EVDEV_KEY_Q, SEQ_SECOND, true));
+    let _ = backend.handle_native(key(EVDEV_KEY_Q, SEQ_SECOND, true));
     backend.set_key_filter(filter(|event| if event.key_name == "q" { KeyDisposition::Consume } else { KeyDisposition::Pass }));
     backend.release_input().unwrap();
     assert_eq!(api.st().posted.len(), 2);

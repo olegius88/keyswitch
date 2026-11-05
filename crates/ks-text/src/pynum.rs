@@ -40,10 +40,10 @@ pub fn float_repr(x: f64) -> String {
     let n = digits.len().low::<i32>();
     let mut out = String::from(sign);
     if !(-4..16).contains(&exp10) {
-        out.push_str(&digits[..1]);
+        out.push_str(digits.get(..1).unwrap_or_default());
         if n > 1 {
             out.push('.');
-            out.push_str(&digits[1..]);
+            out.push_str(digits.get(1..).unwrap_or_default());
         }
         out.push('e');
         out.push(if exp10 < 0 { '-' } else { '+' });
@@ -57,9 +57,9 @@ pub fn float_repr(x: f64) -> String {
         out.extend(std::iter::repeat_n('0', (decpt - n).to::<usize>()));
         out.push_str(".0");
     } else {
-        out.push_str(&digits[..decpt.to::<usize>()]);
+        out.push_str(digits.get(..decpt.to::<usize>()).unwrap_or_default());
         out.push('.');
-        out.push_str(&digits[decpt.to::<usize>()..]);
+        out.push_str(digits.get(decpt.to::<usize>()..).unwrap_or_default());
     }
     out
 }
@@ -125,9 +125,9 @@ fn strip_underscores(text: &str) -> Option<String> {
 pub fn py_int(s: &str) -> Option<i128> {
     let text = strip_underscores(&to_ascii_number_text(s))?;
     let (negative, digits) = match text.as_bytes().first()? {
-        b'-' => (true, &text[1..]),
-        b'+' => (false, &text[1..]),
-        _ => (false, &text[..]),
+        b'-' => (true, text.get(1..).unwrap_or_default()),
+        b'+' => (false, text.get(1..).unwrap_or_default()),
+        _ => (false, text.get(..).unwrap_or_default()),
     };
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
@@ -139,7 +139,7 @@ pub fn py_int(s: &str) -> Option<i128> {
     }
     let magnitude: u128 = if significant.is_empty() { 0 } else { significant.parse().ok()? };
     if negative {
-        if magnitude > 1u128 << 127 { None } else { Some(magnitude.to::<i128>().wrapping_neg()) }
+        if magnitude > 1u128 << 127 { None } else { Some(magnitude.bits::<i128>().wrapping_neg()) }
     } else {
         i128::try_from(magnitude).ok()
     }
@@ -151,9 +151,9 @@ pub fn py_int(s: &str) -> Option<i128> {
 pub fn py_float(s: &str) -> Option<f64> {
     let text = strip_underscores(&to_ascii_number_text(s))?;
     let (negative, body) = match text.as_bytes().first()? {
-        b'-' => (true, &text[1..]),
-        b'+' => (false, &text[1..]),
-        _ => (false, &text[..]),
+        b'-' => (true, text.get(1..).unwrap_or_default()),
+        b'+' => (false, text.get(1..).unwrap_or_default()),
+        _ => (false, text.get(..).unwrap_or_default()),
     };
     let lower = body.to_ascii_lowercase();
     let value = match lower.as_str() {
@@ -500,7 +500,7 @@ pub fn sqrt(x: f64) -> Option<f64> {
 
 /// `max(items, key=key)`: the FIRST of the maximal elements (`Iterator::max_by_key` returns the last).
 /// A later element replaces the best only when its key is strictly greater (Python's `>`).
-#[expect(clippy::neg_cmp_op_on_partial_ord)] // Python keeps the first unless `>` holds; NaN keys never replace
+#[expect(clippy::neg_cmp_op_on_partial_ord, reason = "Python keeps the first value when a comparison with NaN is false")]
 pub fn max_by_key_first<I, K, F>(items: I, mut key: F) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -519,7 +519,7 @@ where
 }
 
 /// `min(items, key=key)`: the first of the minimal elements.
-#[expect(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord, reason = "Python keeps the first value when a comparison with NaN is false")]
 pub fn min_by_key_first<I, K, F>(items: I, mut key: F) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -538,7 +538,7 @@ where
 }
 
 /// `max(items)` without a key: the first maximal element.
-#[expect(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord, reason = "Python keeps the first value when a comparison with NaN is false")]
 pub fn max_first<I>(items: I) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -555,7 +555,7 @@ where
 }
 
 /// `min(items)` without a key: the first minimal element.
-#[expect(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord, reason = "Python keeps the first value when a comparison with NaN is false")]
 pub fn min_first<I>(items: I) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -584,8 +584,8 @@ mod tests {
         assert_eq!(float_repr(0.0001), "0.0001");
         assert_eq!(float_repr(0.00001), "1e-05");
         assert_eq!(float_repr(-0.0), "-0.0");
-        assert_eq!(float_repr(123456.789), "123456.789");
-        assert_eq!(float_repr(1.7976931348623157e308), "1.7976931348623157e+308");
+        assert_eq!(float_repr(123_456.789), "123456.789");
+        assert_eq!(float_repr(1.797_693_134_862_315_7e308), "1.7976931348623157e+308");
         assert_eq!(float_repr(5e-324), "5e-324");
         assert_eq!(float_repr(f64::NAN), "nan");
         assert_eq!(float_repr(f64::NEG_INFINITY), "-inf");
@@ -600,7 +600,7 @@ mod tests {
         assert_eq!(py_round(2.5), 2.0);
         assert_eq!(py_round(-0.5).to_bits(), 0.0f64.to_bits());
         assert_eq!(py_round(-2.5), -2.0);
-        assert_eq!(py_round(0.49999999999999994), 0.0);
+        assert_eq!(py_round(0.499_999_999_999_999_94), 0.0);
         assert_eq!(py_round_to_int(2.5), Some(2));
         assert_eq!(py_round_to_int(f64::NAN), None);
         assert_eq!(py_round_ndigits(2.675, 2), Some(2.67));
@@ -651,7 +651,7 @@ mod tests {
         assert_eq!(fsum(&[]), Ok(0.0));
         assert_eq!(fmean(&[3.5, 4.0, 5.25]), Some(4.25));
         assert_eq!(fmean(&[]), None);
-        assert_eq!(pstdev(&[1.5, 2.5, 2.5, 2.75, 3.25, 4.75]), Some(0.986893273527251));
+        assert_eq!(pstdev(&[1.5, 2.5, 2.5, 2.75, 3.25, 4.75]), Some(0.986_893_273_527_251));
         assert_eq!(pstdev(&[2.0]), Some(0.0));
         assert_eq!(pstdev(&[]), None);
         assert_eq!(pstdev(&[1.0, f64::NAN]), None);

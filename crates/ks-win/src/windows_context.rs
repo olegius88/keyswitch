@@ -13,6 +13,7 @@
 //! a null string where the Python would call a method on None is `AttributeError`. A field without a text pattern is no
 //! failure: Chromium and Qt windows expose a focused element long before they expose its text.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::ffi::c_void;
 use std::mem::{transmute_copy, zeroed};
@@ -328,7 +329,7 @@ fn process_for_window(window: i64) -> i64 {
 
 fn uia_field(application: &str, field_id: String) -> FieldContext {
     let mut field = FieldContext::new(application, field_id);
-    field.source = SOURCE_UIA.to_owned();
+    SOURCE_UIA.clone_into(&mut field.source);
     field
 }
 

@@ -222,7 +222,7 @@ fn plain_row(original: &str, alternative: &str, source_group: i64, trigger: Corr
 }
 
 /// `build_lexical_disjoint_corpus`.
-pub fn build_lexical_disjoint_corpus(onboard: &[HashSet<String>; 2], minimum_words_per_group: usize, snapshots: &[Snapshot; 2]) -> Result<ExternalCorpus, String> {
+pub fn build_lexical_disjoint_corpus<S: ::std::hash::BuildHasher>(onboard: &[HashSet<String, S>; 2], minimum_words_per_group: usize, snapshots: &[Snapshot; 2]) -> Result<ExternalCorpus, String> {
     if minimum_words_per_group < 1 {
         return Err("minimum_words_per_group must be positive".to_owned());
     }
@@ -254,7 +254,7 @@ fn render(signature: &str, group: usize) -> String {
 }
 
 /// `build_unknown_typo_disjoint_corpus`: serving-domain rows where neither decoding is known to the runtime scorers.
-pub fn build_unknown_typo_disjoint_corpus(onboard: &[HashSet<String>; 2], excluded: &BTreeSet<String>, minimum_words_per_group: usize, snapshots: &[Snapshot; 2], models: &[&LanguageModel; 2], protected: &ProtectedTokens, rank_namespace: &str, choice_namespace: &str) -> Result<ExternalCorpus, String> {
+pub fn build_unknown_typo_disjoint_corpus<S: ::std::hash::BuildHasher>(onboard: &[HashSet<String, S>; 2], excluded: &BTreeSet<String>, minimum_words_per_group: usize, snapshots: &[Snapshot; 2], models: &[&LanguageModel; 2], protected: &ProtectedTokens, rank_namespace: &str, choice_namespace: &str) -> Result<ExternalCorpus, String> {
     if minimum_words_per_group < 1 {
         return Err("minimum_words_per_group must be positive".to_owned());
     }

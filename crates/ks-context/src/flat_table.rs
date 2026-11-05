@@ -53,7 +53,7 @@ impl NameIndex {
     #[must_use]
     pub fn name(&self, entry: usize) -> &str {
         let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
-        &self.arena[start..self.ends[entry].to::<usize>()]
+        self.arena.get(start..self.ends[entry].to::<usize>()).unwrap_or_default()
     }
 
     /// The entry of a name, if the table holds it.
@@ -104,7 +104,7 @@ impl Names {
 
     fn name(&self, entry: usize) -> &str {
         let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
-        &self.arena[start..self.ends[entry].to::<usize>()]
+        self.arena.get(start..self.ends[entry].to::<usize>()).unwrap_or_default()
     }
 
     /// The index sorted by hash. A name given twice keeps its last value, as `dict` does.
@@ -361,7 +361,7 @@ fn json_error(error: &serde_json::Error) -> LoadError {
     use serde_json::error::Category;
     match error.classify() {
         Category::Data => LoadError::value(error.to_string()),
-        _ => LoadError { name: "JSONDecodeError", message: error.to_string() },
+        Category::Io | Category::Syntax | Category::Eof => LoadError { name: "JSONDecodeError", message: error.to_string() },
     }
 }
 

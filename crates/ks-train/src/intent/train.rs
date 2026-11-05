@@ -60,7 +60,7 @@ pub fn report_of(manifest: &Map<String, Value>) -> Value {
 /// The model file and the fields of the sidecar that name it.
 pub fn seal_artifact(built: &Candidate, manifest: &mut Map<String, Value>) -> Result<Vec<u8>, String> {
     let provenance = manifest["build_provenance_sha256"].as_str().ok_or("a provenance digest")?.to_owned();
-    let version = format!("intent-v1-{}", &provenance[..seal::VERSION_HASH_CHARACTERS]);
+    let version = format!("intent-v1-{}", provenance.get(..seal::VERSION_HASH_CHARACTERS).unwrap_or_default());
     let metadata = Value::Object(manifest.clone());
     let encoded = seal::encode_model(&seal::ModelFile { version: &version, quantized: &built.quantized, fingerprints: &built.fingerprints, selections: &built.selections, veto: &built.veto, bias: built.bias, calibration: &built.calibration, fnv_seed: built.config.feature_hash_seed, membership_seed: built.config.membership_hash_seed, metadata: Some(&metadata) })?;
     let loaded = ks_lang::intent_model::LinearNgramModel::from_bytes(encoded.clone(), None).map_err(|error| error.name.to_string())?;
@@ -215,7 +215,7 @@ fn compact(value: &Value, depth: usize) -> Value {
         }
         Value::Object(object) => Value::Object(object.iter().map(|(key, item)| (key.clone(), compact(item, depth + 1))).collect()),
         Value::Array(items) if items.len() > COMPACT_MAX_INLINE_ITEMS => json!({"omitted_items": items.len()}),
-        other => other.clone(),
+        other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::String(_) | other @ Value::Array(_) => other.clone(),
     }
 }
 

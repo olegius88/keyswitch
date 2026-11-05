@@ -141,7 +141,7 @@ impl InputContext {
     pub fn replace_suffix(&mut self, original: &str, replacement: &str, boundary: &str) {
         let old = format!("{original}{boundary}");
         if !old.is_empty() && self.text.ends_with(&old) {
-            let joined = format!("{}{replacement}{boundary}", &self.text[..self.text.len() - old.len()]);
+            let joined = format!("{}{replacement}{boundary}", self.text.get(..self.text.len() - old.len()).unwrap_or_default());
             self.text = pystr::slice(&joined, Some(-CONTEXT_LIMIT.to::<i64>()), None).to_string();
             self.updated_at = self.now();
             self.revision += 1;

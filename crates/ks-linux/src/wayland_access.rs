@@ -7,6 +7,7 @@
 //! Windows. The rule ships inside the application and an administrator enables it once with
 //! `sudo keyswitch --enable-wayland-input`, and takes it away with `--disable-wayland-input`.
 
+#![expect(unsafe_code, reason = "calls into the Linux kernel and system libraries")]
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

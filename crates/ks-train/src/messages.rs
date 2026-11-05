@@ -106,7 +106,7 @@ pub fn unescape(text: &str) -> String {
                 if let Some(replacement) = HTML.invalid_charrefs.get(&code) {
                     return replacement.clone();
                 }
-                if (0xD800..=0xDFFF).contains(&code) || code > 0x10FFFF {
+                if (0xD800..=0xDFFF).contains(&code) || code > 0x0010_FFFF {
                     return "\u{fffd}".to_owned();
                 }
                 if HTML.invalid_codepoints.contains(&code) {
@@ -282,7 +282,7 @@ fn code_lines(markdown: &str) -> Vec<String> {
 
 fn split_of(namespace: &str, identifier: &str) -> &'static str {
     let digest = hex_digest(&format!("{namespace}:{identifier}"));
-    let bucket = u64::from_str_radix(&digest[..SPLIT_HEX_DIGITS], 16).expect("a digest") % SPLIT_BUCKET_COUNT;
+    let bucket = u64::from_str_radix(digest.get(..SPLIT_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % SPLIT_BUCKET_COUNT;
     if bucket < TEST_SPLIT_BUCKETS {
         "test"
     } else if bucket < DEVELOPMENT_SPLIT_BUCKETS {
@@ -365,7 +365,7 @@ pub fn build_taiga(taiga: &Path, out: &Path) -> Result<BTreeMap<String, i64>, St
                     let translated = typeable(rest);
                     let mut joined = pystr::split(&translated).join(" ");
                     if lower {
-                        joined = pystr::strip(pystr::rstrip_chars(&pystr::lower(&joined), ".!?…")).to_owned();
+                        pystr::strip(pystr::rstrip_chars(&pystr::lower(&joined), ".!?…")).clone_into(&mut joined);
                     }
                     let tokens = pystr::split(&joined);
                     if !(MIN_TOKENS..=MAX_TOKENS).contains(&tokens.len()) || !typeable_tokens(&tokens) || !tokens.iter().any(|token| has_cyrillic(token)) {
@@ -507,7 +507,7 @@ pub fn build_messages(so: &Path, tatoeba: &Path, out: &Path) -> Result<BTreeMap<
                 let part = split_of(&format!("{TATOEBA_NAMESPACE}:{language}"), &identifier);
                 let mut joined = tokens.join(" ");
                 if lower {
-                    joined = pystr::strip(pystr::rstrip_chars(&pystr::lower(&joined), ".!?…")).to_owned();
+                    pystr::strip(pystr::rstrip_chars(&pystr::lower(&joined), ".!?…")).clone_into(&mut joined);
                     if pystr::split(&joined).len() < TATOEBA_MIN_TOKENS {
                         continue;
                     }
@@ -804,7 +804,7 @@ fn resumes(text: &str) -> bool {
         let word = if token.chars().next().is_some_and(|first| RESUME_LEADING_SIGNS.contains(first)) { pystr::slice(token, Some(1), None) } else { token };
         if pystr::isalpha(word) && word.chars().count() <= OPENING_SHORT_MAX_LETTERS && tokens[index + 1].chars().any(cyrillic) {
             let before = tokens[..index].join(" ");
-            if before.chars().filter(|character| is_alpha(*character)).next_back().is_some_and(|last| last.is_ascii()) {
+            if before.chars().rfind(|character| is_alpha(*character)).is_some_and(|last| last.is_ascii()) {
                 return true;
             }
         }
@@ -877,7 +877,7 @@ fn holds(text: &str, class: TokenClass) -> bool {
 
 fn capture_split(question: i64, development_share: f64) -> &'static str {
     let digest = hex_digest(&format!("capture-split:{question}"));
-    let draw = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest").to::<f64>() / 16_f64.powi(CHOICE_HEX_DIGITS.to::<i32>());
+    let draw = u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest").to::<f64>() / 16_f64.powi(CHOICE_HEX_DIGITS.to::<i32>());
     if draw < development_share { "dev" } else { "train" }
 }
 
@@ -972,7 +972,7 @@ fn messages_of(text: &str) -> Vec<String> {
 
 fn devchat_split(question: i64) -> &'static str {
     let digest = hex_digest(&format!("{DEVCHAT_NAMESPACE}:{question}"));
-    if u64::from_str_radix(&digest[..8], 16).expect("a digest").is_multiple_of(2) { "dev" } else { "test" }
+    if u64::from_str_radix(digest.get(..8).unwrap_or_default(), 16).expect("a digest").is_multiple_of(2) { "dev" } else { "test" }
 }
 
 fn content_checksum(path: &Path) -> Result<String, String> {
@@ -1031,7 +1031,7 @@ pub fn build_devchat(root: &Path, comments: &Path, dump: &Path, out: &Path, earl
         for comment in batch.as_array().ok_or("comments")? {
             let post = match &comment["post_id"] {
                 Value::String(text) => text.parse().map_err(|_| "a post")?,
-                value => value.as_i64().ok_or("a post")?,
+                value @ Value::Null | value @ Value::Bool(_) | value @ Value::Number(_) | value @ Value::Array(_) | value @ Value::Object(_) => value.as_i64().ok_or("a post")?,
             };
             let question = question_of.get(&post).copied().unwrap_or(post);
             for text in messages_of(or_empty(comment, "body")) {

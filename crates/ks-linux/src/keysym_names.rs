@@ -1,3 +1,4 @@
+#![expect(clippy::unreadable_literal, reason = "a table generated from a standard")]
 // Generated from libX11's XKeysymToString by the project's table generator; do not edit by hand.
 // Keysyms of the Latin-1, Cyrillic, function and XF86 ranges; a Unicode keysym is named `U` and its code in hex.
 pub static KEYSYM_NAMES: [(u32, &str); 781] = [

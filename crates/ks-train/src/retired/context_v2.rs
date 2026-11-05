@@ -87,7 +87,7 @@ fn evidence(row: &Frame, profile: &str, cache: &Cache) -> Result<ContextEvidence
     field.after.clone_from(&row.after);
     field.role = if row.role == "text" { FieldRole::Text } else { FieldRole::Unknown };
     let mut item = ContextEvidence::new(&row.original, &row.alternative, row.group, field);
-    item.trigger = row.trigger.to_owned();
+    row.trigger.clone_into(&mut item.trigger);
     item.baseline_convert = baseline;
     item.source_known = source;
     item.target_known = target;
@@ -132,7 +132,7 @@ fn samples<'a>(frames: &'a [Frame], split: &str) -> Vec<(&'a Frame, &'static str
     let mut items = Vec::new();
     for row in frames.iter().filter(|row| row.split == split) {
         if split == "train" {
-            let draw = u64::from_str_radix(&hex_digest(&row.identifier)[..CHOICE_DIGITS], 16).expect("a digest");
+            let draw = u64::from_str_radix(hex_digest(&row.identifier).get(..CHOICE_DIGITS).unwrap_or_default(), 16).expect("a digest");
             items.push((row, PROFILES[(draw % PROFILES.len().to::<u64>()).to::<usize>()]));
         } else {
             items.extend(PROFILES.iter().map(|profile| (row, *profile)));
@@ -254,7 +254,7 @@ fn fit(root: &Path, frames: &[Frame], cache: &Cache, pins: &Map<String, Value>) 
     let mapping = Value::Object(mapping);
     let compact = JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), sort_keys: true, ..JsonOptions::default() };
     let weight_hash = hex(&Sha256::digest(json_dumps(&mapping, &compact).as_bytes()));
-    let version = format!("context-v1-{}", &weight_hash[..VERSION_HASH_CHARACTERS]);
+    let version = format!("context-v1-{}", weight_hash.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let actions: Vec<&str> = ACTIONS.iter().map(|action| action.as_str()).collect();
     let artifact = canonical(&json!({"actions": actions, "feature_version": 2, "weights": mapping, "weights_sha256": weight_hash, "version": version, "conversion_threshold": threshold}));
     let seal = json!({

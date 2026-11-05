@@ -1,5 +1,4 @@
 //! The layout-intent model: a linear n-gram classifier over physical keys (`train_intent_model`, `evaluate_intent_model`).
-use ks_cast::To as _;
 pub mod dataset;
 pub mod evaluate;
 pub mod external;

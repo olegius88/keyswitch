@@ -1,4 +1,5 @@
 //! The program on macOS: `AppKit` owns the main thread, the models load in the background, the menu bar item comes up at once.
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -264,7 +265,7 @@ fn ensure_permission(backend: &MacBackend) {
     }
     logsetup::warning(LOGGER, PERMISSION_REQUEST_MESSAGE);
     println!("{PERMISSION_REQUEST_MESSAGE}");
-    backend.request_permission();
+    let _ = backend.request_permission();
     while !backend.permission_granted() {
         std::thread::sleep(std::time::Duration::from_secs_f64(MACOS_PERMISSION_POLL_SECONDS));
     }
@@ -359,5 +360,5 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     0
 }
 
-#[expect(dead_code)]
+#[expect(dead_code, reason = "the macOS build alone uses it")]
 fn unused(_: PathBuf) {}

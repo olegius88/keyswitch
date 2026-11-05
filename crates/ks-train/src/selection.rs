@@ -10,7 +10,7 @@ use crate::{ACTIONS, DETERMINISTIC_ROUNDING_DECIMALS, EPOCH_NET_BENEFIT_TOLERANC
 
 /// Use sample mass, with absolute 1e-9 cutoff tolerance and stable ties: ranking rounds mass to nine decimal places, then
 /// breaks ties by name. Returned columns retain the canonical alphabetical order.
-pub fn select_features(masses: &HashMap<String, f64>, minimum: f64, maximum: usize) -> Result<Vec<String>, String> {
+pub fn select_features<S: ::std::hash::BuildHasher>(masses: &HashMap<String, f64, S>, minimum: f64, maximum: usize) -> Result<Vec<String>, String> {
     if !minimum.is_finite() || minimum <= 0.0 {
         return Err("minimum feature mass must be positive and finite".to_owned());
     }

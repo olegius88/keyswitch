@@ -1,6 +1,7 @@
 //! The menu bar item, drawn through `AppKit`. The menu is rebuilt when `AppKit` announces it is about to open, rather than
 //! whenever the state changes: every `AppKit` call then happens on the main thread, while the engine keeps changing the state
 //! from its own.
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 #[cfg(target_os = "macos")]
 pub use native::StatusItem;
 
@@ -184,6 +185,6 @@ mod native {
         }
     }
 
-    #[expect(dead_code)]
+    #[expect(dead_code, reason = "the macOS build alone uses it")]
     const _: *const c_void = std::ptr::null();
 }

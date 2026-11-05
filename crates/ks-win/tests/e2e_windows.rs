@@ -2,6 +2,7 @@
 //! keys through `SendInput`, corrections through `SendInput` back. Runs with `KS_E2E_BINARY` naming the program; otherwise,
 //! and on other systems, it says so and passes.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 #[cfg(not(windows))]
 fn main() {
     println!("the Windows end-to-end test runs on Windows only, skipped");

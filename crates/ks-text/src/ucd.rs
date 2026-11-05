@@ -26,7 +26,7 @@ pub fn flags(cp: u32) -> u16 {
         t::ASCII_FLAGS[cp.to::<usize>()]
     } else if (t::CYRILLIC_LO..t::CYRILLIC_HI).contains(&cp) {
         t::CYRILLIC_FLAGS[(cp - t::CYRILLIC_LO).to::<usize>()]
-    } else if cp > 0x10FFFF {
+    } else if cp > 0x0010_FFFF {
         0
     } else {
         let i = t::FLAG_STARTS.partition_point(|&s| s <= cp) - 1;
@@ -132,7 +132,7 @@ mod tests {
         assert!(isalpha('й') && isalpha('ё') && isupper('Ё') && islower('ё'));
         assert!(istitle('ǅ') && !isupper('ǅ') && !islower('ǅ'));
         assert!(isprintable(' ') && !isprintable('\n') && !isprintable('\u{a0}'));
-        assert!(isalpha_cp(0x61) && !isalpha_cp(0xD800) && !isalpha_cp(0x110000));
+        assert!(isalpha_cp(0x61) && !isalpha_cp(0xD800) && !isalpha_cp(0x0011_0000));
         assert!(re_w('_') && re_w('٣') && !re_w('-'));
         assert!(re_s('\u{85}') && re_s('\u{2028}') && !re_s('\u{200b}'));
     }

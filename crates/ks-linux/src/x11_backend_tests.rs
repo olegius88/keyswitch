@@ -1,6 +1,5 @@
 //! The backend over a fake server: the tests of the Python's `test_x11_backend.py` that pin a decision.
 
-use ks_cast::To as _;
 use super::*;
 use crate::xkb_keymap::{KeyMap, KeySyms, KeyType, TypeEntry};
 use ks_backend::KeyDisposition;

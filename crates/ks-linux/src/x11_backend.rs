@@ -423,9 +423,9 @@ impl Shared {
         let mut character = characters.get(usize::from(group)).cloned().unwrap_or_default();
         let key_name = self.key_name(api, keycode);
         if key_name == "Return" {
-            character = "\n".to_owned();
+            "\n".clone_into(&mut character);
         } else if key_name == "Tab" || key_name == "ISO_Left_Tab" {
-            character = "\t".to_owned();
+            "\t".clone_into(&mut character);
         }
         let synthetic = self.consume_expected(pressed, keycode);
         Some(KeyEvent {

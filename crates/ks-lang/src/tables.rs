@@ -54,7 +54,7 @@ impl WordList {
 
     #[must_use]
     pub fn get(&self, index: usize) -> &str {
-        &self.arena[self.offsets[index].to::<usize>()..(self.offsets[index + 1]).to::<usize>()]
+        self.arena.get(self.offsets[index].to::<usize>()..(self.offsets[index + 1]).to::<usize>()).unwrap_or_default()
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &str> + Clone {
@@ -325,7 +325,7 @@ mod tests {
     fn merged_sets() {
         let list = |words: &[&str]| {
             let mut l = WordList::new();
-            words.iter().for_each(|w| l.push(w));
+            for w in words { l.push(w); }
             l
         };
         let merged = list(&["a", "c", "e"]).merged(&list(&["b", "c", "d", "f"]));

@@ -70,11 +70,11 @@ impl Source {
         for (key, item) in object {
             let wrong = || Error::value("Некорректные типы настроек источника.");
             match key.as_str() {
-                "path" => source.path = item.as_str().ok_or_else(wrong)?.to_owned(),
-                "label" => source.label = item.as_str().ok_or_else(wrong)?.to_owned(),
+                "path" => item.as_str().ok_or_else(wrong)?.clone_into(&mut source.path),
+                "label" => item.as_str().ok_or_else(wrong)?.clone_into(&mut source.label),
                 "rotations" => source.rotations = item.as_i64().ok_or_else(wrong)?,
                 "include_existing" => source.include_existing = item.as_bool().ok_or_else(wrong)?,
-                "id" => source.id = item.as_str().ok_or_else(wrong)?.to_owned(),
+                "id" => item.as_str().ok_or_else(wrong)?.clone_into(&mut source.id),
                 _ => return Err(Error::Other("TypeError")),
             }
         }
@@ -162,10 +162,10 @@ impl Config {
         let wrong = || Error::value("Некорректные типы настроек отправки.");
         for (key, item) in object {
             match key.as_str() {
-                "device_id" => config.device_id = item.as_str().ok_or_else(wrong)?.to_owned(),
-                "device_name" => config.device_name = item.as_str().ok_or_else(wrong)?.to_owned(),
-                "chat_id" => config.chat_id = item.as_str().ok_or_else(wrong)?.to_owned(),
-                "bot_id" => config.bot_id = item.as_str().ok_or_else(wrong)?.to_owned(),
+                "device_id" => item.as_str().ok_or_else(wrong)?.clone_into(&mut config.device_id),
+                "device_name" => item.as_str().ok_or_else(wrong)?.clone_into(&mut config.device_name),
+                "chat_id" => item.as_str().ok_or_else(wrong)?.clone_into(&mut config.chat_id),
+                "bot_id" => item.as_str().ok_or_else(wrong)?.clone_into(&mut config.bot_id),
                 "interval_minutes" => config.interval_minutes = item.as_i64().ok_or_else(wrong)?,
                 "auto_send" => config.auto_send = item.as_bool().ok_or_else(wrong)?,
                 "consent" => config.consent = item.as_bool().ok_or_else(wrong)?,

@@ -197,7 +197,7 @@ impl Tape {
         self.at += 1;
         self.follow_clock(&call);
         if let Some(status) = call.get("status").and_then(Value::as_str) {
-            self.status = status.to_owned();
+            status.clone_into(&mut self.status);
         }
         Some(call)
     }

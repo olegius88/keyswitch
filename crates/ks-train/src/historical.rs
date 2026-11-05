@@ -46,7 +46,7 @@ pub struct ScenarioRow {
 
 fn family_split(signature: &str) -> &'static str {
     let digest = crate::physical::hex_digest(&format!("{NAMESPACE}:{signature}"));
-    let bucket = u64::from_str_radix(&digest[..DETERMINISTIC_CHOICE_HEX_DIGITS], 16).expect("hex digits") % CONTEXT_V1_SPLIT_BUCKET_COUNT;
+    let bucket = u64::from_str_radix(digest.get(..DETERMINISTIC_CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("hex digits") % CONTEXT_V1_SPLIT_BUCKET_COUNT;
     if bucket < CONTEXT_V1_TRAIN_SPLIT_BUCKETS { "train" } else { "development" }
 }
 
@@ -127,7 +127,6 @@ impl Builder<'_> {
 }
 
 /// `build_corpus` of the packaged scenarios, with the reference lexicons.
-#[expect(clippy::too_many_lines)]
 pub fn build_corpus(tools: &Tools, detector: &LanguageDetector, models: &Lexicons) -> Result<Vec<ScenarioRow>, String> {
     let payload = read_json(&tools.root.join("model/context_v1/scenarios.json"))?;
     if payload.get("schema_version").and_then(Value::as_i64) != Some(1) {

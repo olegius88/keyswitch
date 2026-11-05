@@ -1,6 +1,5 @@
 //! `tests/test_macos_backend.py`: the decision half of the macOS backend over a fake of the system.
 
-use ks_cast::To as _;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Condvar};
 
@@ -290,8 +289,8 @@ fn a_name_does_not_follow_the_modifiers() {
     let backend = backend(&api);
     let (listener, events) = collector();
     backend.set_listener(Some(listener));
-    backend.handle_native(native(true, MAC_VK_CONTROL));
-    backend.handle_native(native(true, KEY_Z));
+    let _ = backend.handle_native(native(true, MAC_VK_CONTROL));
+    let _ = backend.handle_native(native(true, KEY_Z));
     assert_eq!(events.lock().unwrap()[1].key_name, "z");
 }
 
@@ -300,9 +299,9 @@ fn the_state_carries_caps_lock_and_a_released_modifier_is_forgotten() {
     let api = FakeMac::new();
     let backend = backend(&api);
     api.caps.store(true, Ordering::SeqCst);
-    backend.handle_native(native(true, MAC_VK_OPTION));
+    let _ = backend.handle_native(native(true, MAC_VK_OPTION));
     assert_eq!(backend.inner.normalized_state(), LOCK_MASK | ALT_MASK);
-    backend.handle_native(native(false, MAC_VK_OPTION));
+    let _ = backend.handle_native(native(false, MAC_VK_OPTION));
     assert_eq!(backend.inner.normalized_state(), LOCK_MASK);
 }
 
@@ -380,7 +379,7 @@ fn a_failed_repost_still_ends_the_hold() {
     let api = FakeMac::new();
     let backend = backend(&api);
     backend.hold_input();
-    backend.handle_native(native(true, KEY_Q));
+    let _ = backend.handle_native(native(true, KEY_Q));
     *api.take.lock().unwrap() = Some(0);
     assert!(backend.release_input().is_err());
     assert!(!backend.handle_native(native(true, KEY_Q)));
@@ -414,7 +413,7 @@ fn a_withheld_enter_is_dropped_when_the_place_of_input_changed() {
     let api = FakeMac::new();
     let backend = backend(&api);
     backend.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.keycode == MAC_VK_RETURN { KeyDisposition::Defer } else { KeyDisposition::Pass })));
-    backend.handle_native(native(true, MAC_VK_RETURN));
+    let _ = backend.handle_native(native(true, MAC_VK_RETURN));
     api.window.store(11, Ordering::SeqCst);
     assert!(backend.complete_action(true).is_err());
     assert!(api.posted().is_empty());

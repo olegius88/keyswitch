@@ -639,7 +639,7 @@ impl App {
     fn apply_update_snapshot(&self, snapshot: &UpdateSnapshot) {
         self.with_window(|window| window.apply_update_snapshot(snapshot));
         if snapshot.phase == UpdatePhase::Available && *self.last_update_notification.borrow() != snapshot.available_version {
-            *self.last_update_notification.borrow_mut() = snapshot.available_version.clone();
+            (*self.last_update_notification.borrow_mut()).clone_from(&snapshot.available_version);
             if self.flag("general.notifications", true) {
                 let notification = gio::Notification::new("Доступно обновление KeySwitch");
                 notification.set_body(Some(&snapshot.message));

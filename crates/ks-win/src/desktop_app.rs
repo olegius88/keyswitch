@@ -6,6 +6,7 @@
 //! message. The window itself, its pages, the learning prompt and the rule window are in `settings_window`,
 //! `learning_prompt` and `rule_editor_dialog`; this file wires them to the engine, the stores and the tray.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -280,7 +281,7 @@ impl App {
     fn apply_update_snapshot(&self, snapshot: UpdateSnapshot) {
         settings_window::apply_update_snapshot(&snapshot);
         if snapshot.phase == UpdatePhase::Available && *self.last_update_notification.borrow() != snapshot.available_version {
-            *self.last_update_notification.borrow_mut() = snapshot.available_version.clone();
+            (*self.last_update_notification.borrow_mut()).clone_from(&snapshot.available_version);
             if setting_bool(&self.settings, "general.notifications", true)
                 && let Some(tray) = self.tray.borrow().as_ref()
             {

@@ -206,7 +206,6 @@ pub struct Pairs {
 }
 
 /// `score_sequences`: every pair replayed in both settings modes; acceptance needs every gate in every mode and profile.
-#[expect(clippy::too_many_lines)]
 pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Value, String> {
     let selected = select_rows(rows);
     let mut plans = Vec::new();

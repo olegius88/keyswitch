@@ -295,7 +295,7 @@ fn add_character_features(token: &str, group_number: i64, polarity: f64, orders:
         let mut counts: Vec<(&str, u64)> = Vec::new();
         let mut index: HashMap<&str, usize> = HashMap::new();
         for start in 0..=(length - order) {
-            let gram = &bounded[offsets[start]..offsets[start + order]];
+            let gram = bounded.get(offsets[start]..offsets[start + order]).unwrap_or_default();
             if let Some(&slot) = index.get(gram) { counts[slot].1 += 1 } else {
                 index.insert(gram, counts.len());
                 counts.push((gram, 1));
@@ -478,7 +478,7 @@ fn expanduser(text: &str) -> PathBuf {
     if (text == "~" || text.starts_with("~/"))
         && let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
     {
-        return PathBuf::from(home).join(text[1..].trim_start_matches('/'));
+        return PathBuf::from(home).join(text.get(1..).unwrap_or_default().trim_start_matches('/'));
     }
     PathBuf::from(text)
 }
@@ -730,7 +730,7 @@ fn read_manifest(manifest_bytes: &[u8]) -> Result<Manifest, LoadError> {
 
     let payload_sha = match &manifest["payload_sha256"] {
         Value::String(text) if text.len() == SHA256_HEX_CHARACTERS && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) => text.clone(),
-        _ => return Err(format_error("payload_sha256 must be lowercase hexadecimal")),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => return Err(format_error("payload_sha256 must be lowercase hexadecimal")),
     };
 
     Ok(Manifest {
@@ -1059,7 +1059,7 @@ fn validate_orders_values(values: &[Value]) -> Result<[i64; 5], LoadError> {
     for order in values {
         match order {
             Value::Number(number) if number.is_i64() || number.is_u64() => parsed.push(number.as_i64().unwrap_or(i64::MAX)),
-            _ => return Err(LoadError::value("n-gram orders must be integers")),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => return Err(LoadError::value("n-gram orders must be integers")),
         }
     }
     validate_orders(&parsed)?;
@@ -1069,7 +1069,7 @@ fn validate_orders_values(values: &[Value]) -> Result<[i64; 5], LoadError> {
 fn validate_version(value: &Value) -> Result<String, LoadError> {
     match value {
         Value::String(text) if !text.is_empty() && pystr::len(text) <= INTENT_MODEL_VERSION_MAX_CHARACTERS && pystr::isprintable(text) => Ok(text.clone()),
-        _ => Err(LoadError::value("model_version must be a short printable string")),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => Err(LoadError::value("model_version must be a short printable string")),
     }
 }
 
@@ -1077,7 +1077,7 @@ fn validate_version(value: &Value) -> Result<String, LoadError> {
 fn model_float(value: &Value, field: &str) -> Result<f64, LoadError> {
     let parsed = match value {
         Value::Number(number) => number.as_f64().expect("a JSON number reads as f64"),
-        _ => return Err(LoadError::value(format!("{field} must be numeric"))),
+        Value::Null | Value::Bool(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => return Err(LoadError::value(format!("{field} must be numeric"))),
     };
     if !parsed.is_finite() || parsed.abs() > INTENT_MAX_MODEL_FLOAT_MAGNITUDE {
         return Err(LoadError::value(format!("{field} must be finite and bounded")));
@@ -1093,7 +1093,7 @@ fn manifest_int(value: &Value, field: &str) -> Result<i128, LoadError> {
     match value {
         Value::Number(number) if number.is_i64() => Ok(i128::from(number.as_i64().expect("checked"))),
         Value::Number(number) if number.is_u64() => Ok(i128::from(number.as_u64().expect("checked"))),
-        _ => Err(format_error(format!("{field} must be an integer"))),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => Err(format_error(format!("{field} must be an integer"))),
     }
 }
 

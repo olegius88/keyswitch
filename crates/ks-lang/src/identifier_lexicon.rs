@@ -69,7 +69,7 @@ impl IdentifierLexicon {
             match entry {
                 Value::String(text) => identifiers.push(text),
                 // Elements other than strings fail one of the two checks in the Python.
-                _ => return Err(LoadError::value("invalid identifier entry")),
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => return Err(LoadError::value("invalid identifier entry")),
             }
         }
         if !identifiers.is_sorted_set() {

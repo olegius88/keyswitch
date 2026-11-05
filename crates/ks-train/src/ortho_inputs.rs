@@ -168,7 +168,7 @@ pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
 /// The split of a phrase family, decided by its name alone before anything looks at a model.
 fn phrase_split(group: &str) -> &'static str {
     let digest = hex_digest(&format!("{PHRASE_NAMESPACE}:{group}"));
-    let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % PHRASE_SPLIT_BUCKETS;
+    let bucket = u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % PHRASE_SPLIT_BUCKETS;
     match bucket {
         0..60 => "train",
         60..70 => "development",
@@ -231,7 +231,7 @@ pub(crate) fn shape_of(token: &str, position: usize) -> &'static str {
 
 fn split_of(group: &str) -> &'static str {
     let digest = hex_digest(&format!("{SPLIT_NAMESPACE}:{group}"));
-    let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % BUCKET_COUNT;
+    let bucket = u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % BUCKET_COUNT;
     if bucket < TEST_SPLIT_CEILING { "test" } else { "train" }
 }
 
@@ -307,7 +307,7 @@ fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> 
                 continue;
             }
             let bits = 128 - (frequency.unsigned_abs()).leading_zeros();
-            let weight = i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1));
+            let weight = i64::from(bits.clamp(1, MAXIMUM_LEXICON_WEIGHT));
             let entry = counts.entry((script.to_owned(), keys)).or_insert(0);
             *entry = (*entry).max(weight);
         }
@@ -397,7 +397,7 @@ fn asked(keys: &str, direction: &str, result: &mut HashMap<&'static str, HashSet
         }
     }
     if direction == "ru" && keys.chars().count() > 1 && keys.starts_with('.') {
-        result.get_mut("en").expect("a script").insert(keys[1..].to_owned());
+        result.get_mut("en").expect("a script").insert(keys.get(1..).unwrap_or_default().to_owned());
     }
     if pystr::isalpha(&target) {
         let set = result.get_mut(script_key(target_script)).expect("a script");
@@ -868,7 +868,7 @@ fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, S
         if let Some(body) = text.as_mut() {
             match line.find("</text>") {
                 Some(end) => {
-                    body.push_str(&line[..end]);
+                    body.push_str(line.get(..end).unwrap_or_default());
                     let content = xml_text(&std::mem::take(body));
                     text = None;
                     if let (Some(id), Some(number)) = (page, revision)
@@ -898,15 +898,15 @@ fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, S
                 continue;
             }
             let start = line.find('>').map_or(0, |place| place + 1);
-            match line[start..].find("</text>") {
+            match line.get(start..).unwrap_or_default().find("</text>") {
                 Some(end) => {
-                    let content = xml_text(&line[start..start + end]);
+                    let content = xml_text(line.get(start..start + end).unwrap_or_default());
                     if let (Some(id), Some(number)) = (page, revision)
                         && wanted.contains(&id) {
                             each(id, number, content);
                         }
                 }
-                None => text = Some(line[start..].to_owned()),
+                None => text = Some(line.get(start..).unwrap_or_default().to_owned()),
             }
         }
     }
@@ -1033,7 +1033,7 @@ pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), 
             }
         }
     }
-    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = (ks_text::py_round(count.to::<f64>() * WORDS_SCALE / words.to::<f64>())).to::<i64>(); let bits = rounded.cast_unsigned().bit_width(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
+    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = (ks_text::py_round(count.to::<f64>() * WORDS_SCALE / words.to::<f64>())).to::<i64>(); let bits = rounded.cast_unsigned().bit_width(); (form, i64::from(bits.clamp(1, MAXIMUM_LEXICON_WEIGHT))) }).collect();
     let listed: String = pages.iter().map(|(title, (revision, _))| format!("{title}\t{revision}\n")).collect();
     let author_years: BTreeMap<String, i64> = authors.values().collect::<BTreeSet<_>>().into_iter().map(|author| (author.replace('_', " "), died[author])).collect();
     Ok((table, json!({"authors": author_years, "pages": pages.len(), "pages_sha256": hex_digest(&listed), "left_out": dropped, "words": words})))
@@ -1072,7 +1072,7 @@ struct SetSource {
 }
 
 fn sampled(sentence: &str, percent: u64, namespace: &str) -> bool {
-    u64::from_str_radix(&hex_digest(&format!("{namespace}:{sentence}"))[..CHOICE_HEX_DIGITS], 16).expect("a digest") % 100 < percent
+    u64::from_str_radix(hex_digest(&format!("{namespace}:{sentence}")).get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % 100 < percent
 }
 
 fn set_sentences(source: &SetSource, directory: &Path, excluded: &[String], namespace: &str, previous: &str) -> Result<Vec<String>, String> {

@@ -255,7 +255,7 @@ impl EngineCore {
                 // alone does not arm the pause timer: a user who stops to
                 // think after the Backspace must not get a second, unasked
                 // judgement of the same letters. The next letter arms it.
-                self.strokes = reopenable.strokes.clone();
+                self.strokes.clone_from(&reopenable.strokes);
                 self.source_group = reopenable.source_group;
                 technical_event!(
                     self.shared, "committed_word_reopened",
@@ -313,9 +313,7 @@ impl EngineCore {
             }
             return Ok(());
         }
-        if !event.character.is_empty()
-            && !Self::_safe_text_stroke(&event)
-            && !(pystr::len(&event.character) == 1 && pystr::isspace(&event.character))
+        if !(event.character.is_empty() || Self::_safe_text_stroke(&event) || pystr::len(&event.character) == 1 && pystr::isspace(&event.character))
         {
             technical_event!(
                 self.shared, "input_not_representable", "key_name": event.key_name,

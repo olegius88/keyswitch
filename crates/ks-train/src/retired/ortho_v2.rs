@@ -78,7 +78,7 @@ const EVIDENCE_SCOPE: &str = "synthetic wrong-layout renderings of frozen CC0 co
 
 fn gate_family(keys: &str) -> bool {
     let digest = hex_digest(&format!("{GATE_NAMESPACE}:{keys}"));
-    u64::from_str_radix(&digest[..CHOICE_DIGITS], 16).expect("a digest") % PERCENT_SCALE < GATE_SHARE_PERCENT
+    u64::from_str_radix(digest.get(..CHOICE_DIGITS).unwrap_or_default(), 16).expect("a digest") % PERCENT_SCALE < GATE_SHARE_PERCENT
 }
 
 /// `lexicon_rows`: (script, keys) -> weight, compressed so that a frequent word cannot dominate. A dictionary is evidence
@@ -95,7 +95,7 @@ fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> 
                 continue;
             }
             let bits = i128::from(128 - frequency.unsigned_abs().leading_zeros());
-            let weight = bits.min(MAXIMUM_LEXICON_WEIGHT).max(1).to::<i64>();
+            let weight = bits.clamp(1, MAXIMUM_LEXICON_WEIGHT).to::<i64>();
             let entry = counts.entry((script.to_owned(), keys)).or_insert(weight);
             *entry = (*entry).max(weight);
         }
@@ -355,7 +355,7 @@ fn build(rows: &[Row], settings: &Value) -> Result<Map<String, Value>, String> {
     payload.insert("prose_shape".to_owned(), shape_channel(&prose, scale));
     payload.insert("acronym_shape".to_owned(), shape_channel(&acronym, scale));
     let digest = hex(&Sha256::digest(canonical(&Value::Object(payload.clone()))));
-    payload.insert("version".to_owned(), json!(format!("ortho-v2-{}", &digest[..VERSION_HASH_CHARACTERS])));
+    payload.insert("version".to_owned(), json!(format!("ortho-v2-{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default())));
     payload.insert("weights_sha256".to_owned(), json!(digest));
     Ok(payload)
 }

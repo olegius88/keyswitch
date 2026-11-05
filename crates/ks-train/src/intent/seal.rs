@@ -100,7 +100,6 @@ pub fn verify_toolchain(root: &Path, snapshot: &Value, config_path: &Path, regis
 }
 
 /// Everything known before the sealed test: the exact projection of the manifest `presealed_candidate_metadata_projection` makes.
-#[expect(clippy::too_many_arguments)]
 #[must_use]
 pub fn metadata_projection(config_sha256: &str, namespace: &str, toolchain: &Value, source_package: &Value, sources: &Value, candidate_counts: &Value, variant_quarantine_sha256: &str, scorer: &Value, gate_policy: &Value, training: &Value, quantization: &Value, calibration: &Value, veto_selection: &Value, thresholds: &Value, selection_gate: &Value, safety_audit: &Value, parameters: &Value) -> Value {
     json!({

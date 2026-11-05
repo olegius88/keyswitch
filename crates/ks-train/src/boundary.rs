@@ -53,7 +53,7 @@ fn digest(text: &str) -> String {
 
 /// `int(digest[:digits], 16)`.
 fn choice(hexadecimal: &str, digits: usize) -> u64 {
-    u64::from_str_radix(&hexadecimal[..digits], 16).expect("a hexadecimal digest")
+    u64::from_str_radix(hexadecimal.get(..digits).unwrap_or_default(), 16).expect("a hexadecimal digest")
 }
 
 fn is_cyrillic(character: char) -> bool {
@@ -235,7 +235,7 @@ fn add(rows: &mut BTreeMap<String, Row>, models: &[Arc<LanguageModel>], sample: 
         if !row.labels.contains(&label) {
             row.labels.push(label);
             row.labels.sort_unstable();
-            row.category = "ambiguous".to_owned();
+            "ambiguous".clone_into(&mut row.category);
         }
         return;
     }
@@ -321,7 +321,7 @@ pub fn freeze(root: &Path, resources: &Arc<Resources>, directory: &Path) -> Resu
         }
         if labels.len() > 1 {
             row.labels = labels.into_iter().collect();
-            row.category = "ambiguous".to_owned();
+            "ambiguous".clone_into(&mut row.category);
         }
     }
     let mut counts = Map::new();
@@ -498,7 +498,7 @@ pub fn train(root: &Path, directory: &Path) -> Result<(Vec<u8>, Vec<u8>), String
     }
     let learned: IndexMap<String, f64> = names.iter().enumerate().map(|(index, name)| (name.clone(), py_round_ndigits(best[index * ACTIONS + 1] - best[index * ACTIONS], WEIGHT_DECIMALS).unwrap_or(0.0))).collect();
     let digest_of_weights = hex(&Sha256::digest(canonical(&table(&learned))));
-    let version = format!("{BOUNDARY_V2_VERSION_PREFIX}{}", &digest_of_weights[..VERSION_HASH_CHARACTERS]);
+    let version = format!("{BOUNDARY_V2_VERSION_PREFIX}{}", digest_of_weights.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let mut search = Vec::new();
     let mut threshold = 1.0;
     for candidate in config["thresholds"].as_array().ok_or("thresholds")?.iter().filter_map(Value::as_f64) {

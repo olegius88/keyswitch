@@ -319,7 +319,7 @@ impl FieldReader for CaretReader {
         field.before = state.text[..state.caret].iter().collect();
         field.after = state.text[state.caret..].iter().collect();
         field.role = FieldRole::Text;
-        field.source = "uia".to_owned();
+        "uia".clone_into(&mut field.source);
         Some(field)
     }
 

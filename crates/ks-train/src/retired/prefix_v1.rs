@@ -195,7 +195,7 @@ fn train(root: &Path, pins: &Value) -> Result<(Vec<u8>, Vec<u8>), String> {
     let learned = Value::Object(learned);
     let compact = JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), sort_keys: true, ..JsonOptions::default() };
     let digest = hex(&Sha256::digest(json_dumps(&learned, &compact).as_bytes()));
-    let version = format!("prefix-v1-{}", &digest[..VERSION_HASH_CHARACTERS]);
+    let version = format!("prefix-v1-{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let calibration = sequence_results(root, &table, "calibration")?;
     let mut threshold = 1.0;
     for candidate in cfg["thresholds"].as_array().ok_or("no thresholds")?.iter().filter_map(Value::as_f64) {

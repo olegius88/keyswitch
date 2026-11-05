@@ -68,8 +68,8 @@ pub fn draft(config: &Config, form: &Form<'_>) -> Result<(Config, String)> {
     if !token.is_empty() {
         draft.bot_id = token_bot_id(&token)?;
     }
-    draft.chat_id = form.chat.trim().to_owned();
-    draft.device_name = form.device.trim().to_owned();
+    form.chat.trim().clone_into(&mut draft.chat_id);
+    form.device.trim().clone_into(&mut draft.device_name);
     draft.sources = form.sources.to_vec();
     draft.consent = form.consent;
     draft.auto_send = form.auto;

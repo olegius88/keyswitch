@@ -323,7 +323,7 @@ pub fn clean_windows_executable(value: &str) -> String {
     if let Some(rest) = text.strip_prefix('"')
         && let Some(closing_quote) = rest.find('"')
     {
-        return rest[..closing_quote].to_owned();
+        return rest.get(..closing_quote).unwrap_or_default().to_owned();
     }
     let mut kept = text;
     if let Some((candidate, icon_index)) = text.rsplit_once(',')
@@ -357,16 +357,16 @@ fn ntpath_tail(path: &str) -> &str {
             let Some(index2) = find_from(index + 1) else {
                 return "";
             };
-            &path[index2 + 1..]
+            path.get(index2 + 1..).unwrap_or_default()
         }
         // Relative path with root, e.g. \Windows.
-        (Some((_, one)), _) if is_separator(one) => &path[1..],
+        (Some((_, one)), _) if is_separator(one) => path.get(1..).unwrap_or_default(),
         (Some(_), Some((colon, ':'))) => {
             let after = colon + 1;
             // Absolute drive-letter path, e.g. X:\Windows; relative path with drive, e.g. X:Windows.
             match third {
-                Some((_, three)) if is_separator(three) => &path[after + 1..],
-                _ => &path[after..],
+                Some((_, three)) if is_separator(three) => path.get(after + 1..).unwrap_or_default(),
+                _ => path.get(after..).unwrap_or_default(),
             }
         }
         // Relative path, e.g. Windows.
@@ -379,7 +379,7 @@ fn ntpath_tail(path: &str) -> &str {
 pub fn ntpath_basename(path: &str) -> &str {
     let tail = ntpath_tail(path);
     match tail.rfind(['\\', '/']) {
-        Some(separator) => &tail[separator + 1..],
+        Some(separator) => tail.get(separator + 1..).unwrap_or_default(),
         None => tail,
     }
 }
@@ -390,7 +390,7 @@ pub fn ntpath_splitext(path: &str) -> (&str, &str) {
     let name_start = path.rfind(['\\', '/']).map_or(0, |separator| separator + 1);
     if let Some(dot) = path.rfind('.')
         && dot >= name_start
-        && path[name_start..dot].bytes().any(|byte| byte != b'.')
+        && path.get(name_start..dot).unwrap_or_default().bytes().any(|byte| byte != b'.')
     {
         return path.split_at(dot);
     }

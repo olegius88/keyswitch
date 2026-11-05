@@ -172,7 +172,7 @@ impl SettingsStore {
         let Some(loaded_mapping) = loaded_mapping else {
             // Keep safe defaults, and keep the user's file: the next change of any setting would otherwise save the
             // defaults over it.
-            state.data = self.defaults.clone();
+            state.data.clone_from(&self.defaults);
             state.unreadable = set_aside_unreadable(&self.path);
             return;
         };
@@ -356,7 +356,7 @@ impl SettingsStore {
         let callbacks;
         {
             let mut state = lock(&self.state);
-            state.data = self.defaults.clone();
+            state.data.clone_from(&self.defaults);
             let data = state.data.clone();
             self.save_locked(&data)?;
             callbacks = self.callbacks_snapshot();

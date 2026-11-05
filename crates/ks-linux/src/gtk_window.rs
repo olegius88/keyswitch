@@ -171,7 +171,7 @@ fn status_repr(status: &serde_json::Map<String, Value>) -> String {
                 Value::Bool(true) => "True".to_owned(),
                 Value::Bool(false) => "False".to_owned(),
                 Value::String(text) => format!("'{text}'"),
-                other => other.to_string(),
+                other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
             };
             format!("'{key}': {shown}")
         })
@@ -571,7 +571,7 @@ impl MainWindow {
                         row.set_selected(selected);
                     }
                 }
-                _ => {}
+                Control::Switch(_) | Control::Combo(_) => {}
             }
         }
         if path == "exclusions.applications" {
@@ -1074,7 +1074,6 @@ impl Builder<'_> {
         row
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn combo_row(&self, path: &str, title: &str, subtitle: &str, labels: &[&str], keys: Vec<String>, selected: u32, track: bool) -> adw::ComboRow {
         let row = adw::ComboRow::builder().title(title).subtitle(subtitle).model(&gtk::StringList::new(labels)).build();
         row.set_selected(selected);

@@ -89,7 +89,7 @@ fn label(capture: &Capture, expected: &str) -> Option<ContextAction> {
     if anchor.is_empty() || !capture.observed.ends_with(&anchor) {
         return None;
     }
-    let converted = format!("{}{}{suffix}", &capture.observed[..capture.observed.len() - anchor.len()], item.alternative);
+    let converted = format!("{}{}{suffix}", capture.observed.get(..capture.observed.len() - anchor.len()).unwrap_or_default(), item.alternative);
     (converted == expected).then_some(ContextAction::Convert)
 }
 

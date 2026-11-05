@@ -405,7 +405,7 @@ fn placed_sequence(text: &[char], index: usize) -> Option<(String, &'static str)
     for ((latin, cyrillic), placed) in candidates {
         if placed && pystr::lower(&slice(text, index, index + latin.len())) == latin {
             // The `k` after `ts` is read on its own: only тс is written for this match.
-            let sequence = if (latin, cyrillic) == TS_BEFORE_K { &latin[..latin.len() - 1] } else { latin };
+            let sequence = if (latin, cyrillic) == TS_BEFORE_K { latin.get(..latin.len() - 1).unwrap_or_default() } else { latin };
             return Some((sequence.to_string(), cyrillic));
         }
     }

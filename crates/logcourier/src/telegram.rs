@@ -306,7 +306,7 @@ mod tests {
                 assert_eq!((retry_after, status_code), (37, 429));
                 assert!(message.contains("<TOKEN>") && !message.contains("AAAA"));
             }
-            other => panic!("{other:?}"),
+            other @ Error::Value(_) | other @ Error::Os(_) | other @ Error::QueueFull(_) | other @ Error::Cancelled(_) | other @ Error::Runtime(_) | other @ Error::Other(_) => panic!("{other:?}"),
         }
     }
 

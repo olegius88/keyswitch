@@ -178,7 +178,7 @@ impl LearnedRule {
             RuleMatch::Prefix => key.starts_with(&text) || text.starts_with(&key),
             RuleMatch::Contains => {
                 text.contains(&key)
-                    || text.char_indices().any(|(start, _)| key.starts_with(&text[start..]))
+                    || text.char_indices().any(|(start, _)| key.starts_with(text.get(start..).unwrap_or_default()))
                     // range(len(text)) starts at every character, and never at the end: no empty suffix.
             }
         }

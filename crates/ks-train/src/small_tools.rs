@@ -48,7 +48,7 @@ pub fn carried(pair: &Value, refit: &[String]) -> Result<Value, String> {
     let mut output = pair.as_object().ok_or("a pair")?.clone();
     output.insert("weights".to_owned(), Value::Object(kept));
     output.insert("weights_sha256".to_owned(), json!(digest));
-    output.insert("version".to_owned(), json!(format!("context-v3-{}", &digest[..VERSION_HASH_CHARACTERS])));
+    output.insert("version".to_owned(), json!(format!("context-v3-{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default())));
     Ok(Value::Object(output))
 }
 
@@ -275,7 +275,7 @@ impl Sources {
     }
 
     fn pool(&self) -> String {
-        format!("pool/{}/{}/{PACKAGE_NAME}", self.component, &PACKAGE_NAME[..1])
+        format!("pool/{}/{}/{PACKAGE_NAME}", self.component, PACKAGE_NAME.get(..1).unwrap_or_default())
     }
 }
 
@@ -285,7 +285,7 @@ fn stanza_field(stanza: &str, name: &str) -> Result<String, String> {
         if line.starts_with('#') || !line.starts_with(&prefix) {
             continue;
         }
-        let values: Vec<&str> = line[prefix.len()..].split_whitespace().collect();
+        let values: Vec<&str> = line.get(prefix.len()..).unwrap_or_default().split_whitespace().collect();
         let [value] = values.as_slice() else { return Err(format!("{SOURCES_STANZA} must give exactly one {name} value")) };
         return Ok((*value).to_owned());
     }

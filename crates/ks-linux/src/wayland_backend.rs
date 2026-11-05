@@ -663,7 +663,8 @@ impl Inner {
             self.hold_input();
             let mut state = self.state();
             state.deferred_action = Some(*native);
-            state.action_prior_keys = state.pressed.clone();
+            let pressed = state.pressed.clone();
+            state.action_prior_keys = pressed;
             event.deferred = true;
         }
         if native.seq != 0 && !native.delivered {

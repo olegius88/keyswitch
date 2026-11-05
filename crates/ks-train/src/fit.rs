@@ -505,7 +505,6 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
 }
 
 /// The features of `splits` alone: without TRAIN none of its curricula is built and no TRAIN frame is held in memory.
-#[expect(clippy::too_many_lines)]
 pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages, splits: &[&'static str]) -> Result<FeatureSet, String> {
     let train_built = splits.contains(&TRAIN);
     let root = inputs.tools.root.clone();
@@ -887,7 +886,6 @@ pub struct FitRequest<'a> {
 }
 
 /// `fit`: every back end of the Python built the same candidate; so does this one.
-#[expect(clippy::too_many_lines)]
 pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, String> {
     let (root, corpus, output) = (request.root, request.corpus, request.output);
     if output.exists() {
@@ -1127,7 +1125,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     let weight_table: Map<String, Value> = mapping.iter().map(|(name, row)| (name.clone(), json!(row))).collect();
     let weights_value = Value::Object(weight_table);
     let weight_hash = hex(&Sha256::digest(json_dumps(&weights_value, &JsonOptions { ensure_ascii: false, sort_keys: true, separators: Some((",".to_owned(), ":".to_owned())), ..JsonOptions::default() }).as_bytes()));
-    let version = format!("context-v3-{}", &weight_hash[..VERSION_HASH_CHARACTERS]);
+    let version = format!("context-v3-{}", weight_hash.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let actions: Vec<&str> = ACTION_NAMES.iter().map(|action| action.as_str()).collect();
     let payload = json!({"actions": actions, "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": weights_value, "weights_sha256": weight_hash, "version": version, "conversion_threshold": threshold});
     write_all(&output.join(ARTIFACT), &crate::artifact::artifact_bytes(&payload))?;

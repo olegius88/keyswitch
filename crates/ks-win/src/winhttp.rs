@@ -4,6 +4,7 @@
 //! handed to the updater, which accepts only the addresses it knows. `launch_windows_installer` starts the
 //! downloaded installer and compiles everywhere.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};

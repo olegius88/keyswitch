@@ -1,5 +1,6 @@
 //! The macOS half of the keyboard backend: nothing here decides anything, it only calls the system. Every decision lives
 //! in `macos_backend`, which is verified on any platform.
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 use ks_cast::To as _;
 use std::collections::HashMap;
 use std::ffi::{CString, c_char, c_long, c_ulong, c_void};
@@ -380,7 +381,7 @@ impl MacAPI for NativeMacAPI {
             MACOS_LAYOUT_SWITCH_WAIT_SECONDS,
         );
         if selected {
-            *locked(&self.state.current_source) = identifier.to_owned();
+            identifier.clone_into(&mut locked(&self.state.current_source));
         }
         selected
     }

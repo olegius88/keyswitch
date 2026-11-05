@@ -131,7 +131,9 @@ fn the_first_scan_sets_a_baseline_and_only_new_lines_travel() {
     assert_eq!(collector.scan(&config).unwrap().0, 1);
     assert_eq!(collector.scan(&config).unwrap().0, 0, "nothing is read twice");
     let rows = store.queue(&config.destination()).unwrap();
-    let fragment = rows.iter().find(|row| row.name.ends_with(".zip")).expect("a fragment");
+    let fragment = rows.iter().find(|row| std::path::Path::new(&row.name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))).expect("a fragment");
     assert_eq!(fragment.metadata()["keyswitch_version"], "0.66.1");
     assert_eq!(fragment.metadata()["start_byte"], 58);
 }

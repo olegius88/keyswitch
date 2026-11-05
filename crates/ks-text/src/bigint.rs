@@ -213,7 +213,7 @@ impl BigUint {
             match rest.cmp(&half) {
                 Ordering::Greater => q += 1,
                 Ordering::Equal if q & 1 == 1 => q += 1,
-                _ => {}
+                Ordering::Less | Ordering::Equal => {}
             }
             (q, exp2 + shift)
         } else {
@@ -294,8 +294,8 @@ mod tests {
     #[test]
     fn conversion_to_double_rounds_to_even() {
         assert_eq!(big(1).to_f64_scaled(-1), 0.5);
-        assert_eq!(big((1 << 53) + 1).to_f64_scaled(0), 9007199254740992.0);
-        assert_eq!(big((1 << 53) + 3).to_f64_scaled(0), 9007199254740996.0);
+        assert_eq!(big((1 << 53) + 1).to_f64_scaled(0), 9_007_199_254_740_992.0);
+        assert_eq!(big((1 << 53) + 3).to_f64_scaled(0), 9_007_199_254_740_996.0);
         assert_eq!(big(1).to_f64_scaled(-1074), f64::from_bits(1));
         assert_eq!(big(3).to_f64_scaled(-1075), f64::from_bits(2)); // 1.5 * 2^-1074 -> even
         assert_eq!(big(1).to_f64_scaled(-1075), 0.0); // exactly half of the least subnormal -> even (0)

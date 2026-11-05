@@ -38,7 +38,7 @@ impl EngineCore {
             // Typed into a word, every key is part of it: `,` between `те` and `е`
             // is the `б` of `тебе`, not punctuation in front of a word.
             head = 0;
-            strokes = typed.clone();
+            strokes.clone_from(&typed);
             trailing = Vec::new();
             segmentation_certain = true;
             abstained = false;
@@ -230,7 +230,7 @@ impl EngineCore {
             }
             if joint.is_none() && head == 0 && decided.should_convert {
                 let base = self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary");
-                let base = base.replaced_with(|plan| plan.trailing = trailing.clone());
+                let base = base.replaced_with(|plan| plan.trailing.clone_from(&trailing));
                 let base = self.with_signs(&base, &signs);
                 let taken = self.take_along(&kept, &base, pystr::len(&original), &application, false)?;
                 if taken.mode == "context_phrase" {
@@ -270,7 +270,7 @@ impl EngineCore {
                 let base = self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary");
                 let quotation_closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, Some(boundary)));
                 let base = base.replaced_with(|plan| {
-                    plan.trailing = trailing.clone();
+                    plan.trailing.clone_from(&trailing);
                     plan.head = if !mention.is_empty() && quotation_closed { Vec::new() } else { mention.clone() };
                 });
                 let mut converted = Self::_replay_sign_with_word(&self.with_signs(&base, &signs), &opened);
@@ -522,18 +522,13 @@ impl EngineCore {
         let split = word.char_indices().nth(DOUBLE_CAPITALS).map_or(word.len(), |(index, _)| index);
         let (capitals, rest) = word.split_at(split);
         let length = pystr::len(word);
-        if !self.in_models(group)
-            || !self.flag("detection.fix_double_capitals", true)
-            || length < DOUBLE_CAPITALS_MIN_LETTERS
-            || length != plan.strokes.len()
-            || !pystr::isalpha(word)
-            || !(pystr::isupper(capitals) && pystr::islower(rest))
+        if !(self.in_models(group) && self.flag("detection.fix_double_capitals", true) && length >= DOUBLE_CAPITALS_MIN_LETTERS && length == plan.strokes.len() && pystr::isalpha(word) && pystr::isupper(capitals) && pystr::islower(rest))
         {
             return plan.clone();
         }
         let model = self.model(group).clone();
         let first_end = capitals.chars().next().map_or(0, char::len_utf8);
-        let fixed = format!("{}{}{rest}", &capitals[..first_end], pystr::lower(&capitals[first_end..]));
+        let fixed = format!("{}{}{rest}", capitals.get(..first_end).unwrap_or_default(), pystr::lower(capitals.get(first_end..).unwrap_or_default()));
         let lowered = self.unshifted(&plan.strokes[1..DOUBLE_CAPITALS], group);
         // The early switch or a pause converted the word while it was typed: its keys are another
         // layout's, and a conversion's keys are typed back as they were.

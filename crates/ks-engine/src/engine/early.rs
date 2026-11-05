@@ -1,6 +1,5 @@
 //! The early switch, the typo correction and the bookkeeping of a finished correction.
 
-use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_context::context_policy::{caret_lag, typed_short_of};
@@ -10,6 +9,7 @@ use ks_lang::early_switch::{early_switch_decision, EarlySwitchDecision, EarlySwi
 use serde_json::json;
 
 /// `type(error).__name__` of an operating system error.
+#[expect(clippy::wildcard_enum_match_arm, reason = "std::io::ErrorKind is non-exhaustive: a new kind has to land somewhere")]
 pub(crate) fn os_error_name(error: &std::io::Error) -> &'static str {
     match error.kind() {
         std::io::ErrorKind::PermissionDenied => "PermissionError",
@@ -81,7 +81,7 @@ impl EngineCore {
         }
         if !protection.is_empty() {
             decision.should_switch = false;
-            decision.reason = protection.to_owned();
+            protection.clone_into(&mut decision.reason);
         } else if !excluded {
             (decision, confidence) = self.decide_prefix(decision, field.as_ref())?;
         }
@@ -179,11 +179,11 @@ impl EngineCore {
     pub(crate) fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
         let boundaries: Vec<usize> = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len())).collect();
         for &end in boundaries.iter().rev() {
-            let shown = format!("{typed}{}", &ahead[..end]);
+            let shown = format!("{typed}{}", ahead.get(..end).unwrap_or_default());
             if let Some(lag) = caret_lag(&field.before, &field.after, &shown, true) {
                 let head = format!("{}{}", field.before, pystr::slice(&field.after, None, Some(lag.to::<i64>())));
                 if head.ends_with(&shown) {
-                    return Some((head[..head.len() - shown.len()].to_owned(), pystr::slice(&field.after, Some(lag.to::<i64>()), None).to_owned()));
+                    return Some((head.get(..head.len() - shown.len()).unwrap_or_default().to_owned(), pystr::slice(&field.after, Some(lag.to::<i64>()), None).to_owned()));
                 }
             }
         }
@@ -495,7 +495,7 @@ impl EngineCore {
         let reason_name = judgement.reason.as_str();
         if matches!(reason_name, "no_candidate" | "rare" | "ambiguous" | "corrected") {
             // No list knows the word: left as typed, it counts towards the user's own (personal_word_settled).
-            self.personal_pending = word.clone();
+            self.personal_pending.clone_from(&word);
         }
         let Some(choice) = judgement.choice.as_ref() else {
             return Ok(None);

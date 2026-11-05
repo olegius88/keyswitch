@@ -363,16 +363,15 @@ pub fn natural_anchors(source_rows: &[CorpusRow]) -> Vec<Anchor> {
 fn source_identifier(identifier: &str) -> &str {
     let mut end = identifier.len();
     for _ in 0..IDENTIFIER_SUFFIX_SEGMENTS {
-        match identifier[..end].rfind(':') {
+        match identifier.get(..end).unwrap_or_default().rfind(':') {
             Some(place) => end = place,
             None => break,
         }
     }
-    &identifier[..end]
+    identifier.get(..end).unwrap_or_default()
 }
 
 /// `natural_lookahead_rows`: bounded natural short-space frames replaced with equal-mass original/planned variants.
-#[expect(clippy::too_many_arguments)]
 pub fn natural_lookahead_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows: &[CorpusRow], detector: &LanguageDetector, ortho: Option<&OrthoModel>, maximum_families: i64, seeds_per_family: i64) -> Curriculum {
     let by_identifier: HashMap<&str, &CorpusRow> = source_rows.iter().map(|row| (row.identifier.as_str(), row)).collect();
     let mut places: HashMap<String, usize> = HashMap::new();
@@ -467,7 +466,6 @@ fn lexical_short_pairs(tools: &Tools, models: &Lexicons) -> Result<Vec<(String, 
 }
 
 /// `lexical_short_pair_rows`: a deferred three-letter word taught to follow its converted neighbour.
-#[expect(clippy::too_many_arguments)]
 pub fn lexical_short_pair_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows: &[CorpusRow], detector: &LanguageDetector, ortho: Option<&OrthoModel>, maximum_families: i64, seeds_per_family: i64, models: &Lexicons) -> Result<Curriculum, String> {
     let pairs = lexical_short_pairs(tools, models)?;
     let mut seeds = Vec::new();

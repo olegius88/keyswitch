@@ -57,7 +57,7 @@ fn int_of(value: &Value) -> i64 {
     // `int(...)`: the battery holds numbers here, and a boolean counts.
     match value {
         Value::Bool(flag) => i64::from(*flag),
-        other => other.as_i64().unwrap_or(0),
+        other @ Value::Null | other @ Value::Number(_) | other @ Value::String(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.as_i64().unwrap_or(0),
     }
 }
 
@@ -168,7 +168,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
                     && text.starts_with(&previous_original)
                 {
                     // A word a pause judged stays the engine's word until a click drops it: its letters are typed.
-                    text = text[previous_original.len()..].to_owned();
+                    text = text.get(previous_original.len()..).unwrap_or_default().to_owned();
                 }
                 field.session.backend.insert_at_caret(&text);
                 field.session.pointer();
@@ -549,7 +549,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
             None => backend.text(),
         };
         field_ref.last_t = Some(text_of(last, "t"));
-        field_ref.submitted = submitted.clone();
+        field_ref.submitted.clone_from(&submitted);
         let &(last_start, last_length, last_index, _) = spans.last().expect("a span per item");
         let last_item = &items[last_index];
         field_ref.last_item = Some(last_item.clone());

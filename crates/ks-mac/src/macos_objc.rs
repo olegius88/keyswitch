@@ -1,5 +1,6 @@
 //! The few Objective-C runtime calls the macOS layers share. `AppKit` has no C interface, so reaching it means sending
 //! messages, and those are written once here.
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 use std::ffi::{CStr, CString, c_char};
 
 use objc2::runtime::{AnyClass, AnyObject};

@@ -101,6 +101,7 @@ fn private_group(chat: &Value) -> bool {
 }
 
 /// The pinned catalog: `file_id`, `sha256`, `message_id` and the decoded `index`; None when nothing is pinned.
+#[expect(clippy::cmp_owned, reason = "the id is a JSON number: a JSON value compared with text directly never equals it")]
 pub fn current_catalog(client: &dyn Client, chat_id: &str) -> Result<Option<Value>> {
     let chat = client.call("getChat", json!({"chat_id": chat_id}))?;
     if !private_group(&chat) {
@@ -112,7 +113,7 @@ pub fn current_catalog(client: &dyn Client, chat_id: &str) -> Result<Option<Valu
     }
     let name = message["document"]["file_name"].as_str().unwrap_or("");
     let good_name = name.strip_prefix("lc-index-").and_then(|rest| rest.strip_suffix(".json")).is_some_and(|id| lower_hex(id, 32));
-    if message["from"]["id"] != client.bot_id() || !good_name {
+    if message["from"]["id"].to_string() != client.bot_id() || !good_name {
         return Err(Error::telegram(
             "В группе закреплено другое сообщение. Выберите отдельную группу или восстановите последнее закрепление каталога LogCourier. Чужие закрепления не изменены.",
         ));
@@ -126,9 +127,10 @@ pub fn current_catalog(client: &dyn Client, chat_id: &str) -> Result<Option<Valu
     Ok(Some(json!({"file_id": file_id, "sha256": digest, "message_id": message["message_id"], "index": decode_index(&data, chat_id, client.bot_id())?})))
 }
 
+#[expect(clippy::cmp_owned, reason = "the id is a JSON number: a JSON value compared with text directly never equals it")]
 pub fn verify_connection(client: &dyn Client, chat_id: &str) -> Result<String> {
     let me = client.call("getMe", json!({}))?;
-    if me["id"] != client.bot_id() {
+    if me["id"].to_string() != client.bot_id() {
         return Err(Error::telegram("ID бота не совпал с токеном."));
     }
     let chat = client.call("getChat", json!({"chat_id": chat_id}))?;

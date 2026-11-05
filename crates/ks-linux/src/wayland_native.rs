@@ -8,6 +8,7 @@
 //! (a handful of messages), so there is no libwayland either; the program runs without both libraries, and says why when it
 //! needs them.
 
+#![expect(unsafe_code, reason = "calls into the Linux kernel and system libraries")]
 use ks_cast::To as _;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -39,7 +40,7 @@ use crate::wayland_access::access_hint;
 use crate::wayland_backend::{NativeKeyEvent, NativeListener, ReadyCallback, WaylandApi, join_within};
 use crate::wayland_constants::{EVDEV_READ_BATCH_EVENTS, EVIOCGID, EVDEV_NAME_BUFFER_BYTES, EVIOCGNAME_256, EVIOCGPHYS_256, EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES, EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES, EVIOCGBIT_REL_8, EVIOCGBIT_ABS_8, UI_SET_EVBIT, EV_SYN, EV_KEY, WAYLAND_UINPUT_MAX_KEYCODE, UI_SET_KEYBIT, EV_LED, WAYLAND_FORWARDED_LEDS, UI_SET_LEDBIT, BUS_I8042, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, WAYLAND_UINPUT_VERSION, UINPUT_MAX_NAME_BYTES, UI_DEV_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY, EVIOCSCLOCKID, EVIOCGRAB, EVIOCGKEY_96, EVIOCGLED_8, LED_CAPSL, IN_NONBLOCK, IN_CLOEXEC, IN_CREATE, IN_ATTRIB, IN_DELETE, INOTIFY_READ_BUFFER_BYTES, INOTIFY_EVENT_HEADER_BYTES, WAYLAND_REPEAT_DEFAULT_DELAY_MS, UINT32_MODULO_MASK, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, WAYLAND_KEYMAP_WAIT_SECONDS, WAYLAND_XKB_KEYCODE_OFFSET, XKB_KEYSYM_NAME_BUFFER_BYTES, WAYLAND_IPC_TIMEOUT_SECONDS, WAYLAND_SEAT_INTERFACE_MAX_VERSION, WL_SEAT_CAPABILITY_KEYBOARD, WAYLAND_KEYMAP_ROUNDTRIPS, WAYLAND_DBUS_CALL_TIMEOUT_MS, LAYOUT_SWITCH_POLL_SECONDS, LEARNING_PROMPT_WINDOW_TITLE, SWAY_IPC_HEADER_BYTES, SWAY_IPC_GET_INPUTS, SWAY_IPC_GET_TREE, SWAY_IPC_RUN_COMMAND, SWAY_IPC_SUBSCRIBE, SWAY_IPC_EVENT_INPUT, SWAY_IPC_EVENT_WINDOW, WAYLAND_HELPER_RESTARTS, WAYLAND_HELPER_RESTART_DELAY_SECONDS};
 use crate::wayland_desktop::{DesktopWindowInfo, DesktopSnapshot, parse_gnome_state, GNOME_DBUS_NAME, GNOME_DBUS_PATH, GNOME_DBUS_INTERFACE, GNOME_EXTENSIONS_BUS_NAME, GNOME_EXTENSIONS_PATH, GNOME_EXTENSIONS_INTERFACE, GNOME_EXTENSION_UUID, parse_kwin_report, KdeWindowIdMap, KDE_KEYBOARD_BUS_NAME, KDE_KEYBOARD_PATH, KDE_KEYBOARD_INTERFACE, parse_kde_layouts, KWIN_BUS_NAME, KWIN_SCRIPTING_PATH, KWIN_SCRIPTING_INTERFACE, KWIN_SCRIPT_INTERFACE, build_kwin_watcher_script, KwinAction, build_kwin_action_script, encode_sway_ipc, decode_sway_ipc_header, parse_sway_inputs, parse_sway_focused_window, sway_switch_layout_command, find_sway_window_by_pid, sway_popup_move_command, sway_focus_command, detect_desktop_kind, DesktopKind};
-use crate::wayland_helper::{RawInputEvent, InputDeviceInfo, HelperOs, seconds, WaylandInputHelper, Flag, ByteChannel, HelperClient, HelperKey, HelperCallbacks, classify_input_device, DeviceRole};
+use crate::wayland_helper::{RawInputEvent, InputDeviceInfo, HelperOs, seconds, WaylandInputHelper, Flag, HelperClient, HelperKey, HelperCallbacks, classify_input_device, DeviceRole};
 
 const LOGGER: &str = "keyswitch.wayland_native";
 
@@ -1173,7 +1174,7 @@ fn signal_rule(sender: &str, interface: &str, member: &str, path: &str) -> Optio
     )
 }
 
-fn anchor_of(window: &Option<DesktopWindowInfo>, pointer: Option<(i64, i64)>) -> Option<ScreenAnchor> {
+fn anchor_of(window: Option<&DesktopWindowInfo>, pointer: Option<(i64, i64)>) -> Option<ScreenAnchor> {
     let window_id = window.as_ref().map(|window| window.window_id);
     if let Some((x, y)) = pointer {
         return Some(ScreenAnchor { x: x.low::<i32>(), y: y.low::<i32>(), window: window_id });
@@ -1330,7 +1331,7 @@ impl DesktopAdapter for GnomeShellAdapter {
             let data = lock(&self.shared.data);
             (data.snapshot.window.clone(), data.snapshot.pointer)
         };
-        anchor_of(&window, pointer)
+        anchor_of(window.as_ref(), pointer)
     }
 
     fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
@@ -1368,7 +1369,7 @@ impl KwinReport {
         };
         if let Ok((window, pointer)) = parsed {
             let mut data = lock(&self.shared.data);
-            data.window = window.clone();
+            data.window.clone_from(&window);
             if pointer.is_some() {
                 data.pointer = pointer;
             }
@@ -1568,7 +1569,7 @@ impl DesktopAdapter for KdePlasmaAdapter {
             let data = lock(&self.shared.data);
             (data.window.clone(), data.pointer)
         };
-        anchor_of(&window, pointer)
+        anchor_of(window.as_ref(), pointer)
     }
 
     fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
@@ -1667,7 +1668,7 @@ impl SwayShared {
         let tree = self.roundtrip(SWAY_IPC_GET_TREE, "")?;
         let window = parse_sway_focused_window(&tree);
         let mut state = lock(&self.data);
-        state.window = window.clone();
+        state.window.clone_from(&window);
         if let Some(window) = window {
             state.windows.insert(window.window_id, window);
         }
@@ -2082,7 +2083,7 @@ fn create_adapter(xkb: &Arc<WaylandXkbMonitor>, shared: &Weak<ApiShared>) -> Arc
                 return Arc::new(adapter);
             }
         }
-        _ => {}
+        DesktopKind::Gnome | DesktopKind::Kde | DesktopKind::Sway | DesktopKind::Generic => {}
     }
     Arc::new(GenericWaylandAdapter::new(xkb.clone()))
 }

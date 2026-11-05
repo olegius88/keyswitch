@@ -68,9 +68,9 @@ fn predicates_for_every_code_point() {
     let Some(path) = golden("props.bin.gz") else { return };
     let mut data = Vec::new();
     GzDecoder::new(std::fs::File::open(path).unwrap()).read_to_end(&mut data).unwrap();
-    assert_eq!(data.len(), 0x110000 * 4, "all 1 114 112 code points");
+    assert_eq!(data.len(), 0x0011_0000 * 4, "all 1 114 112 code points");
     let mut failures = Failures::default();
-    for cp in 0..0x110000u32 {
+    for cp in 0..0x0011_0000_u32 {
         let v = u32::from_le_bytes(data[cp.to::<usize>() * 4..cp.to::<usize>() * 4 + 4].try_into().unwrap());
         let got: [bool; 16] = [
             ucd::isalpha_cp(cp), ucd::isalnum_cp(cp), ucd::isdecimal_cp(cp), ucd::isdigit_cp(cp), ucd::isnumeric_cp(cp),
@@ -100,7 +100,7 @@ fn case_mapping_for_every_code_point() {
         table.insert(r[0].as_u64().unwrap().low::<u32>(), [text(&r[1]), text(&r[2]), text(&r[3]), text(&r[4])]);
     }
     let mut failures = Failures::default();
-    for cp in 0..0x110000u32 {
+    for cp in 0..0x0011_0000_u32 {
         let Some(c) = char::from_u32(cp) else { continue };
         let s = c.to_string();
         let want = table.get(&cp).cloned().unwrap_or_else(|| [s.clone(), s.clone(), s.clone(), s.clone()]);
@@ -123,7 +123,7 @@ fn normalisation_for_every_code_point() {
         table.insert(r[0].as_u64().unwrap().low::<u32>(), (text(&r[1]), text(&r[2]), r[3].as_u64().unwrap().low::<u8>()));
     }
     let mut failures = Failures::default();
-    for cp in 0..0x110000u32 {
+    for cp in 0..0x0011_0000_u32 {
         let Some(c) = char::from_u32(cp) else { continue };
         let s = c.to_string();
         let want = table.get(&cp).cloned().unwrap_or_else(|| (s.clone(), s.clone(), 0));
@@ -347,7 +347,7 @@ fn json_dumps_byte_for_byte() {
                 Value::Null => None,
                 Value::Number(n) => Some(pyjson::Indent::Spaces(n.as_u64().unwrap().to::<usize>())),
                 Value::String(s) => Some(pyjson::Indent::Text(s.clone())),
-                _ => unreachable!(),
+                Value::Bool(_) | Value::Array(_) | Value::Object(_) => unreachable!(),
             };
             let separators = o[2].as_array().map(|a| (a[0].as_str().unwrap().to_string(), a[1].as_str().unwrap().to_string()));
             let options = pyjson::JsonOptions { ensure_ascii: o[0].as_bool().unwrap(), indent, separators, sort_keys: o[3].as_bool().unwrap() };

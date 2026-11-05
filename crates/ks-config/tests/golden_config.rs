@@ -452,7 +452,7 @@ fn caret() {
     let Some(records) = lines("caret.jsonl.gz") else { return };
     let ranges: Vec<(u32, u32)> = records[0]["unanswered"].as_array().unwrap().iter().map(|r| (r[0].as_u64().unwrap().to::<u32>(), r[1].as_u64().unwrap().to::<u32>())).collect();
     let mut bad = 0;
-    for code in 0..0x110000u32 {
+    for code in 0..0x0011_0000_u32 {
         if let Some(c) = char::from_u32(code) {
             let want = ranges.iter().any(|r| r.0 <= code && code <= r.1);
             if caret_steps(&c.to_string()).is_none() != want {
@@ -470,9 +470,9 @@ fn privacy() {
     for r in &records {
         if let Some(t) = r["token"].as_str() {
             f.eq(&format!("secret {t:?}"), &json!(log_privacy::secret_token(t)), &r["secret"]);
-            f.eq(&format!("masked {t:?}"), &json!(log_privacy::masked_text(t, &Default::default())), &r["masked"]);
+            f.eq(&format!("masked {t:?}"), &json!(log_privacy::masked_text(t, &std::collections::HashSet::<String>::new())), &r["masked"]);
         } else if let Some(t) = r["text"].as_str() {
-            let known = r["known"].as_array().unwrap().iter().map(|x| s(x).to_string()).collect();
+            let known: std::collections::HashSet<String> = r["known"].as_array().unwrap().iter().map(|x| s(x).to_string()).collect();
             f.eq(&format!("text {t:?}"), &json!(log_privacy::masked_text(t, &known)), &r["masked"]);
         } else if r.get("markers").is_some() {
             let mut m: Vec<String> = log_privacy::markers().iter().cloned().collect();

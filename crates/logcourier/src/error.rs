@@ -66,6 +66,7 @@ impl fmt::Display for Error {
 }
 
 impl From<std::io::Error> for Error {
+    #[expect(clippy::wildcard_enum_match_arm, reason = "std::io::ErrorKind is non-exhaustive: a new kind has to land somewhere")]
     fn from(error: std::io::Error) -> Error {
         use std::io::ErrorKind::{NotFound, PermissionDenied, AlreadyExists, IsADirectory, NotADirectory, TimedOut};
         Error::Os(match error.kind() {

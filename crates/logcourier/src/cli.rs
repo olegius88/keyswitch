@@ -31,7 +31,7 @@ fn selection_directory(root: &Path, entries: &[Value], scope: Option<&str>) -> R
     let manifest = json!({"schema": 1, "kind": "logcourier.selection", "keyswitch_version": scope, "files": files});
     let data = pretty(&manifest, true).into_bytes();
     let digest = sha256_hex(&data);
-    let root = root.join(format!("keyswitch-{scope}-{}", &digest[..SELECTION_HASH_PREFIX_CHARACTERS]));
+    let root = root.join(format!("keyswitch-{scope}-{}", digest.get(..SELECTION_HASH_PREFIX_CHARACTERS).unwrap_or_default()));
     if std::fs::symlink_metadata(&root).is_ok_and(|info| info.file_type().is_symlink()) {
         return Err(Error::value("Папка подборки является ссылкой; сохранение запрещено."));
     }

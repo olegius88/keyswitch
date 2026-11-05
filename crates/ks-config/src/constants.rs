@@ -222,6 +222,6 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
     });
     match value {
         Value::Object(map) => map,
-        _ => unreachable!("the defaults are an object"),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => unreachable!("the defaults are an object"),
     }
 });

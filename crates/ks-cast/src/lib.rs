@@ -315,6 +315,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(unsafe_code, reason = "reading through the pointer is what shows it is the same one")]
     fn an_address_becomes_the_pointer_again() {
         let mut value = 7_u8;
         let address = std::ptr::from_mut(&mut value).to::<usize>();

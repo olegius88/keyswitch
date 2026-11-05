@@ -320,7 +320,7 @@ impl TypoLexicon {
             seen: filter_bits,
             seen_bits: bits.to::<u64>(),
             seen_hashes: hashes.to::<u64>(),
-            version: format!("typo-frequency-{}", &version_digest[..VERSION_HASH_CHARACTERS]),
+            version: format!("typo-frequency-{}", version_digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default()),
         })
     }
 }
@@ -400,7 +400,7 @@ impl Edit {
 /// lies on a key next to that letter's. Any other extra letter is no slip of the fingers but part of the word: an
 /// identifier's prefix (`nlevel`, `bweight`) or a rare inflection (`эстафетах`), which the development texts showed
 /// corrected away. A letter left out may be any letter, and a letter typed for another lies on a neighbouring key.
-pub fn edits(word: &str, alphabet: &str, neighbours: &HashMap<char, String>) -> Vec<Edit> {
+pub fn edits<S: ::std::hash::BuildHasher>(word: &str, alphabet: &str, neighbours: &HashMap<char, String, S>) -> Vec<Edit> {
     let chars: Vec<char> = word.chars().collect();
     let mut found = Vec::new();
     for position in 0..chars.len().saturating_sub(1) {

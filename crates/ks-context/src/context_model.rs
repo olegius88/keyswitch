@@ -269,7 +269,7 @@ impl AffixCounts {
             let chars: Vec<(usize, char)> = word.char_indices().collect();
             for size in crate::constants::TERM_HEAD_ENDING_LETTERS {
                 if chars.len() > *size {
-                    let affix = if ending { &word[chars[chars.len() - size].0..] } else { &word[..chars[*size].0] };
+                    let affix = if ending { word.get(chars[chars.len() - size].0..).unwrap_or_default() } else { word.get(..chars[*size].0).unwrap_or_default() };
                     *counts.entry(affix.to_string()).or_insert(0) += 1;
                 }
             }

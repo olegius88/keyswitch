@@ -2,6 +2,7 @@
 //! the accessibility tree. Started from a Terminal that holds the Accessibility permission, by `packaging/e2e-mac.command`,
 //! with `KS_E2E_BINARY` naming the program; otherwise, and on other systems, it says so and passes.
 
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 #[cfg(not(target_os = "macos"))]
 fn main() {
     println!("the Mac end-to-end test runs on macOS only, skipped");
@@ -380,7 +381,7 @@ mod scenario {
         // SAFETY: takes the state by value.
         let source = unsafe { CGEventSourceCreate(HID_SYSTEM_STATE) };
         let backend = Arc::new(MacBackend::new(Some(Arc::new(NativeMacAPI::new()))).map_err(|error| format!("{error:?}"))?);
-        let driver = Driver { source, ax: NativeAccessibility::new(), backend, document, failures: Default::default() };
+        let driver = Driver { source, ax: NativeAccessibility::new(), backend, document, failures: std::cell::RefCell::default() };
         let outcome = (|| -> Result<(), String> {
             driver.release_modifiers()?;
             typing(&driver)?;

@@ -1,6 +1,7 @@
 //! Single-instance coordination for the Windows frontend: the logic, and below it the native named mutex and the search
 //! for the running program's window (the Python's `windows_instance.py` and `windows_instance_native.py`).
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use crate::windows_system::WindowsSystemError;
 
 pub trait WindowsInstanceAPI {

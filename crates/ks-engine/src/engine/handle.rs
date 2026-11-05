@@ -1,6 +1,5 @@
 //! The engine as the application keeps it: the worker thread and the calls made from other threads.
 
-use ks_cast::To as _;
 use super::logging::technical_event;
 use super::shared::{Command, CorrectionCallback, LearningPromptCallback, Next, QueueItem, RuleRequestCallback, SnapshotCallback};
 use super::*;
@@ -28,7 +27,6 @@ impl KeySwitchEngine {
     /// `KeySwitchEngine(settings, history, backend, learning, backend_label, context_reader)`. The resources folder and the
     /// clock are given here, as the Python finds its own; `context_reader` None is the reader of this platform, built from
     /// `reader_factory`.
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         settings: Arc<SettingsStore>, history: Arc<HistoryStore>, backend: Arc<dyn InputBackend>, learning: Option<Arc<LearningStore>>,
         backend_label: &str, context_reader: Option<Arc<dyn FieldReader>>, reader_factory: Option<crate::context_access::ReaderFactory>,
@@ -412,7 +410,7 @@ impl EngineCore {
         self.note_engine_switch(group);
         self.manual_layout_group = self.flag("detection.respect_manual_layout", true).then_some(group);
         self.manual_layout_observed_at = Some(self.monotonic());
-        self.manual_layout_source = "menu".to_owned();
+        "menu".clone_into(&mut self.manual_layout_source);
         self.manual_layout_word = false;
         technical_event!(
             self.shared, "layout_selected_from_menu",

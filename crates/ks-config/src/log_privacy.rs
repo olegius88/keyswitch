@@ -74,15 +74,15 @@ pub fn secret_token(token: &str) -> bool {
 /// `text` with each secret word as stars: a long token of letters and digits, the word right after a password marker,
 /// and each word of `secrets` (casefolded, edge signs aside).
 #[must_use]
-pub fn masked_text(text: &str, secrets: &HashSet<String>) -> String {
+pub fn masked_text<S: ::std::hash::BuildHasher>(text: &str, secrets: &HashSet<String, S>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
     let mut after_marker = false;
     for (start, end) in tokens(text) {
-        let token = &text[start..end];
+        let token = text.get(start..end).unwrap_or_default();
         let word = core(token);
         let hidden = after_marker || secret_token(token) || secrets.contains(&word);
-        out.push_str(&text[last..start]);
+        out.push_str(text.get(last..start).unwrap_or_default());
         if hidden {
             out.extend(std::iter::repeat_n(MASK, token.chars().count()));
         } else {
@@ -91,7 +91,7 @@ pub fn masked_text(text: &str, secrets: &HashSet<String>) -> String {
         last = end;
         after_marker = markers().contains(&word);
     }
-    out.push_str(&text[last..]);
+    out.push_str(text.get(last..).unwrap_or_default());
     out
 }
 
@@ -108,7 +108,7 @@ fn masked(value: &Value, secrets: &HashSet<String>) -> Value {
                 .collect::<Map<String, Value>>(),
         ),
         Value::Array(items) => Value::Array(items.iter().map(|item| masked(item, secrets)).collect()),
-        other => other.clone(),
+        other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) => other.clone(),
     }
 }
 
@@ -125,16 +125,16 @@ fn words(value: &Value, out: &mut Vec<String>) {
             }
         }
         Value::Array(items) => items.iter().for_each(|item| words(item, out)),
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
 }
 
 fn texts(value: &Value, out: &mut Vec<String>) {
     match value {
-        Value::String(text) => out.extend(tokens(text).into_iter().map(|(start, end)| core(&text[start..end]))),
+        Value::String(text) => out.extend(tokens(text).into_iter().map(|(start, end)| core(text.get(start..end).unwrap_or_default()))),
         Value::Object(map) => map.values().for_each(|item| texts(item, out)),
         Value::Array(items) => items.iter().for_each(|item| texts(item, out)),
-        _ => {}
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
@@ -177,7 +177,7 @@ impl LogRedactor {
         let secrets: HashSet<String> = self.secrets.iter().cloned().collect();
         match masked(&Value::Object(payload.clone()), &secrets) {
             Value::Object(map) => map,
-            _ => unreachable!("an object stays an object"),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => unreachable!("an object stays an object"),
         }
     }
 }

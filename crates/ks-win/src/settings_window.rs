@@ -9,6 +9,7 @@
 //! One thread, the message loop's, owns everything here. State sits in one `Ui` kept in a thread-local; no `RefCell` of it
 //! is held across a call that can send a message back into the window.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -390,14 +391,14 @@ pub fn apply_snapshot(snapshot: &EngineSnapshot) {
 
 pub fn set_error(text: &str) {
     with_ui(|ui| {
-        ui.state.borrow_mut().error = text.to_owned();
+        text.clone_into(&mut ui.state.borrow_mut().error);
         ui.refresh_status_labels();
     });
 }
 
 pub fn set_status_override(text: &str) {
     with_ui(|ui| {
-        ui.state.borrow_mut().status = text.to_owned();
+        text.clone_into(&mut ui.state.borrow_mut().status);
         ui.refresh_status_labels();
     });
 }
@@ -1091,7 +1092,7 @@ impl Ui {
                 }
                 _ => {}
             },
-            _ => {}
+            Action::Navigate(_) | Action::Reset(_) | Action::Button(_) | Action::Other => {}
         }
     }
 
@@ -1242,7 +1243,7 @@ impl Ui {
                 ControlKind::Choice => {
                     w32::combo_select_text(setting.control, &control_text(&setting.spec, value));
                 }
-                _ => w32::set_text(setting.control, &control_text(&setting.spec, value)),
+                ControlKind::Int | ControlKind::Float | ControlKind::Text => w32::set_text(setting.control, &control_text(&setting.spec, value)),
             }
         }
     }
@@ -1302,11 +1303,11 @@ impl Ui {
     fn apply_snapshot(&self, snapshot: &EngineSnapshot) {
         {
             let mut state = self.state.borrow_mut();
-            state.status = status_line(snapshot.enabled, snapshot.running).to_owned();
+            status_line(snapshot.enabled, snapshot.running).clone_into(&mut state.status);
             state.layout = format!("Раскладка: {}", layout_label(snapshot.current_group));
             state.count = format!("Исправлений: {}", snapshot.correction_count);
-            state.last_action = snapshot.last_action.clone();
-            state.error = snapshot.last_error.clone();
+            state.last_action.clone_from(&snapshot.last_action);
+            state.error.clone_from(&snapshot.last_error);
             state.snapshot = snapshot.clone();
         }
         self.refresh_status_labels();
@@ -1419,7 +1420,7 @@ impl Ui {
     fn add_active_application(&self) {
         w32::message_box(self.window, "Выбор окна", &capture_hint_text(), MessageKind::Information);
         {
-            self.state.borrow_mut().status = "Выберите приложение-исключение…".to_owned();
+            "Выберите приложение-исключение…".clone_into(&mut self.state.borrow_mut().status);
         }
         self.refresh_status_labels();
         // SAFETY: the window and the timer are ours.
@@ -1584,7 +1585,7 @@ impl Ui {
                 }
                 Err(error) => match error {
                     ks_config::learning::LearningError::Invalid(invalid) => invalid.0,
-                    other => format!("Правило не сохранено: {other}"),
+                    other @ ks_config::learning::LearningError::Io(_) | other @ ks_config::learning::LearningError::Value(_) => format!("Правило не сохранено: {other}"),
                 },
             }
         });
@@ -1724,7 +1725,7 @@ fn label_font(fonts: &Fonts, style: LabelStyle) -> windows_sys::Win32::Graphics:
     match style {
         LabelStyle::PageTitle => fonts.title,
         LabelStyle::CardTitle | LabelStyle::CardTitleModified => fonts.semibold,
-        _ => fonts.base,
+        LabelStyle::Normal | LabelStyle::Muted | LabelStyle::Error | LabelStyle::PageSubtitle => fonts.base,
     }
 }
 
@@ -1811,7 +1812,7 @@ fn layout_setting(setting: &mut SettingNode, x: i32, width: i32, mut y: i32, con
             match setting.kind {
                 ControlKind::Choice => CHOICE_CONTROL_WIDTH_PIXELS,
                 ControlKind::Int | ControlKind::Float => NUMBER_CONTROL_WIDTH_PIXELS,
-                _ => TEXT_CONTROL_WIDTH_PIXELS,
+                ControlKind::Bool | ControlKind::Text => TEXT_CONTROL_WIDTH_PIXELS,
             },
             dpi,
         );
@@ -1831,7 +1832,7 @@ fn layout_setting(setting: &mut SettingNode, x: i32, width: i32, mut y: i32, con
                 context.moves.push((setting.control, control_x, control_y, control_width - arrows, control_height));
                 context.moves.push((setting.updown, control_x + control_width - arrows, control_y, arrows, control_height));
             }
-            _ => context.moves.push((setting.control, control_x, control_y, control_width, control_height)),
+            ControlKind::Bool | ControlKind::Text => context.moves.push((setting.control, control_x, control_y, control_width, control_height)),
         }
         (y + row_height, 0)
     };
@@ -1886,7 +1887,7 @@ fn paint_nodes(nodes: &[Node], hdc: HDC, context: &PaintContext<'_>) {
                     w32::delete_object(brush);
                 }
             }
-            _ => {}
+            Node::Label(_) | Node::Row { .. } | Node::List { .. } => {}
         }
     }
 }
@@ -2023,7 +2024,7 @@ impl Builder<'_> {
                     w32::apply_control_theme(control, dark, Themed::Field);
                     w32::guard_wheel(control);
                 }
-                _ => {
+                ControlKind::Bool | ControlKind::Text => {
                     control = w32::create_window("EDIT", &control_text(spec, stored.as_ref()), WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, self.panel, id, (0, 0, 10, 10));
                     w32::set_font(control, fonts.base);
                     w32::apply_control_theme(control, dark, Themed::Field);

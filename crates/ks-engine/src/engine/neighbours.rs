@@ -1,6 +1,5 @@
 //! A word and the words next to it: waiting for the next word, taking the kept words along, going back with it.
 
-use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_context::context_action_features::{cyrletter_question, resume_question, sign_token_asked, term_question, variable_question};
@@ -100,7 +99,6 @@ impl EngineCore {
     ///
     /// `switched` says the early switch converted the next word while it was typed: its keys
     /// are in two layouts, and `decision` is that conversion, from the waiting word's layout.
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn resolve_context_wait(
         &mut self, waiting: Option<&WaitingContextWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision,
         application: &str, alternatives: &Alternatives, switched: bool,
@@ -278,7 +276,6 @@ impl EngineCore {
     /// layout it is what it was, so the correction covers it as well, and the layout follows the converted word. With
     /// the token kept in its own layout (`kept_tail`), `м + ` became `v + ` and the next letter of the formula came out
     /// Russian again: `v + ы`, and a lone letter there is refused. A word is typed again in its own layout, which stays.
-    #[expect(clippy::too_many_arguments)]
     fn word_before_kept(
         &self, previous: &PlanRef, strokes: &[Stroke], boundary: &Stroke, group: i64, alternative: &str, following: &str, confidence: f64, application: &str,
     ) -> PlanRef {
@@ -722,7 +719,7 @@ impl EngineCore {
             });
             if !passed {
                 settled = plan.clone();
-                next_replacement = previous.replacement.clone();
+                next_replacement.clone_from(&previous.replacement);
             }
         }
         let Some(farthest) = taken.last() else {

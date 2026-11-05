@@ -217,9 +217,9 @@ pub fn select_source_pair(sources: &[String], translate: &dyn Fn(u32, u32, &str)
         seen.push(source);
         let character = translate(MAC_SCRIPT_PROBE_KEYCODE, 0, source);
         if english.is_empty() && pystr::isascii(&character) && pystr::isalpha(&character) {
-            english = source.clone();
+            english.clone_from(source);
         } else if russian.is_empty() && is_cyrillic(&character) {
-            russian = source.clone();
+            russian.clone_from(source);
         }
     }
     if english.is_empty() || russian.is_empty() {

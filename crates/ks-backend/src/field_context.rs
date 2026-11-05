@@ -128,7 +128,7 @@ pub trait ManagedFieldReader {
 
 fn first_characters(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
-        Some((index, _)) => &text[..index],
+        Some((index, _)) => text.get(..index).unwrap_or_default(),
         None => text,
     }
 }
@@ -138,7 +138,7 @@ fn last_characters(text: &str, count: usize) -> &str {
         return "";
     }
     match text.char_indices().rev().nth(count - 1) {
-        Some((index, _)) => &text[index..],
+        Some((index, _)) => text.get(index..).unwrap_or_default(),
         None => text,
     }
 }

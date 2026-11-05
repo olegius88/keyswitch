@@ -267,9 +267,9 @@ fn universal_lines(text: &str) -> impl Iterator<Item = &str> {
             return None;
         }
         if let Some(end) = rest.find(['\n', '\r']) {
-            let line = &rest[..end];
-            let skip = if rest[end..].starts_with("\r\n") { 2 } else { 1 };
-            rest = &rest[end + skip..];
+            let line = rest.get(..end).unwrap_or_default();
+            let skip = if rest.get(end..).unwrap_or_default().starts_with("\r\n") { 2 } else { 1 };
+            rest = rest.get(end + skip..).unwrap_or_default();
             Some(line)
         } else {
             let line = rest;

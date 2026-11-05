@@ -5,6 +5,7 @@
 //! program is driven, down to a frozen main process and a killed helper. `KS_E2E_DESKTOP` names the desktop. Without them
 //! it says so and passes. The harness keeps it in the VM: nothing else should have its keyboard grabbed.
 
+#![expect(unsafe_code, reason = "calls into the Linux kernel and system libraries")]
 use ks_cast::To as _;
 mod support;
 
@@ -158,7 +159,7 @@ impl PhysicalKeyboard {
         if descriptor < 0 {
             return Err(io_error("/dev/uinput"));
         }
-        let keyboard = PhysicalKeyboard { descriptor, name: device, leds: Default::default() };
+        let keyboard = PhysicalKeyboard { descriptor, name: device, leds: std::cell::RefCell::default() };
         // SAFETY: each ioctl takes the integer the kernel's uinput interface documents for it, and `setup` outlives its call.
         unsafe {
             for event in [EV_KEY, EV_SYN, EV_LED, EV_REP] {
@@ -398,7 +399,7 @@ fn code_of(character: char) -> Option<u16> {
 /// The window typed into, in a process of its own: the program neither follows the focus into a window of its own process
 /// nor reads its fields, so a window here would hide what a user's application goes through.
 mod target {
-    use super::{json, Value, Write, DisplayExt, DBusInterfaceSkeletonExt, DBusObjectSkeletonExt, OutputStreamExt, ApplicationExt, TARGET_APPLICATION_ID, ButtonExt, CheckButtonExt, ComboBoxExt, EntryExt, FlowBoxChildExt, ListBoxRowExt, GtkWindowExt, NativeDialogExt, ToplevelExt, WINDOW_WIDTH, WINDOW_HEIGHT, CellRendererTextExt, AdjustmentExt, EditableExt, FilterExt, RecentManagerExt, SorterExt, TextBufferExt, DeviceExt, DriveExt, FileMonitorExt, MountExt, SettingsExt, VolumeExt, EntryBufferExtManual, Cast, IsAttribute, IsRenderNode, WidgetExt, ENTRY_MARGIN, BoxExt, MultiFilterExt, UnixFDListExtManual, FrameExt, ListItemExt, PopoverExt, gdk, SeatExt, DragSurfaceExt, PopupExt, channel, BufRead, SocketExtManual, glib, Duration, CellRendererExt, SurfaceExt, TextureExt, PixbufAnimationExt, ApplicationExtManual};
+    use super::{json, Value, Write, DisplayExt, DBusInterfaceSkeletonExt, DBusObjectSkeletonExt, OutputStreamExt, ApplicationExt, TARGET_APPLICATION_ID, ButtonExt, CheckButtonExt, ComboBoxExt, EntryExt, FlowBoxChildExt, ListBoxRowExt, GtkWindowExt, NativeDialogExt, ToplevelExt, WINDOW_WIDTH, WINDOW_HEIGHT, CellRendererTextExt, AdjustmentExt, EditableExt, FilterExt, RecentManagerExt, SorterExt, TextBufferExt, DeviceExt, DriveExt, FileMonitorExt, MountExt, SettingsExt, VolumeExt, EntryBufferExtManual, Cast, IsAttribute, IsRenderNode, WidgetExt, ENTRY_MARGIN, BoxExt, MultiFilterExt, UnixFDListExtManual, FrameExt, ListItemExt, PopoverExt, gdk, SeatExt, DragSurfaceExt, PopupExt, channel, BufRead, SocketExtManual, glib, Duration, CellRendererExt, SurfaceExt, PixbufAnimationExt, ApplicationExtManual};
 
     fn emit(event: &Value) {
         let mut out = std::io::stdout().lock();
@@ -497,8 +498,8 @@ impl TargetApp {
                 let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
                 let mut state = reading.lock().expect("the target's state");
                 match event["event"].as_str().unwrap_or("") {
-                    "text" if event["widget"] == "password" => state.password = event["text"].as_str().unwrap_or("").to_owned(),
-                    "text" => state.text = event["text"].as_str().unwrap_or("").to_owned(),
+                    "text" if event["widget"] == "password" => event["text"].as_str().unwrap_or("").clone_into(&mut state.password),
+                    "text" => event["text"].as_str().unwrap_or("").clone_into(&mut state.text),
                     "caps" => state.caps = event["value"] == json!(true),
                     "bounds" => state.bounds = Some((event["ok"] == json!(true), event["x"].as_f64().unwrap_or(0.0), event["y"].as_f64().unwrap_or(0.0), event["width"].as_f64().unwrap_or(0.0), event["height"].as_f64().unwrap_or(0.0))),
                     "activate" => state.activations.push_back(event["text"].as_str().unwrap_or("").to_owned()),
@@ -869,8 +870,8 @@ fn source(desktop: &str) -> Result<(), String> {
             },
         )
     };
-    let rule_windows: std::rc::Rc<std::cell::RefCell<Vec<RuleEditorWindow>>> = Default::default();
-    let offer_window: std::rc::Rc<std::cell::Cell<Option<i64>>> = Default::default();
+    let rule_windows: std::rc::Rc<std::cell::RefCell<Vec<RuleEditorWindow>>> = std::rc::Rc::default();
+    let offer_window: std::rc::Rc<std::cell::Cell<Option<i64>>> = std::rc::Rc::default();
     let drain = || loop {
         let Some(item) = posted.lock().expect("the queue").pop_front() else { break };
         match item {

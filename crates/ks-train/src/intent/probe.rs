@@ -40,7 +40,7 @@ const ROUNDING: [f64; 7] = [0.0, 0.5, 1.5, 2.5, -0.5, -1.5, 1e15 + 0.5];
 const STRINGS: [&str; 16] = ["", "a", "A", "ß", "İ", "ı", "A\u{30a}", "Å", "\u{212b}", "й", "и\u{306}", "\u{1d11e}", "\u{1f600}", "ﬃ", "ẞ", "e\u{327}\u{301}"];
 
 fn doubles() -> [f64; 21] {
-    [0.0, -0.0, SMALLEST_SUBNORMAL, 2.2250738585072014e-308, 1e-300, 1e-15, 0.1, 0.5, 1.0 - f64::EPSILON / 2.0, 1.0, 1.0 + f64::EPSILON, 1.5, 2.0, 3.0, 10.0, 1e15, 1e15 + 1.0, 9007199254740991.0, 9007199254740992.0, 1e300, 1.797_693_134_862_315_7e308]
+    [0.0, -0.0, SMALLEST_SUBNORMAL, 2.225_073_858_507_201_4e-308, 1e-300, 1e-15, 0.1, 0.5, 1.0 - f64::EPSILON / 2.0, 1.0, 1.0 + f64::EPSILON, 1.5, 2.0, 3.0, 10.0, 1e15, 1e15 + 1.0, 9_007_199_254_740_991.0, 9_007_199_254_740_992.0, 1e300, 1.797_693_134_862_315_7e308]
 }
 
 fn double(value: f64) -> Vec<u8> {
@@ -185,7 +185,7 @@ fn ordering() -> Vec<Entry> {
     let mut stable = pairs.clone();
     stable.sort_by_key(|item| item.0);
     let mut reversed = pairs;
-    reversed.sort_by(|a, b| b.0.cmp(&a.0));
+    reversed.sort_by_key(|a| std::cmp::Reverse(a.0));
     let mut strings = STRINGS.to_vec();
     strings.sort_unstable();
     let mut folded = STRINGS.to_vec();

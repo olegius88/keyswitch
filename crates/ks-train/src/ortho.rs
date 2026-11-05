@@ -174,7 +174,7 @@ pub(crate) fn extra_key_variant(script: &str, keys: &str) -> Option<String> {
         return None;
     }
     let digest = hex_digest(&format!("{SYNTHESIS_NAMESPACE}:{script}:{base}"));
-    let part = |index: usize| u64::from_str_radix(&digest[index * CHOICE_HEX_DIGITS..(index + 1) * CHOICE_HEX_DIGITS], 16).expect("a digest");
+    let part = |index: usize| u64::from_str_radix(digest.get(index * CHOICE_HEX_DIGITS..(index + 1) * CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest");
     if part(0) % PERCENT_SCALE >= EXTRA_KEY_SHARE_PERCENT {
         return None;
     }
@@ -240,7 +240,7 @@ fn counts(rows: &[&Row], order: usize, collapse: Option<i64>) -> (Counts, Counts
 }
 
 fn drop_last(gram: &str) -> &str {
-    gram.char_indices().next_back().map_or("", |(place, _)| &gram[..place])
+    gram.char_indices().next_back().map_or("", |(place, _)| gram.get(..place).unwrap_or_default())
 }
 
 fn drop_first(gram: &str) -> &str {
@@ -417,7 +417,7 @@ fn char_model(payload: &Map<String, Value>, settings: &Settings, scratch: &Path)
 fn fold_of(row: &Row, folds: u64) -> u64 {
     let core = word_core(&row.keys, &row.script);
     let digest = hex_digest(&format!("{NAMESPACE}:fold:{}:{core}", row.script));
-    u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % folds
+    u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % folds
 }
 
 /// `solve`: Gaussian elimination with partial pivoting, in a fixed order.
@@ -835,7 +835,7 @@ fn build(inputs: &Inputs, ties: &mut Ties, scratch: &Path) -> Result<Value, Stri
         }
     }
     let digest = hex(&Sha256::digest(canonical(&Value::Object(payload.clone()))));
-    payload.insert("version".to_owned(), json!(format!("ortho-v1-{}", &digest[..VERSION_HASH_CHARACTERS])));
+    payload.insert("version".to_owned(), json!(format!("ortho-v1-{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default())));
     payload.insert("weights_sha256".to_owned(), json!(digest));
     payload.insert("minimum_length".to_owned(), settings.value["minimum_length"].clone());
     let thresholds = &settings.value["thresholds_nats"];
@@ -894,7 +894,7 @@ fn web_rows(root: &Path, settings: &Settings) -> Result<Vec<Row>, String> {
         let table: BTreeMap<String, i64> = match &payload["forms"] {
             Value::Array(items) => items.iter().filter_map(|item| Some((item[0].as_str()?.to_owned(), web_weight(item[1].as_i64()?)))).collect(),
             Value::Object(items) => items.iter().filter_map(|(form, weight)| Some((form.clone(), weight.as_i64()?))).collect(),
-            _ => return Err("a lexicon without forms".to_owned()),
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => return Err("a lexicon without forms".to_owned()),
         };
         for (form, weight) in table {
             rows.push(Row { split: LEXICON.to_owned(), script: "ru".to_owned(), keys: to_keys(&form)?, shapes: vec![("lower".to_owned(), weight)] });

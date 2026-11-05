@@ -80,7 +80,7 @@ impl EngineCore {
             if !stroke.pressed || is_modifier_key(&stroke.key_name) {
                 continue;
             }
-            if !(!stroke.character.is_empty() && pystr::isprintable(&stroke.character)) || stroke.control() || stroke.alt() || stroke.super_key() {
+            if stroke.character.is_empty() || !pystr::isprintable(&stroke.character) || stroke.control() || stroke.alt() || stroke.super_key() {
                 return ahead;
             }
             ahead.push_str(&stroke.character);
@@ -92,7 +92,7 @@ impl EngineCore {
             if !item.pressed || is_modifier_key(&item.key_name) {
                 continue;
             }
-            if !(!item.character.is_empty() && pystr::isprintable(&item.character)) || item.control() || item.alt() || item.super_key() {
+            if item.character.is_empty() || !pystr::isprintable(&item.character) || item.control() || item.alt() || item.super_key() {
                 break;
             }
             ahead.push_str(&item.character);
@@ -116,7 +116,7 @@ impl EngineCore {
         }
         let boundaries = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len()));
         for end in boundaries {
-            if caret_lag(&field.before, &field.after, &format!("{suffix}{}", &ahead[..end]), true).is_some() {
+            if caret_lag(&field.before, &field.after, &format!("{suffix}{}", ahead.get(..end).unwrap_or_default()), true).is_some() {
                 return "";
             }
         }
@@ -127,7 +127,7 @@ impl EngineCore {
     fn field_catch_up_seconds(&self) -> f64 {
         let mut value = self.text_setting("detection.field_catch_up", DEFAULT_FIELD_CATCH_UP);
         if !FIELD_CATCH_UP_CHOICES.contains(&value.as_str()) {
-            value = DEFAULT_FIELD_CATCH_UP.to_owned();
+            DEFAULT_FIELD_CATCH_UP.clone_into(&mut value);
         }
         if value == FIELD_CATCH_UP_OFF { 0.0 } else { value.parse::<f64>().unwrap_or(0.0) / MILLISECONDS_PER_SECOND }
     }
@@ -232,7 +232,7 @@ impl EngineCore {
                 }
             }
         }
-        self.late_refusal = refusal.to_owned();
+        refusal.clone_into(&mut self.late_refusal);
         let usable = refusal.is_empty();
         if !usable || late.is_empty() {
             self.shared.put_back(queued);
@@ -510,7 +510,7 @@ impl EngineCore {
         } else {
             ""
         };
-        if context_reset_reason == "late_input" && !(held != 0 && !replayed_only_releases) && self.context_policy.stream.withdraw(&rolled) {
+        if (replayed_only_releases || held == 0) && self.context_policy.stream.withdraw(&rolled) && context_reset_reason == "late_input" {
             // The late keys come back typed again and are observed then: the text before them
             // stays the context of the next word. Cleared, it left the word after `nats` with
             // nothing before it, and the model declined `b redis` as `и redis` (rollover typing).
@@ -598,7 +598,7 @@ impl EngineCore {
             self.early_switch_undone = true;
             self.manual_layout_group = self.flag("detection.respect_manual_layout", true).then_some(plan.target_group);
             self.manual_layout_observed_at = Some(self.monotonic());
-            self.manual_layout_source = "early_undo".to_owned();
+            "early_undo".clone_into(&mut self.manual_layout_source);
             self.manual_layout_word = true;
             self.shared.update(Update {
                 current_group: Some(plan.target_group),
@@ -652,13 +652,13 @@ impl EngineCore {
             // Idle/manual correction did not end the word. Keep its physical
             // prefix so continued typing and Backspace still refer to the
             // whole token instead of a detached suffix.
-            self.strokes = plan.strokes.clone();
+            self.strokes.clone_from(&plan.strokes);
             self.source_group = plan.target_group;
             self.shared.update(Update { current_word: Some(plan.replacement.clone()), ..Update::default() });
             if !plan.automatic {
                 self.manual_layout_group = Some(plan.target_group);
                 self.manual_layout_observed_at = Some(self.monotonic());
-                self.manual_layout_source = "current_word".to_owned();
+                "current_word".clone_into(&mut self.manual_layout_source);
                 self.manual_layout_word = true;
             }
         }

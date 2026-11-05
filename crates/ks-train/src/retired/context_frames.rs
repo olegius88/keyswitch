@@ -89,7 +89,7 @@ pub fn frames_sha256(frames: &[Frame]) -> String {
 /// The deterministic number a frame's choices are taken from.
 #[must_use]
 pub fn draw(key: &str) -> u64 {
-    u64::from_str_radix(&hex_digest(key)[..CHOICE_DIGITS], 16).expect("a digest")
+    u64::from_str_radix(hex_digest(key).get(..CHOICE_DIGITS).unwrap_or_default(), 16).expect("a digest")
 }
 
 /// The focus family belongs to the separate lexical test track.

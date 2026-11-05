@@ -147,7 +147,7 @@ pub(crate) fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>,
 }
 
 fn draw(text: &str) -> u64 {
-    u64::from_str_radix(&hex_digest(text)[..DETERMINISTIC_DRAW_HEX_DIGITS], 16).expect("hex digits")
+    u64::from_str_radix(hex_digest(text).get(..DETERMINISTIC_DRAW_HEX_DIGITS).unwrap_or_default(), 16).expect("hex digits")
 }
 
 /// `typo_variants`: three predetermined internal edits.

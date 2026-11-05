@@ -61,7 +61,7 @@ impl EngineCore {
             boundary = committed.boundary.clone();
             application = committed.application.clone();
             source = "last_committed";
-            trailing = committed.trailing.clone();
+            trailing.clone_from(&committed.trailing);
         } else {
             self.switch_layout_only(trigger_keycode);
             return;
@@ -401,7 +401,7 @@ impl EngineCore {
         if protects {
             self.manual_layout_group = Some(target);
             self.manual_layout_observed_at = Some(self.monotonic());
-            self.manual_layout_source = "correction_undone".to_owned();
+            "correction_undone".clone_into(&mut self.manual_layout_source);
             self.manual_layout_word = false;
         }
         technical_event!(
@@ -467,15 +467,7 @@ impl EngineCore {
         }
         let available = match (&self.last_correction, &self.last_committed) {
             (Some(previous), Some(committed)) => {
-                !self.last_committed_stale
-                    && !(!self.strokes.is_empty() && self.strokes != previous.strokes)
-                    // The text before the caret must end as the correction left it: undo deletes the corrected word and
-                    // its boundary. After `ghbdtn vbh ` it deleted `ет мир ` and typed `ghbdtn ` there (`привghbdtn `), and
-                    // the spaces Pause reaches past (extend_last_committed) are no part of this plan either.
-                    && committed.strokes == previous.strokes
-                    && committed.trailing == previous.trailing
-                    && committed.boundary == previous.boundary
-                    && self.symbol_strokes.is_empty()
+                (self.strokes == previous.strokes || self.strokes.is_empty()) && self.symbol_strokes.is_empty() && committed.boundary == previous.boundary && committed.trailing == previous.trailing && committed.strokes == previous.strokes && !self.last_committed_stale
                     && self.monotonic() - self.last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
             }
             _ => false,
@@ -557,10 +549,10 @@ impl EngineCore {
             // A typo correction typed other keys than the user's, and maybe not as many (CorrectionPlan.replaced_strokes):
             // undo types the user's keys back over the corrected word, and undoing the undo types the correction again.
             strokes = previous.replaced_strokes.clone();
-            replaced_strokes = previous.strokes.clone();
+            replaced_strokes.clone_from(&previous.strokes);
         } else if !previous.replaced.is_empty() {
             strokes = previous.replaced.clone();
-            replaced = previous.strokes.clone();
+            replaced.clone_from(&previous.strokes);
         } else {
             strokes = previous.strokes.clone();
         }

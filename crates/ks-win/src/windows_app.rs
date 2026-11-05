@@ -236,7 +236,7 @@ mod tests {
     use super::*;
 
     fn parse(arguments: &[&str]) -> Parsed {
-        parse_arguments(&arguments.iter().map(std::string::ToString::to_string).collect::<Vec<_>>())
+        parse_arguments(&arguments.iter().map(ToString::to_string).collect::<Vec<_>>())
     }
 
     #[test]

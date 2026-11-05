@@ -172,7 +172,7 @@ pub fn command(resources: &Arc<Resources>, sample: usize, dictionary_sample: usi
     for (group, model) in models.iter().enumerate() {
         let locale = LOCALES[group];
         let mut ordered: Vec<(String, i64)> = table_order(model, locale);
-        ordered.sort_by(|a, b| b.1.cmp(&a.1));
+        ordered.sort_by_key(|a| std::cmp::Reverse(a.1));
         let words: Vec<String> = ordered.into_iter().map(|entry| entry.0).filter(|word| word_fits(word)).take(sample.max(MIN_SAMPLE_SIZE)).collect();
         let (metrics, found) = harness.evaluate_words(group.to::<i64>(), locale.to_owned(), &words)?;
         directions.push(metrics);

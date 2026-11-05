@@ -607,7 +607,6 @@ fn reuse_installed(request: &PrefixRequest<'_>) -> Result<Option<Value>, String>
 }
 
 /// `fit`: an explicit candidate fit, preserving all existing model directories.
-#[expect(clippy::too_many_lines)]
 pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let output = request.output;
     if output.exists() {
@@ -684,7 +683,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let table: Map<String, Value> = names.iter().enumerate().map(|(index, name)| (name.clone(), json!(row_of(index)))).collect();
     let learned = Value::Object(table);
     let weight_digest = hex(&Sha256::digest(compact(&learned).as_bytes()));
-    let version = format!("prefix-v{feature_version}-{}", &weight_digest[..VERSION_HASH_CHARACTERS]);
+    let version = format!("prefix-v{feature_version}-{}", weight_digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let entries: Vec<(&str, [f64; ACTIONS])> = names
         .iter()
         .enumerate()

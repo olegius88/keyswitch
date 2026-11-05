@@ -300,7 +300,7 @@ pub fn token_features(
         repeat: i64::from(reduplicated(&source) || reduplicated(&target)),
         parts_source: i64::from(parts_source),
         parts_target: i64::from(parts_target),
-        dot_word: i64::from(source_script == "ru" && pystr::len(keys) > 1 && keys.starts_with('.') && known("en", &keys[1..])),
+        dot_word: i64::from(source_script == "ru" && pystr::len(keys) > 1 && keys.starts_with('.') && known("en", keys.get(1..).unwrap_or_default())),
         extra_key: i64::from(one_key_extra(&target, target_script, known)),
         source_word: i64::from(known(source_script, &source)),
         name_unknown: i64::from(unknown && CAPITALISED.contains(&shape)),
@@ -605,7 +605,7 @@ fn int_like(value: &Value) -> Option<i64> {
     match value {
         Value::Bool(flag) => Some(i64::from(*flag)),
         Value::Number(number) => number.as_i64(),
-        _ => None,
+        Value::Null | Value::String(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 
@@ -613,7 +613,7 @@ fn int_like(value: &Value) -> Option<i64> {
 fn strict_int(value: &Value) -> Option<i64> {
     match value {
         Value::Number(number) => number.as_i64(),
-        _ => None,
+        Value::Null | Value::Bool(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 
@@ -622,7 +622,7 @@ fn schema_number(value: &Value) -> Option<i64> {
     match value {
         Value::Bool(flag) => Some(i64::from(*flag)),
         Value::Number(number) => number.as_i64().or_else(|| number.as_f64().filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(ks_cast::To::to::<i64>)),
-        _ => None,
+        Value::Null | Value::String(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 
@@ -989,7 +989,6 @@ impl OrthoModel {
     }
 
     /// One reading scored: its character ratio, the case shape and the features of `featured`.
-    #[expect(clippy::too_many_arguments)]
     fn judged(&self, featured: &str, source_logprob: f64, target_logprob: f64, shape_ratio: f64, source: &str, known: Option<KnownRef<'_>>, shape: &str) -> OrthoScore {
         let ratio = target_logprob - source_logprob;
         let mut features = 0.0;

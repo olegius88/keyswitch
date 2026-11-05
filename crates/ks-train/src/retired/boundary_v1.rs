@@ -58,7 +58,7 @@ fn tail_of(text: &str) -> usize {
 
 fn split_of(family: &str) -> &'static str {
     let digest = hex_digest(&format!("{NAMESPACE}{family}"));
-    let bucket = u64::from_str_radix(&digest[..CHOICE_DIGITS], 16).expect("a digest") % SPLIT_BUCKETS;
+    let bucket = u64::from_str_radix(digest.get(..CHOICE_DIGITS).unwrap_or_default(), 16).expect("a digest") % SPLIT_BUCKETS;
     if bucket < TRAIN_BUCKETS {
         "train"
     } else if bucket == TRAIN_BUCKETS {
@@ -215,7 +215,7 @@ fn train(root: &Path, pins: Map<String, Value>) -> Result<(Vec<u8>, Vec<u8>), St
         }
     }
     let digest = crate::physical::hex(&<sha2::Sha256 as sha2::Digest>::digest(canonical(&best_json)));
-    let version = format!("boundary-v1-{}", &digest[..VERSION_HASH_CHARACTERS]);
+    let version = format!("boundary-v1-{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default());
     let raw = canonical(&json!({"feature_version": FEATURE_VERSION, "version": version, "weights": best_json, "threshold": threshold}));
     let model = BoundaryModel::new(table, threshold, version);
     let families: HashSet<(&str, &str)> = data.iter().map(|(row, _)| (row.split, row.family.as_str())).collect();

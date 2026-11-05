@@ -1,7 +1,6 @@
 //! What resets or watches the engine's state: the timers of a held Enter and a manual correction, clearing the word,
 //! the settings, the focus and the layout.
 
-use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_config::settings_diagnostics::setting_change;
@@ -280,7 +279,7 @@ impl EngineCore {
         if protects {
             self.manual_layout_group = Some(group);
             self.manual_layout_observed_at = Some(self.monotonic());
-            self.manual_layout_source = source.to_owned();
+            source.clone_into(&mut self.manual_layout_source);
             self.manual_layout_word = false;
             self.shared.update(Update {
                 current_group: Some(group),

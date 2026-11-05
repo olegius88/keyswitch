@@ -202,7 +202,7 @@ impl PersonalWords {
             state.salt = (self.salt_source)();
         }
         let digest = Sha256::digest(format!("{}{}", state.salt, casefold(word)).as_bytes());
-        hex(&digest)[..PERSONAL_WORD_HASH_HEX_CHARACTERS].to_string()
+        hex(&digest).get(..PERSONAL_WORD_HASH_HEX_CHARACTERS).unwrap_or_default().to_string()
     }
 
     /// `word in personal_words`.

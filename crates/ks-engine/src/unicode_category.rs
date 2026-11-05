@@ -1,5 +1,6 @@
 //! `unicodedata.category`, Unicode 16.0 as in `CPython` 3.14: one packed run per change of category (start << 5 | index).
 
+#![expect(clippy::unreadable_literal, reason = "a table generated from a standard")]
 use ks_cast::To as _;
 const NAMES: [&str; 30] = ["Cc", "Cf", "Cn", "Co", "Cs", "Ll", "Lm", "Lo", "Lt", "Lu", "Mc", "Me", "Mn", "Nd", "Nl", "No", "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"];
 

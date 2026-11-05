@@ -413,7 +413,7 @@ fn tatoeba_sentence(identifier: &str, language: &str, text: &str, source: &str, 
 }
 
 fn draw(text: &str) -> u64 {
-    u64::from_str_radix(&hex_digest(text)[..DETERMINISTIC_DRAW_HEX_DIGITS], 16).expect("hex digits")
+    u64::from_str_radix(hex_digest(text).get(..DETERMINISTIC_DRAW_HEX_DIGITS).unwrap_or_default(), 16).expect("hex digits")
 }
 
 /// `captured_tatoeba_identifiers`: the Tatoeba sentences behind the captured training questions.
@@ -592,7 +592,7 @@ fn string_items(value: &Value) -> Vec<String> {
     match value {
         Value::Array(items) => items.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
         Value::Object(table) => table.keys().cloned().collect(),
-        _ => Vec::new(),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Vec::new(),
     }
 }
 
@@ -680,7 +680,7 @@ pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(H
                     }
                 }
             }
-            _ => {}
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
         }
     }
     let mut done: BTreeSet<PathBuf> = BTreeSet::new();
@@ -695,7 +695,9 @@ pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(H
         let expand = path.parent().and_then(Path::file_name).is_some_and(|name| name == "context_v1");
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
-        let bytes = if name.ends_with(".gz") {
+        let bytes = if Path::new(&name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gz")) {
             let mut unpacked = Vec::new();
             MultiGzDecoder::new(raw.as_slice()).read_to_end(&mut unpacked).map_err(|error| error.to_string())?;
             unpacked
@@ -852,7 +854,7 @@ fn holdout_rows(sentences: &[Sentence], exclusions: &Exclusions) -> Result<(Vec<
         if row.alignment != "exact-text-comment" {
             reasons.push(row.alignment.clone());
         }
-        row.split = if reasons.is_empty() { "test" } else { "quarantine" }.to_owned();
+        if reasons.is_empty() { "test" } else { "quarantine" }.clone_into(&mut row.split);
         count_into(&mut reasons_count, &reasons);
         row.quarantine_reasons = reasons;
         result.push(row);
@@ -905,7 +907,7 @@ pub(crate) fn read_commands(contents: &Path) -> Result<Vec<Command>, String> {
         let line = line.map_err(|error| error.to_string())?;
         let trimmed = pystr::rstrip(&line);
         let Some(place) = trimmed.rfind(char::is_whitespace) else { continue };
-        let (path, packages) = (pystr::rstrip(&trimmed[..place]), &trimmed[place..].trim_start());
+        let (path, packages) = (pystr::rstrip(trimmed.get(..place).unwrap_or_default()), trimmed.get(place..).unwrap_or_default().trim_start());
         let Some(name) = command_of_path(path) else { continue };
         let items: Vec<&str> = packages.split(',').collect();
         if !items.iter().all(|item| package_section(item)) {
@@ -983,7 +985,7 @@ fn read_alpine_commands(archive: &Path) -> Result<Vec<Command>, String> {
     let mut package = String::new();
     for line in String::from_utf8_lossy(index).lines() {
         if let Some(name) = line.strip_prefix("P:") {
-            package = pystr::strip(name).to_owned();
+            pystr::strip(name).clone_into(&mut package);
         } else if let (Some(provided), false) = (line.strip_prefix("p:"), package.is_empty()) {
             for token in pystr::split(provided) {
                 let Some(name) = token.strip_prefix("cmd:") else { continue };
@@ -1011,19 +1013,19 @@ fn read_fedora_commands(primary: &Path) -> Result<Vec<Command>, String> {
     let mut owners: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for block in text.split("<package ").skip(1) {
         let block = block.split("</package>").next().unwrap_or("");
-        let name = block.find("<name>").and_then(|start| block[start + 6..].find("</name>").map(|end| pystr::strip(&block[start + 6..start + 6 + end]).to_owned())).unwrap_or_default();
+        let name = block.find("<name>").and_then(|start| block.get(start + 6..).unwrap_or_default().find("</name>").map(|end| pystr::strip(block.get(start + 6..start + 6 + end).unwrap_or_default()).to_owned())).unwrap_or_default();
         let mut rest = block;
         while let Some(start) = rest.find("<file") {
-            let after = &rest[start..];
+            let after = rest.get(start..).unwrap_or_default();
             let Some(open) = after.find('>') else { break };
             let Some(end) = after.find("</file>") else { break };
             if open < end {
-                let path = xml_text(pystr::strip(&after[open + 1..end]));
+                let path = xml_text(pystr::strip(after.get(open + 1..end).unwrap_or_default()));
                 if let Some(command) = command_of_path(path.trim_start_matches('/')) {
                     owners.entry(command.to_owned()).or_default().insert(format!("fedora/{name}"));
                 }
             }
-            rest = &after[end + 7..];
+            rest = after.get(end + 7..).unwrap_or_default();
         }
     }
     Ok(commands_from(owners))
@@ -1259,7 +1261,11 @@ pub(crate) fn source_inventory(source_root: &Path, pins: &[(&str, &str)]) -> Res
             return Err(format!("holdout source repository or pinned commit differs: {source}"));
         }
         for item in pin["files"].as_array().filter(|items| !items.is_empty()).ok_or_else(|| format!("invalid pinned holdout inventory: {source}"))? {
-            let name = item["path"].as_str().filter(|name| name.ends_with(".conllu") || name.ends_with(".md") || name.ends_with(".txt")).ok_or_else(|| format!("invalid pinned holdout filename: {source}"))?;
+            let name = item["path"].as_str().filter(|name| name.ends_with(".conllu") || Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) || Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))).ok_or_else(|| format!("invalid pinned holdout filename: {source}"))?;
             let path = directory.join(Path::new(name).file_name().ok_or("a pinned file without a name")?);
             let content = std::fs::read(&path).map_err(|error| error.to_string())?;
             if item["sha256"] != json!(hex(&Sha256::digest(&content))) {
@@ -1449,7 +1455,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
     let mut repeated = 0;
     for row in ud_rows.iter_mut().chain(technical_rows.iter_mut()) {
         if row.split == "test" && (prior_rows.contains(&hex_digest(&row.identifier)) || prior_documents.contains(&hex_digest(&row.document))) {
-            row.split = "quarantine".to_owned();
+            "quarantine".clone_into(&mut row.split);
             row.quarantine_reasons.push("prior-accessed-test-row".to_owned());
             repeated += 1;
         }
@@ -1498,7 +1504,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         // The previously accessed test rows, relabelled programmatically; their text is never printed.
         let mut prior = load_rows(request.base, "test")?;
         for row in &mut prior {
-            row.split = "quarantine".to_owned();
+            "quarantine".clone_into(&mut row.split);
             row.quarantine_reasons = vec![PRIOR_TEST.to_owned()];
         }
         let pick = |rows: &[CorpusRow], split: &str| -> Result<(Vec<u8>, u64), String> {
@@ -1555,7 +1561,6 @@ fn fitting_split(namespace: &str, family: &str) -> &'static str {
 }
 
 /// `freeze_context_action_fitting.main`: fitting splits extended with short utterances, the test left alone.
-#[expect(clippy::too_many_lines)]
 pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
     let output = request.output.ok_or("a fitting freeze needs an output")?;
     let exclusions = load_exclusions(request.root, request.base, request.ud_origin, request.technical_origin, request.prefix_inventory, request.lexicon, &request.extra_exposure, request.ledger)?;

@@ -256,7 +256,7 @@ pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_a
     }
     let model = ContextModel::load_artifact(artifact, models_dir).map_err(|error| error.name.to_string())?;
     let payload = read_json(artifact)?;
-    if model.version != format!("context-v3-{}", &sha(&receipt["weights_sha256"])?[..12]) || receipt["model_version"].as_str() != Some(model.version.as_str()) || receipt["conversion_threshold"].as_f64() != Some(model.conversion_threshold) || payload["weights_sha256"] != receipt["weights_sha256"] {
+    if model.version != format!("context-v3-{}", sha(&receipt["weights_sha256"])?.get(..12).unwrap_or_default()) || receipt["model_version"].as_str() != Some(model.version.as_str()) || receipt["conversion_threshold"].as_f64() != Some(model.conversion_threshold) || payload["weights_sha256"] != receipt["weights_sha256"] {
         return Err("context weights, version or threshold mismatch".to_owned());
     }
     let prefix_payload = read_json(prefix_artifact)?;
@@ -264,7 +264,7 @@ pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_a
     if receipt["prefix_artifact_sha256"].as_str() != Some(checksum(prefix_artifact)?.as_str())
         || receipt["prefix_feature_version"].as_i64() != Some(prefix.feature_version)
         || receipt["prefix_conversion_threshold"].as_f64() != Some(prefix.model.conversion_threshold)
-        || prefix.version() != format!("prefix-v{}-{}", prefix.feature_version, &sha(&receipt["prefix_weights_sha256"])?[..12])
+        || prefix.version() != format!("prefix-v{}-{}", prefix.feature_version, sha(&receipt["prefix_weights_sha256"])?.get(..12).unwrap_or_default())
         || receipt["prefix_model_version"].as_str() != Some(prefix.version())
         || prefix_payload["weights_sha256"] != receipt["prefix_weights_sha256"]
     {

@@ -179,14 +179,14 @@ impl AtspiFieldReader {
         let mut field = FieldContext::new(application, field_id);
         field.role = FieldRole::Password;
         field.sensitive = true;
-        field.source = SOURCE_ATSPI.to_owned();
+        SOURCE_ATSPI.clone_into(&mut field.source);
         field
     }
 
     fn plain_field(application: &str, field_id: String, selection: bool) -> FieldContext {
         let mut field = FieldContext::new(application, field_id);
         field.selection = selection;
-        field.source = SOURCE_ATSPI.to_owned();
+        SOURCE_ATSPI.clone_into(&mut field.source);
         field
     }
 
@@ -223,7 +223,7 @@ impl AtspiFieldReader {
         field.before = before;
         field.after = after;
         field.role = FieldRole::Text;
-        field.source = SOURCE_ATSPI.to_owned();
+        SOURCE_ATSPI.clone_into(&mut field.source);
         Ok(Some(field.bounded()))
     }
 

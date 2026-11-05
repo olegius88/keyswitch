@@ -76,13 +76,13 @@ fn last_characters(text: &str, count: usize) -> &str {
         return text;
     }
     let start = text.char_indices().nth(total - count).map_or(text.len(), |(index, _)| index);
-    &text[start..]
+    text.get(start..).unwrap_or_default()
 }
 
 fn slice_characters(text: &str, start: usize, end: usize) -> &str {
     let from = text.char_indices().nth(start).map_or(text.len(), |(index, _)| index);
     let to = text.char_indices().nth(end).map_or(text.len(), |(index, _)| index);
-    &text[from..to]
+    text.get(from..to).unwrap_or_default()
 }
 
 /// What stands on either side of the caret in the focused field.
@@ -117,7 +117,7 @@ impl<A: AccessibilityAPI> MacFieldReader<A> {
             let mut context = FieldContext::new(application, field_id);
             context.role = FieldRole::Password;
             context.sensitive = true;
-            context.source = SOURCE_AX.to_owned();
+            SOURCE_AX.clone_into(&mut context.source);
             return Some(context.bounded());
         }
         let value = self.api.string_attribute(element, VALUE_ATTRIBUTE)?;
@@ -128,11 +128,11 @@ impl<A: AccessibilityAPI> MacFieldReader<A> {
         let (start, end) = (start?, end?);
         let total = value.chars().count();
         let mut context = FieldContext::new(application, field_id);
-        context.before = last_characters(slice_characters(&value, 0, start), CONTEXT_LIMIT).to_owned();
-        context.after = slice_characters(&value, end, total.min(end + CONTEXT_LIMIT)).to_owned();
+        last_characters(slice_characters(&value, 0, start), CONTEXT_LIMIT).clone_into(&mut context.before);
+        slice_characters(&value, end, total.min(end + CONTEXT_LIMIT)).clone_into(&mut context.after);
         context.role = if subrole == SEARCH_FIELD_SUBROLE { FieldRole::Search } else { kind };
         context.selection = length > 0;
-        context.source = SOURCE_AX.to_owned();
+        SOURCE_AX.clone_into(&mut context.source);
         Some(context.bounded())
     }
 

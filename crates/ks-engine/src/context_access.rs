@@ -103,7 +103,7 @@ impl PlatformFieldReader {
         // Never format provider exceptions: they may contain user text. Missing dependencies, access denial and failed
         // cleanup require an explicit reset, not repeated calls against the same failure.
         let mut state = self.state();
-        state.status = "unavailable".to_owned();
+        "unavailable".clone_into(&mut state.status);
         state.failure_stage = Some(stage);
         state.failure_name = Some(failure.failure_name);
         state.failure_code = failure.failure_code;
@@ -126,7 +126,7 @@ impl FieldReader for PlatformFieldReader {
             let mut field = FieldContext::new(application, format!("{window}:compositor"));
             field.role = FieldRole::Password;
             field.sensitive = true;
-            field.source = "compositor".to_owned();
+            "compositor".clone_into(&mut field.source);
             return Some(field);
         }
         let unavailable = self.state().status == "unavailable";
@@ -163,7 +163,7 @@ impl FieldReader for PlatformFieldReader {
             Err(failure) => self.fail("read", failure),
             Ok(result) => {
                 let mut state = self.state();
-                state.status = if result.is_some() { "available" } else { "unsupported_field" }.to_owned();
+                if result.is_some() { "available" } else { "unsupported_field" }.clone_into(&mut state.status);
                 state.failure_stage = None;
                 state.failure_type = None;
                 state.failure_name = None;

@@ -25,24 +25,24 @@ pub const QUOTED_WORD_CLOSING_SIGNS: &str = ".,:;!?";
 pub const VERSION_HASH_CHARACTERS: usize = 12;
 
 // Largest prefix model artifact loaded.
-pub const MAX_PREFIX_MODEL_BYTES: usize = 2097152;
+pub const MAX_PREFIX_MODEL_BYTES: usize = 2_097_152;
 
 // Largest context model artifact loaded (context_model.py exports it as MAX_ARTIFACT_BYTES); the feature-2 history
 // (tools/verify_context_v2_history.py) holds this value.
-pub const MAX_CONTEXT_MODEL_BYTES: usize = 8388608;
+pub const MAX_CONTEXT_MODEL_BYTES: usize = 8_388_608;
 
 // Largest action model (schema 3) artifact loaded: written one feature to a line (train_context_action_model.artifact_bytes),
 // the 0.61.0 pair takes about 8.6 MB.
-pub const MAX_CONTEXT_ACTION_MODEL_BYTES: usize = 16777216;
+pub const MAX_CONTEXT_ACTION_MODEL_BYTES: usize = 16_777_216;
 
 // Largest term frequency table the context model reads with feature schema 7.
-pub const MAX_CONTEXT_TERM_FREQUENCY_BYTES: usize = 8388608;
+pub const MAX_CONTEXT_TERM_FREQUENCY_BYTES: usize = 8_388_608;
 
 // Largest table of tokens of letters and digits the letters-and-digits head reads.
-pub const MAX_CONTEXT_ALNUM_FREQUENCY_BYTES: usize = 2097152;
+pub const MAX_CONTEXT_ALNUM_FREQUENCY_BYTES: usize = 2_097_152;
 
 // Largest table of short Russian tokens counted in web and news text that the short-token head reads.
-pub const MAX_CONTEXT_SHORT_FREQUENCY_BYTES: usize = 2097152;
+pub const MAX_CONTEXT_SHORT_FREQUENCY_BYTES: usize = 2_097_152;
 
 // ---- constants/models.py
 
@@ -69,7 +69,7 @@ pub const ACTION_FEATURE_WORD_SCORE_BOUND: f64 = 10.0;
 pub const ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND: f64 = 32.0;
 
 // Frequencies are log-scaled against this cap so one very common word cannot dominate the feature.
-pub const ACTION_FEATURE_FREQUENCY_CAP: i64 = 1000000000000;
+pub const ACTION_FEATURE_FREQUENCY_CAP: i64 = 1_000_000_000_000;
 
 // `after_origin == "planned_next_conversion"` is only reachable for a short waiting word with a
 // short, single-line planned right context; it follows ACTION_DEFERRED_WORD_MAX_CHARACTERS, the
@@ -596,7 +596,7 @@ pub const MAX_CONTEXT_MODEL_FEATURES: usize = 50000;
 // Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 // and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 // MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.
-pub const MAX_CONTEXT_ACTION_MODEL_FEATURES: usize = 150000;
+pub const MAX_CONTEXT_ACTION_MODEL_FEATURES: usize = 150_000;
 
 pub const MAX_CONTEXT_FEATURE_NAME_CHARACTERS: usize = 512;
 
@@ -721,7 +721,7 @@ pub const KEYBOARD_ROW_LENGTHS: &[usize] = &[1, 13, 11, 9];
 pub const TYPO_FREQUENCY_SCHEMA_VERSION: usize = 1;
 
 // Largest typo frequency file loaded; the shipped ones are about two mebibytes each.
-pub const TYPO_FREQUENCY_MAX_BYTES: usize = 8388608;
+pub const TYPO_FREQUENCY_MAX_BYTES: usize = 8_388_608;
 
 // Stored counts are natural logarithms times this scale, rounded, one byte each: the decision compares ratios, and an
 // eighth of a natural logarithm (thirteen per cent) is finer than any threshold it uses.

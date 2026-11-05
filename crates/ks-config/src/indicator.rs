@@ -11,7 +11,7 @@ pub const INDICATOR_STYLES: [&str; 2] = ["letters", "flags"];
 pub fn normalize_indicator_style(value: &Value) -> &'static str {
     match value {
         Value::String(style) => INDICATOR_STYLES.iter().copied().find(|known| known == style).unwrap_or("letters"),
-        _ => "letters",
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => "letters",
     }
 }
 

@@ -90,7 +90,7 @@ pub fn iso_date(text: &str) -> Option<&str> {
     if !digits(&bytes[..4]) || !digits(&bytes[5..7]) || !digits(&bytes[8..10]) {
         return None;
     }
-    let number = |range: std::ops::Range<usize>| text[range].parse::<i64>().unwrap_or(0);
+    let number = |range: std::ops::Range<usize>| text.get(range).unwrap_or_default().parse::<i64>().unwrap_or(0);
     let (year, month, day) = (number(0..4), number(5..7), number(8..10));
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let last = match month {
@@ -104,7 +104,7 @@ pub fn iso_date(text: &str) -> Option<&str> {
         return None;
     }
     if bytes.len() == 10 {
-        return Some(&text[..10]);
+        return Some(text.get(..10).unwrap_or_default());
     }
     if !bytes[10].is_ascii() {
         return None;
@@ -113,7 +113,7 @@ pub fn iso_date(text: &str) -> Option<&str> {
     if rest.len() < 2 || !digits(&rest[..2]) || rest.iter().any(|byte| !(byte.is_ascii_digit() || b":.,+-Z".contains(byte))) {
         return None;
     }
-    Some(&text[..10])
+    Some(text.get(..10).unwrap_or_default())
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);

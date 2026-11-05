@@ -1,8 +1,8 @@
 //! What is testable of the Linux layer without a compositor: bit maps, the evdev byte layout, the Wayland wire protocol
 //! against a scripted compositor, libxkbcommon where it is installed, and the sway adapter against a scripted sway.
 
+#![expect(unsafe_code, reason = "calls into the Linux kernel and system libraries")]
 use crate::wayland_constants::{EVDEV_KEY_ENTER, EVDEV_KEY_Q, SYN_REPORT};
-use ks_cast::To as _;
 use super::*;
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -13,7 +13,7 @@ fn temporary_path(name: &str) -> PathBuf {
 fn capability_bitmaps_are_read_from_bytes_and_from_sysfs_words() {
     assert_eq!(bits_from_bytes(&[0b0000_0101, 0, 0b1000_0000]), HashSet::from([0, 2, 23]));
     // Words are the machine's unsigned long, the most significant first: "1 0" is bit 64.
-    let word_bits = (size_of::<libc::c_ulong>() * 8).low::<u32>();
+    let word_bits = (libc::c_ulong::BITS as usize).low::<u32>();
     assert_eq!(bits_from_sysfs("1 0\n"), HashSet::from([word_bits]));
     assert_eq!(bits_from_sysfs("zz 3"), HashSet::from([0, 1]));
     assert!(bits_from_sysfs("  ").is_empty());

@@ -118,7 +118,6 @@ pub struct DetectionDecision {
 
 impl DetectionDecision {
     /// `DetectionDecision(should, original, replacement, source, target, confidence, reason, source_score, target_score)`.
-    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         should_convert: bool,
@@ -147,11 +146,11 @@ impl DetectionDecision {
         }
     }
 
-    fn with_prediction(mut self, prediction: &Option<LinearPrediction>) -> Self {
+    fn with_prediction(mut self, prediction: Option<&LinearPrediction>) -> Self {
         if let Some(prediction) = prediction {
             self.model_probability = Some(prediction.probability);
             self.model_threshold = Some(prediction.threshold);
-            self.model_version = prediction.model_version.clone();
+            self.model_version.clone_from(&prediction.model_version);
         }
         self
     }
@@ -361,7 +360,7 @@ impl LanguageDetector {
         // where the artifact is absent or explicitly disabled.
         let decision = |should_convert: bool, confidence: f64, reason: &str| {
             DetectionDecision::new(should_convert, original, replacement, source_group, group, confidence, reason, source_score.clone(), target_score.clone())
-                .with_prediction(&prediction)
+                .with_prediction(prediction.as_ref())
         };
         if let Some(prediction) = &prediction {
             let should_convert = prediction.should_switch;
@@ -434,7 +433,6 @@ impl LanguageDetector {
         Ok(decision(should_convert, delta, reason))
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn intent_prediction(
         &self,
         original: &str,

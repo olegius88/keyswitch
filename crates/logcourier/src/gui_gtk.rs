@@ -146,7 +146,7 @@ fn on_status(app: &mut App, message: &str, stats: &Value) {
         }
         let all: Vec<&str> = app.event_lines.iter().map(String::as_str).collect();
         app.widgets.events.buffer().set_text(&all.join("\n"));
-        app.last_message = message.to_owned();
+        message.clone_into(&mut app.last_message);
     }
 }
 

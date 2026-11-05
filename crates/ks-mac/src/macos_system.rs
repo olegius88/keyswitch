@@ -44,19 +44,19 @@ pub fn agent_document(arguments: &[String]) -> String {
 /// nothing, so it is reported as no autostart.
 #[must_use]
 pub fn registered_arguments(document: &str) -> Vec<String> {
-    let after = |key: &str| document.find(&format!("<key>{key}</key>")).map(|at| &document[at + key.len() + 11..]);
+    let after = |key: &str| document.find(&format!("<key>{key}</key>")).map(|at| document.get(at + key.len() + 11..).unwrap_or_default());
     if !after("RunAtLoad").is_some_and(|rest| rest.trim_start().starts_with("<true/>")) {
         return Vec::new();
     }
     let Some(rest) = after("ProgramArguments") else { return Vec::new() };
     let Some(end) = rest.find("</array>") else { return Vec::new() };
     let mut arguments = Vec::new();
-    let mut scan = &rest[..end];
+    let mut scan = rest.get(..end).unwrap_or_default();
     while let Some(start) = scan.find("<string>") {
-        let tail = &scan[start + 8..];
+        let tail = scan.get(start + 8..).unwrap_or_default();
         let Some(close) = tail.find("</string>") else { break };
-        arguments.push(unescaped(&tail[..close]));
-        scan = &tail[close + 9..];
+        arguments.push(unescaped(tail.get(..close).unwrap_or_default()));
+        scan = tail.get(close + 9..).unwrap_or_default();
     }
     arguments
 }

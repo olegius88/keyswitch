@@ -48,7 +48,6 @@ pub struct ActionRow {
 }
 
 impl ActionRow {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(identifier: impl Into<String>, original: impl Into<String>, group: i64, field: FieldContext, trigger: &'static str, action: ContextAction, category: impl Into<String>, boundary_text: impl Into<String>) -> ActionRow {
         ActionRow {
             identifier: identifier.into(),
@@ -85,8 +84,8 @@ impl ActionRow {
 #[must_use]
 pub fn field_of(application: &str, field_id: &str, before: &str, after: &str, role: FieldRole) -> FieldContext {
     let mut field = FieldContext::new(application, field_id);
-    field.before = before.to_owned();
-    field.after = after.to_owned();
+    before.clone_into(&mut field.before);
+    after.clone_into(&mut field.after);
     field.role = role;
     field
 }
@@ -112,7 +111,7 @@ fn word_letter(character: char) -> bool {
 
 fn run_end(text: &str, start: usize) -> usize {
     let mut end = start;
-    for (offset, character) in text[start..].char_indices() {
+    for (offset, character) in text.get(start..).unwrap_or_default().char_indices() {
         if !word_letter(character) {
             return start + offset;
         }
@@ -125,9 +124,9 @@ fn run_end(text: &str, start: usize) -> usize {
 fn word_end(text: &str, start: usize) -> usize {
     let mut end = run_end(text, start);
     loop {
-        let Some(separator) = text[end..].chars().next().filter(|character| matches!(character, '\'' | '’' | '-')) else { return end };
+        let Some(separator) = text.get(end..).unwrap_or_default().chars().next().filter(|character| matches!(character, '\'' | '’' | '-')) else { return end };
         let next = end + separator.len_utf8();
-        match text[next..].chars().next() {
+        match text.get(next..).unwrap_or_default().chars().next() {
             Some(character) if word_letter(character) => end = run_end(text, next),
             _ => return end,
         }
@@ -139,7 +138,7 @@ fn word_end(text: &str, start: usize) -> usize {
 pub fn word_spans(text: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut position = 0;
-    while let Some((offset, _)) = text[position..].char_indices().find(|(_, character)| word_letter(*character)) {
+    while let Some((offset, _)) = text.get(position..).unwrap_or_default().char_indices().find(|(_, character)| word_letter(*character)) {
         let start = position + offset;
         let end = word_end(text, start);
         spans.push((start, end));
@@ -151,7 +150,7 @@ pub fn word_spans(text: &str) -> Vec<(usize, usize)> {
 /// `WORDS.findall(text)`.
 #[must_use]
 pub fn words_of(text: &str) -> Vec<&str> {
-    word_spans(text).into_iter().map(|(start, end)| &text[start..end]).collect()
+    word_spans(text).into_iter().map(|(start, end)| text.get(start..end).unwrap_or_default()).collect()
 }
 
 /// `WORDS.search(text) is not None`.
@@ -163,18 +162,18 @@ pub fn has_word(text: &str) -> bool {
 #[must_use]
 pub fn word_at_start(text: &str) -> Option<&str> {
     text.chars().next().filter(|character| word_letter(*character))?;
-    Some(&text[..word_end(text, 0)])
+    Some(text.get(..word_end(text, 0)).unwrap_or_default())
 }
 
 /// `JOINED_WORDS.finditer(text)`: words joined by hyphens, each with its byte span.
 pub fn joined_spans(text: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut position = 0;
-    while let Some((offset, _)) = text[position..].char_indices().find(|(_, character)| word_letter(*character)) {
+    while let Some((offset, _)) = text.get(position..).unwrap_or_default().char_indices().find(|(_, character)| word_letter(*character)) {
         let start = position + offset;
         let mut end = run_end(text, start);
         let first = end;
-        while text[end..].starts_with('-') && text[end + 1..].chars().next().is_some_and(word_letter) {
+        while text.get(end..).unwrap_or_default().starts_with('-') && text.get(end + 1..).unwrap_or_default().chars().next().is_some_and(word_letter) {
             end = run_end(text, end + 1);
         }
         if end > first {
@@ -361,7 +360,7 @@ fn stranded_previous(tools: &Tools, before: &str, group: i64) -> Option<String> 
     if !pystr::isalpha(&other) || !tools.plausible_reading(&other, 1 - group) {
         return None;
     }
-    Some(format!("{}{other}{}", &head[..head.len() - previous.len()], &before[head.len()..]))
+    Some(format!("{}{other}{}", head.get(..head.len() - previous.len()).unwrap_or_default(), before.get(head.len()..).unwrap_or_default()))
 }
 
 /// A curated letter, whose intent is observable: its own reading is a word or it is not.
@@ -392,7 +391,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
             let mark = row.literal_tail.chars().find(|character| !pystr::isspace(character.encode_utf8(&mut [0_u8; 4])));
             boundary = mark.unwrap_or('.').to_string();
         } else if (trigger == "enter" || trigger == "tab") && variant_choice(&row.identifier, "boundary-event", BOUNDARY_EVENT_CHOICES) != 0 {
-            boundary = if trigger == "enter" { "\n" } else { "\t" }.to_owned();
+            if trigger == "enter" { "\n" } else { "\t" }.clone_into(&mut boundary);
         }
         let application = application_of(&row.identifier);
         let frame = |identifier: String, original: &str, frame_group: i64, field: FieldContext, action: ContextAction, category: &str| {
@@ -445,7 +444,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
             // A phrase typed whole in the other layout: the word after a word left as typed is still the phrase's.
             let last = *words_of(&stranded).last().expect("the stranded reading is a word");
             let head = pystr::rstrip(&stranded).len() - last.len();
-            let opening = stranded[head..].to_owned();
+            let opening = stranded.get(head..).unwrap_or_default().to_owned();
             for (suffix, left) in [("", stranded.as_str()), (":opening", opening.as_str())] {
                 result.push(frame(format!("{}:stranded-previous{suffix}:wrong", row.identifier), &alternate, 1 - group, public_field(application, left, ""), Convert, "layout_intervention").weighing(STRANDED_PREVIOUS_WEIGHT));
             }

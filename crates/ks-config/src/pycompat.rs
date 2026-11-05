@@ -78,7 +78,7 @@ pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
         Some(i) if i > 0 && i < name.len() - 1 => name.len() - i,
         _ => 0,
     };
-    path.with_file_name(format!("{}{}", &name[..name.len() - existing], suffix))
+    path.with_file_name(format!("{}{}", name.get(..name.len() - existing).unwrap_or_default(), suffix))
 }
 
 /// `path.with_name(name + suffix)`.
@@ -110,7 +110,7 @@ fn as_number(value: &Value) -> Option<Result<i128, f64>> {
             Some(i) => Ok(i),
             None => Err(n.as_f64().unwrap_or(f64::NAN)),
         }),
-        _ => None,
+        Value::Null | Value::String(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 
@@ -156,7 +156,7 @@ pub fn truthy(value: &Value) -> bool {
 pub fn as_py_int(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64(),
-        _ => None,
+        Value::Null | Value::Bool(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => None,
     }
 }
 
@@ -199,7 +199,7 @@ mod tests {
         assert!(!py_eq(&json!([1, 2]), &json!([2, 1])));
         assert!(!py_eq(&Value::Null, &json!(0)));
         assert!(py_eq(&json!(1.5), &json!(1.5)));
-        assert!(!py_eq(&json!(u64::MAX), &json!(1.8446744073709552e19)));
+        assert!(!py_eq(&json!(u64::MAX), &json!(1.844_674_407_370_955_2e19)));
     }
 
     #[test]

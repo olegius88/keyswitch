@@ -3,6 +3,7 @@
 //! prompt would both read as a manual layout switch and swallow the next typed key; Enter and Esc reach the engine through
 //! the global keyboard hook, and the window's own key handling below is only a second way to the same calls.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};

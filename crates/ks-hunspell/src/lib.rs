@@ -4,6 +4,7 @@
 //! linked, so the program runs on a machine without Hunspell and then answers as `DisabledSpellChecker` does. The
 //! dictionary roots, the file names tried and the argument handed to the library are `ks_lang::spellcheck`'s.
 
+#![expect(unsafe_code, reason = "opens the Hunspell library at run time")]
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;

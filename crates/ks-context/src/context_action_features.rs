@@ -146,7 +146,7 @@ pub fn words_of(text: &str) -> Vec<&str> {
             end = run(end + 1);
         }
         let stop = if end < chars.len() { chars[end].0 } else { text.len() };
-        words.push(&text[chars[at].0..stop]);
+        words.push(text.get(chars[at].0..stop).unwrap_or_default());
         at = end;
     }
     words
@@ -308,7 +308,7 @@ fn term_features(features: &mut FeatureMap, item: &ContextEvidence, direction: &
     let after = pystr::casefold(first(&item.field.after, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS));
     let known = format!("known:{}:{}", flag(item.source_known), flag(item.target_known));
     let (earlier, line) = match item.field.before.rfind('\n') {
-        Some(at) => (Some(&item.field.before[..at]), &item.field.before[at + 1..]),
+        Some(at) => (Some(item.field.before.get(..at).unwrap_or_default()), item.field.before.get(at + 1..).unwrap_or_default()),
         None => (None, item.field.before.as_str()),
     };
     let state = if has_alpha(line) { "same" } else if earlier.is_some() { "newline" } else { "empty" };
@@ -368,7 +368,6 @@ fn capitals_features(features: &mut FeatureMap, item: &ContextEvidence, directio
 /// in both readings has no entry in either, and as one shared bucket such tokens all read like the Latin ones with
 /// digits the corpus restores (`зь2` is `pm2`): `1С`, `2фа` and `а1` in Russian prose became `1C`, `2af` and `f1`. An
 /// absent count is no evidence.
-#[expect(clippy::too_many_arguments)]
 fn frequency_features(
     features: &mut FeatureMap, item: &ContextEvidence, direction: &str, surroundings: (&str, &str, &str), readings: (&str, &str),
     buckets: (&str, &str), cyrillic_known: bool, tables: &TermTables,
@@ -530,9 +529,9 @@ pub fn extract_action_features(item: &ContextEvidence, tables: &TermTables) -> C
             characters(&mut features, label, first(word, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS), direction);
         }
         let whitespace = if label == "before" {
-            &raw[pystr::rstrip(raw).len()..]
+            raw.get(pystr::rstrip(raw).len()..).unwrap_or_default()
         } else {
-            &raw[..raw.len() - pystr::lstrip(raw).len()]
+            raw.get(..raw.len() - pystr::lstrip(raw).len()).unwrap_or_default()
         };
         let whitespace = first(whitespace, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS);
         let limit = ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS.to::<f64>();
@@ -1574,13 +1573,13 @@ fn dash_shape(token: &str) -> bool {
 /// The letters of a flag without the digits after them (`v` of `v2`).
 fn letters_of_flag(rest: &str) -> &str {
     let mut end = rest.len();
-    while let Some(c) = rest[..end].chars().next_back() {
+    while let Some(c) = rest.get(..end).unwrap_or_default().chars().next_back() {
         if !ucd::isdigit(c) {
             break;
         }
         end -= c.len_utf8();
     }
-    &rest[..end]
+    rest.get(..end).unwrap_or_default()
 }
 
 /// The dash head's evidence: the features it is asked with once more under its own names, and evidence of its own: the

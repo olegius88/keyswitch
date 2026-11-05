@@ -291,7 +291,6 @@ impl Default for EvidenceOptions<'_> {
 
 /// Build the same lexical and optional orthotactic evidence for any caller. `shared` is the packaged identifier lexicon
 /// the engine, the trainer and the evaluator share (`shared_identifiers()`), used when `identifiers` is not given.
-#[expect(clippy::too_many_arguments)]
 pub fn evidence_for_decision(
     baseline: &DetectionDecision, alternative: &str, target_group: i64, detector: &LanguageDetector, field: &FieldContext, trigger: &str,
     options: &EvidenceOptions<'_>, shared: Option<&IdentifierLexicon>,
@@ -426,7 +425,6 @@ impl ContextPolicy {
         &self.model.as_ref().expect("a policy with a model").tables
     }
 
-    #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     pub fn decide(
         &self, baseline: &DetectionDecision, alternative: &str, target_group: i64, detector: &LanguageDetector, trigger: &str, mode: &str,
         options: &DecideOptions<'_>,
@@ -657,7 +655,7 @@ impl ContextPolicy {
                 match prediction.action {
                     ContextAction::Keep => "контекстная модель оставляет текст",
                     ContextAction::Wait => "контекстная модель ждёт продолжения",
-                    _ => "контекстная модель предлагает проверить раскладку",
+                    ContextAction::Convert | ContextAction::Suggest => "контекстная модель предлагает проверить раскладку",
                 }
             }
             .to_string();

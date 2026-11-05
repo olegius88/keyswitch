@@ -120,13 +120,13 @@ pub fn captured_rows(source: &CapturedSource) -> Result<Vec<(ContextEvidence, us
         // No application name, as in every scenario row: the model does not read it.
         let field = field_of("", "captured", text_of("before"), text_of("after"), role_of(text_of("role")));
         let mut item = ContextEvidence::new(text_of("original"), text_of("alternative"), value("source_group").as_i64().expect("a group"), field);
-        item.trigger = text_of("trigger").to_owned();
+        text_of("trigger").clone_into(&mut item.trigger);
         item.baseline_convert = flag("baseline_convert");
         item.source_known = flag("source_known");
         item.target_known = flag("target_known");
         item.score_delta = value("score_delta").as_f64().expect("a score");
-        item.literal_tail = text_of("literal_tail").to_owned();
-        item.boundary_text = text_of("boundary_text").to_owned();
+        text_of("literal_tail").clone_into(&mut item.literal_tail);
+        text_of("boundary_text").clone_into(&mut item.boundary_text);
         item.after_origin = after_origin_of(text_of("after_origin"));
         if let Some(index) = positions.get("before_origin") {
             item.before_origin = before_origin_of(values[*index].as_str().expect("a text column"));

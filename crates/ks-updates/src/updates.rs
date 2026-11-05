@@ -206,7 +206,7 @@ pub trait ResponseOpener: Send + Sync {
 fn object_mapping<'a>(value: &'a Value, label: &str) -> Result<&'a Map<String, Value>, UpdateError> {
     match value {
         Value::Object(map) => Ok(map),
-        _ => fail(format!("GitHub вернул некорректное поле {label}")),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => fail(format!("GitHub вернул некорректное поле {label}")),
     }
 }
 
@@ -268,7 +268,7 @@ fn split_url(value: &str) -> Option<(String, String, &str)> {
         _ => host_port,
     };
     let path_end = tail.find(['?', '#']).unwrap_or(tail.len());
-    Some((scheme.to_lowercase(), host.to_lowercase(), &tail[..path_end]))
+    Some((scheme.to_lowercase(), host.to_lowercase(), tail.get(..path_end).unwrap_or_default()))
 }
 
 fn validate_download_response_url(value: &str) -> Result<(), UpdateError> {

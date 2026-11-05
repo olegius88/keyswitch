@@ -5,6 +5,7 @@
 //! OK and Escape is Cancel. `accept` turns the form into a rule and answers with an empty string, or with what to fix, which
 //! the window shows instead of closing.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
@@ -377,7 +378,7 @@ fn confirm() {
     }
     let problem_window = DIALOG.with(|slot| {
         slot.borrow_mut().as_mut().map(|dialog| {
-            dialog.problem = problem.clone();
+            dialog.problem.clone_from(&problem);
             dialog.controls.problem
         })
     });

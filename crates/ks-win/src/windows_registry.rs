@@ -4,6 +4,7 @@
 //! the same here: a number for `REG_DWORD` and `REG_QWORD`, text up to the first zero for `REG_SZ` and `REG_EXPAND_SZ`, and bytes
 //! for the rest, with an empty value of those being None.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::io;
 use std::ptr::{null, null_mut};
@@ -192,7 +193,7 @@ impl NativeWindowsRegistry {
         let key = open(HKEY_CURRENT_USER, PERSONALIZE_KEY, KEY_READ).ok()?;
         match query(&key, APPS_USE_LIGHT_THEME_VALUE).ok()? {
             RegistryValue::Number(value) => Some(value),
-            _ => None,
+            RegistryValue::Text(_) | RegistryValue::TextList | RegistryValue::Bytes(_) | RegistryValue::Empty => None,
         }
     }
 }

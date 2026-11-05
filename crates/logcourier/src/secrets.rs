@@ -31,7 +31,7 @@ pub fn redact(text: &str) -> String {
     while index < bytes.len() {
         match token_end(bytes, index) {
             Some(end) => {
-                out.push_str(&text[copied..index]);
+                out.push_str(text.get(copied..index).unwrap_or_default());
                 out.push_str("<TOKEN>");
                 copied = end;
                 index = end;
@@ -39,7 +39,7 @@ pub fn redact(text: &str) -> String {
             None => index += 1,
         }
     }
-    out.push_str(&text[copied..]);
+    out.push_str(text.get(copied..).unwrap_or_default());
     out
 }
 

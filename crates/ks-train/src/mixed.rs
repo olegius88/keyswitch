@@ -59,7 +59,7 @@ const ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS: i64 = 128;
 const MIXED_EVALUATE_RUSSIAN_SHARE: f64 = 0.25;
 
 fn draw_with(text: &str, digits: usize) -> u64 {
-    u64::from_str_radix(&hex_digest(text)[..digits], 16).expect("hex digits")
+    u64::from_str_radix(hex_digest(text).get(..digits).unwrap_or_default(), 16).expect("hex digits")
 }
 
 fn draw(text: &str) -> u64 {
@@ -264,12 +264,12 @@ impl FieldReader for Reader {
         field.role = FieldRole::Text;
         if self.after {
             let caret = self.backend.caret().to::<i64>();
-            field.before = pystr::slice(pystr::slice(&text, None, Some(caret)), Some(-CONTEXT_LIMIT), None).to_owned();
-            field.after = pystr::slice(pystr::slice(&text, Some(caret), None), None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS)).to_owned();
-            field.source = "uia".to_owned();
+            pystr::slice(pystr::slice(&text, None, Some(caret)), Some(-CONTEXT_LIMIT), None).clone_into(&mut field.before);
+            pystr::slice(pystr::slice(&text, Some(caret), None), None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS)).clone_into(&mut field.after);
+            "uia".clone_into(&mut field.source);
         } else {
-            field.before = pystr::slice(&text, Some(-CONTEXT_LIMIT), None).to_owned();
-            field.source = "native".to_owned();
+            pystr::slice(&text, Some(-CONTEXT_LIMIT), None).clone_into(&mut field.before);
+            "native".clone_into(&mut field.source);
         }
         Some(field)
     }
@@ -890,7 +890,7 @@ pub fn capture(resource_dir: &Path, manifest: &Path, messages: &Path, model: &Pa
         sorted.sort();
         let mut content = String::new();
         for (row, count) in sorted {
-            content.push_str(&format!("[{count},{}\n", &row[1..]));
+            content.push_str(&format!("[{count},{}\n", row.get(1..).unwrap_or_default()));
         }
         let digest = hex(&Sha256::digest(content.as_bytes()));
         let path = parent.join(&file);
@@ -921,7 +921,6 @@ pub fn capture(resource_dir: &Path, manifest: &Path, messages: &Path, model: &Pa
 }
 
 /// `evaluate`: final text against intended text, per typing mode.
-#[expect(clippy::too_many_arguments)]
 pub fn evaluate(resource_dir: &Path, messages: &Path, recipe: &Value, code: Option<&Path>, model: &Path, output: &Path, workers: usize) -> Result<Value, String> {
     let jobs = jobs_for(messages, recipe, code)?;
     let bench = Bench::new(resource_dir)?;
@@ -978,7 +977,7 @@ fn load_members(path: &Path) -> Result<Vec<Member>, String> {
         // `str(row["question"])`.
         let question = match &row["question"] {
             Value::String(text) => text.clone(),
-            other => other.to_string(),
+            other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
         };
         members.push(Member { text: row["text"].as_str().unwrap_or("").to_owned(), question: hex_digest(&format!("{DEVCHAT_NAMESPACE}:{question}")), mix: row["mix"].as_str().unwrap_or("").to_owned() });
     }
@@ -1088,7 +1087,6 @@ fn ledger_records(ledger: &Path, suffix: &str) -> Result<Vec<(PathBuf, Value)>, 
 }
 
 /// `evaluate_devchat_test.evaluate`: development read freely, the test once, each with its floors.
-#[expect(clippy::too_many_lines)]
 pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let split = request.split;
     let directory = request.directory;

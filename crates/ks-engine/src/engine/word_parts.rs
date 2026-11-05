@@ -229,7 +229,6 @@ impl EngineCore {
     /// stands). Signs split off the end (`replayed_signs`) stay split off the part: `mongo-cthdbcf/` is
     /// `mongo-сервиса.`. Otherwise the token stays as the whole of it was judged, with that
     /// judgement's context result.
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn decide_joined_part(
         &mut self, strokes: &[Stroke], signs: &[Stroke], source_group: i64, targets: &[i64], application: &str, trigger: CorrectionTrigger,
         boundary: Option<&Stroke>, whole: &DetectionDecision,
@@ -545,12 +544,12 @@ impl EngineCore {
             }
             start = index;
         }
-        text[start..].to_owned()
+        text.get(start..).unwrap_or_default().to_owned()
     }
 
     pub(crate) fn _letters_after(text: &str) -> String {
         let end = text.char_indices().find(|(_, character)| !ks_text::ucd::isalpha(*character)).map_or(text.len(), |(index, _)| index);
-        text[..end].to_owned()
+        text.get(..end).unwrap_or_default().to_owned()
     }
 
     pub(crate) fn _reads_alike(plan: &CorrectionPlan) -> bool {

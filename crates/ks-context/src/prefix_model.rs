@@ -163,7 +163,7 @@ pub(crate) fn finish_load(artifact: Artifact, feature_version: i64, namespace: &
         return Err(LoadError::value(message));
     }
     let digest = weights.digest.as_str();
-    if payload.get("weights_sha256").and_then(Value::as_str) != Some(digest) || version != format!("{namespace}{}", &digest[..VERSION_HASH_CHARACTERS]) {
+    if payload.get("weights_sha256").and_then(Value::as_str) != Some(digest) || version != format!("{namespace}{}", digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default()) {
         return Err(LoadError::value("prefix checksum mismatch"));
     }
     Ok(Loaded { model: PrefixModel { version: version.to_string(), conversion_threshold: threshold, weights: weights.table }, feature_version })

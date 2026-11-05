@@ -1,5 +1,6 @@
 //! The settings window in `AppKit`: tabs built from the same setting descriptions as on Windows, the lists and actions beside
 //! them, the learning prompt and the rule editor.
+#![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use ks_config::history::data_dir;
 use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
-use ks_ui::windows_ui_model::{SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, UpdateController, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
+use ks_ui::windows_ui_model::{SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -469,7 +470,7 @@ fn action(tag: isize) {
             });
         }
         ACTION_OPEN_LOGS => {
-            open_path(&data_dir().display().to_string());
+            let _ = open_path(&data_dir().display().to_string());
         }
         ACTION_RESET_SETTINGS => {
             with_ui(|ui| {
@@ -692,7 +693,7 @@ pub fn apply_setting(path: &str, value: &Value) {
                     ControlKind::Choice => {
                         let _: () = msg_send![control, selectItemWithTitle: string(&control_text(spec, stored.as_ref()))];
                     }
-                    _ => {
+                    ControlKind::Int | ControlKind::Float | ControlKind::Text => {
                         let _: () = msg_send![control, setStringValue: string(&control_text(spec, stored.as_ref()))];
                     }
                 }

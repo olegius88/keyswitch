@@ -49,7 +49,7 @@ const LOCALES: [&str; 2] = ["en_US", "ru_RU"];
 const CYRILLIC: &str = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
 
 fn draw(parts: &[&str]) -> u64 {
-    u64::from_str_radix(&hex_digest(&parts.join(":"))[..DRAW_HEX_DIGITS], 16).expect("a digest")
+    u64::from_str_radix(hex_digest(&parts.join(":")).get(..DRAW_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest")
 }
 
 fn locale_of(token: &str) -> Option<&'static str> {
@@ -113,7 +113,7 @@ fn messages(directory: &Path, name: &str) -> Result<Vec<(String, String)>, Strin
         .iter()
         .map(|line| {
             let item: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
-            let qid = match &item["qid"] { Value::String(text) => text.clone(), other => other.to_string() };
+            let qid = match &item["qid"] { Value::String(text) => text.clone(), other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string() };
             Ok((qid, item["text"].as_str().unwrap_or("").to_owned()))
         })
         .collect()

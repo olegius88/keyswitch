@@ -51,7 +51,7 @@ fn canonical(value: &Value) -> Vec<u8> {
 /// `assigned_split`.
 fn assigned_split(namespace: &str, key: &str) -> &'static str {
     let digest = hex_digest(&format!("{namespace}:{key}"));
-    let bucket = u64::from_str_radix(&digest[..DRAW_HEX_DIGITS], 16).expect("a hexadecimal digest") % SPLIT_BUCKET_COUNT;
+    let bucket = u64::from_str_radix(digest.get(..DRAW_HEX_DIGITS).unwrap_or_default(), 16).expect("a hexadecimal digest") % SPLIT_BUCKET_COUNT;
     if bucket < TRAIN_CEILING {
         "train"
     } else if bucket < DEVELOPMENT_CEILING {
@@ -262,7 +262,7 @@ fn sequence_document_counts(rows: &[CorpusRow]) -> Value {
     let name_of = |group: Option<i64>| group.map_or_else(|| "None".to_owned(), |group| group.to_string());
     for row in &selected {
         let name = name_of(row.group);
-        let mut representable = sequence_plan(row, false).unsupported.is_empty() != false;
+        let mut representable = sequence_plan(row, false).unsupported.is_empty();
         if matches!(row.group, Some(0 | 1)) {
             let has_letter = row.original.chars().any(|character| crate::evaluate::script_group(character) == row.group);
             representable = representable && has_letter && sequence_plan(row, true).unsupported.is_empty();
@@ -381,7 +381,7 @@ fn reconcile_rows(sentences: &[Sentence], rows: &[CorpusRow], historical: &HashS
             let unique: BTreeSet<String> = reasons.into_iter().collect();
             let sorted: Vec<String> = unique.into_iter().collect();
             removed.push(json!({"row_sha256": hex_digest(&row.identifier), "previous_split": row.split, "closure_sha256": hex_digest(&root), "reasons": sorted}));
-            next.split = "quarantine".to_owned();
+            "quarantine".clone_into(&mut next.split);
             next.quarantine_reasons = sorted;
         } else if FITTING_SPLITS.contains(&row.split.as_str()) {
             next.family = hex_digest(&root);

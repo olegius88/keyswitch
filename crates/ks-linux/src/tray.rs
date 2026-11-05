@@ -533,8 +533,8 @@ impl StatusNotifierItem {
     fn refresh(&self) {
         let (icon_name, subtitle, enabled, group) = {
             let mut item = locked(&self.shared.item);
-            item.status = "Active".to_owned();
-            item.icon_name = layout_icon_name(&Json::String(item.indicator_style.to_owned()), item.group).to_owned();
+            "Active".clone_into(&mut item.status);
+            layout_icon_name(&Json::String(item.indicator_style.to_owned()), item.group).clone_into(&mut item.icon_name);
             let label = layout_label(item.group);
             let state = if item.enabled { "автокоррекция включена" } else { "автокоррекция на паузе" };
             item.subtitle = if label == "—" {
@@ -560,7 +560,7 @@ impl StatusNotifierItem {
             let icon_changed = menu.layout_icon != icon_name;
             let enabled_changed = menu.enabled != enabled;
             menu.group = group;
-            menu.layout_icon = icon_name.to_owned();
+            icon_name.clone_into(&mut menu.layout_icon);
             menu.enabled = enabled;
             (group_changed, icon_changed, enabled_changed)
         };

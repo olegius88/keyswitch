@@ -112,7 +112,7 @@ fn monolingual_rows(source_rows: &[CorpusRow]) -> Vec<Monolingual<'_>> {
         }
         let text = format!("{}{}", row.before, row.original);
         let tokens = word_spans(&text);
-        if tokens.iter().any(|(start, end)| cyrillic(&text[*start..*end]) != (group == 1)) {
+        if tokens.iter().any(|(start, end)| cyrillic(text.get(*start..*end).unwrap_or_default()) != (group == 1)) {
             continue;
         }
         result.push(Monolingual { row, group, text, tokens });
@@ -537,7 +537,7 @@ pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
         }
         let text = format!("{}{}{}", row.before, row.original, row.after);
         for (start, end) in crate::rows::joined_spans(&text) {
-            let token = &text[start..end];
+            let token = text.get(start..end).unwrap_or_default();
             let letters = token.replace('-', "");
             let group = if cyrillic(&letters) {
                 Some(1)
@@ -546,13 +546,13 @@ pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
             } else {
                 None
             };
-            let before = clipped(&text[..start]);
+            let before = clipped(text.get(..start).unwrap_or_default());
             let occurrence = [row.document.as_str(), before, token].join("\0");
             let Some(group) = group else { continue };
             if !seen.insert(occurrence.clone()) {
                 continue;
             }
-            let identifier = format!("joined:{}", &hex_digest(&occurrence)[..12]);
+            let identifier = format!("joined:{}", hex_digest(&occurrence).get(..12).unwrap_or_default());
             if variant_choice(&identifier, "draw", item_modulus) != 0 {
                 continue;
             }
@@ -601,7 +601,7 @@ pub fn joined_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpus
             let mut token = format!("{word}-{word}");
             if capital {
                 let head: String = token.chars().take(1).collect();
-                token = format!("{}{}", pystr::upper(&head), &token[head.len()..]);
+                token = format!("{}{}", pystr::upper(&head), token.get(head.len()..).unwrap_or_default());
             }
             let keys = reading(&token, group);
             if held_out.contains(&pystr::casefold(&token)) || held_out.contains(&pystr::casefold(&keys)) || tools.is_refused(&[&token, &keys]) {
@@ -792,7 +792,7 @@ pub fn first_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
         }
         let stem = format!("first:{typed}");
         let mut field = field_of(application_of(&stem), crate::rows::PUBLIC_TRAINING, "", "", FieldRole::Text);
-        field.source = "reader".to_owned();
+        "reader".clone_into(&mut field.source);
         let start = features::russian_start_bucket(&typed, &tools.tables);
         let stopped = if start != "na" && start.parse::<i64>().expect("a start bucket is a number") >= FIRST_PAUSE_WORD_START_MIN_BUCKET { Keep } else { Convert };
         for (trigger, boundary, action) in [("space", " ", Convert), ("pause", "", stopped)] {
@@ -903,14 +903,14 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
         // Every short word of the sentence followed, after one space, by another word is the question asked as written.
         for pair in item.tokens.windows(2) {
             let (current, following) = (pair[0], pair[1]);
-            let word = &item.text[current.0..current.1];
-            let next = &item.text[following.0..following.1];
+            let word = item.text.get(current.0..current.1).unwrap_or_default();
+            let next = item.text.get(following.0..following.1).unwrap_or_default();
             if (KEPT_NEIGHBOUR_MIN_LETTERS..=KEPT_CONTEXT_WORD_MAX_CHARACTERS).contains(&pystr::len(word))
                 && pystr::isalpha(word)
                 && pystr::isalpha(next)
-                && &item.text[current.1..following.0] == " "
+                && item.text.get(current.1..following.0).unwrap_or_default() == " "
             {
-                let before = &item.text[..current.0];
+                let before = item.text.get(..current.0).unwrap_or_default();
                 natural[item.group.to::<usize>()].insert(format!("{before}|{word}"), (before.to_owned(), word.to_owned(), next.to_owned()));
             }
         }
@@ -1050,9 +1050,9 @@ pub fn letter_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Val
         for triple in item.tokens.windows(3) {
             let (previous, current, following) = (triple[0], triple[1], triple[2]);
             let text = &item.text;
-            let (word, after) = (&text[current.0..current.1], &text[following.0..following.1]);
-            if &text[previous.1..current.0] != " "
-                || &text[current.1..following.0] != " "
+            let (word, after) = (text.get(current.0..current.1).unwrap_or_default(), text.get(following.0..following.1).unwrap_or_default());
+            if text.get(previous.1..current.0).unwrap_or_default() != " "
+                || text.get(current.1..following.0).unwrap_or_default() != " "
                 || !pystr::isalpha(word)
                 || !pystr::isalpha(after)
                 || pystr::len(after) > PLANNED_CONTEXT_AFTER_MAX_CHARACTERS
@@ -1060,12 +1060,12 @@ pub fn letter_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Val
             {
                 continue;
             }
-            let previous_word = &text[previous.0..previous.1];
-            let key = format!("{}|{word}", &text[..current.0]);
+            let previous_word = text.get(previous.0..previous.1).unwrap_or_default();
+            let key = format!("{}|{word}", text.get(..current.0).unwrap_or_default());
             if item.group == 1 && TRUSTED_SINGLE_LETTER_WORDS.contains(&word) {
-                sentences[1].insert(key, [text[..previous.0].to_owned(), word.to_owned(), after.to_owned(), String::new()]);
+                sentences[1].insert(key, [text.get(..previous.0).unwrap_or_default().to_owned(), word.to_owned(), after.to_owned(), String::new()]);
             } else if item.group == 0 && pystr::isalpha(previous_word) {
-                sentences[0].insert(key, [text[..previous.0].to_owned(), previous_word.to_owned(), word.to_owned(), after.to_owned()]);
+                sentences[0].insert(key, [text.get(..previous.0).unwrap_or_default().to_owned(), previous_word.to_owned(), word.to_owned(), after.to_owned()]);
             }
         }
     }

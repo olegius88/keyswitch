@@ -106,7 +106,7 @@ pub fn history_limit(value: &Value) -> i64 {
             },
         },
         Value::String(text) => py_int(text),
-        _ => None,
+        Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
     };
     match parsed {
         Some(count) => (count.clamp(1, i128::from(i64::MAX))).to::<i64>(),

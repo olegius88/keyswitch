@@ -43,7 +43,7 @@ fn family(word: &str, group: i64) -> String {
 
 fn split_for(signature: &str, namespace: &str) -> &'static str {
     let digest = hex_digest(&format!("{namespace}:{signature}"));
-    let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % SPLIT_BUCKET_COUNT;
+    let bucket = u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest") % SPLIT_BUCKET_COUNT;
     if bucket < TRAIN_SPLIT_BUCKETS { "train" } else { SPLITS[(bucket - TRAIN_SPLIT_BUCKETS + 1).to::<usize>()] }
 }
 

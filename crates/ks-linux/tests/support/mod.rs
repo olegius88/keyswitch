@@ -1,6 +1,7 @@
 //! What the end-to-end tests share: physical keys through XTEST, a GTK entry to type into, the main loop run from straight
 //! code, and a watcher for the panel icon.
-#![allow(dead_code)]
+#![expect(clippy::allow_attributes, reason = "each test program uses a different part of this module, so `expect` cannot hold for all of them")]
+#![allow(dead_code, reason = "each test program uses a different part of this module")]
 
 use ks_cast::To as _;
 use std::sync::{Arc, Mutex};

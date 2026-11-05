@@ -297,7 +297,7 @@ impl Worker {
     fn new_lines(&mut self) -> Vec<String> {
         let mut text = String::new();
         let _ = self.log.read_to_string(&mut text);
-        text.lines().filter_map(|line| line.find("TECHNICAL ").map(|at| line[at..].to_owned())).collect()
+        text.lines().filter_map(|line| line.find("TECHNICAL ").map(|at| line.get(at..).unwrap_or_default().to_owned())).collect()
     }
 
     fn slot(&mut self, choice: Choice) -> &mut Option<Kind> {
@@ -541,7 +541,6 @@ impl Worker {
         (done, found)
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn run_step(
         &mut self, step: &Value, engine: &KeySwitchEngine, tape: &Arc<Mutex<Tape>>, clock: &Arc<AtomicU64>, reader: &Arc<dyn FieldReader>,
         plans: &Arc<Mutex<Vec<Value>>>, requests: &Arc<Mutex<Vec<Value>>>, state: &mut Expected, saved_model: &mut Option<ContextModel>,
@@ -551,7 +550,7 @@ impl Worker {
             let mut tape = tape.lock().unwrap_or_else(PoisonError::into_inner);
             tape.load(step["io"].as_array().map_or(&[], Vec::as_slice));
             if let Some(status) = step["status"].as_str() {
-                tape.status = status.to_owned();
+                status.clone_into(&mut tape.status);
             }
         }
         if let Some(attributes) = step.get("model_attributes") {

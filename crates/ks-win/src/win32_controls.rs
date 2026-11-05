@@ -2,9 +2,10 @@
 //! scheme, the owner-drawn check boxes, radio buttons and navigation buttons, lists and combo boxes. Everything here is
 //! a call or two of the API behind a safe signature; the windows that use it keep the layout and the behaviour.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 // The raw pointers these functions take are window, font and brush handles: opaque numbers the system looks up, never
 // dereferenced here, so a stale one fails the call and does nothing worse.
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![expect(clippy::not_unsafe_ptr_arg_deref, reason = "a window, font or brush handle is opaque: a stale one fails the call")]
 use ks_cast::To as _;
 
 use std::ffi::c_void;

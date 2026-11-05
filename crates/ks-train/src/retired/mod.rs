@@ -57,6 +57,6 @@ pub fn reference_models(root: &Path) -> Result<Vec<Arc<LanguageModel>>, String> 
 pub fn read_object(path: &Path) -> Result<serde_json::Map<String, Value>, String> {
     match read_json(path)? {
         Value::Object(object) => Ok(object),
-        _ => Err(format!("{}: not an object", path.display())),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => Err(format!("{}: not an object", path.display())),
     }
 }

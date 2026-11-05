@@ -278,7 +278,7 @@ impl FieldReader for Reader {
         let mut field = FieldContext::new(application, window.to_string());
         field.before = self.backend.slice(0, caret).iter().collect();
         field.role = self.role;
-        field.source = "fixture-field".to_owned();
+        "fixture-field".clone_into(&mut field.source);
         Some(field)
     }
 }

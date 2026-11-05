@@ -1,7 +1,6 @@
 //! The Python's tests of this logic (`test_windows_backend.py`, `test_windows_selection.py`, `test_input_integrity.py`,
 //! `test_input_delay.py`, and of `test_action_boundary.py` what needs no engine), driven by a fake API.
 
-use ks_cast::To as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Condvar, mpsc};
@@ -796,7 +795,7 @@ fn a_modifier_whose_release_the_hook_missed_is_forgotten() {
     let events = collected();
     subject.set_listener(Some(collecting(&events)));
     let press = |virtual_key: u32, timestamp: i64| {
-        subject.handle_native(native(true, virtual_key, virtual_key, false, timestamp));
+        let _ = subject.handle_native(native(true, virtual_key, virtual_key, false, timestamp));
     };
     let last_state = || events.lock().unwrap().last().unwrap().state;
 
@@ -827,8 +826,8 @@ fn a_modifier_whose_release_the_hook_missed_is_forgotten() {
     // Keys another program injected, and KeySwitch's own, ask nothing of the keyboard.
     api.state().released_keys.insert(CTRL);
     api.state().foreground = WINDOWS_FAKE_HWND;
-    subject.handle_native(NativeKeyEvent { foreign: true, ..native(true, VK_A, VK_A, false, 5200) });
-    subject.handle_native(NativeKeyEvent { replayed: true, ..native(true, VK_A, VK_A, false, 5200) });
+    let _ = subject.handle_native(NativeKeyEvent { foreign: true, ..native(true, VK_A, VK_A, false, 5200) });
+    let _ = subject.handle_native(NativeKeyEvent { replayed: true, ..native(true, VK_A, VK_A, false, 5200) });
     assert_eq!(last_state(), CONTROL_MASK);
     assert_eq!(api.state().key_down_calls, [CTRL]);
 }
@@ -841,22 +840,22 @@ fn the_event_state_tracks_modifiers_caps_and_an_unknown_group() {
     subject.set_listener(Some(collecting(&events)));
     let modifiers = [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_CAPITAL];
     for virtual_key in modifiers {
-        subject.handle_native(native(true, virtual_key, virtual_key, false, 1));
+        let _ = subject.handle_native(native(true, virtual_key, virtual_key, false, 1));
     }
     // A repeated CapsLock key-down must not toggle the lock back off.
-    subject.handle_native(native(true, VK_CAPITAL, VK_CAPITAL, false, 2));
+    let _ = subject.handle_native(native(true, VK_CAPITAL, VK_CAPITAL, false, 2));
     assert_eq!(events.lock().unwrap().last().unwrap().state, SHIFT_MASK | CONTROL_MASK | ALT_MASK | SUPER_MASK | LOCK_MASK);
     for virtual_key in modifiers {
-        subject.handle_native(native(false, virtual_key, virtual_key, false, 3));
+        let _ = subject.handle_native(native(false, virtual_key, virtual_key, false, 3));
     }
     assert_eq!(events.lock().unwrap().last().unwrap().state, LOCK_MASK);
 
     api.state().current_layout = GERMAN_HKL;
-    subject.handle_native(native(true, u32::from(b'A'), SCAN_CODE_A, false, 4));
+    let _ = subject.handle_native(native(true, u32::from(b'A'), SCAN_CODE_A, false, 4));
     assert_eq!(events.lock().unwrap().last().unwrap().character, "");
     assert_eq!(events.lock().unwrap().last().unwrap().group, -1);
     subject.set_listener(None);
-    subject.handle_native(native(false, u32::from(b'A'), SCAN_CODE_A, false, 5));
+    let _ = subject.handle_native(native(false, u32::from(b'A'), SCAN_CODE_A, false, 5));
 }
 
 // --------------------------------------------------------------------------------------------------------- injection
@@ -1317,7 +1316,7 @@ fn a_withheld_enter_goes_once_before_what_was_typed_after_it() {
 fn keypad_enter_preserves_its_extended_flag() {
     let api = FakeWindowsAPI::plain();
     let subject = deferring_backend(&api);
-    subject.handle_native(NativeKeyEvent { extended: true, ..ENTER_DOWN });
+    let _ = subject.handle_native(NativeKeyEvent { extended: true, ..ENTER_DOWN });
     subject.complete_action(true).unwrap();
     assert!(api.sent()[0].iter().all(|item| item.extended && item.virtual_key == VK_RETURN));
 }
@@ -1335,7 +1334,7 @@ fn shift_enter_is_not_intercepted() {
 fn a_cancelled_action_sends_nothing_and_lets_go() {
     let api = FakeWindowsAPI::plain();
     let subject = deferring_backend(&api);
-    subject.handle_native(ENTER_DOWN);
+    let _ = subject.handle_native(ENTER_DOWN);
     assert_eq!(subject.complete_action(false).unwrap(), 0);
     assert!(api.sent().is_empty());
     assert!(!subject.inner.hold.lock().unwrap().holding);
@@ -1346,9 +1345,9 @@ fn pointer_and_focus_change_cancel_without_submitting_to_another_field() {
     for pointer in [false, true] {
         let api = FakeWindowsAPI::plain();
         let subject = deferring_backend(&api);
-        subject.handle_native(ENTER_DOWN);
+        let _ = subject.handle_native(ENTER_DOWN);
         if pointer {
-            subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1));
+            let _ = subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1));
         } else {
             api.state().foreground += 1;
         }
@@ -1364,7 +1363,7 @@ fn pointer_and_focus_change_cancel_without_submitting_to_another_field() {
 fn a_partial_action_send_is_reported_without_a_duplicate_retry() {
     let api = FakeWindowsAPI::plain();
     let subject = deferring_backend(&api);
-    subject.handle_native(ENTER_DOWN);
+    let _ = subject.handle_native(ENTER_DOWN);
     api.state().send_count = Some(1);
     let error = subject.complete_action(true).unwrap_err();
     assert!(message(&error).contains("1 из 2"));
@@ -1515,26 +1514,26 @@ fn the_hook_measures_typed_keys_only() {
     let subject = backend(&api);
     let key = native(true, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS);
     api.state().ticks = HOOK_KEY_TIME_MS + INPUT_DELAY_LATE_MS;
-    subject.handle_native(key);
+    let _ = subject.handle_native(key);
     // KeySwitch's own keys, their replays and the pointer are no typing.
-    subject.handle_native(NativeKeyEvent { pressed: false, injected: true, ..key });
-    subject.handle_native(NativeKeyEvent { pressed: false, replayed: true, ..key });
-    subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 0));
+    let _ = subject.handle_native(NativeKeyEvent { pressed: false, injected: true, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { pressed: false, replayed: true, ..key });
+    let _ = subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 0));
     // A key time ahead of the clock says nothing about a delay.
     let ahead = api.state().ticks + 1;
-    subject.handle_native(NativeKeyEvent { pressed: false, timestamp: ahead, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { pressed: false, timestamp: ahead, ..key });
     let report = subject.take_input_delay().unwrap();
     assert_eq!((report.keys, report.late_keys, report.worst_late_ms), (1, 1, INPUT_DELAY_LATE_MS));
     // The counter wraps after 49.7 days; a key stamped just before is still on time.
     api.state().ticks = 0;
-    subject.handle_native(NativeKeyEvent { pressed: false, timestamp: DWORD_MASK, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { pressed: false, timestamp: DWORD_MASK, ..key });
     assert_eq!(
         subject.take_input_delay().unwrap(),
         InputDelayReport { keys: 1, worst_late_ms: 1, ..InputDelayReport::default() }
     );
     // A key another program sent with a time of zero, long after the computer started.
     api.state().ticks = INPUT_DELAY_UNSTAMPED_MS;
-    subject.handle_native(NativeKeyEvent { timestamp: 0, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { timestamp: 0, ..key });
     assert_eq!(
         subject.take_input_delay().unwrap(),
         InputDelayReport { keys: 1, unstamped_keys: 1, ..InputDelayReport::default() }
@@ -1549,7 +1548,7 @@ fn the_hook_times_its_answer_and_counts_a_slow_one() {
     let seconds = INPUT_DELAY_SLOW_CALLBACK_MS.to::<f64>() / 1000.0;
     api.state().ticks = HOOK_KEY_TIME_MS;
     clock.perf.lock().unwrap().extend([0.0, seconds]);
-    subject.handle_native(NativeKeyEvent { foreign: true, ..native(true, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS) });
+    let _ = subject.handle_native(NativeKeyEvent { foreign: true, ..native(true, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS) });
     assert_eq!(
         subject.take_input_delay().unwrap(),
         InputDelayReport {
@@ -1560,12 +1559,12 @@ fn the_hook_times_its_answer_and_counts_a_slow_one() {
         }
     );
     clock.perf.lock().unwrap().extend([0.0, seconds]);
-    subject.handle_native(native(false, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS));
+    let _ = subject.handle_native(native(false, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS));
     let report = subject.take_input_delay().unwrap();
     assert_eq!((report.keys, report.slow_callbacks, report.worst_callback_ms), (1, 1, INPUT_DELAY_SLOW_CALLBACK_MS));
     // Half a millisecond rounds to the even number, as the Python's round does.
     clock.perf.lock().unwrap().extend([0.0, 0.0025]);
-    subject.handle_native(native(false, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS));
+    let _ = subject.handle_native(native(false, VK_RETURN, SCAN_CODE_ENTER, false, HOOK_KEY_TIME_MS));
     assert_eq!(subject.take_input_delay().unwrap().worst_callback_ms, 2);
 }
 
@@ -1580,13 +1579,13 @@ fn the_hook_notes_the_gap_before_the_key_goes_on() {
     subject.set_listener(Some(Arc::new(move |_event| {
         noted.lock().unwrap().push(inner.input_delay.take_gap());
     })));
-    subject.handle_native(key);
+    let _ = subject.handle_native(key);
     let expected = HookGap { late_ms: HOOK_GAP_MS, callback_ms: 0 };
     assert_eq!(*seen.lock().unwrap(), [Some(expected)]);
     // A key time ahead of the clock, and another program's key, are not waits the hook can know.
     let ahead = api.state().ticks + 1;
-    subject.handle_native(NativeKeyEvent { pressed: false, timestamp: ahead, ..key });
-    subject.handle_native(NativeKeyEvent { timestamp: 0, foreign: true, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { pressed: false, timestamp: ahead, ..key });
+    let _ = subject.handle_native(NativeKeyEvent { timestamp: 0, foreign: true, ..key });
     assert_eq!(subject.take_hook_gap(), None);
 }
 
@@ -2095,8 +2094,8 @@ fn the_default_job_starter_runs_the_mask_off_the_hook_thread() {
     subject.set_key_filter(Some(Arc::new(|event: &KeyEvent| {
         if event.key_name == "Pause" { KeyDisposition::Consume } else { KeyDisposition::Pass }
     })));
-    subject.handle_native(native(true, VK_LMENU, SCAN_CODE_LEFT_ALT, false, 5000));
-    subject.handle_native(native(true, VK_PAUSE, SCAN_CODE_PAUSE, false, 5100));
+    let _ = subject.handle_native(native(true, VK_LMENU, SCAN_CODE_LEFT_ALT, false, 5000));
+    let _ = subject.handle_native(native(true, VK_PAUSE, SCAN_CODE_PAUSE, false, 5100));
     assert_ne!(on_thread.recv_timeout(Duration::from_secs(10)).unwrap(), here);
 }
 

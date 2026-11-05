@@ -4,6 +4,7 @@
 //! Everything here runs on the thread of the window that owns the icon. The menu is built each time it opens, so its
 //! labels and switches follow the state, as pystray's callables did.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::ptr::{null, null_mut};

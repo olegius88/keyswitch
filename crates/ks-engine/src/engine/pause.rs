@@ -2,7 +2,7 @@
 
 use super::decide::WordOptions;
 use super::logging::{technical_event, WordEvaluation};
-use super::{Stroke, EngineCore, EngineResult, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, InputBackend, KeyEvent, ms, sorted_keycodes, text_for_group, Strokes, InsertionPoint, pystr, PlanRef, DetectionDecision, Arc, KeptWord, Update};
+use super::{Stroke, EngineCore, EngineResult, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, KeyEvent, ms, sorted_keycodes, text_for_group, Strokes, InsertionPoint, pystr, PlanRef, DetectionDecision, Arc, KeptWord, Update};
 use ks_context::context_policy::DecideOptions as PolicyOptions;
 use ks_lang::intent_model::CorrectionTrigger;
 
@@ -184,7 +184,7 @@ impl EngineCore {
             // Typed into a word, every key is part of it: `,` between `те` and `е`
             // is the `б` of `тебе`, not punctuation in front of a word.
             head = 0;
-            strokes = typed.clone();
+            strokes.clone_from(&typed);
             trailing = Vec::new();
             segmentation_certain = true;
         }
@@ -360,7 +360,7 @@ impl EngineCore {
                     }));
                 }
                 let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
-                let base = base.replaced_with(|plan| plan.trailing = trailing.clone());
+                let base = base.replaced_with(|plan| plan.trailing.clone_from(&trailing));
                 let base = self.with_signs(&base, &signs);
                 let taken = self.take_along(&kept, &base, pystr::len(&original), &application, false)?;
                 if taken.mode == "context_phrase" {
@@ -389,7 +389,7 @@ impl EngineCore {
             let closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, None));
             let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
             let base = base.replaced_with(|plan| {
-                plan.trailing = trailing.clone();
+                plan.trailing.clone_from(&trailing);
                 plan.head = if !mention.is_empty() && closed { Vec::new() } else { mention.clone() };
             });
             let mut plan = self.with_signs(&base, &signs);

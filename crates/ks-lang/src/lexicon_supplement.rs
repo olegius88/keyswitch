@@ -69,7 +69,7 @@ impl<'de> de::Deserialize<'de> for RawWords {
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<RawWords, A::Error> {
                 let mut list = WordList::with_capacity(seq.size_hint().unwrap_or(0), 0);
                 let mut only_strings = true;
-                while let Some(element) = seq.next_element::<Element>()? {
+                while let Some(element) = seq.next_element::<Element<'_>>()? {
                     match element {
                         Element::Text(text) => list.push(&text),
                         Element::Other => only_strings = false,

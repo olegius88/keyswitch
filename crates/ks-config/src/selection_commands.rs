@@ -182,9 +182,9 @@ pub type KeyChoice = (i64, bool);
 /// typed in when that group has it (spaces, digits and signs on the same key in both layouts do not switch), and
 /// otherwise in the first group that has it. A character no group types makes the whole text `SelectionRefused`, before
 /// a single key is typed.
-pub fn typing_runs(
+pub fn typing_runs<S: ::std::hash::BuildHasher>(
     text: &str,
-    tables: &[HashMap<char, KeyChoice>],
+    tables: &[HashMap<char, KeyChoice, S>],
     start_group: i64,
 ) -> Result<Vec<(i64, Vec<KeyChoice>)>, SelectionRefused> {
     let mut runs: Vec<(i64, Vec<KeyChoice>)> = Vec::new();

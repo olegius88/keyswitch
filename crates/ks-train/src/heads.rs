@@ -110,7 +110,6 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
 }
 
 /// `head_question`: whether the features of a frame hold one of these prefixes.
-#[expect(clippy::too_many_arguments)]
 pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &str, after: &str, trigger: &str, origin: AfterOrigin, prefixes: &BTreeSet<String>, before_origin: BeforeOrigin) -> bool {
     let has = |prefix: &str| prefixes.contains(prefix);
     let t = &tools.tables;

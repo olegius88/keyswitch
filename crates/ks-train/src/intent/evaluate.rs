@@ -367,7 +367,7 @@ pub fn verify_provenance(model: &LinearNgramModel, manifest: &Value, inputs: &Pr
     let calculated = seal::build_provenance_sha256(manifest_object)?;
     let recorded = manifest["build_provenance_sha256"].as_str().ok_or("a provenance digest")?;
     let version = manifest["artifact_model_version"].as_str().ok_or("a version")?;
-    let expected_version = format!("intent-v1-{}", &calculated[..seal::VERSION_HASH_CHARACTERS]);
+    let expected_version = format!("intent-v1-{}", calculated.get(..seal::VERSION_HASH_CHARACTERS).unwrap_or_default());
     let parameters = seal::runtime_parameters(model);
     let audit = SafetyAudit::of(&candidate.safety, protected);
     let gate_policy = pipeline::gate_policy(raw_config, config);
@@ -786,7 +786,6 @@ struct ContextEvaluation<'a> {
 }
 
 /// `evaluate_production_context_ensemble`: the real detector at every role-relative context endpoint.
-#[expect(clippy::too_many_arguments)]
 fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [LexicalExample], unknown_typo: &'a [LexicalExample], safety: &'a [LexicalExample], source_known: &'a [LexicalExample], models: &[Arc<LanguageModel>; 2], protected: &Arc<ProtectedTokens>, config: &FitConfig, workers: usize) -> Result<ContextEvaluation<'a>, String> {
     if safety.iter().any(|example| example.label || !example.safety) {
         return Err("production context safety rows must be safety negatives".to_owned());

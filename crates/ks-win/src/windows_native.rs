@@ -9,6 +9,7 @@
 //! the ring, written before anything else at each event, and the listener, set before the hook is installed and taken
 //! away after it is removed. There is one keyboard hook per process.
 
+#![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 

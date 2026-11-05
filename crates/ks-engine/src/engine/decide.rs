@@ -358,7 +358,6 @@ impl EngineCore {
     /// word of the lexicon or the identifier index is not taken back: the prefix model was right
     /// about a term typed in the other layout that the context model, asked about the unknown
     /// typed reading alone, kept (an English word typed in the Russian layout after Russian prose).
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn settle_early_switch(
         &mut self, shown: DetectionDecision, strokes: &[Stroke], shown_group: i64, origin: i64, application: &str, trigger: CorrectionTrigger,
         boundary_text: &str,
@@ -483,7 +482,6 @@ impl EngineCore {
         })?)
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn consult_context_model(
         &mut self, decision: DetectionDecision, original: &str, alternatives: &Alternatives, rejected_targets: &[i64], application: &str,
         trigger: CorrectionTrigger, options: WordOptions,

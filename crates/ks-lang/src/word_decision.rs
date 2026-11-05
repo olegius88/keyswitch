@@ -82,7 +82,6 @@ pub fn automatic_word_decision(
 /// rule therefore reads the letter as a word only when the target layout prints a space, nothing or a clause sign
 /// right after it (`OPENING_LETTER_FOLLOWING_SIGNS)`: `f?` is `а,` and `f& xnj` is `а? что`, while `J.` is `Ою` and `C#`
 /// is `С№` in the Russian layout, no word a message opens with.
-#[expect(clippy::too_many_arguments)]
 pub fn opening_letter_decision(
     detector: &LanguageDetector,
     original: &str,

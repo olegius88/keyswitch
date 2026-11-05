@@ -1,6 +1,7 @@
 //! What the process asks of the operating system directly: the local time of the log, the system description of its first
 //! line, and the signals that end a run without a window.
 
+#![expect(unsafe_code, reason = "calls into the Linux kernel and system libraries")]
 use ks_cast::To as _;
 use std::ffi::CStr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

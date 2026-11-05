@@ -98,7 +98,6 @@ pub struct CorrectionPlan {
 
 impl CorrectionPlan {
     /// The positional fields; `automatic` True and `mode` "boundary" are the defaults of the dataclass.
-    #[expect(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         strokes: Strokes, boundary: Option<Stroke>, source_group: i64, target_group: i64, original: String, replacement: String,

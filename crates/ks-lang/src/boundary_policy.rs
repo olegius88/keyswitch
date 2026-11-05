@@ -37,9 +37,9 @@ pub fn misspelled(text: &str, model: &LanguageModel) -> bool {
     word.char_indices().any(|(offset, _)| {
         letters.chars().any(|letter| {
             candidate.clear();
-            candidate.push_str(&word[..offset]);
+            candidate.push_str(word.get(..offset).unwrap_or_default());
             candidate.push(letter);
-            candidate.push_str(&word[offset..]);
+            candidate.push_str(word.get(offset..).unwrap_or_default());
             model.frequencies.get_or_zero(&candidate) != 0
         })
     })
