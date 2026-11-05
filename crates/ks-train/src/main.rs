@@ -138,6 +138,18 @@ fn main() {
         }
         return;
     }
+    if arguments.first().map(String::as_str) == Some("coverage-gate") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let reports: Vec<String> = arguments.windows(2).filter(|pair| pair[0] == "--report").map(|pair| pair[1].clone()).collect();
+        match ks_train::coverage_gate::check(&root, &reports, &root.join("packaging/coverage-native.txt")) {
+            Ok(files) => println!("every line and branch of {files} files ran"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if arguments.first().map(String::as_str) == Some("licenses") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         if let Err(error) = ks_train::licenses::command(&root, arguments.iter().any(|argument| argument == "--verify")) {

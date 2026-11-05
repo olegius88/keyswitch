@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Measures test coverage on Linux: every test, the live tests in a private desktop, and the replays CI runs. The report is
-# written to the file named by the first argument.
-#
-# https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-external-tests
+# written to the file named by the first argument, and `ks-train coverage-gate` reads it.
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 report="$(realpath -m -- "${1:?usage: coverage.sh <report.json>}")"
 cd "$project_dir"
 
-source <(cargo llvm-cov show-env --sh)
+# Branch coverage needs a nightly compiler; the program itself is built with stable.
+# https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-external-tests
+export RUSTUP_TOOLCHAIN="${KS_COVERAGE_TOOLCHAIN:-nightly-2026-11-05}"
+source <(cargo llvm-cov show-env --sh --branch)
 cargo llvm-cov clean --workspace
 
 status=0
@@ -46,5 +47,5 @@ step train intent --preseal --output "$scratch/preseal.json"
 step train intent --freeze --output "$scratch/development.json"
 step train intent --evaluate --strict --output "$scratch/strict.json"
 
-cargo llvm-cov report --profile coverage --json --output-path "$report"
+cargo llvm-cov report --profile coverage --branch --json --output-path "$report"
 exit "$status"

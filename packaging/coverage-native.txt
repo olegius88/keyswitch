@@ -1,0 +1,29 @@
+# Code the coverage check leaves out: the files that call the operating system, as the Python's list did. The live tests
+# run them (packaging/e2e.sh, packaging/e2e-mac.command, the Windows job); the failures they handle cannot be produced.
+crates/ks-hunspell/src/lib.rs
+crates/ks-linux/src/atspi_bus.rs
+crates/ks-linux/src/platform.rs
+crates/ks-linux/src/wayland_access.rs
+crates/ks-linux/src/wayland_native.rs
+crates/ks-linux/src/x11_native.rs
+crates/ks-mac/src/desktop_app.rs
+crates/ks-mac/src/macos_native.rs
+crates/ks-mac/src/macos_objc.rs
+crates/ks-mac/src/macos_tray_native.rs
+crates/ks-mac/src/settings_window.rs
+crates/ks-win/src/desktop_app.rs
+crates/ks-win/src/learning_prompt.rs
+crates/ks-win/src/rule_editor_dialog.rs
+crates/ks-win/src/settings_window.rs
+crates/ks-win/src/tray.rs
+crates/ks-win/src/win32_controls.rs
+crates/ks-win/src/windows_context.rs
+crates/ks-win/src/windows_instance.rs
+crates/ks-win/src/windows_native.rs
+crates/ks-win/src/windows_registry.rs
+crates/ks-win/src/winhttp.rs
+crates/logcourier/src/gui_gtk.rs
+crates/logcourier/src/gui_win.rs
+# The tools that train and replay: measured, and next to be covered.
+crates/ks-replay/
+crates/ks-train/

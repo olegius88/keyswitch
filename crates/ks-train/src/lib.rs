@@ -12,6 +12,7 @@ pub mod captured;
 pub mod compare;
 pub mod corpus;
 pub mod curricula;
+pub mod coverage_gate;
 pub mod deb_check;
 pub mod detector;
 pub mod engine_reports;
