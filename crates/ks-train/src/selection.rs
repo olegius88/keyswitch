@@ -56,6 +56,7 @@ pub struct EpochSelection {
 
 impl EpochSelection {
     /// Worst profile first, then the pooled balance: a model is judged by what it nets.
+    #[must_use]
     pub fn rank(&self) -> (f64, f64, f64, f64, f64) {
         (self.minimum_net_benefit.to::<f64>(), self.net_benefit.to::<f64>(), self.pooled_recall, -self.loss, -self.threshold)
     }
@@ -156,6 +157,7 @@ pub struct Qualifying {
 
 /// The epoch the heads keep: the latest whose development balance is within the tolerance of the best. The balance is
 /// flat over most epochs; within the tolerance the difference is noise, and the latest epoch fitted the curricula furthest.
+#[must_use]
 pub fn settled_epoch(qualifying: &[Qualifying]) -> Option<&Qualifying> {
     let mut best: Option<&Qualifying> = None;
     for entry in qualifying {
@@ -176,6 +178,7 @@ pub fn settled_epoch(qualifying: &[Qualifying]) -> Option<&Qualifying> {
         .max_by_key(|entry| entry.epoch)
 }
 
+#[must_use]
 pub fn metrics(probabilities: &[f64], labels: &[u8], threshold: f64) -> Value {
     let (mut wrong, mut right, mut possible, mut correct) = (0i64, 0i64, 0i64, 0i64);
     for (index, label) in labels.iter().enumerate() {

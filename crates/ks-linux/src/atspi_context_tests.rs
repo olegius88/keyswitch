@@ -244,7 +244,7 @@ fn read_with_application(fake: &Arc<Fake>, application: &str) -> Result<Option<F
 fn the_walk_stops_at_its_deadline() {
     let fake = Fake::new();
     let reader = fake.reader(None);
-    assert_eq!(reader.focused("editor", WINDOW, Instant::now() - Duration::from_secs(1)), Ok(None));
+    assert_eq!(reader.focused("editor", WINDOW, Instant::now().checked_sub(Duration::from_secs(1)).unwrap()), Ok(None));
     assert!(reader.focused("editor", WINDOW, Instant::now() + Duration::from_secs(5)).expect("walks").is_some());
 }
 

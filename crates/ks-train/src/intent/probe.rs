@@ -234,12 +234,11 @@ fn random_stream() -> Vec<Entry> {
 const CELLS: [(&str, fn() -> Vec<Entry>); 9] = [("float_arithmetic", float_arithmetic), ("libm", libm), ("builtin_sum", builtin_sum), ("float_text", float_text), ("unicode", unicode), ("hashing", hashing), ("ordering", ordering), ("integers", integers), ("random_stream", random_stream)];
 
 fn bucket_of(cell: &str, label: &str) -> String {
-    if cell == "unicode" {
-        if let Some(rest) = label.strip_prefix("U+") {
+    if cell == "unicode"
+        && let Some(rest) = label.strip_prefix("U+") {
             let point = u32::from_str_radix(rest.split(':').next().unwrap_or(rest), 16).unwrap_or(0);
             return format!("plane-{:02X}", point >> PLANE_BITS);
         }
-    }
     label.split(':').next().unwrap_or(label).to_owned()
 }
 

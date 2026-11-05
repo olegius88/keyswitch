@@ -184,7 +184,7 @@ impl PhysicalKeyboard {
         let now = libc::timeval { tv_sec: 0, tv_usec: 0 };
         let events = [InputEvent { time: now, kind: EV_KEY.low::<u16>(), code, value }, InputEvent { time: now, kind: EV_SYN.low::<u16>(), code: SYN_REPORT, value: 0 }];
         // SAFETY: the bytes written are those of the array, which outlives the call.
-        let written = unsafe { libc::write(self.descriptor, events.as_ptr().cast(), std::mem::size_of_val(&events)) };
+        let written = unsafe { libc::write(self.descriptor, events.as_ptr().cast(), size_of_val(&events)) };
         if written < 0 { Err(io_error("a key event")) } else { Ok(()) }
     }
 
@@ -230,8 +230,8 @@ impl PhysicalKeyboard {
         loop {
             let mut event = InputEvent { time: libc::timeval { tv_sec: 0, tv_usec: 0 }, kind: 0, code: 0, value: 0 };
             // SAFETY: the kernel writes at most the size of the event it is given.
-            let read = unsafe { libc::read(self.descriptor, (&raw mut event).cast(), std::mem::size_of::<InputEvent>()) };
-            if read != (std::mem::size_of::<InputEvent>()).bits::<isize>() {
+            let read = unsafe { libc::read(self.descriptor, (&raw mut event).cast(), size_of::<InputEvent>()) };
+            if read != (size_of::<InputEvent>()).bits::<isize>() {
                 break;
             }
             if u32::from(event.kind) == EV_LED {
@@ -337,7 +337,7 @@ impl PhysicalPointer {
         let now = libc::timeval { tv_sec: 0, tv_usec: 0 };
         let packed: Vec<InputEvent> = events.iter().map(|(kind, code, value)| InputEvent { time: now, kind: (*kind).low::<u16>(), code: *code, value: *value }).collect();
         // SAFETY: the bytes written are those of the vector, which outlives the call.
-        let written = unsafe { libc::write(self.descriptor, packed.as_ptr().cast(), packed.len() * std::mem::size_of::<InputEvent>()) };
+        let written = unsafe { libc::write(self.descriptor, packed.as_ptr().cast(), packed.len() * size_of::<InputEvent>()) };
         if written < 0 { Err(io_error("a pointer event")) } else { Ok(()) }
     }
 
@@ -398,7 +398,7 @@ fn code_of(character: char) -> Option<u16> {
 /// The window typed into, in a process of its own: the program neither follows the focus into a window of its own process
 /// nor reads its fields, so a window here would hide what a user's application goes through.
 mod target {
-    use super::*;
+    use super::{json, Value, Write, DisplayExt, DBusInterfaceSkeletonExt, DBusObjectSkeletonExt, OutputStreamExt, ApplicationExt, TARGET_APPLICATION_ID, ButtonExt, CheckButtonExt, ComboBoxExt, EntryExt, FlowBoxChildExt, ListBoxRowExt, GtkWindowExt, NativeDialogExt, ToplevelExt, WINDOW_WIDTH, WINDOW_HEIGHT, CellRendererTextExt, AdjustmentExt, EditableExt, FilterExt, RecentManagerExt, SorterExt, TextBufferExt, DeviceExt, DriveExt, FileMonitorExt, MountExt, SettingsExt, VolumeExt, EntryBufferExtManual, Cast, IsAttribute, IsRenderNode, WidgetExt, ENTRY_MARGIN, BoxExt, MultiFilterExt, UnixFDListExtManual, FrameExt, ListItemExt, PopoverExt, gdk, SeatExt, DragSurfaceExt, PopupExt, channel, BufRead, SocketExtManual, glib, Duration, CellRendererExt, SurfaceExt, TextureExt, PixbufAnimationExt, ApplicationExtManual};
 
     fn emit(event: &Value) {
         let mut out = std::io::stdout().lock();
@@ -406,7 +406,7 @@ mod target {
         let _ = out.flush();
     }
 
-    pub fn main() {
+    pub(crate) fn main() {
         let application = gtk::Application::builder().application_id(TARGET_APPLICATION_ID).build();
         application.connect_activate(|application| {
             let window = gtk::ApplicationWindow::builder().application(application).title("KeySwitch Wayland E2E target").default_width(WINDOW_WIDTH).default_height(WINDOW_HEIGHT).build();
@@ -656,11 +656,10 @@ fn packaged(binary: &Path, desktop: &str) -> Result<(), String> {
         if !wait_until(TRAY_DEADLINE, || child.try_wait().ok().flatten().is_none() && has_owner(&destination)) {
             return Err("the program did not register its panel icon".to_owned());
         }
-        if let Some(watcher) = &watcher {
-            if watcher.service().is_none() {
+        if let Some(watcher) = &watcher
+            && watcher.service().is_none() {
                 return Err("the watcher did not receive the icon's registration".to_owned());
             }
-        }
         let menu = dbus_call(&destination, MENU_PATH, &format!("{MENU_INTERFACE}.GetLayout"), &["0", "1", "[]"])?;
         if !menu.contains("Настройки KeySwitch") || !menu.contains("Выход") {
             return Err(format!("unexpected menu: {menu}"));
@@ -766,11 +765,10 @@ fn packaged(binary: &Path, desktop: &str) -> Result<(), String> {
     let _ = control.switch_group(original);
     drop(target);
     drop(keyboard);
-    if outcome.is_err() {
-        if let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
+    if outcome.is_err()
+        && let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
             println!("{}", log.lines().rev().take(40).collect::<Vec<&str>>().join("\n"));
         }
-    }
     let _ = std::fs::remove_dir_all(&root);
     outcome
 }

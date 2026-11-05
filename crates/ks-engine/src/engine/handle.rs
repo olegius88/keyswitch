@@ -28,7 +28,7 @@ impl KeySwitchEngine {
     /// `KeySwitchEngine(settings, history, backend, learning, backend_label, context_reader)`. The resources folder and the
     /// clock are given here, as the Python finds its own; `context_reader` None is the reader of this platform, built from
     /// `reader_factory`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         settings: Arc<SettingsStore>, history: Arc<HistoryStore>, backend: Arc<dyn InputBackend>, learning: Option<Arc<LearningStore>>,
         backend_label: &str, context_reader: Option<Arc<dyn FieldReader>>, reader_factory: Option<crate::context_access::ReaderFactory>,
@@ -156,7 +156,7 @@ impl KeySwitchEngine {
         Ok(stored)
     }
 
-    /// Forget the user's own words (personal_words).
+    /// Forget the user's own words (`personal_words`).
     pub fn clear_personal_words(&self) {
         self.personal.clear();
         technical_event!(self.shared, "personal_words_cleared");
@@ -326,15 +326,15 @@ impl EngineCore {
         Ok(())
     }
 
-    /// Log, once per program, input that reached a program without any hook of KeySwitch.
+    /// Log, once per program, input that reached a program without any hook of `KeySwitch`.
     ///
     /// A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every
-    /// keyboard hook of the system silent (Windows 10 and 11, 28.10.2026): KeySwitch sees nothing typed there, and
+    /// keyboard hook of the system silent (Windows 10 and 11, 28.10.2026): `KeySwitch` sees nothing typed there, and
     /// the log did not say so. The programs are logged to learn which do it before anything is built for them, and
     /// nothing else is done. Letting go of the text as well dropped words the hook saw typed in 0.64.0: on a laptop
     /// input no hook got came in the middle of words in 14 programs, and each time the word, the text before it and
     /// the last correction were forgotten, so Pause found no word to convert. A backend that cannot tell has no
-    /// take_unseen_input.
+    /// `take_unseen_input`.
     pub fn report_unseen_input(&mut self) -> EngineResult<()> {
         let Some(unseen) = self.backend.take_unseen_input()? else {
             return Ok(());
@@ -353,7 +353,7 @@ impl EngineCore {
     /// Log how late the keyboard hook saw keys, once a minute and only when one was late.
     ///
     /// A backend that cannot tell (X11 observes keys after the window has them) has no
-    /// take_input_delay; see input_delay.
+    /// `take_input_delay`; see `input_delay`.
     pub fn report_input_delay(&mut self) {
         let now = self.monotonic();
         if now < self.input_delay_due {

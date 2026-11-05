@@ -44,6 +44,7 @@ fn wayland_backend() -> Result<DesktopBackend, String> {
 }
 
 /// The backend of this session. A Wayland session whose backend cannot be built gets one that reports why.
+#[must_use]
 pub fn new_desktop_backend() -> DesktopBackend {
     if !wayland_session_active() {
         return x11_backend();

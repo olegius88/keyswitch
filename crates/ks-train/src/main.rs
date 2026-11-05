@@ -61,7 +61,7 @@ fn main() {
         }
     }
     if arguments.first().map(String::as_str) == Some("evaluate") {
-        let required = |name: &str| option(&arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+        let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
         let root = required("--tree");
         let resource_dir = root.join("resources");
         let (artifact, seal, prefix, prefix_seal, corpus, output) = (required("--candidate"), option(&arguments, "--seal").map(PathBuf::from).unwrap_or_default(), required("--prefix-candidate"), option(&arguments, "--prefix-seal").map(PathBuf::from).unwrap_or_default(), required("--corpus"), required("--output"));
@@ -96,7 +96,7 @@ fn main() {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         match ks_train::messages::command(&arguments, &root, &resources) {
-            Ok(result) => println!("{}", ks_text::json_dumps(&result, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() })),
+            Ok(result) => println!("{}", ks_text::json_dumps(&result, &JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..JsonOptions::default() })),
             Err(error) => {
                 eprintln!("{error}");
                 std::process::exit(1);
@@ -292,7 +292,7 @@ fn main() {
         eprintln!("usage: ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]");
         std::process::exit(2);
     }
-    let required = |name: &str| option(&arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let root = required("--tree");
     let recipe = option(&arguments, "--recipe").map_or_else(|| root.join("model/context_v3/recipe.json"), PathBuf::from);
     let ledger = option(&arguments, "--ledger").map_or_else(|| root.join(".t/reliable-release-2026-09-12/context-action-test-ledger"), PathBuf::from);
@@ -360,7 +360,7 @@ fn all_of<'a>(arguments: &'a [String], name: &str) -> Vec<&'a str> {
 /// The two corpus freezes share their arguments.
 fn freeze_command(arguments: &[String]) -> i32 {
     use ks_train::freeze::{self, FreezeRequest, TechnicalSource};
-    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let root = required("--tree");
     let holdout = arguments[0] == "holdout";
     let (base, ud_origin, technical_origin, prefix_inventory) = (required("--base"), required("--ud-origin"), required("--technical-origin"), required("--prefix-inventory"));
@@ -419,7 +419,7 @@ fn freeze_command(arguments: &[String]) -> i32 {
 
 /// The commands of the typing bench.
 fn typing_command(arguments: &[String]) -> i32 {
-    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let root = required("--tree");
     let resource_dir = root.join("resources");
     let jobs: usize = option(arguments, "--jobs").map_or(4, |value| value.parse().expect("--jobs is a number"));
@@ -472,7 +472,7 @@ fn typing_command(arguments: &[String]) -> i32 {
 
 /// The steps of a model cycle after a fit.
 fn cycle_command(arguments: &[String]) -> i32 {
-    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let root = required("--tree");
     let resource_dir = root.join("resources");
     let jobs: usize = option(arguments, "--jobs").map_or(4, |value| value.parse().expect("--jobs is a number"));
@@ -504,7 +504,7 @@ fn cycle_command(arguments: &[String]) -> i32 {
             let inputs = ks_train::fit::load_inputs(&root, &resource_dir, &required("--corpus"), options, &ledger)?;
             let report = ks_train::compare::compare(&inputs, &artifacts, jobs)?;
             if let Some(path) = option(arguments, "--output") {
-                let format = ks_text::JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() };
+                let format = JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(ks_text::Indent::Spaces(1)), ..JsonOptions::default() };
                 std::fs::write(path, ks_text::json_dumps(&report, &format) + "\n").map_err(|error| error.to_string())?;
             }
             for (split, profiles) in report.as_object().into_iter().flatten() {
@@ -604,7 +604,7 @@ fn base_command(arguments: &[String]) -> Result<serde_json::Value, String> {
     match arguments.get(1).map(String::as_str) {
         Some("freeze") => {
             let namespace = option(arguments, "--namespace").ok_or("--namespace is required")?;
-            let manifest = base::freeze_base(&root, &required("--source-root")?, &required("--output")?, &namespace, &exposures, size("--max-documents", base::DEFAULT_MAX_DOCUMENTS_PER_SOURCE)?, size("--max-sentences-per-document", base::DEFAULT_MAX_SENTENCES_PER_DOCUMENT)?)?;
+            let manifest = base::freeze_base(&root, &required("--source-root")?, &required("--output")?, namespace, &exposures, size("--max-documents", base::DEFAULT_MAX_DOCUMENTS_PER_SOURCE)?, size("--max-sentences-per-document", base::DEFAULT_MAX_SENTENCES_PER_DOCUMENT)?)?;
             Ok(serde_json::json!({"namespace": manifest["namespace"], "sampling": manifest["sampling"], "partitioning": manifest["partitioning"], "splits": manifest["splits"], "test_membership_sha256": manifest["test_membership_sha256"]}))
         }
         Some("reconcile") => base::reconcile(&root, &required("--corpus")?, &required("--source-root")?, &required("--report")?, option(arguments, "--output").map(PathBuf::from).as_deref()),

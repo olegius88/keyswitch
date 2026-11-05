@@ -1,6 +1,6 @@
-//! The user's own words, which the typo correction leaves as typed (KeySwitchEngine typo plan).
+//! The user's own words, which the typo correction leaves as typed (`KeySwitchEngine` typo plan).
 //!
-//! A word becomes the user's own when they type it and leave it as it is PERSONAL_WORD_MIN_COUNT times, or at once when
+//! A word becomes the user's own when they type it and leave it as it is `PERSONAL_WORD_MIN_COUNT` times, or at once when
 //! they take back a typo correction of it: `комить`, `иишка` and `митап` are words of their language for them, whatever
 //! a word list says. The file beside the history keeps no text: each word is stored as a salted SHA-256 (the salt is
 //! drawn once per installation and kept in the same file), so the file lists which hashes are the user's words and how
@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -34,6 +34,7 @@ fn hex(bytes: &[u8]) -> String {
 /// `secrets.token_hex(nbytes)`. Randomness comes from the operating system through the seeds of `RandomState` (which
 /// the standard library draws from `getrandom`, `BCryptGenRandom` or `arc4random`), mixed with SHA-256; this needs no
 /// `unsafe` and no extra crate. A salt is not a key: it only has to differ between installations.
+#[must_use]
 pub fn token_hex(nbytes: usize) -> String {
     let mut pool: Vec<u8> = Vec::new();
     for round in 0u64..8 {
@@ -75,17 +76,14 @@ impl<V> Ordered<V> {
 
     /// `d[key] = value`: a key that is there keeps its place.
     fn set(&mut self, key: String, value: V) {
-        match self.positions.get(&key) {
-            Some(position) => {
-                if let Some(entry) = self.entries.get_mut(position) {
-                    entry.1 = value;
-                }
+        if let Some(position) = self.positions.get(&key) {
+            if let Some(entry) = self.entries.get_mut(position) {
+                entry.1 = value;
             }
-            None => {
-                self.positions.insert(key.clone(), self.next);
-                self.entries.insert(self.next, (key, value));
-                self.next += 1;
-            }
+        } else {
+            self.positions.insert(key.clone(), self.next);
+            self.entries.insert(self.next, (key, value));
+            self.next += 1;
         }
     }
 
@@ -120,7 +118,7 @@ struct State {
 
 /// The user's own words as salted hashes, in `personal-words.json`.
 ///
-/// `persist` says whether the file may be written now: with the history off (general.keep_history) nothing typed is
+/// `persist` says whether the file may be written now: with the history off (`general.keep_history`) nothing typed is
 /// stored, and the words stay the user's for the session only.
 pub struct PersonalWords {
     pub path: PathBuf,
@@ -131,11 +129,13 @@ pub struct PersonalWords {
 }
 
 impl PersonalWords {
+    #[must_use]
     pub fn new(path: Option<PathBuf>, persist: Box<dyn Fn() -> bool + Send + Sync>) -> PersonalWords {
         PersonalWords::with_salt_source(path, persist, Box::new(|| token_hex(PERSONAL_WORD_SALT_BYTES)))
     }
 
     /// `new` with the draw of the salt given.
+    #[must_use]
     pub fn with_salt_source(
         path: Option<PathBuf>,
         persist: Box<dyn Fn() -> bool + Send + Sync>,
@@ -152,6 +152,7 @@ impl PersonalWords {
     }
 
     /// `PersonalWords(persist=lambda: True)`.
+    #[must_use]
     pub fn always_persisting(path: Option<PathBuf>) -> PersonalWords {
         PersonalWords::new(path, Box::new(|| true))
     }
@@ -285,7 +286,7 @@ impl PersonalWords {
         let mut data = Map::new();
         data.insert("schema_version".into(), Value::from(PERSONAL_WORDS_SCHEMA_VERSION));
         data.insert("salt".into(), Value::String(state.salt.clone()));
-        data.insert("personal".into(), Value::Array(state.personal.iter().map(|(key, _)| Value::String(key.clone())).collect()));
+        data.insert("personal".into(), Value::Array(state.personal.iter().map(|(key, ())| Value::String(key.clone())).collect()));
         data.insert("counts".into(), Value::Object(counts));
         // json.dumps(data, indent=2) with the default ensure_ascii: every character is ASCII anyway.
         let options = JsonOptions { indent: Some(Indent::Spaces(USER_DATA_JSON_INDENT)), ..JsonOptions::default() };

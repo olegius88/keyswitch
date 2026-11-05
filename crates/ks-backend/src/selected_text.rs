@@ -33,6 +33,7 @@ pub enum RefusalReason {
 
 impl RefusalReason {
     /// The name the log gives the reason.
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             RefusalReason::Disabled => "disabled",
@@ -66,6 +67,7 @@ pub struct SelectionRefused {
 }
 
 impl SelectionRefused {
+    #[must_use]
     pub fn new(reason: RefusalReason) -> Self {
         SelectionRefused { reason }
     }

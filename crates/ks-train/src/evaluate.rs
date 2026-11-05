@@ -120,7 +120,7 @@ pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
                 intervention_event = Some(keys.len() + 1);
             }
             let mut chosen = key.clone();
-            chosen.explicit_group = explicit.map(|value| value.to::<i32>());
+            chosen.explicit_group = explicit.map(ks_cast::To::to::<i32>);
             keys.push(chosen);
         }
     }
@@ -129,6 +129,7 @@ pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
 }
 
 /// `select_rows`: hash-ranked documents and one hash-ranked focus per document and group.
+#[must_use]
 pub fn select_rows(rows: &[CorpusRow]) -> Vec<&CorpusRow> {
     let mut selected = Vec::new();
     for group in [Some(0), Some(1), None] {
@@ -205,7 +206,7 @@ pub struct Pairs {
 }
 
 /// `score_sequences`: every pair replayed in both settings modes; acceptance needs every gate in every mode and profile.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Value, String> {
     let selected = select_rows(rows);
     let mut plans = Vec::new();
@@ -431,12 +432,12 @@ fn validate_calibration(value: &Value) -> Result<(), String> {
         if possible == 0 || rows < possible || right > possible || recall != right.to::<f64>() / possible.to::<f64>() || wrong > right || right - wrong < 1 {
             return Err(format!("calibration gate failed: {name}"));
         }
-        if name != "aggregate" {
+        if name == "aggregate" {
+            sums = [0; 4];
+        } else {
             for (sum, number) in sums.iter_mut().zip(&numbers) {
                 *sum += number;
             }
-        } else {
-            sums = [0; 4];
         }
     }
     for (field, sum) in fields.iter().zip(sums) {

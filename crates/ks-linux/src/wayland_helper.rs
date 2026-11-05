@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use crate::constants::{KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS};
 use crate::wayland_access::access_hint;
-use crate::wayland_constants::*;
+use crate::wayland_constants::{HELPER_MAX_FRAME_BYTES, HELPER_FRAME_HEADER_BYTES, MICROSECONDS_PER_MILLISECOND, UINT32_MODULO_MASK, EV_KEY, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, EVDEV_BTN_STYLUS, EVDEV_BTN_GAMEPAD, EV_ABS, EVDEV_ABS_MT_POSITION_X, EV_REL, EVDEV_REL_X, EVDEV_REL_Y, EVDEV_BTN_MOUSE, EVDEV_REQUIRED_KEYBOARD_KEYS, HELPER_MSG_ERROR, WAYLAND_UINPUT_SETTLE_SECONDS, HELPER_MSG_READY, WAYLAND_HELPER_POLL_TIMEOUT_MS, HELPER_SOCKET_CHUNK_BYTES, HELPER_CMD_STOP, HELPER_CMD_VERDICT, HELPER_CMD_EMIT_BATCH, HELPER_MSG_EMIT_ACK, HELPER_EMIT_ACTION, HELPER_EMIT_ITEM_BYTES, KEY_VALUE_RELEASE, EV_SYN, SYN_REPORT, KEY_VALUE_PRESS, HELPER_CMD_SEQ_ACK, HELPER_CMD_QUERY_KEY_DOWN, HELPER_MSG_KEY_DOWN, HELPER_CMD_SET_GRAB, HELPER_EMIT_TEXT, WAYLAND_UINPUT_BURST_TRANSITIONS, TRANSITION_EVENTS, WAYLAND_UINPUT_BURST_PAUSE_SECONDS, HELPER_KEY_FORCED, WAYLAND_HELPER_VERDICT_TIMEOUT_MS, HELPER_KEY_NEEDS_VERDICT, HELPER_MSG_KEY, KEY_VALUE_REPEAT, EVDEV_MODIFIER_KEYS, EVDEV_KEY_CAPSLOCK, HELPER_MSG_REPEAT_RESET, EVDEV_BTN_TASK, HELPER_MSG_POINTER, LED_CAPSL, HELPER_MSG_CAPS_LOCK, HELPER_MSG_INPUT_RESET, WAYLAND_GRAB_WAIT_TIMEOUT_SECONDS, WAYLAND_GRAB_POLL_SECONDS, WAYLAND_GRAB_RELEASE_SETTLE_SECONDS, HELPER_EMIT_UNCHECKED, WAYLAND_HELPER_COMMAND_TIMEOUT_SECONDS, HELPER_VERDICT_SWALLOW, HELPER_VERDICT_PASS};
 
 /// seq, pressed, keycode, time, flags (`HELPER_KEY_*`): `!IBHIB`.
 const MSG_KEY_SIZE: usize = 12;
@@ -63,11 +63,13 @@ impl Flag {
     }
 }
 
+#[must_use]
 pub fn seconds(value: f64) -> Duration {
     Duration::from_secs_f64(value.max(0.0))
 }
 
 /// Whether `seq` came after `than` among the helper's wrapping 32-bit key numbers.
+#[must_use]
 pub fn seq_newer(seq: u32, than: u32) -> bool {
     seq != than && seq.wrapping_sub(than) <= u32::MAX >> 1
 }
@@ -91,6 +93,7 @@ pub struct FrameReader {
 }
 
 impl FrameReader {
+    #[must_use]
     pub fn new() -> FrameReader {
         FrameReader::default()
     }
@@ -142,6 +145,7 @@ pub struct RawInputEvent {
 }
 
 impl RawInputEvent {
+    #[must_use]
     pub fn timestamp_ms(&self) -> u32 {
         (self.sec.wrapping_mul(1000).wrapping_add(self.usec.div_euclid(MICROSECONDS_PER_MILLISECOND)) & i64::from(UINT32_MODULO_MASK)).low::<u32>()
     }
@@ -155,6 +159,7 @@ pub enum DeviceRole {
 }
 
 /// Classify an evdev node as a physical keyboard to grab, passive pointer, or ignored.
+#[must_use]
 pub fn classify_input_device(info: &InputDeviceInfo) -> DeviceRole {
     if !info.ev_bits.contains(&EV_KEY) {
         return DeviceRole::Ignore;
@@ -665,12 +670,9 @@ impl<'a> WaylandInputHelper<'a> {
     }
 
     fn read_pointer(&mut self, fd: i32) -> io::Result<()> {
-        let events = match self.os.read_events(fd) {
-            Ok(events) => events,
-            Err(_) => {
-                self.close_pointer(fd);
-                return Ok(());
-            }
+        let events = if let Ok(events) = self.os.read_events(fd) { events } else {
+            self.close_pointer(fd);
+            return Ok(());
         };
         if !self.grab_enabled {
             return Ok(());
@@ -905,9 +907,11 @@ pub struct HelperKey {
 }
 
 impl HelperKey {
+    #[must_use]
     pub fn needs_verdict(&self) -> bool {
         self.flags & HELPER_KEY_NEEDS_VERDICT != 0
     }
+    #[must_use]
     pub fn forced(&self) -> bool {
         self.flags & HELPER_KEY_FORCED != 0
     }

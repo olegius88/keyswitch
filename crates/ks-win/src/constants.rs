@@ -17,9 +17,9 @@ pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
 /// milliseconds later or in another window: its release may have gone where the hook does not reach (a UAC prompt, the
 /// Ctrl+Alt+Del screen, an elevated window).
 pub const MODIFIER_RECHECK_GAP_MS: i64 = 1000;
-/// How long start() waits for the keyboard hook to confirm it runs.
+/// How long `start()` waits for the keyboard hook to confirm it runs.
 pub const KEYBOARD_LISTENER_START_TIMEOUT_SECONDS: f64 = 5.0;
-/// How long stop() waits for the keyboard hook's thread to finish.
+/// How long `stop()` waits for the keyboard hook's thread to finish.
 pub const KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS: f64 = 2.0;
 /// Milliseconds UI Automation may take to reach a provider and to finish one request.
 pub const UIA_CONNECTION_TIMEOUT_MS: u32 = 200;
@@ -28,9 +28,9 @@ pub const UIA_TRANSACTION_TIMEOUT_MS: u32 = 200;
 /// thread kept from the processor got its keys at most 4.8 s late in VM runs under CPU load, while a program in front
 /// that reads the keyboard as raw input and has a keyboard hook of its own keeps every keyboard hook silent for good.
 pub const HOOK_SILENCE_MS: i64 = 10_000;
-/// How many input times GetLastInputInfo must have moved through for input to count as kept from the hooks. A single
+/// How many input times `GetLastInputInfo` must have moved through for input to count as kept from the hooks. A single
 /// such input followed by events the hooks got is no program keeping keys away: inputs no hook got also came in Explorer,
-/// Task Manager and KeySwitch's own window, in the middle of words the hook saw typed.
+/// Task Manager and `KeySwitch`'s own window, in the middle of words the hook saw typed.
 pub const UNSEEN_INPUT_MIN_TIMES: usize = 3;
 /// The selection hotkeys copy the selection where UI Automation cannot read it: the clipboard has this long to change,
 /// to open for reading and to take the user's own data back. A copy that has not arrived by then is taken for no
@@ -38,14 +38,14 @@ pub const UNSEEN_INPUT_MIN_TIMES: usize = 3;
 pub const SELECTION_CLIPBOARD_TIMEOUT_SECONDS: f64 = 1.0;
 /// Step at which the clipboard is looked at again while it has not changed or another program holds it open.
 pub const SELECTION_CLIPBOARD_POLL_SECONDS: f64 = 0.02;
-/// A selection hotkey's result pasted on Windows (SLOW_INPUT_FIELD_CLASSES): the field takes the text when it handles
+/// A selection hotkey's result pasted on Windows (`SLOW_INPUT_FIELD_CLASSES)`: the field takes the text when it handles
 /// Ctrl+V, and the user's clipboard comes back once UI Automation shows the result selected, or after this long.
 pub const SELECTION_PASTE_CONFIRM_SECONDS: f64 = 1.0;
 
 // -------------------------------------------------------------------------------------------------- constants/text.py
 
 /// Characters a platform field reader reads after the caret; the before side is bounded by
-/// FIELD_CONTEXT_MAX_CHARACTERS, a different limit.
+/// `FIELD_CONTEXT_MAX_CHARACTERS`, a different limit.
 pub const FIELD_AFTER_CARET_MAX_CHARACTERS: i32 = 128;
 /// The longest selection a selection hotkey changes (layout, case, transliteration). The replacement is typed key by
 /// key, so the bound keeps one press of the hotkey within a moment of typing, and it bounds the read too: UI Automation
@@ -76,7 +76,7 @@ pub const PRIMARY_LANGID_MASK: i64 = 0x03FF;
 /// The low 32 bits of an HKL, for display, and of a tick count; HKL is pointer-sized but only the low word carries the
 /// language id and the high word the layout id.
 pub const DWORD_MASK: i64 = 0xFFFF_FFFF;
-/// The key and pointer event times the hook thread keeps for the check of input it never got (take_unseen_input): about
+/// The key and pointer event times the hook thread keeps for the check of input it never got (`take_unseen_input)`: about
 /// four seconds of a mouse reporting a thousand times a second, eight checks of the engine's timer.
 pub const HOOK_INPUT_TIMES_KEPT: usize = 4096;
 pub const VK_BACK: u32 = 0x08;
@@ -120,13 +120,13 @@ pub const VK_OEM_4: u32 = 0xDB;
 pub const VK_OEM_5: u32 = 0xDC;
 pub const VK_OEM_6: u32 = 0xDD;
 pub const VK_OEM_7: u32 = 0xDE;
-/// A key event that carries a Unicode character in its scan code field (SendInput with KEYEVENTF_UNICODE): remote
+/// A key event that carries a Unicode character in its scan code field (`SendInput` with `KEYEVENTF_UNICODE)`: remote
 /// control and on-screen keyboards type with it.
 pub const VK_PACKET: u32 = 0xE7;
 /// A virtual key that types nothing ("Unassigned", Virtual-Key Codes, Microsoft Learn), pressed while Alt or Win is held
-/// under a hotkey key KeySwitch keeps from the window: the window then sees a key between that modifier's press and its
-/// release, which would otherwise open its menu bar (the Start menu for Win). AutoHotkey calls such a key the menu mask
-/// key (A_MenuMaskKey) and names vkE8 as a good choice.
+/// under a hotkey key `KeySwitch` keeps from the window: the window then sees a key between that modifier's press and its
+/// release, which would otherwise open its menu bar (the Start menu for Win). `AutoHotkey` calls such a key the menu mask
+/// key (`A_MenuMaskKey`) and names vkE8 as a good choice.
 pub const VK_MENU_MASK: u32 = 0xE8;
 // Alphanumeric keys: winuser.h defines no VK_0.. VK_9 / VK_A.. VK_Z constants because their values equal the ASCII
 // digits and upper-case letters.
@@ -137,37 +137,37 @@ pub const VK_V: u32 = 0x56;
 pub const VK_Z: u32 = 0x5A;
 /// Scroll Lock, whose name a hotkey can use (Punto Switcher transliterates the selection with Alt+Scroll Lock).
 pub const VK_SCROLL: u32 = 0x91;
-/// UI Automation TextPattern id. GetCurrentPattern answers S_OK with a null pointer when the element does not support
+/// UI Automation `TextPattern` id. `GetCurrentPattern` answers `S_OK` with a null pointer when the element does not support
 /// it: a field without text is an ordinary answer.
 pub const UIA_TEXT_PATTERN_ID: i32 = 10014;
-/// TextPatternRangeEndpoint_Start and _End, and TextUnit_Character (UIAutomationClient.h).
+/// `TextPatternRangeEndpoint_Start` and _End, and `TextUnit_Character` (UIAutomationClient.h).
 pub const ENDPOINT_START: i32 = 0;
 pub const ENDPOINT_END: i32 = 1;
 pub const UNIT_CHARACTER: i32 = 0;
-/// CoCreateInstance's context in comtypes: an in-process or a local server.
+/// `CoCreateInstance`'s context in comtypes: an in-process or a local server.
 pub const CLSCTX_SERVER: u32 = 5;
 /// What a browser's text range reports in place of an embedded object, and as the whole text of an empty input (Edge):
 /// a placeholder, never typed text.
 pub const UIA_EMBEDDED_OBJECT_CHARACTER: char = '\u{FFFC}';
-/// UIA_IsReadOnlyAttributeId (VT_BOOL), asked of a selection before a selection hotkey types over it: text that says it
+/// `UIA_IsReadOnlyAttributeId` (`VT_BOOL`), asked of a selection before a selection hotkey types over it: text that says it
 /// is read-only is left alone (Text Attribute Identifiers, UIAutomationClient.h).
 pub const UIA_IS_READ_ONLY_ATTRIBUTE_ID: i32 = 40015;
-/// UIA_EditControlTypeId (Control Type Identifiers, UIAutomationClient.h): a focused element of this type is a field the
+/// `UIA_EditControlTypeId` (Control Type Identifiers, UIAutomationClient.h): a focused element of this type is a field the
 /// user types into, which lets the selection hotkeys copy its selection where it has no text pattern.
 pub const UIA_EDIT_CONTROL_TYPE_ID: i32 = 50004;
-/// The window classes of the console host and of Windows Terminal (CONSOLE_WINDOW_CLASS in
-/// src/interactivity/win32/window.cpp and XAML_HOSTING_WINDOW_CLASS_NAME in src/cascadia/WindowsTerminal/IslandWindow.cpp
+/// The window classes of the console host and of Windows Terminal (`CONSOLE_WINDOW_CLASS` in
+/// src/interactivity/win32/window.cpp and `XAML_HOSTING_WINDOW_CLASS_NAME` in src/cascadia/WindowsTerminal/IslandWindow.cpp
 /// of microsoft/terminal). Typing does not replace text selected in a console, and Ctrl+C there stops the running
 /// program when nothing is selected, so the selection hotkeys stay out of them.
 pub const CONSOLE_WINDOW_CLASSES: [&str; 2] = ["ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"];
 /// The field of Notepad of Windows 11. Its text service takes keys sent in one burst asynchronously and loses some when
 /// they replace a selection: `привет мир` typed over one came out as `привет `, and pasted it was whole. A selection
-/// hotkey pastes its result there (WindowsBackend::pasted_selection).
+/// hotkey pastes its result there (`WindowsBackend::pasted_selection`).
 pub const SLOW_INPUT_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
-/// "The maximum length for lpszClassName is 256" (WNDCLASSW): GetClassNameW needs no longer buffer than this and its
+/// "The maximum length for lpszClassName is 256" (WNDCLASSW): `GetClassNameW` needs no longer buffer than this and its
 /// terminating zero.
 pub const WINDOW_CLASS_NAME_MAX_CHARACTERS: usize = 256;
-/// Clipboard formats (Standard Clipboard Formats, winuser.h). CF_UNICODETEXT is what a selection copies as.
+/// Clipboard formats (Standard Clipboard Formats, winuser.h). `CF_UNICODETEXT` is what a selection copies as.
 pub const CF_UNICODETEXT: u32 = 13;
 pub const CF_BITMAP: u32 = 2;
 pub const CF_METAFILEPICT: u32 = 3;
@@ -199,7 +199,7 @@ pub const CLIPBOARD_DIB_FORMATS: [u32; 2] = [CF_DIB, CF_DIBV5];
 /// The registered format whose DWORD zero keeps a clipboard item out of the clipboard history: the user's own data put
 /// back after a copy is no new item (Cloud Clipboard and Clipboard History Formats).
 pub const CLIPBOARD_HISTORY_FORMAT_NAME: &str = "CanIncludeInClipboardHistory";
-/// GlobalAlloc flag the clipboard requires of the memory SetClipboardData takes.
+/// `GlobalAlloc` flag the clipboard requires of the memory `SetClipboardData` takes.
 pub const GMEM_MOVEABLE: u32 = 0x0002;
 pub const ERROR_ALREADY_EXISTS: u32 = 183;
 pub const SW_RESTORE: i32 = 9;
@@ -242,19 +242,19 @@ pub const SWP_NOMOVE: u32 = 0x0002;
 pub const SWP_NOZORDER: u32 = 0x0004;
 pub const SWP_NOACTIVATE: u32 = 0x0010;
 pub const SWP_FRAMECHANGED: u32 = 0x0020;
-/// A pointer to a 256-byte array holding one keyboard-state byte per virtual key (ToUnicodeEx's lpKeyState /
-/// GetKeyboardState). High bit set means down.
+/// A pointer to a 256-byte array holding one keyboard-state byte per virtual key (`ToUnicodeEx`'s lpKeyState /
+/// `GetKeyboardState`). High bit set means down.
 pub const KEYBOARD_STATE_ARRAY_SIZE: usize = 256;
 pub const VK_STATE_DOWN_BIT: u8 = 0x80;
-/// GetAsyncKeyState sets the most significant bit of its SHORT while the key is down.
+/// `GetAsyncKeyState` sets the most significant bit of its SHORT while the key is down.
 pub const ASYNC_KEY_DOWN_BIT: i32 = 0x8000;
-/// SetThreadPriority: one step above the normal priority of the process.
+/// `SetThreadPriority`: one step above the normal priority of the process.
 pub const THREAD_PRIORITY_ABOVE_NORMAL: i32 = 1;
 pub const VIRTUAL_KEY_BYTE_MASK: u32 = 0xFF;
 pub const TRANSLATED_TEXT_BUFFER_CHARACTERS: usize = 8;
-/// ToUnicodeEx wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
+/// `ToUnicodeEx` wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
 pub const TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG: u32 = 0x04;
-/// QueryFullProcessImageNameW's output buffer, in wide characters.
+/// `QueryFullProcessImageNameW`'s output buffer, in wide characters.
 pub const PROCESS_IMAGE_NAME_BUFFER_CHARACTERS: usize = 32768;
 /// StartupApproved\Run's first byte: 0x02 and 0x06 mean enabled, anything else (0x03 from Task Manager, 0x01 from older
 /// builds) means the value is skipped.
@@ -263,7 +263,7 @@ pub const SHIFT_KEYS: [u32; 3] = [VK_SHIFT, VK_LSHIFT, VK_RSHIFT];
 pub const CONTROL_KEYS: [u32; 3] = [VK_CONTROL, VK_LCONTROL, VK_RCONTROL];
 pub const ALT_KEYS: [u32; 3] = [VK_MENU, VK_LMENU, VK_RMENU];
 pub const SUPER_KEYS: [u32; 2] = [VK_LWIN, VK_RWIN];
-/// SHIFT_KEYS, CONTROL_KEYS, ALT_KEYS and SUPER_KEYS together, in ascending order: the log names forgotten modifiers
+/// `SHIFT_KEYS`, `CONTROL_KEYS`, `ALT_KEYS` and `SUPER_KEYS` together, in ascending order: the log names forgotten modifiers
 /// in this order.
 pub const MODIFIER_KEYS: [u32; 11] = [
     VK_SHIFT,

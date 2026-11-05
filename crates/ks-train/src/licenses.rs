@@ -37,11 +37,10 @@ fn reached(meta: &Value, roots: &[&str]) -> Result<BTreeSet<String>, String> {
         let Some(node) = by_id.get(id.as_str()) else { continue };
         for dependency in node["deps"].as_array().into_iter().flatten() {
             let normal = dependency["dep_kinds"].as_array().into_iter().flatten().any(|kind| kind["kind"].is_null());
-            if normal {
-                if let Some(next) = dependency["pkg"].as_str() {
+            if normal
+                && let Some(next) = dependency["pkg"].as_str() {
                     pending.push(next.to_owned());
                 }
-            }
         }
     }
     Ok(seen)

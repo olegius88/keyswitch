@@ -1,4 +1,4 @@
-//! X11, XKB and XRecord protocol numbers, keysyms and the timing of the backend.
+//! X11, XKB and `XRecord` protocol numbers, keysyms and the timing of the backend.
 
 pub const X11_WHEEL_BUTTONS: [u8; 4] = [4, 5, 6, 7];
 pub const X11_KEY_PRESS: u8 = 2;

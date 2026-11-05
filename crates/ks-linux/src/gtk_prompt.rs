@@ -100,6 +100,7 @@ impl PromptInner {
 }
 
 impl LearningPromptWindow {
+    #[must_use]
     pub fn new(application: &gtk::Application, callbacks: PromptCallbacks) -> LearningPromptWindow {
         let window = gtk::Window::builder()
             .application(application)
@@ -142,6 +143,7 @@ impl LearningPromptWindow {
     }
 
     /// The window the user typed in when the offer was made.
+    #[must_use]
     pub fn anchor_window(&self) -> Option<i64> {
         self.inner.anchor.borrow().and_then(|anchor| anchor.window)
     }
@@ -175,6 +177,7 @@ impl LearningPromptWindow {
         self.inner.window.destroy();
     }
 
+    #[must_use]
     pub fn is_visible(&self) -> bool {
         self.inner.window.is_visible()
     }
@@ -365,6 +368,7 @@ impl RuleEditorWindow {
         self.form.confirm();
     }
 
+    #[must_use]
     pub fn current_draft(&self) -> RuleDraft {
         self.form.current_draft()
     }

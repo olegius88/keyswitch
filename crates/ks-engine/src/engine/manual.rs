@@ -141,7 +141,7 @@ impl EngineCore {
     }
 
     /// A plain space pressed while an automatic correction made at a sign, not at a space, waits for its keys to
-    /// come up. A correction at a space may wait for the next word (start_context_wait), and one of another kind
+    /// come up. A correction at a space may wait for the next word (`start_context_wait`), and one of another kind
     /// (Pause, the early switch, a mention) reaches text of its own: those still give way to the second boundary.
     pub(crate) fn space_follows_pending_sign(&self, event: &KeyEvent) -> bool {
         let Some(plan) = &self.pending else {
@@ -314,7 +314,7 @@ impl EngineCore {
 
     /// Input another program injected: the text changed in a way not typed here.
     ///
-    /// Remote control (TeamViewer, AnyDesk), macros and on-screen keyboards send
+    /// Remote control (`TeamViewer`, `AnyDesk`), macros and on-screen keyboards send
     /// keys of their own. They are not this keyboard's typing - the machine where
     /// they are typed has its own switcher - so they are neither words nor
     /// hotkeys nor keys to wait for; only the text they change is no longer known.
@@ -494,14 +494,14 @@ impl EngineCore {
     ///
     /// A wrong correction is noticed when it is seen, and by then a space or more often stands after
     /// it. The hotkey reaches the correction across those spaces, puts the word back as it was typed and
-    /// keeps the spaces, as Pause reaches the last word past them (pause_reaches_past, which also bounds
+    /// keeps the spaces, as Pause reaches the last word past them (`pause_reaches_past`, which also bounds
     /// how many). Any other key typed after the correction still leaves nothing to undo: a letter, Backspace,
     /// an arrow key or a click leave text the correction did not, and Tab and Enter may have moved to
     /// another field or sent the text (they end the reach of Pause too).
     ///
     /// There are two paths for one reason. `schedule_undo` undoes a correction only while the text ends
     /// exactly as the correction left it, and a frozen historical test calls it directly and pins that
-    /// behaviour: tests/test_input_integrity.py, test_undo_is_unavailable_after_edit_or_pointer_move, where
+    /// behaviour: `tests/test_input_integrity.py`, `test_undo_is_unavailable_after_edit_or_pointer_move`, where
     /// a space typed after the correction leaves nothing to undo. The bytes of that file are part of sealed
     /// evidence and cannot change. What the hotkey does is the product's, so the hotkey comes here, and
     /// everything other than the spaces is left to `schedule_undo`.
@@ -520,7 +520,7 @@ impl EngineCore {
     /// The undo of the last correction together with the spaces typed after it, and how many there are.
     ///
     /// None unless the text before the caret is the correction's text followed by plain spaces alone: the
-    /// word, the signs and the boundary the correction typed, then spaces (extend_last_committed adds each
+    /// word, the signs and the boundary the correction typed, then spaces (`extend_last_committed` adds each
     /// to the last committed word as it is typed, and anything else makes that word stale).
     fn undo_past_spaces(&self) -> Option<(PlanRef, usize)> {
         let (previous, committed) = (self.last_correction.as_ref()?, self.last_committed.as_ref()?);
@@ -548,7 +548,7 @@ impl EngineCore {
     /// The plan that puts `previous` back, deleting and typing again `trailing` and `boundary` after the word.
     ///
     /// A case fix and a typo correction typed keys other than the ones typed (CorrectionPlan.replaced,
-    /// CorrectionPlan.replaced_strokes): undo types those back, and undoing the undo types the fix again.
+    /// `CorrectionPlan.replaced_strokes)`: undo types those back, and undoing the undo types the fix again.
     fn _undo_of(previous: &CorrectionPlan, boundary: Option<Stroke>, trailing: Strokes) -> PlanRef {
         let mut replaced: Strokes = Vec::new();
         let mut replaced_strokes: Strokes = Vec::new();

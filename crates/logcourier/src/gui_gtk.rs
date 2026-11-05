@@ -13,9 +13,9 @@ use serde_json::{Value, json};
 
 use crate::catalog::{current_catalog, verify_connection};
 use crate::config::{Config, Source, data_directory, load_config, private_directory, save_config};
-use crate::constants::*;
+use crate::constants::{MAX_ROTATIONS, DEFAULT_ROTATIONS, MAX_INTERVAL_MINUTES};
 use crate::error::{Error, Result};
-use crate::gui_model::*;
+use crate::gui_model::{draft, Form, summary, EVENTS_LOG_MAX_LINES, group_label, SOURCE_NOTE, source_from, reset_warning, WINDOW_TITLE_PREFIX, CONNECTION_INTRO, SOURCES_NOTE, delivery_note};
 use crate::secrets::{read_token, redact, store_token, token_bot_id};
 use crate::service::Service;
 use crate::store::Store;
@@ -431,11 +431,10 @@ fn build(application: &gtk::Application, root: PathBuf, config: &Config) -> App 
                 if !app.widgets.consent.is_active() {
                     return say_error(&app, "Сначала разрешите передачу текста логов на вкладке «Отправка».");
                 }
-                if save(&mut app) {
-                    if let Some(service) = &app.service {
+                if save(&mut app)
+                    && let Some(service) = &app.service {
                         service.send_now();
                     }
-                }
             }),
             action_button("Пауза", |shared| pause(&mut shared.borrow_mut())),
         ],
@@ -513,15 +512,13 @@ fn start(application: &gtk::Application, root: PathBuf, config: Config, minimize
     }
 }
 
+#[must_use]
 pub fn run(minimized: bool) -> i32 {
     let root = data_directory();
     let _ = private_directory(&root);
-    let config = match load_config(&root) {
-        Ok(config) => config,
-        Err(_) => {
-            eprintln!("Не удалось прочитать {}.\nФайл оставлен без изменений; автоматическая отправка не запущена.", root.join("config.json").display());
-            return 1;
-        }
+    let config = if let Ok(config) = load_config(&root) { config } else {
+        eprintln!("Не удалось прочитать {}.\nФайл оставлен без изменений; автоматическая отправка не запущена.", root.join("config.json").display());
+        return 1;
     };
     let application = gtk::Application::builder().application_id(APPLICATION_ID).build();
     // A second start reaches the first through the application id and shows its window.

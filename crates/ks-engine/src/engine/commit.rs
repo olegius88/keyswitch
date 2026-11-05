@@ -114,18 +114,15 @@ impl EngineCore {
             } else {
                 self.decide_inside_word(&strokes, source_group, &alternatives, &application, trigger, Some(boundary))?
             };
-            let mut decided = match inside.clone() {
-                Some(inside) => inside,
-                None => {
-                    let closing = strokes_of(&[&trailing, &signs, std::slice::from_ref(boundary)]);
-                    let following = alternatives.iter().map(|(group, _)| (*group, text_for_group(&closing, *group))).collect();
-                    self.decide_word(&original, &alternatives, source_group, &application, trigger, WordOptions {
-                        literal_tail: characters_of(&[&trailing, &signs]),
-                        boundary_text: boundary.character.clone(),
-                        following: Some(following),
-                        ..WordOptions::default()
-                    })?
-                }
+            let mut decided = if let Some(inside) = inside.clone() { inside } else {
+                let closing = strokes_of(&[&trailing, &signs, std::slice::from_ref(boundary)]);
+                let following = alternatives.iter().map(|(group, _)| (*group, text_for_group(&closing, *group))).collect();
+                self.decide_word(&original, &alternatives, source_group, &application, trigger, WordOptions {
+                    literal_tail: characters_of(&[&trailing, &signs]),
+                    boundary_text: boundary.character.clone(),
+                    following: Some(following),
+                    ..WordOptions::default()
+                })?
             };
             let stem = strokes.clone();
             let stem_signs = signs.clone();
@@ -253,7 +250,7 @@ impl EngineCore {
                 }
             }
             if !trailing.is_empty() || head != 0 {
-                self.log_context_wait("context_wait_cancelled", waiting.as_ref(), if !trailing.is_empty() { "literal_tail" } else { "literal_head" }, &[]);
+                self.log_context_wait("context_wait_cancelled", waiting.as_ref(), if trailing.is_empty() { "literal_head" } else { "literal_tail" }, &[]);
             }
             // A typo is corrected only in a plain word typed as one, after the early switch has let go (typo_plan).
             let plain = !(head != 0
@@ -507,7 +504,7 @@ impl EngineCore {
     /// Schedule the case fix of a word typed with two capitals at its start; return the word as it will stand.
     ///
     /// `ПРивет` and `HEllo` are Shift held down one letter too long. A word kept in its layout gets its second
-    /// letter lowercase at its boundary when all of it has that shape: at least DOUBLE_CAPITALS_MIN_LETTERS
+    /// letter lowercase at its boundary when all of it has that shape: at least `DOUBLE_CAPITALS_MIN_LETTERS`
     /// letters, two capitals, then lowercase letters only. An abbreviation (`ПК`, `IT`, `URLs`), a word in
     /// capitals, a CamelCase name and a token with digits or signs have other shapes and are never touched.
     ///

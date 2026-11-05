@@ -14,7 +14,7 @@ fn local_time() -> LocalTime {
     // SAFETY: `tm` is a C struct of integers and one pointer (`tm_zone`); all-zero is a valid value of it.
     let mut broken: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: both pointers refer to live values owned by this frame; `localtime_r` writes only into `broken`.
-    let converted = unsafe { libc::localtime_r(&seconds, &mut broken) };
+    let converted = unsafe { libc::localtime_r(&raw const seconds, &raw mut broken) };
     if converted.is_null() {
         return logsetup::utc_time(now.as_millis().low::<i64>());
     }
@@ -35,11 +35,12 @@ fn field(bytes: &[libc::c_char]) -> String {
 }
 
 /// `platform.platform()`: `Linux-<release>-<machine>-with-glibc<version>`.
+#[must_use]
 pub fn platform_description() -> String {
     // SAFETY: `utsname` is a C struct of byte arrays; all-zero is a valid value of it.
     let mut name: libc::utsname = unsafe { std::mem::zeroed() };
     // SAFETY: the pointer refers to a live `utsname` owned by this frame.
-    if unsafe { libc::uname(&mut name) } != 0 {
+    if unsafe { libc::uname(&raw mut name) } != 0 {
         return "Linux".to_owned();
     }
     // SAFETY: returns a pointer to a static NUL-terminated string.
@@ -67,20 +68,21 @@ pub fn signal_waiter() -> impl Fn(Duration) -> bool {
     let mut set: libc::sigset_t = unsafe { std::mem::zeroed() };
     // SAFETY: `set` is a live `sigset_t`; the signal numbers are valid; `pthread_sigmask` only changes this thread's mask.
     unsafe {
-        libc::sigemptyset(&mut set);
-        libc::sigaddset(&mut set, libc::SIGTERM);
-        libc::sigaddset(&mut set, libc::SIGINT);
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
+        libc::sigemptyset(&raw mut set);
+        libc::sigaddset(&raw mut set, libc::SIGTERM);
+        libc::sigaddset(&raw mut set, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const set, std::ptr::null_mut());
     }
     move |timeout| {
         let limit = libc::timespec { tv_sec: timeout.as_secs().to::<libc::time_t>(), tv_nsec: timeout.subsec_nanos().to::<libc::c_long>() };
         // SAFETY: `set` and `limit` are live for the call; a null `siginfo` is allowed.
-        let signal = unsafe { libc::sigtimedwait(&set, std::ptr::null_mut(), &limit) };
+        let signal = unsafe { libc::sigtimedwait(&raw const set, std::ptr::null_mut(), &raw const limit) };
         signal > 0
     }
 }
 
 /// The engine without a window, until SIGTERM or SIGINT.
+#[must_use]
 pub fn run_headless(no_engine: bool) -> i32 {
     let waiter = signal_waiter();
     crate::linux_app::run_headless_with(&waiter, no_engine)

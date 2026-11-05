@@ -66,6 +66,7 @@ impl Frame {
 }
 
 /// `json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"`.
+#[must_use]
 pub fn readable(value: &Value) -> Vec<u8> {
     let options = JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(Indent::Spaces(REPORT_JSON_INDENT)), ..JsonOptions::default() };
     (json_dumps(value, &options) + "\n").into_bytes()
@@ -102,11 +103,10 @@ fn refused_aliases(corpus: &Path, ledger: &Path) -> Result<BTreeSet<String>, Str
         }
     }
     let manifest = read_json(&corpus.join("manifest.json"))?;
-    if let Some(frozen_against) = manifest.get("metadata").and_then(|value| value.get("refused_test_aliases")).and_then(Value::as_u64) {
-        if refused.len().to::<u64>() < frozen_against {
+    if let Some(frozen_against) = manifest.get("metadata").and_then(|value| value.get("refused_test_aliases")).and_then(Value::as_u64)
+        && refused.len().to::<u64>() < frozen_against {
             return Err(format!("the fit would refuse {} test aliases and the corpus was frozen refusing {frozen_against}: the test ledger ({}) is missing or older than the corpus", refused.len(), ledger.display()));
         }
-    }
     Ok(refused)
 }
 
@@ -505,7 +505,7 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
 }
 
 /// The features of `splits` alone: without TRAIN none of its curricula is built and no TRAIN frame is held in memory.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages, splits: &[&'static str]) -> Result<FeatureSet, String> {
     let train_built = splits.contains(&TRAIN);
     let root = inputs.tools.root.clone();
@@ -605,12 +605,11 @@ pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dy
             stages.frames(&format!("spans-{profile}-{split}"), &curriculum.frames.iter().cloned().map(Frame::Span).collect::<Vec<_>>());
             let mut entries = prepared_frames(chain_rows, curriculum.frames, split);
             eprintln!("{profile}/{split}: {} frames", entries.len());
-            if split == TRAIN {
-                if let Some(prefixes) = &heads {
+            if split == TRAIN
+                && let Some(prefixes) = &heads {
                     entries.retain(|frame| head_frame(tools, frame, prefixes));
                     eprintln!("{profile}/{split}: {} frames ask a question of a head", entries.len());
                 }
-            }
             stages.frames(&format!("entries-{profile}-{split}"), &entries);
             let part = columns_of(inputs, &mut vocabulary, profile, split, &entries, keep_importance, jobs);
             stages.features(&format!("features-{profile}-{split}"), &part, &vocabulary.names);
@@ -648,7 +647,7 @@ fn labelling_base(root: &Path, models_dir: &Path, options: &Value) -> Result<Opt
 }
 
 impl FeatureSet {
-    /// `masses`: FeatureMass over the TRAIN frames of every profile, in the order the serial fit adds them.
+    /// `masses`: `FeatureMass` over the TRAIN frames of every profile, in the order the serial fit adds them.
     fn masses(&self, profiles: &[String]) -> HashMap<String, f64> {
         let mut values = vec![0.0_f64; self.names.len()];
         let mut errors = vec![0.0_f64; self.names.len()];
@@ -702,10 +701,12 @@ impl FeatureSet {
         &self.columns[&(profile.to_owned(), split)]
     }
 
+    #[must_use]
     pub fn part_of(&self, profile: &str, split: &'static str) -> &Columns {
         self.part(profile, split)
     }
 
+    #[must_use]
     pub fn feature_names(&self) -> &[String] {
         &self.names
     }
@@ -721,7 +722,7 @@ fn base_weights(names: &[String], base: &ContextModel) -> Vec<f64> {
     weights
 }
 
-/// `trainable_frames`: the frames that hold a feature whose AdaGrad accumulator is finite, in their order.
+/// `trainable_frames`: the frames that hold a feature whose `AdaGrad` accumulator is finite, in their order.
 fn trainable_frames(data: &Packed, accumulators: &[f64]) -> Packed {
     let mut result = Packed { offsets: vec![0], ..Packed::default() };
     for row in 0..data.rows() {
@@ -886,7 +887,7 @@ pub struct FitRequest<'a> {
 }
 
 /// `fit`: every back end of the Python built the same candidate; so does this one.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, String> {
     let (root, corpus, output) = (request.root, request.corpus, request.output);
     if output.exists() {
@@ -931,12 +932,9 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     let mut budgets: Vec<(String, usize)> = vec![(KEPT_FEATURE_PREFIX.to_owned(), kept_options.int("maximum_features").to::<usize>())];
     budgets.extend(heads.iter().map(|(prefix, budget)| (prefix.clone(), *budget)));
     budgets.retain(|(prefix, _)| !carried.contains(prefix));
-    let mut names: Vec<String> = match start {
-        Some(model) => model.weights.names().map(str::to_owned).collect(),
-        None => {
-            let plain: HashMap<String, f64> = masses.iter().filter(|(name, _)| !own.iter().any(|prefix| name.starts_with(prefix))).map(|(name, mass)| (name.clone(), *mass)).collect();
-            select_features(&plain, minimum, options.int("maximum_features").to::<usize>())?
-        }
+    let mut names: Vec<String> = if let Some(model) = start { model.weights.names().map(str::to_owned).collect() } else {
+        let plain: HashMap<String, f64> = masses.iter().filter(|(name, _)| !own.iter().any(|prefix| name.starts_with(prefix))).map(|(name, mass)| (name.clone(), *mass)).collect();
+        select_features(&plain, minimum, options.int("maximum_features").to::<usize>())?
     };
     for (prefix, budget) in &budgets {
         let part: HashMap<String, f64> = masses.iter().filter(|(name, _)| name.starts_with(prefix.as_str())).map(|(name, mass)| (name.clone(), *mass)).collect();
@@ -1128,7 +1126,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     calibration_report["outside_lone_word"] = outside_lone_word(&calibration_predictions, &calibration_parts, &features.names, threshold);
     let weight_table: Map<String, Value> = mapping.iter().map(|(name, row)| (name.clone(), json!(row))).collect();
     let weights_value = Value::Object(weight_table);
-    let weight_hash = hex(&Sha256::digest(ks_text::json_dumps(&weights_value, &JsonOptions { ensure_ascii: false, sort_keys: true, separators: Some((",".to_owned(), ":".to_owned())), ..JsonOptions::default() }).as_bytes()));
+    let weight_hash = hex(&Sha256::digest(json_dumps(&weights_value, &JsonOptions { ensure_ascii: false, sort_keys: true, separators: Some((",".to_owned(), ":".to_owned())), ..JsonOptions::default() }).as_bytes()));
     let version = format!("context-v3-{}", &weight_hash[..VERSION_HASH_CHARACTERS]);
     let actions: Vec<&str> = ACTION_NAMES.iter().map(|action| action.as_str()).collect();
     let payload = json!({"actions": actions, "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": weights_value, "weights_sha256": weight_hash, "version": version, "conversion_threshold": threshold});

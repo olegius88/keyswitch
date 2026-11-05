@@ -62,7 +62,8 @@ impl KeyMap {
         self.types.get(usize::from(*key.kt_index.get(group)?))
     }
 
-    /// `XkbKeycodeToKeysym`: 0 for NoSymbol.
+    /// `XkbKeycodeToKeysym`: 0 for `NoSymbol`.
+    #[must_use]
     pub fn keysym(&self, keycode: u8, group: u8, level: u8) -> u32 {
         let Some(key) = self.key(keycode) else { return 0 };
         let group = usize::from(group);
@@ -80,6 +81,7 @@ impl KeyMap {
     }
 
     /// `XkbLookupKeySym` (`XkbTranslateKeyCode`): the symbol a key gives in a core state, with the group in bits 13-14.
+    #[must_use]
     pub fn lookup_keysym(&self, keycode: u8, state: u16) -> Option<u32> {
         let key = self.key(keycode)?;
         let groups = key.groups();
@@ -109,6 +111,7 @@ impl KeyMap {
 
     /// `XKeysymToKeycode`: the first key that carries the keysym in one of the first four columns (two levels of two
     /// groups), the columns in order.
+    #[must_use]
     pub fn keycode_for_keysym(&self, keysym: u32) -> u8 {
         for column in 0u8..4 {
             for keycode in self.min_keycode..=self.max_keycode {

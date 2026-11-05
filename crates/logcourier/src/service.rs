@@ -12,7 +12,7 @@ use crate::batching::compact;
 use crate::catalog::deliver;
 use crate::collector::Collector;
 use crate::config::Config;
-use crate::constants::*;
+use crate::constants::{SECONDS_PER_MINUTE, PENDING_RETRY_SECONDS, MAX_RETRY_DELAY_SECONDS, RETRY_BASE_SECONDS, RETRY_BACKOFF_BASE, RETRY_BACKOFF_MAX_EXPONENT, WAKE_POLL_SECONDS};
 use crate::error::{Error, Result};
 use crate::rate_limit::{Cancelled, RateLimitedClient};
 use crate::reset::reset_group;

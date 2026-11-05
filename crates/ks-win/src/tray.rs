@@ -45,7 +45,7 @@ fn copy_text(target: &mut [u16], text: &str) {
 unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi::HBITMAP, *mut u8)> {
     let mut header: BITMAPINFO = unsafe { std::mem::zeroed() };
     header.bmiHeader = BITMAPINFOHEADER {
-        biSize: (std::mem::size_of::<BITMAPINFOHEADER>()).low::<u32>(),
+        biSize: (size_of::<BITMAPINFOHEADER>()).low::<u32>(),
         biWidth: size.low::<i32>(),
         biHeight: -size.low::<i32>(),
         biPlanes: 1,
@@ -59,7 +59,7 @@ unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi:
     };
     let mut bits: *mut core::ffi::c_void = null_mut();
     // SAFETY: the header describes a 32-bit RGB bitmap; with DIB_RGB_COLORS no device context is read.
-    let bitmap = unsafe { CreateDIBSection(null_mut(), &header, DIB_RGB_COLORS, &mut bits, null_mut(), 0) };
+    let bitmap = unsafe { CreateDIBSection(null_mut(), &raw const header, DIB_RGB_COLORS, &raw mut bits, null_mut(), 0) };
     if bitmap.is_null() || bits.is_null() { None } else { Some((bitmap, bits.cast::<u8>())) }
 }
 
@@ -96,7 +96,7 @@ fn glyph_ink(text: &str) -> Option<Ink> {
         SetTextColor(hdc, 0x00FF_FFFF);
         TextOutW(hdc, 0, 0, units.as_ptr(), units.len().low::<i32>());
         let pixels = std::slice::from_raw_parts(bits, size * size * 4);
-        let coverage: Vec<u8> = pixels.chunks_exact(4).map(|pixel| pixel[1]).collect();
+        let coverage: Vec<u8> = pixels.as_chunks::<4>().0.iter().map(|pixel| pixel[1]).collect();
         SelectObject(hdc, old_font);
         SelectObject(hdc, old_bitmap);
         DeleteObject(font);
@@ -145,7 +145,7 @@ fn create_icon(state: &TrayState) -> Option<HICON> {
         // The mask is ignored for a 32-bit colour bitmap with alpha, but the call needs one.
         let mask = CreateBitmap(target.low::<i32>(), target.low::<i32>(), 1, 1, null());
         let info = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
-        let icon = CreateIconIndirect(&info);
+        let icon = CreateIconIndirect(&raw const info);
         DeleteObject(color);
         DeleteObject(mask);
         if icon.is_null() { None } else { Some(icon) }
@@ -179,7 +179,7 @@ impl Tray {
     fn data(&self, flags: u32) -> NOTIFYICONDATAW {
         // SAFETY: NOTIFYICONDATAW is plain data for which all zeros is a valid value.
         let mut data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
-        data.cbSize = (std::mem::size_of::<NOTIFYICONDATAW>()).low::<u32>();
+        data.cbSize = (size_of::<NOTIFYICONDATAW>()).low::<u32>();
         data.hWnd = self.window;
         data.uID = ICON_ID;
         data.uFlags = flags;
@@ -209,10 +209,10 @@ impl Tray {
             data.uCallbackMessage = self.callback_message;
         }
         // SAFETY: `data` is a fully initialised structure of the size it states.
-        unsafe { Shell_NotifyIconW(message, &data) != 0 }
+        unsafe { Shell_NotifyIconW(message, &raw const data) != 0 }
     }
 
-    /// NIM_ADD; the shell forgets the icon when Explorer restarts, and this puts it back (TaskbarCreated).
+    /// `NIM_ADD`; the shell forgets the icon when Explorer restarts, and this puts it back (`TaskbarCreated`).
     pub fn add(&self) {
         let added = self.notify_icon(NIM_ADD, NIF_MESSAGE | NIF_ICON | NIF_TIP);
         self.added.set(added);
@@ -249,7 +249,7 @@ impl Tray {
         copy_text(&mut info_title, title);
         (data.szInfo, data.szInfoTitle) = (info, info_title);
         // SAFETY: as in `notify_icon`.
-        unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) };
+        unsafe { Shell_NotifyIconW(NIM_MODIFY, &raw const data) };
     }
 
     /// The menu at the cursor; the line chosen, if one was.
@@ -280,7 +280,7 @@ impl Tray {
                 }
             }
             let mut point = POINT { x: 0, y: 0 };
-            GetCursorPos(&mut point);
+            GetCursorPos(&raw mut point);
             SetForegroundWindow(self.window);
             let chosen = TrackPopupMenuEx(
                 menu,

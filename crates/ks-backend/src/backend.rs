@@ -56,22 +56,27 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
+    #[must_use]
     pub fn shift(&self) -> bool {
         self.state & SHIFT_MASK != 0
     }
 
+    #[must_use]
     pub fn caps_lock(&self) -> bool {
         self.state & LOCK_MASK != 0
     }
 
+    #[must_use]
     pub fn control(&self) -> bool {
         self.state & CONTROL_MASK != 0
     }
 
+    #[must_use]
     pub fn alt(&self) -> bool {
         self.state & ALT_MASK != 0
     }
 
+    #[must_use]
     pub fn super_key(&self) -> bool {
         self.state & SUPER_MASK != 0
     }
@@ -103,7 +108,7 @@ pub struct ScreenAnchor {
 
 /// The focused top-level window as the backend sees it.
 ///
-/// `window` is the platform identity (an HWND or an X window id). `own` marks windows of KeySwitch
+/// `window` is the platform identity (an HWND or an X window id). `own` marks windows of `KeySwitch`
 /// itself (settings, the learning prompt), which never count as the user moving to another window,
 /// except while the test field of the settings window has the keyboard: the window reports that to
 /// the engine (`KeySwitchEngine::set_test_field_focused`). `isolated_layout` says that the window

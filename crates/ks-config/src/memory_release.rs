@@ -14,12 +14,12 @@ static TRIM: Mutex<Option<fn() -> bool>> = Mutex::new(None);
 /// The platform crate sets the function that asks the C library to return the free pages of its heap; it answers
 /// whether it asked.
 pub fn set_trim_hook(hook: fn() -> bool) {
-    *TRIM.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+    *TRIM.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(hook);
 }
 
 /// Ask the C library to return the free pages of its heap; whether it was asked.
 pub fn release_free_memory() -> bool {
-    let hook = *TRIM.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let hook = *TRIM.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     match hook {
         Some(trim) if cfg!(target_os = "linux") => trim(),
         _ => false,

@@ -1,4 +1,4 @@
-//! The builtin `sum()` of CPython over floats, which is not a plain running addition.
+//! The builtin `sum()` of `CPython` over floats, which is not a plain running addition.
 //!
 //! Since Python 3.12 `sum` keeps a Neumaier compensation next to the running total (`cs_add` in
 //! `Python/bltinmodule.c`); the result differs in the last bits from `a + b + c ...` for about one list of floats in

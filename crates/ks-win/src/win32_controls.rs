@@ -42,11 +42,13 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::windows_native::wide;
 use crate::windows_ui_model::Palette;
 
+#[must_use]
 pub fn scaled(pixels: i32, dpi: i32) -> i32 {
     // Round half up, as MulDiv does.
     (pixels * dpi + crate::constants::BASE_DPI / 2) / crate::constants::BASE_DPI
 }
 
+#[must_use]
 pub fn hinstance() -> *mut c_void {
     // SAFETY: a null name asks for the module of the running executable.
     unsafe { GetModuleHandleW(null()) }
@@ -73,7 +75,7 @@ pub fn parent_of(window: HWND) -> HWND {
 pub fn client_rect(window: HWND) -> RECT {
     let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: fills the structure it is given.
-    unsafe { GetClientRect(window, &mut rect) };
+    unsafe { GetClientRect(window, &raw mut rect) };
     rect
 }
 
@@ -150,11 +152,12 @@ fn face_font(face: &str, points: i32, dpi: i32) -> HFONT {
 }
 
 impl Fonts {
+    #[must_use]
     pub fn new(dpi: i32) -> Fonts {
         // SAFETY: NONCLIENTMETRICSW is plain data; the call fills it for the size it is told.
         let metrics = unsafe {
             let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
-            metrics.cbSize = (std::mem::size_of::<NONCLIENTMETRICSW>()).low::<u32>();
+            metrics.cbSize = (size_of::<NONCLIENTMETRICSW>()).low::<u32>();
             let filled = SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, metrics.cbSize, std::ptr::from_mut(&mut metrics).cast::<c_void>(), 0, dpi.bits::<u32>());
             if filled == 0 { None } else { Some(metrics) }
         };
@@ -167,7 +170,7 @@ impl Fonts {
                 heavy.lfFaceName = [0; 32];
                 heavy.lfFaceName[..face.len()].copy_from_slice(&face);
                 // SAFETY: the structures are fully initialised LOGFONTs; the fonts are deleted by `destroy`.
-                unsafe { (CreateFontIndirectW(&regular), CreateFontIndirectW(&heavy)) }
+                unsafe { (CreateFontIndirectW(&raw const regular), CreateFontIndirectW(&raw const heavy)) }
             }
             None => (face_font("Segoe UI", 9, dpi), face_font("Segoe UI Semibold", 9, dpi)),
         };
@@ -215,6 +218,7 @@ pub struct Brushes {
 }
 
 impl Brushes {
+    #[must_use]
     pub fn new(palette: Palette) -> Brushes {
         // SAFETY: plain colour brushes, deleted by `destroy`.
         unsafe {
@@ -245,7 +249,7 @@ pub fn text_width(font: HFONT, text: &str) -> i32 {
         let hdc = GetDC(null_mut());
         let old = SelectObject(hdc, font);
         let mut size = windows_sys::Win32::Foundation::SIZE { cx: 0, cy: 0 };
-        GetTextExtentPoint32W(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut size);
+        GetTextExtentPoint32W(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &raw mut size);
         SelectObject(hdc, old);
         ReleaseDC(null_mut(), hdc);
         size.cx
@@ -263,7 +267,7 @@ pub fn wrapped_height(font: HFONT, text: &str, width: i32) -> i32 {
     unsafe {
         let hdc = GetDC(null_mut());
         let old = SelectObject(hdc, font);
-        DrawTextW(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut rect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
+        DrawTextW(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &raw mut rect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
         SelectObject(hdc, old);
         ReleaseDC(null_mut(), hdc);
     }
@@ -275,6 +279,7 @@ pub fn line_height(font: HFONT) -> i32 {
     wrapped_height(font, "Ag", 10_000)
 }
 
+#[must_use]
 pub fn pixels_per_inch() -> i32 {
     // SAFETY: the screen's device context, released at once.
     unsafe {
@@ -380,7 +385,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
     let top = rect.top + scaled(1, dpi);
     // SAFETY: draws into the device context the system gave for this paint; the font is selected and put back.
     unsafe {
-        FillRect(hdc, &rect, brushes.content);
+        FillRect(hdc, &raw const rect, brushes.content);
         let old_font = SelectObject(hdc, font);
         let (left, right, bottom) = (rect.left + 1, rect.left + 1 + size, top + size);
         let face = if checked && !radio { CreateSolidBrush(rgb(palette.accent)) } else { CreateSolidBrush(rgb(palette.field)) };
@@ -434,7 +439,7 @@ pub fn draw_navigation(item: &DRAWITEMSTRUCT, fill: HBRUSH, text_color: u32, fon
     let mut rect = item.rcItem;
     // SAFETY: draws into the device context of this paint; the font is selected and put back.
     unsafe {
-        FillRect(hdc, &rect, fill);
+        FillRect(hdc, &raw const rect, fill);
         let old_font = SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, text_color);
@@ -446,7 +451,7 @@ pub fn draw_navigation(item: &DRAWITEMSTRUCT, fill: HBRUSH, text_color: u32, fon
             inner.top += 2;
             inner.right -= 2;
             inner.bottom -= 2;
-            DrawFocusRect(hdc, &inner);
+            DrawFocusRect(hdc, &raw const inner);
         }
         SelectObject(hdc, old_font);
     }
@@ -484,7 +489,7 @@ pub fn frame_rect(hdc: *mut c_void, rect: &RECT, color: u32) {
 
 // ------------------------------------------------------------------------------------------------------ the wheel
 
-unsafe extern "system" fn wheel_guard(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, id: usize, data: usize) -> LRESULT {
+unsafe extern "system" fn wheel_guard(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     if message == WM_MOUSEWHEEL {
         // The wheel scrolls the page; it never changes the value of a combo box or a number box the pointer is over.
         send(parent_of(window), WM_MOUSEWHEEL, wparam, lparam);
@@ -566,6 +571,7 @@ pub fn combo_selected_index(window: HWND) -> Option<usize> {
 
 pub const LIST_VIEW_CLASS: &str = "SysListView32";
 
+#[must_use]
 pub fn list_view_styles() -> u32 {
     LVS_REPORT | LVS_SHOWSELALWAYS
 }
@@ -657,14 +663,14 @@ pub fn pick_executable(owner: HWND, title: &str) -> Option<String> {
     // SAFETY: OPENFILENAMEW is plain data; the buffers and strings live through the call.
     unsafe {
         let mut dialog: OPENFILENAMEW = std::mem::zeroed();
-        dialog.lStructSize = (std::mem::size_of::<OPENFILENAMEW>()).low::<u32>();
+        dialog.lStructSize = (size_of::<OPENFILENAMEW>()).low::<u32>();
         dialog.hwndOwner = owner;
         dialog.lpstrFilter = filter.as_ptr();
         dialog.lpstrFile = buffer.as_mut_ptr();
         dialog.nMaxFile = buffer.len().low::<u32>();
         dialog.lpstrTitle = title.as_ptr();
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-        if GetOpenFileNameW(&mut dialog) == 0 {
+        if GetOpenFileNameW(&raw mut dialog) == 0 {
             return None;
         }
     }
@@ -700,6 +706,7 @@ pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
 }
 
 /// A brush of one colour; the caller deletes it with `delete_object`.
+#[must_use]
 pub fn solid_brush(color: crate::windows_ui_model::Rgb) -> HBRUSH {
     // SAFETY: a plain colour brush.
     unsafe { CreateSolidBrush(color.colorref()) }

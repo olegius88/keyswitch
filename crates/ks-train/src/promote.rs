@@ -98,7 +98,7 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
         let _ = Command::new("git").current_dir(root).args(["worktree", "remove", "--force"]).arg(&scratch).status();
     }
     let development = request.devchat_ledger.join(format!("{}.dev.json", crate::corpus::checksum(&request.candidate.join(CONTEXT_ARTIFACT))?));
-    let held = read_json(&development).ok().is_some_and(|record| record["floors"].as_object().is_some_and(|floors| !floors.is_empty() && floors.values().all(|value| value == &Value::Bool(true))));
+    let held = read_json(&development).is_ok_and(|record| record["floors"].as_object().is_some_and(|floors| !floors.is_empty() && floors.values().all(|value| value == &Value::Bool(true))));
     if !held {
         failures.push("no developer-chat development result of the candidate holds both floors (ks-train devchat --split dev)".to_owned());
     }

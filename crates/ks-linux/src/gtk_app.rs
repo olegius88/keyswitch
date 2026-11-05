@@ -124,7 +124,7 @@ pub fn clear_rules() {
     with_app(|app| {
         let _ = app.learning.clear();
     });
-    with_window(|window| window.refresh_rules());
+    with_window(MainWindow::refresh_rules);
     toast("Правила удалены");
 }
 
@@ -132,7 +132,7 @@ pub fn remove_rule(rule: &LearnedRule) {
     with_app(|app| {
         let _ = app.learning.remove_rule(rule);
     });
-    with_window(|window| window.refresh_rules());
+    with_window(MainWindow::refresh_rules);
     toast("Правило удалено");
 }
 
@@ -153,7 +153,7 @@ pub fn remove_application_exclusion(identifier: &str) {
 }
 
 pub fn finish_application_capture() {
-    with_window(|window| window.finish_active_application_capture());
+    with_window(MainWindow::finish_active_application_capture);
 }
 
 pub fn open_rule_editor_for(draft: RuleDraft) {
@@ -182,6 +182,7 @@ pub fn autostart_toggled(active: bool, row: &adw::SwitchRow) {
 }
 
 /// The window's close button: to the tray when the tray is there and the setting says so, else the end of the program.
+#[must_use]
 pub fn window_close_requested() -> glib::Propagation {
     with_app(|app| {
         if setting_bool(&app.services.settings, "general.close_to_tray", true) && app.tray.borrow().is_some() {
@@ -240,6 +241,7 @@ fn prompt_anchor(desktop: &DesktopBackend) -> Option<PromptAnchor> {
 }
 
 /// `main`'s GTK half: the status the process ends with.
+#[must_use]
 pub fn run(hidden: bool, no_engine: bool) -> i32 {
     glib::set_prgname(Some("keyswitch"));
     glib::set_application_name("KeySwitch");
@@ -332,7 +334,7 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
                 0 => app.show_window(),
                 1 => app.toggle("enabled", true),
                 _ => app.application.quit(),
-            })
+            });
         });
         application.add_action(&simple);
     }
@@ -342,7 +344,7 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
         let (path, value) = (path.to_owned(), value.clone());
         post_app(move |app| app.apply_setting(&path, &value));
     }));
-    history.subscribe(Arc::new(|| post_app(|app| app.with_window(|window| window.refresh_history()))));
+    history.subscribe(Arc::new(|| post_app(|app| app.with_window(MainWindow::refresh_history))));
     updates.subscribe(Arc::new(|snapshot: &UpdateSnapshot| {
         let snapshot = snapshot.clone();
         post_app(move |app| app.apply_update_snapshot(&snapshot));
@@ -742,6 +744,6 @@ fn accept_rule(engine: &DeferredEngine, draft: &RuleDraft) -> String {
         Err(ks_config::learning::LearningError::Invalid(error)) => return error.to_string(),
         Err(error) => return format!("Правило не сохранено: {error}"),
     }
-    with_window(|window| window.refresh_rules());
+    with_window(MainWindow::refresh_rules);
     String::new()
 }

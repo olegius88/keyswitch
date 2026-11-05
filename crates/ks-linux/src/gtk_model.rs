@@ -94,29 +94,35 @@ pub const FIELD_CATCH_UP_DESCRIPTION: &str = "Браузеры и редакто
 pub const FIELD_CATCH_UP_LABELS: [(&str, &str); 5] =
     [("off", "Не ждать"), ("100", "0,1 с"), ("300", "0,3 с"), ("500", "0,5 с"), ("1000", "1 с")];
 
+#[must_use]
 pub fn table_text(table: &[(&'static str, &'static str)], name: &str) -> &'static str {
     table.iter().find(|(key, _)| *key == name).map_or("", |(_, text)| *text)
 }
 
 /// The position of `value` among `keys`, or `fallback` for an unknown one.
+#[must_use]
 pub fn index_of(keys: &[&str], value: &str, fallback: u32) -> u32 {
-    keys.iter().position(|key| *key == value).map_or(fallback, |index| index.low::<u32>())
+    keys.iter().position(|key| *key == value).map_or(fallback, ks_cast::To::low::<u32>)
 }
 
 /// `quantity` of a count in the noun forms.
+#[must_use]
 pub fn counted(value: f64, forms: NounForms) -> String {
     quantity(value, forms)
 }
 
+#[must_use]
 pub fn plural_entries(count: usize) -> String {
     quantity(count.to::<f64>(), ["запись", "записи", "записей"])
 }
 
+#[must_use]
 pub fn learning_summary(count: usize) -> String {
     if count > 0 { format!("Правил: {count}") } else { "Правил пока нет".to_owned() }
 }
 
 /// `_format_time`: an ISO moment in the local time zone as day.month.year · hour:minute, or the text as it came.
+#[must_use]
 pub fn format_time(value: &str) -> String {
     gtk::glib::DateTime::from_iso8601(value, None)
         .ok()
@@ -126,6 +132,7 @@ pub fn format_time(value: &str) -> String {
 }
 
 /// `_os_description`: `PRETTY_NAME` of an os-release file's text.
+#[must_use]
 pub fn os_pretty_name(text: &str) -> Option<String> {
     text.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
@@ -156,6 +163,7 @@ pub struct EngineView {
 
 pub const HERO_SUBTITLE: &str = "Печатайте как обычно — раскладка исправится после слова.";
 
+#[must_use]
 pub fn engine_view(snapshot: &EngineSnapshot, wayland: bool) -> EngineView {
     let running = snapshot.running;
     let active = running && snapshot.enabled;
@@ -195,6 +203,7 @@ pub fn engine_view(snapshot: &EngineSnapshot, wayland: bool) -> EngineView {
 }
 
 /// The group number as the diagnostics rows show it: from 1, a dash when unknown.
+#[must_use]
 pub fn group_text(current_group: i32) -> String {
     if current_group >= 0 { (current_group + 1).to_string() } else { "—".to_owned() }
 }
@@ -212,6 +221,7 @@ pub struct ReportContext {
     pub log_state: String,
 }
 
+#[must_use]
 pub fn diagnostics_report(probe: &BackendProbe, context: &ReportContext) -> String {
     let backend_lines = if probe.session_type == "wayland" {
         vec![
@@ -245,6 +255,7 @@ pub fn diagnostics_report(probe: &BackendProbe, context: &ReportContext) -> Stri
 
 /// Where the learning prompt goes: centred over the anchor, above it, under it when there is no room above, and inside the
 /// monitor the anchor is on (`_position_above_anchor`). `monitor` is `(x, y, width, height)`.
+#[must_use]
 pub fn prompt_position(anchor: (i32, i32), size: (i32, i32), monitor: Option<(i32, i32, i32, i32)>) -> (i32, i32) {
     let (width, height) = size;
     let mut x = anchor.0 - width / 2;

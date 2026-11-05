@@ -4,13 +4,13 @@
 //! little-endian int16 weights and sorted uint64 fingerprints of the exact character features observed during
 //! training. The fingerprints use an independent hash namespace: coverage therefore measures feature membership
 //! rather than occupancy of collision-prone weight buckets. Loading is strict and bounded so a broken optional model
-//! can never prevent KeySwitch from falling back to its conservative rules.
+//! can never prevent `KeySwitch` from falling back to its conservative rules.
 //!
 //! The container is read once and kept as it is: the weights and the fingerprints are read in place from the bytes of
 //! the file (little endian), without a second copy. The training side (`encode_model`, `write_model`) is not here.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{VERSION_HASH_CHARACTERS, INTENT_RAW_TOKEN_MAX_CHARACTERS, FNV1A64_PRIME, FEATURE_HASH_SIGN_BIT, INTENT_LENGTH_EXACT_MAX_CHARACTERS, INTENT_LENGTH_SHORT_MAX_CHARACTERS, INTENT_LENGTH_MEDIUM_MAX_CHARACTERS, INTENT_LENGTH_LONG_MAX_CHARACTERS, INTENT_MAX_FEATURE_GROUP, KSLM_WEIGHT_ENTRY_BYTES, KSLM_FINGERPRINT_ENTRY_BYTES, KSLM_MAX_CONTAINER_BYTES, KSLM_SCHEMA_VERSION, KSLM_MIN_MANIFEST_BYTES, KSLM_MAX_MANIFEST_BYTES, KSLM_MAX_PAYLOAD_BYTES, INTENT_FEATURE_VERSION, KSLM_MAX_FINGERPRINTS, SHA256_HEX_CHARACTERS, INTENT_METADATA_MAX_DEPTH, KSLM_MAX_DIMENSION, KSLM_MAX_DIMENSION_LOG2, INTENT_NGRAM_ORDERS, INTENT_MODEL_VERSION_MAX_CHARACTERS, INTENT_MAX_MODEL_FLOAT_MAGNITUDE, INT64_MIN, UINT64_MAX};
 use crate::language_model::WordScore;
 use crate::load_error::LoadError;
 use ks_text::{exp, normalize, pystr};
@@ -44,6 +44,7 @@ pub const TRIGGERS: [CorrectionTrigger; 6] = [
 ];
 
 impl CorrectionTrigger {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             CorrectionTrigger::BoundaryProbe => "boundary_probe",
@@ -55,6 +56,7 @@ impl CorrectionTrigger {
         }
     }
 
+    #[must_use]
     pub fn parse(name: &str) -> Option<CorrectionTrigger> {
         TRIGGERS.into_iter().find(|trigger| trigger.as_str() == name)
     }
@@ -74,6 +76,7 @@ pub enum LayoutDirection {
 pub const LAYOUT_DIRECTIONS: [LayoutDirection; 2] = [LayoutDirection::ZeroToOne, LayoutDirection::OneToZero];
 
 impl LayoutDirection {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             LayoutDirection::ZeroToOne => "0>1",
@@ -132,6 +135,7 @@ pub struct IntentModelStatus {
 }
 
 impl IntentModelStatus {
+    #[must_use]
     pub fn summary(&self) -> String {
         if self.available {
             let version = self.version.as_deref().filter(|version| !version.is_empty()).unwrap_or("unknown");
@@ -144,6 +148,7 @@ impl IntentModelStatus {
         format!("недоступна: {error}")
     }
 
+    #[must_use]
     pub fn as_dict(&self) -> Value {
         let text = |value: &Option<String>| value.as_ref().map_or(Value::Null, |value| Value::String(value.clone()));
         let mut map = serde_json::Map::new();
@@ -174,12 +179,14 @@ pub struct PlattParameters {
 }
 
 /// Bound CPU/memory use, then apply the model's Unicode normalization.
+#[must_use]
 pub fn normalize_token(token: &str) -> String {
     let bounded = pystr::slice(token, None, Some(INTENT_RAW_TOKEN_MAX_CHARACTERS.to::<i64>()));
     normalize::nfc(&pystr::casefold(&normalize::nfc(bounded)))
 }
 
 /// A platform-independent FNV-1a hash of UTF-8 feature text. (A seed is a `u64` here: the Python's range check is the type.)
+#[must_use]
 pub fn fnv1a64(value: &str, seed: u64) -> u64 {
     value.bytes().fold(seed, |result, byte| (result ^ u64::from(byte)).wrapping_mul(FNV1A64_PRIME))
 }
@@ -289,12 +296,9 @@ fn add_character_features(token: &str, group_number: i64, polarity: f64, orders:
         let mut index: HashMap<&str, usize> = HashMap::new();
         for start in 0..=(length - order) {
             let gram = &bounded[offsets[start]..offsets[start + order]];
-            match index.get(gram) {
-                Some(&slot) => counts[slot].1 += 1,
-                None => {
-                    index.insert(gram, counts.len());
-                    counts.push((gram, 1));
-                }
+            if let Some(&slot) = index.get(gram) { counts[slot].1 += 1 } else {
+                index.insert(gram, counts.len());
+                counts.push((gram, 1));
             }
         }
         // math.sqrt of an exact integer.
@@ -376,17 +380,20 @@ impl LinearNgramModel {
     }
 
     /// `metadata`: training diagnostics, parsed from the manifest on demand.
+    #[must_use]
     pub fn metadata(&self) -> Value {
         let manifest: Value = serde_json::from_slice(&self.data[self.manifest_start..self.payload_start]).expect("the manifest was validated");
         manifest.get("metadata").cloned().unwrap_or_else(|| Value::Object(serde_json::Map::new()))
     }
 
     /// Bytes of the file held in memory.
+    #[must_use]
     pub fn resident_bytes(&self) -> usize {
         self.data.len()
     }
 
     /// `weights[bucket]`.
+    #[must_use]
     pub fn weight(&self, bucket: usize) -> i16 {
         let at = self.payload_start + bucket * KSLM_WEIGHT_ENTRY_BYTES;
         i16::from_le_bytes([self.data[at], self.data[at + 1]])
@@ -401,7 +408,7 @@ impl LinearNgramModel {
     fn is_supported(&self, fingerprint: u64) -> bool {
         let (mut low, mut high) = (0, self.fingerprint_count);
         while low < high {
-            let middle = (low + high) / 2;
+            let middle = usize::midpoint(low, high);
             if self.fingerprint(middle) < fingerprint {
                 low = middle + 1;
             } else {
@@ -435,6 +442,7 @@ impl LinearNgramModel {
 
     /// `LinearNgramModel.try_load_default()`: the override of `KEYSWITCH_INTENT_MODEL_PATH` (given as its value), then
     /// the packaged model of the `resources` folder. The Python's per-process cache lives in `Resources::intent_model`.
+    #[must_use]
     pub fn try_load_default(resource_dir: &Path, override_path: Option<&str>) -> (Option<LinearNgramModel>, IntentModelStatus) {
         let packaged = resource_dir.join("models").join("layout_intent_v1.ksm");
         let override_path = pystr::strip(override_path.unwrap_or(""));
@@ -498,7 +506,7 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, LoadError> {
     use std::io::Read;
     let maximum = KSLM_MAX_CONTAINER_BYTES;
     let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
-    let hint = file.metadata().map(|meta| meta.len().to::<usize>()).unwrap_or(0).min(maximum) + 1;
+    let hint = file.metadata().map_or(0, |meta| meta.len().to::<usize>()).min(maximum) + 1;
     let mut data = Vec::with_capacity(hint);
     file.take(maximum.to::<u64>() + 1).read_to_end(&mut data).map_err(|error| LoadError::os(&error, path))?;
     if data.len() > maximum {
@@ -1139,7 +1147,7 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
     }
     match value {
         Value::Number(number) if number.is_i64() || number.is_u64() => {
-            let integer = number.as_i64().map(i128::from).unwrap_or_else(|| i128::from(number.as_u64().expect("an integer")));
+            let integer = number.as_i64().map_or_else(|| i128::from(number.as_u64().expect("an integer")), i128::from);
             if !(INT64_MIN..=UINT64_MAX).contains(&integer) {
                 return Err(format_error(format!("{field} integer is out of range")));
             }
@@ -1166,6 +1174,7 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
+    use crate::constants::{FNV1A64_OFFSET_BASIS};
     use super::*;
 
     #[test]

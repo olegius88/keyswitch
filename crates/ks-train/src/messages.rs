@@ -83,7 +83,7 @@ static HTML: LazyLock<Entities> = LazyLock::new(|| {
     Entities {
         named: value["html5"].as_object().expect("names").iter().map(|(name, value)| (name.clone(), text(value))).collect(),
         invalid_charrefs: value["invalid_charrefs"].as_object().expect("charrefs").iter().map(|(name, value)| (name.parse().expect("a number"), text(value))).collect(),
-        invalid_codepoints: value["invalid_codepoints"].as_array().expect("codepoints").iter().filter_map(Value::as_u64).map(|number| number.to::<u32>()).collect(),
+        invalid_codepoints: value["invalid_codepoints"].as_array().expect("codepoints").iter().filter_map(Value::as_u64).map(ks_cast::To::to::<u32>).collect(),
     }
 });
 
@@ -412,7 +412,7 @@ pub fn build_tatoeba_bare(tatoeba: &Path, out: &Path) -> Result<BTreeMap<String,
             let lowered = without_bare_signs(&pystr::lower(&typeable(&text)));
             let tokens = pystr::split(&lowered);
             let word = |token: &&str| !token.is_empty() && token.chars().all(|character| if cyrillic { is_cyrillic_letter(character) } else { character.is_ascii_alphabetic() });
-            if !(TATOEBA_MIN_TOKENS..=TATOEBA_MAX_TOKENS).contains(&tokens.len()) || !tokens.iter().all(|token| word(token)) {
+            if !(TATOEBA_MIN_TOKENS..=TATOEBA_MAX_TOKENS).contains(&tokens.len()) || !tokens.iter().all(word) {
                 continue;
             }
             let part = split_of(&format!("{TATOEBA_NAMESPACE}:{language}"), &identifier);
@@ -804,7 +804,7 @@ fn resumes(text: &str) -> bool {
         let word = if token.chars().next().is_some_and(|first| RESUME_LEADING_SIGNS.contains(first)) { pystr::slice(token, Some(1), None) } else { token };
         if pystr::isalpha(word) && word.chars().count() <= OPENING_SHORT_MAX_LETTERS && tokens[index + 1].chars().any(cyrillic) {
             let before = tokens[..index].join(" ");
-            if before.chars().filter(|character| is_alpha(*character)).last().is_some_and(|last| last.is_ascii()) {
+            if before.chars().filter(|character| is_alpha(*character)).next_back().is_some_and(|last| last.is_ascii()) {
                 return true;
             }
         }

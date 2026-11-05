@@ -4,7 +4,7 @@
 //! `(group, text)` pairs in the dict's order (the caller keeps the keys unique), because the order decides ties.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_CONFIDENCE_THRESHOLD, LAYOUT_GROUP_COUNT, CONFIRMED_RULE_MIN_CONFIDENCE, HEURISTIC_KNOWN_TARGET_RELIEF_START_CHARACTERS, HEURISTIC_KNOWN_TARGET_RELIEF_PER_CHARACTER, HEURISTIC_KNOWN_TARGET_MIN_MARGIN, HEURISTIC_SPELL_ONLY_TARGET_EXTRA_MARGIN, LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR, HEURISTIC_TYPO_DELETION_MIN_CHARACTERS, HEURISTIC_TYPO_DELETION_EXTRA_MARGIN, HEURISTIC_NGRAM_RELIEF_CAP, HEURISTIC_NGRAM_RELIEF_START_CHARACTERS, HEURISTIC_NGRAM_RELIEF_PER_CHARACTER, HEURISTIC_NGRAM_EXTRA_MARGIN, HEURISTIC_NGRAM_AGGRESSIVE_MARGIN_REDUCTION, HEURISTIC_NGRAM_MIN_EXTRA_MARGIN, HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX_AGGRESSIVE, HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX, HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN_AGGRESSIVE, HEURISTIC_PLAUSIBLE_TARGET_NGRAM_MIN, HEURISTIC_NGRAM_MIN_CHARACTERS_AGGRESSIVE, HEURISTIC_NGRAM_MIN_CHARACTERS, INTENT_MIN_RUNTIME_TOKEN_CHARACTERS, CONTEXT_DELTA_MULTIPLIER, CONTEXT_TARGET_GROUP_BONUS, CONTEXT_SOURCE_GROUP_PENALTY, MAX_CONVERTIBLE_TOKEN_CHARACTERS, ACRONYM_MIN_LETTERS, REPEATED_CHARACTER_RUN};
 use crate::intent_model::{normalize_token, CorrectionTrigger, IntentModelInput, LinearNgramModel, LinearPrediction};
 use crate::language_model::{LanguageModel, WordScore};
 use crate::load_error::LoadError;
@@ -53,6 +53,7 @@ impl ProtectedTokens {
     }
 
     /// `_load_protected_tokens()`.
+    #[must_use]
     pub fn load(resource_dir: &Path) -> ProtectedTokens {
         let Ok(bytes) = std::fs::read(resource_dir.join("protected_tokens.txt")) else {
             return ProtectedTokens::default();
@@ -65,6 +66,7 @@ impl ProtectedTokens {
     }
 
     /// The lines of a file, as `read_text().splitlines()` sees them.
+    #[must_use]
     pub fn from_text(text: &str) -> ProtectedTokens {
         let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let tokens = pystr::splitlines(&text, false)
@@ -75,10 +77,12 @@ impl ProtectedTokens {
         ProtectedTokens { tokens }
     }
 
+    #[must_use]
     pub fn contains(&self, lowered: &str) -> bool {
         self.tokens.contains(lowered)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
@@ -90,6 +94,7 @@ impl ProtectedTokens {
         tokens
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
@@ -113,7 +118,8 @@ pub struct DetectionDecision {
 
 impl DetectionDecision {
     /// `DetectionDecision(should, original, replacement, source, target, confidence, reason, source_score, target_score)`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         should_convert: bool,
         original: &str,
@@ -199,7 +205,7 @@ impl IntentClassifier for LinearNgramModel {
 /// The ordered `dict[int, str]` the detector is asked about.
 pub type GroupTexts<'a> = &'a [(i64, String)];
 
-fn text_of<'a>(texts: GroupTexts<'a>, group: i64) -> Option<&'a str> {
+fn text_of(texts: GroupTexts<'_>, group: i64) -> Option<&str> {
     texts.iter().find(|item| item.0 == group).map(|item| item.1.as_str())
 }
 
@@ -267,6 +273,7 @@ impl LanguageDetector {
     }
 
     /// `self.models.get(group)`.
+    #[must_use]
     pub fn model(&self, group: i64) -> Option<&Arc<dyn LanguageScorer>> {
         self.models.iter().find(|item| item.0 == group).map(|item| &item.1)
     }
@@ -427,7 +434,7 @@ impl LanguageDetector {
         Ok(decision(should_convert, delta, reason))
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn intent_prediction(
         &self,
         original: &str,
@@ -473,17 +480,20 @@ impl LanguageDetector {
     }
 
     /// Case-insensitive identity that keeps layout-significant punctuation.
+    #[must_use]
     pub fn token_key(token: &str) -> String {
         pystr::casefold(pystr::strip(token))
     }
 
     /// Expose the structural guard to the physical-token boundary logic.
+    #[must_use]
     pub fn is_protected_token(&self, token: &str) -> bool {
         looks_like_protected_token(token, &self.protected_tokens)
     }
 }
 
 /// `LanguageDetector.is_protected_token(token)` of the Python's class: the guard with the packaged list.
+#[must_use]
 pub fn is_protected_token(token: &str, protected_tokens: &ProtectedTokens) -> bool {
     looks_like_protected_token(token, protected_tokens)
 }

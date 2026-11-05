@@ -190,6 +190,7 @@ pub static KEYSYM_NAMES: [(u32, &str); 781] = [
 ];
 
 /// `XKeysymToString`: the name of a keysym, None for one with no name in the table.
+#[must_use]
 pub fn keysym_name(keysym: u32) -> Option<String> {
     if (0x0100_0000..=0x0110_ffff).contains(&keysym) {
         return Some(format!("U{:04X}", keysym - 0x0100_0000));

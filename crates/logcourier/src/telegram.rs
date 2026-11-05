@@ -6,12 +6,13 @@ use std::process::{Command, Stdio};
 use serde_json::{Value, json};
 
 use crate::config::private_new_file;
-use crate::constants::*;
+use crate::constants::{REQUEST_TIMEOUT_SECONDS, ERROR_BODY_MAX_BYTES, ERROR_DESCRIPTION_MAX_CHARACTERS, TELEGRAM_GET_UPDATES_LIMIT, TELEGRAM_RESPONSE_MAX_BYTES, MAX_DOWNLOAD, TELEGRAM_MAX_CAPTION_CHARACTERS};
 use crate::error::{Error, Result};
 use crate::secrets::token_bot_id;
 use crate::store::dumps;
 use crate::timeutil::new_id;
 
+#[must_use]
 pub fn is_file_id(text: &str) -> bool {
     (1..=512).contains(&text.len()) && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
@@ -149,7 +150,7 @@ impl Telegram {
             // The token is inside the Telegram URL: a redirect carrying it elsewhere is never followed.
             return Err(Error::telegram("Telegram вернул перенаправление; запрос остановлен."));
         }
-        if status >= 400 || status < 200 {
+        if !(200..400).contains(&status) {
             let bounded = &body[..body.len().min(ERROR_BODY_MAX_BYTES)];
             let payload: Option<Value> = serde_json::from_slice(bounded).ok();
             let description = payload.as_ref().and_then(|value| value["description"].as_str()).unwrap_or("Ошибка Telegram");
@@ -261,7 +262,7 @@ pub(crate) mod fake {
 
     /// Answers in order and remembers what was asked.
     #[derive(Clone, Default)]
-    pub struct Script {
+    pub(crate) struct Script {
         pub answers: Arc<Mutex<Vec<Answer>>>,
         pub asked: Arc<Mutex<Vec<String>>>,
     }
@@ -271,7 +272,7 @@ pub(crate) mod fake {
             self.asked.lock().unwrap().push(format!("{url} {body}"));
             Ok(self.answers.lock().unwrap().remove(0))
         }
-        fn post_document(&self, url: &str, _fields: &[(&str, String)], filename: &str, data: &[u8]) -> Result<Answer> {
+        fn post_document(&self, url: &str, _fields: &[(&str, String)], filename: &str, _data: &[u8]) -> Result<Answer> {
             self.asked.lock().unwrap().push(format!("{url} {filename}"));
             Ok(self.answers.lock().unwrap().remove(0))
         }

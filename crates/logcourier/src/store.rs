@@ -8,19 +8,20 @@ use serde_json::{Value, json};
 use sqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::config::private_directory;
-use crate::constants::*;
+use crate::constants::{MAX_QUEUE_BYTES, DB_CONNECT_TIMEOUT_SECONDS, BUNDLE_HELD_FOR_CLEARING, RETENTION_DAYS, SECONDS_PER_DAY};
 use crate::error::{Error, Result};
 use crate::timeutil::now_seconds;
 
 pub const PENDING_KEY: &str = "catalog_pending:";
 pub const HEAD_DIGEST_KEY: &str = "catalog_digest:";
-/// Written instead of HEAD_DIGEST_KEY before 0.1.3: the file_id of the pinned catalog.
+/// Written instead of `HEAD_DIGEST_KEY` before 0.1.3: the `file_id` of the pinned catalog.
 pub const LEGACY_HEAD_KEY: &str = "catalog_head:";
 /// Progress of clearing the group, kept until every message up to the notice has been asked for.
 pub const RESET_KEY: &str = "group_reset:";
 
 const CHAIN_KEYS: [&str; 3] = [PENDING_KEY, HEAD_DIGEST_KEY, LEGACY_HEAD_KEY];
 
+#[must_use]
 pub fn dumps(value: &Value, ensure_ascii: bool) -> String {
     json_dumps(value, &JsonOptions { ensure_ascii, ..JsonOptions::default() })
 }
@@ -39,6 +40,7 @@ pub struct Bundle {
 }
 
 impl Bundle {
+    #[must_use]
     pub fn metadata(&self) -> Value {
         serde_json::from_str(&self.meta).unwrap_or(Value::Null)
     }
@@ -152,7 +154,7 @@ impl Store {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn enqueue(&self, source: &str, identity: &str, offset: i64, anchor: &str, destination: &str, metadata: &Value, payload: &[u8], name: &str, version: Option<&str>) -> Result<()> {
         let transaction = self.db.unchecked_transaction()?;
         self.insert_bundle(destination, metadata, payload, name)?;

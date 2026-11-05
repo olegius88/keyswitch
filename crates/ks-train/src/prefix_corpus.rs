@@ -85,7 +85,7 @@ struct Situation {
 
 /// `situations`.
 fn situations(root: &Path, config: &Value) -> Result<Vec<Situation>, String> {
-    let number = |name: &str| config[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("config.{name}"));
+    let number = |name: &str| config[name].as_u64().map(ks_cast::To::to::<usize>).ok_or_else(|| format!("config.{name}"));
     let (minimum, maximum, per_language, per_family) = (number("minimum_word_length")?, number("maximum_word_length")?, number("maximum_words_per_language")?, number("maximum_words_per_family")?);
     let namespace = config["namespace"].as_str().ok_or("a namespace")?;
     let mut words: BTreeMap<(String, i64), i64> = BTreeMap::new();

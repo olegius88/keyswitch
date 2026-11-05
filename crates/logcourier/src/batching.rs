@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use sqlite::params;
 
 use crate::config::Config;
-use crate::constants::*;
+use crate::constants::{MAX_DOWNLOAD, MAX_FRAGMENTS_PER_BATCH, ZIP_MANIFEST_OVERHEAD_BYTES, ZIP_ENTRY_OVERHEAD_BYTES, MIN_FRAGMENTS_TO_COMPACT, BATCH_SCHEMA_VERSION};
 use crate::error::{Error, Result};
 use crate::store::{Bundle, Store, dumps};
 use crate::timeutil::{iso_now, new_id, sha256_hex};
@@ -37,12 +37,9 @@ pub fn compact_with(store: &Store, config: &Config, limit: usize, max_fragments:
         let version = meta["keyswitch_version"].clone();
         let truthy = version.as_str().is_some_and(|text| !text.is_empty());
         let key = (if truthy { meta["source_id"].clone() } else { Value::Null }, version);
-        let position = match groups.iter().position(|group| group.key == key) {
-            Some(position) => position,
-            None => {
-                groups.push(Group { key, selected: Vec::new(), estimated: ZIP_MANIFEST_OVERHEAD_BYTES, full: false });
-                groups.len() - 1
-            }
+        let position = if let Some(position) = groups.iter().position(|group| group.key == key) { position } else {
+            groups.push(Group { key, selected: Vec::new(), estimated: ZIP_MANIFEST_OVERHEAD_BYTES, full: false });
+            groups.len() - 1
         };
         let group = &mut groups[position];
         if group.full {

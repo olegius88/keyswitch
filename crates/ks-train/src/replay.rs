@@ -37,6 +37,7 @@ pub enum Mode {
 }
 
 impl Mode {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Mode::EarlyOff => "early_off",
@@ -63,6 +64,7 @@ pub struct Plan {
 
 impl Plan {
     /// A plan of keys chosen by the caller, with nothing trimmed and no intervention.
+    #[must_use]
     pub fn typed(identifier: String, document: String, group: i64, expected: String, keys: Vec<PhysicalKey>, expected_final_group: i64) -> Plan {
         Plan { identifier, document, group: Some(group), initially_wrong: false, expected, keys, unsupported: Vec::new(), trimmed_left: 0, trimmed_right: 0, expected_final_group, intervention_event: None }
     }
@@ -84,6 +86,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    #[must_use]
     pub fn value(&self) -> Value {
         let corrections: Vec<Value> = self
             .corrections
@@ -128,6 +131,7 @@ pub struct Replayer {
 }
 
 /// The prefix index of each lexicon, as a replay hands the engine its reference models.
+#[must_use]
 pub fn prefix_indexes(models: &Lexicons) -> Vec<Arc<PrefixIndex>> {
     models.iter().map(|model| Arc::new(PrefixIndex::from_lexicon(model.frequencies.clone(), &model.source))).collect()
 }

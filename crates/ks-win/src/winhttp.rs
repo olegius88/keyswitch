@@ -1,6 +1,6 @@
-//! The HTTP transport of the updater on Windows: WinHTTP, with TLS and the proxy settings of the system.
+//! The HTTP transport of the updater on Windows: `WinHTTP`, with TLS and the proxy settings of the system.
 //!
-//! Redirects are followed by WinHTTP (at most ten, never from https to http); the address the response ended at is
+//! Redirects are followed by `WinHTTP` (at most ten, never from https to http); the address the response ended at is
 //! handed to the updater, which accepts only the addresses it knows. `launch_windows_installer` starts the
 //! downloaded installer and compiles everywhere.
 
@@ -20,6 +20,7 @@ pub fn launch_windows_installer(path: &Path) -> Result<(), UpdateError> {
 }
 
 /// The host, port and path with query of an `https://` URL.
+#[must_use]
 pub fn split_https_url(url: &str) -> Option<(&str, u16, &str)> {
     let rest = url.strip_prefix("https://")?;
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
@@ -57,7 +58,7 @@ mod native {
 
     use super::split_https_url;
 
-    /// The WinHTTP calls of one response, closed in reverse order when it is dropped.
+    /// The `WinHTTP` calls of one response, closed in reverse order when it is dropped.
     struct Handles {
         session: *mut c_void,
         connection: *mut c_void,
@@ -88,7 +89,7 @@ mod native {
             let wanted = u32::try_from(buffer.len()).unwrap_or(u32::MAX);
             let mut count: u32 = 0;
             // SAFETY: the buffer is valid for `wanted` bytes, `count` for one u32, the request handle is open.
-            let done = unsafe { WinHttpReadData(self.handles.request, buffer.as_mut_ptr().cast(), wanted, &mut count) };
+            let done = unsafe { WinHttpReadData(self.handles.request, buffer.as_mut_ptr().cast(), wanted, &raw mut count) };
             if done == 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -116,18 +117,18 @@ mod native {
     fn final_url(request: *mut c_void) -> io::Result<String> {
         let mut size: u32 = 0;
         // SAFETY: a null buffer with a zero size asks WinHTTP for the size it needs, in bytes.
-        unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, null_mut(), &mut size) };
+        unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, null_mut(), &raw mut size) };
         let mut buffer = vec![0u16; size.to::<usize>().div_ceil(2).max(1)];
         let mut size = (buffer.len() * 2).low::<u32>();
         // SAFETY: the buffer holds `size` bytes.
-        check(unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, buffer.as_mut_ptr().cast(), &mut size) })?;
+        check(unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, buffer.as_mut_ptr().cast(), &raw mut size) })?;
         let characters = (size.to::<usize>() / 2).min(buffer.len());
         let text = &buffer[..characters];
         let end = text.iter().position(|&unit| unit == 0).unwrap_or(text.len());
         Ok(String::from_utf16_lossy(&text[..end]))
     }
 
-    /// HTTPS GET over WinHTTP; a status outside 200-299 is an error, as `urlopen` raises one.
+    /// HTTPS GET over `WinHTTP`; a status outside 200-299 is an error, as `urlopen` raises one.
     #[derive(Debug, Default, Clone, Copy)]
     pub struct WinHttpOpener;
 
@@ -167,7 +168,7 @@ mod native {
                     WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                     null(),
                     std::ptr::from_mut(&mut status).cast(),
-                    &mut size,
+                    &raw mut size,
                     null_mut(),
                 ))?;
                 if !(200..300).contains(&status) {

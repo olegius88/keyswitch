@@ -423,7 +423,7 @@ impl CountedModel {
         let padded: Vec<char> = std::iter::repeat_n(BOS, self.order - 1).chain(keys.chars()).chain([EOS]).collect();
         let mut buffer = String::new();
         let values: Vec<f64> = (self.order - 1..padded.len()).map(|index| self.conditional(script, &padded[index + 1 - self.order..=index], &mut buffer)).collect();
-        py_sum(values.into_iter())
+        py_sum(values)
     }
 
     /// Nats in favour of reading these keys in the other layout.

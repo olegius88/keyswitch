@@ -14,6 +14,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 /// `RESOURCE_PATH` under the `resources` folder of the install.
+#[must_use]
 pub fn resource_path(resource_dir: &Path) -> PathBuf {
     resource_dir.join("identifiers.json")
 }
@@ -33,11 +34,13 @@ pub struct IdentifierLexicon {
 }
 
 impl IdentifierLexicon {
+    #[must_use]
     pub fn normalize(token: &str) -> String {
         pystr::casefold(token)
     }
 
     /// Exact, case-insensitive membership; no prefixes, no fuzzy matching.
+    #[must_use]
     pub fn contains(&self, token: &str) -> bool {
         self.identifiers.contains_sorted(&Self::normalize(token))
     }
@@ -84,6 +87,7 @@ impl IdentifierLexicon {
     }
 
     /// `IdentifierLexicon.try_load(path)`: the lexicon and its version, or nothing and the reason.
+    #[must_use]
     pub fn try_load(path: &Path) -> (Option<IdentifierLexicon>, String) {
         match Self::load(path) {
             Ok(lexicon) => {

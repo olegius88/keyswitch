@@ -110,7 +110,7 @@ fn local_time() -> LocalTime {
     // SAFETY: GetLocalTime fills the structure it is given.
     let time = unsafe {
         let mut time = std::mem::zeroed();
-        GetLocalTime(&mut time);
+        GetLocalTime(&raw mut time);
         time
     };
     LocalTime {
@@ -129,8 +129,8 @@ fn platform_description() -> String {
     // SAFETY: RtlGetVersion fills the structure whose size it is told.
     let (major, minor, build) = unsafe {
         let mut info: OSVERSIONINFOW = std::mem::zeroed();
-        info.dwOSVersionInfoSize = (std::mem::size_of::<OSVERSIONINFOW>()).low::<u32>();
-        RtlGetVersion(&mut info);
+        info.dwOSVersionInfoSize = (size_of::<OSVERSIONINFOW>()).low::<u32>();
+        RtlGetVersion(&raw mut info);
         (info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber)
     };
     let release = if major >= 10 && build >= 22000 { "11" } else if major >= 10 { "10" } else { "8" };
@@ -170,7 +170,7 @@ pub fn write_standard(error: bool, text: &str) {
             }
         }
         let mut written = 0u32;
-        WriteFile(handle, text.as_ptr(), text.len().low::<u32>(), &mut written, null_mut());
+        WriteFile(handle, text.as_ptr(), text.len().low::<u32>(), &raw mut written, null_mut());
     }
 }
 
@@ -184,6 +184,7 @@ pub fn leave(status: i32) -> ! {
 // -------------------------------------------------------------------------------------------------------- the program
 
 /// `main` after the arguments: one instance at a time, then the application.
+#[must_use]
 pub fn run_with_instance(arguments: Arguments) -> i32 {
     let mut instance = match WindowsSingleInstance::new(None) {
         Ok(instance) => instance,
@@ -783,10 +784,10 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     // SAFETY: the usual loop on the thread that made the window; `message` is plain data the calls fill in.
     unsafe {
         let mut message: MSG = std::mem::zeroed();
-        while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
+        while GetMessageW(&raw mut message, null_mut(), 0, 0) > 0 {
             if !settings_window::is_dialog_message(&message) {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+                TranslateMessage(&raw const message);
+                DispatchMessageW(&raw const message);
             }
         }
     }

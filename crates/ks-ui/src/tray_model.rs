@@ -43,19 +43,23 @@ impl Default for TrayState {
 }
 
 impl TrayState {
+    #[must_use]
     pub fn label(&self) -> &'static str {
         layout_label(self.group)
     }
 
+    #[must_use]
     pub fn alternate_layout_label(&self) -> String {
         alternate_layout_action_label(self.group)
     }
 
+    #[must_use]
     pub fn can_switch_layout(&self) -> bool {
         alternate_layout_group(self.group).is_some()
     }
 
     /// The tooltip of the icon.
+    #[must_use]
     pub fn title(&self) -> String {
         format!("KeySwitch — {}", self.label())
     }
@@ -82,8 +86,9 @@ fn separator() -> MenuEntry {
 }
 
 /// The menu as it should look right now.
+#[must_use]
 pub fn menu_entries(state: &TrayState) -> Vec<MenuEntry> {
-    use TrayAction::*;
+    use TrayAction::{SwitchLayout, ShowSettings, ToggleEngine, ToggleSound, ToggleNotifications, ShowHistory, ShowExclusions, ShowAbout, QuitApplication};
     vec![
         line(&format!("{CURRENT_LAYOUT_PREFIX}: {}", state.label()), None, None, false, false),
         line(&state.alternate_layout_label(), Some(SwitchLayout), None, state.can_switch_layout(), false),
@@ -102,6 +107,7 @@ pub fn menu_entries(state: &TrayState) -> Vec<MenuEntry> {
 }
 
 /// `menu_activation_message`: a primary click opens the same menu as the secondary one.
+#[must_use]
 pub fn menu_activation_message(message: u32, primary_click: u32, menu_click: u32) -> u32 {
     if message == primary_click { menu_click } else { message }
 }

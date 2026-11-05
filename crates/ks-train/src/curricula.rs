@@ -66,10 +66,12 @@ impl Counts {
         *self.0.entry(name.into()).or_insert(0) += count;
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> i64 {
         self.0.get(name).copied().unwrap_or(0)
     }
 
+    #[must_use]
     pub fn report(&self) -> Value {
         let mut map = Map::new();
         for (name, count) in &self.0 {
@@ -1184,6 +1186,7 @@ pub fn lone_word_curriculum(tools: &Tools, split: &str, evidence: &Value, decide
 }
 
 /// `curated_letter` for the captured curricula.
+#[must_use]
 pub fn curated(original: &str, alternative: &str) -> bool {
     curated_letter(original, alternative)
 }

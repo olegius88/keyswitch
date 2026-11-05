@@ -11,6 +11,7 @@ use crate::ucd;
 
 /// `repr(x)` and `str(x)` of a float: the shortest text that parses back to `x`, in Python's layout
 /// (`1e+16`, `1.5e-07`, `0.0001`, `inf`, `nan`, `-0.0`).
+#[must_use]
 pub fn float_repr(x: f64) -> String {
     if x.is_nan() {
         return "nan".to_string();
@@ -27,7 +28,7 @@ pub fn float_repr(x: f64) -> String {
     // dtoa takes the even one: 742082672164581.25 is `...581.2`). The correctly rounded text of the same
     // length, when it still round-trips, is the one Python writes.
     let mut text = format!("{:e}", x.abs());
-    let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(|c| c.is_ascii_digit()).count();
+    let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(char::is_ascii_digit).count();
     let exact = format!("{:.*e}", shortest_len - 1, x.abs());
     if exact != text && exact.parse::<f64>().is_ok_and(|v| v == x.abs()) {
         text = exact;
@@ -64,13 +65,14 @@ pub fn float_repr(x: f64) -> String {
 }
 
 /// `str(x)` of a float is its repr.
+#[must_use]
 pub fn float_str(x: f64) -> String {
     float_repr(x)
 }
 
 // ---------------------------------------------------------------- parsing
 
-/// What CPython does before parsing a number from text: decimal digits of any script become ASCII digits,
+/// What `CPython` does before parsing a number from text: decimal digits of any script become ASCII digits,
 /// whitespace becomes a space, anything else non-ASCII becomes `?`; then the ends are stripped.
 fn to_ascii_number_text(s: &str) -> String {
     // A pure ASCII text is left as it is (so `\x1c` is not a space there, but it is in a text with other
@@ -117,8 +119,9 @@ fn strip_underscores(text: &str) -> Option<String> {
 }
 
 /// `int(text)` in base 10: spaces around, a sign, `_` between digits, digits of any script.
-/// `None` where Python raises ValueError, and also beyond `i128` (the one place this differs: Python has
+/// `None` where Python raises `ValueError`, and also beyond `i128` (the one place this differs: Python has
 /// unbounded integers; the program's integers are small).
+#[must_use]
 pub fn py_int(s: &str) -> Option<i128> {
     let text = strip_underscores(&to_ascii_number_text(s))?;
     let (negative, digits) = match text.as_bytes().first()? {
@@ -143,7 +146,8 @@ pub fn py_int(s: &str) -> Option<i128> {
 }
 
 /// `float(text)`: spaces around, a sign, `inf`/`infinity`/`nan` in any case, `_` between digits, digits of
-/// any script, exponent. `None` where Python raises ValueError.
+/// any script, exponent. `None` where Python raises `ValueError`.
+#[must_use]
 pub fn py_float(s: &str) -> Option<f64> {
     let text = strip_underscores(&to_ascii_number_text(s))?;
     let (negative, body) = match text.as_bytes().first()? {
@@ -200,7 +204,8 @@ pub fn py_float(s: &str) -> Option<f64> {
 
 /// `round(x)` as a float: halves go to the even neighbour (`0.5 -> 0`, `2.5 -> 2`, `-0.5 -> 0`; never -0.0, the
 /// Python result is an `int`).
-/// CPython's recipe: round half away, then fix up the exact halves.
+/// `CPython`'s recipe: round half away, then fix up the exact halves.
+#[must_use]
 pub fn py_round(x: f64) -> f64 {
     let rounded = x.round();
     let rounded = if (x - rounded).abs() == 0.5 { 2.0 * (x / 2.0).round() } else { rounded };
@@ -209,6 +214,7 @@ pub fn py_round(x: f64) -> f64 {
 }
 
 /// `round(x)` as an `int`: `None` for inf and nan (Python raises), and beyond `i128`.
+#[must_use]
 pub fn py_round_to_int(x: f64) -> Option<i128> {
     if !x.is_finite() {
         return None;
@@ -218,7 +224,8 @@ pub fn py_round_to_int(x: f64) -> Option<i128> {
 }
 
 /// `round(x, ndigits)`: correctly rounded through the exact decimal value (halves to even, on the exact
-/// binary value), then parsed back, as CPython does. `None` where Python raises OverflowError.
+/// binary value), then parsed back, as `CPython` does. `None` where Python raises `OverflowError`.
+#[must_use]
 pub fn py_round_ndigits(x: f64, ndigits: i64) -> Option<f64> {
     if !x.is_finite() {
         return Some(x);
@@ -295,13 +302,13 @@ fn round_to_tens(x: f64, k: usize) -> String {
 /// The errors `math.fsum` raises.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsumError {
-    /// OverflowError: intermediate overflow in fsum.
+    /// `OverflowError`: intermediate overflow in fsum.
     Overflow,
-    /// ValueError: -inf + inf in fsum.
+    /// `ValueError`: -inf + inf in fsum.
     InfMinusInf,
 }
 
-/// `math.fsum`: Shewchuk's exactly rounded sum, a port of CPython's `math_fsum`.
+/// `math.fsum`: Shewchuk's exactly rounded sum, a port of `CPython`'s `math_fsum`.
 pub fn fsum(values: &[f64]) -> Result<f64, FsumError> {
     let mut partials: Vec<f64> = Vec::new();
     let mut special_sum = 0.0f64;
@@ -325,7 +332,9 @@ pub fn fsum(values: &[f64]) -> Result<f64, FsumError> {
         }
         partials.truncate(i);
         if x != 0.0 {
-            if !x.is_finite() {
+            if x.is_finite() {
+                partials.push(x);
+            } else {
                 // A non-finite x is an intermediate overflow or an inf/nan in the summands.
                 if xsave.is_finite() {
                     return Err(FsumError::Overflow);
@@ -335,8 +344,6 @@ pub fn fsum(values: &[f64]) -> Result<f64, FsumError> {
                 }
                 special_sum += xsave;
                 partials.clear();
-            } else {
-                partials.push(x);
             }
         }
     }
@@ -375,6 +382,7 @@ pub fn fsum(values: &[f64]) -> Result<f64, FsumError> {
 }
 
 /// `statistics.fmean(data)`: `fsum(data) / len(data)`; `None` for empty data or where `fsum` raises.
+#[must_use]
 pub fn fmean(values: &[f64]) -> Option<f64> {
     if values.is_empty() {
         return None;
@@ -406,6 +414,7 @@ fn float_sqrt_of_frac(n: &BigUint, m: &BigUint) -> f64 {
 
 /// `statistics.pstdev(data)`: exact sums of squares as fractions and a correctly rounded square root.
 /// `None` for empty data and for inf/nan in the data (Python raises).
+#[must_use]
 pub fn pstdev(values: &[f64]) -> Option<f64> {
     let n = values.len();
     if n == 0 || values.iter().any(|v| !v.is_finite()) {
@@ -449,7 +458,8 @@ pub fn pstdev(values: &[f64]) -> Option<f64> {
 
 // ---------------------------------------------------------------- math
 
-/// `math.log2(x)`: the platform libm. `None` where Python raises ValueError (x <= 0).
+/// `math.log2(x)`: the platform libm. `None` where Python raises `ValueError` (x <= 0).
+#[must_use]
 pub fn log2(x: f64) -> Option<f64> {
     if x.is_nan() {
         return Some(x);
@@ -457,7 +467,8 @@ pub fn log2(x: f64) -> Option<f64> {
     if x <= 0.0 { None } else { Some(x.log2()) }
 }
 
-/// `math.log(x)`: the platform libm. `None` where Python raises ValueError (x <= 0).
+/// `math.log(x)`: the platform libm. `None` where Python raises `ValueError` (x <= 0).
+#[must_use]
 pub fn log(x: f64) -> Option<f64> {
     if x.is_nan() {
         return Some(x);
@@ -466,18 +477,21 @@ pub fn log(x: f64) -> Option<f64> {
 }
 
 /// `math.log(x, base)`: `log(x) / log(base)`; `None` for a domain error or a base of 1.
+#[must_use]
 pub fn log_base(x: f64, base: f64) -> Option<f64> {
     let (num, den) = (log(x)?, log(base)?);
     if den == 0.0 { None } else { Some(num / den) }
 }
 
-/// `math.exp(x)`: the platform libm. `None` where Python raises OverflowError (finite x, infinite result).
+/// `math.exp(x)`: the platform libm. `None` where Python raises `OverflowError` (finite x, infinite result).
+#[must_use]
 pub fn exp(x: f64) -> Option<f64> {
     let r = x.exp();
     if r.is_infinite() && x.is_finite() { None } else { Some(r) }
 }
 
-/// `math.sqrt(x)`: `None` for negative x (ValueError).
+/// `math.sqrt(x)`: `None` for negative x (`ValueError`).
+#[must_use]
 pub fn sqrt(x: f64) -> Option<f64> {
     if x < 0.0 { None } else { Some(x.sqrt()) }
 }
@@ -486,7 +500,7 @@ pub fn sqrt(x: f64) -> Option<f64> {
 
 /// `max(items, key=key)`: the FIRST of the maximal elements (`Iterator::max_by_key` returns the last).
 /// A later element replaces the best only when its key is strictly greater (Python's `>`).
-#[allow(clippy::neg_cmp_op_on_partial_ord)] // Python keeps the first unless `>` holds; NaN keys never replace
+#[expect(clippy::neg_cmp_op_on_partial_ord)] // Python keeps the first unless `>` holds; NaN keys never replace
 pub fn max_by_key_first<I, K, F>(items: I, mut key: F) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -505,7 +519,7 @@ where
 }
 
 /// `min(items, key=key)`: the first of the minimal elements.
-#[allow(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord)]
 pub fn min_by_key_first<I, K, F>(items: I, mut key: F) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -524,7 +538,7 @@ where
 }
 
 /// `max(items)` without a key: the first maximal element.
-#[allow(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord)]
 pub fn max_first<I>(items: I) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -541,7 +555,7 @@ where
 }
 
 /// `min(items)` without a key: the first minimal element.
-#[allow(clippy::neg_cmp_op_on_partial_ord)]
+#[expect(clippy::neg_cmp_op_on_partial_ord)]
 pub fn min_first<I>(items: I) -> Option<I::Item>
 where
     I: IntoIterator,
@@ -665,6 +679,7 @@ mod tests {
 }
 
 /// The inverse of `float.hex()`: exactly the forms it writes, nothing else.
+#[must_use]
 pub fn float_fromhex(text: &str) -> Option<f64> {
     let (negative, body) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -694,6 +709,7 @@ pub fn float_fromhex(text: &str) -> Option<f64> {
 }
 
 /// `float.hex()`.
+#[must_use]
 pub fn float_hex(x: f64) -> String {
     if x.is_nan() {
         return "nan".to_owned();

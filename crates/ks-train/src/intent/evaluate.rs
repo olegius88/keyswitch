@@ -786,7 +786,7 @@ struct ContextEvaluation<'a> {
 }
 
 /// `evaluate_production_context_ensemble`: the real detector at every role-relative context endpoint.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [LexicalExample], unknown_typo: &'a [LexicalExample], safety: &'a [LexicalExample], source_known: &'a [LexicalExample], models: &[Arc<LanguageModel>; 2], protected: &Arc<ProtectedTokens>, config: &FitConfig, workers: usize) -> Result<ContextEvaluation<'a>, String> {
     if safety.iter().any(|example| example.label || !example.safety) {
         return Err("production context safety rows must be safety negatives".to_owned());
@@ -1058,7 +1058,7 @@ fn median(samples: &[f64]) -> f64 {
     let mut ordered = samples.to_vec();
     ordered.sort_by(|a, b| a.partial_cmp(b).expect("finite samples"));
     let middle = ordered.len() / 2;
-    if ordered.len() % 2 == 1 { ordered[middle] } else { (ordered[middle - 1] + ordered[middle]) / 2.0 }
+    if ordered.len() % 2 == 1 { ordered[middle] } else { f64::midpoint(ordered[middle - 1], ordered[middle]) }
 }
 
 fn coverage_statistics(rows: &[&PredictionRow<'_>]) -> Result<Value, String> {

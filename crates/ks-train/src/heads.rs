@@ -6,7 +6,7 @@ use crate::curricula::{self, Curriculum};
 use crate::physical::reading;
 use crate::rows::ActionRow;
 use crate::tools::{Options, Tools};
-use ks_context::constants::*;
+use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX};
 use ks_context::context_action_features as f;
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextEvidence};
 use ks_text::pystr;
@@ -110,7 +110,7 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
 }
 
 /// `head_question`: whether the features of a frame hold one of these prefixes.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &str, after: &str, trigger: &str, origin: AfterOrigin, prefixes: &BTreeSet<String>, before_origin: BeforeOrigin) -> bool {
     let has = |prefix: &str| prefixes.contains(prefix);
     let t = &tools.tables;

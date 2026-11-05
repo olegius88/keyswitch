@@ -27,7 +27,7 @@
 //! layer applies it.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{ORTHO_FEATURE_ARTIFACT_SCHEMA_VERSION, ORTHO_EXTRA_KEY_ARTIFACT_SCHEMA_VERSION, ORTHO_STRETCH_ARTIFACT_SCHEMA_VERSION, ORTHO_REPLACEMENT_ARTIFACT_SCHEMA_VERSION, ORTHO_PLAUSIBILITY_ARTIFACT_SCHEMA_VERSION, CONTEXT_TYPO_MIN_CHARACTERS, ACRONYM_MIN_LETTERS, ORTHO_CHANNEL_MAX_GRAMS, ORTHO_ARTIFACT_MAX_BYTES, ORTHO_MIN_ORDER, ORTHO_MAX_ORDER, ORTHO_MAX_SCALE, ORTHO_MAX_MINIMUM_LENGTH_CHARACTERS, ORTHO_MIN_COLLAPSED_RUN, ORTHO_MIN_STRETCH_RUN};
 use crate::load_error::{json_text, read_limited, LoadError};
 use crate::packed_grams::GramTable;
 use crate::pysum::py_sum;
@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 /// `ARTIFACT_PATH` under the `resources` folder of the install.
+#[must_use]
 pub fn artifact_path(resource_dir: &Path) -> PathBuf {
     resource_dir.join("models").join("ortho_v1.json")
 }
@@ -68,6 +69,7 @@ pub const CONTINUOUS_FEATURE: &str = "source_plausibility";
 pub const TARGET_FEATURE: &str = "target_plausibility";
 
 /// `SCHEMA_FEATURES.get(schema)`: the features an artifact of each schema weighs.
+#[must_use]
 pub fn schema_features(schema: i64) -> Option<&'static [&'static str]> {
     match schema {
         ORTHO_FEATURE_ARTIFACT_SCHEMA_VERSION => Some(&FEATURES_SCHEMA_2),
@@ -128,6 +130,7 @@ pub struct OrthoScore {
 }
 
 /// The token as typed and as it reads in the other layout; the keys are the Latin reading.
+#[must_use]
 pub fn readings(keys: &str, source_script: &str) -> (String, String) {
     let cyrillic = LayoutPair::default().translate(keys, "us", "ru").expect("the us/ru pair is supported");
     if source_script == "en" { (keys.to_string(), cyrillic) } else { (cyrillic, keys.to_string()) }
@@ -141,6 +144,7 @@ fn two_parts(text: &str) -> Option<(&str, &str)> {
 }
 
 /// A token that repeats itself around one hyphen: `у-у`, `мда-а`, `ну-ну`.
+#[must_use]
 pub fn reduplicated(text: &str) -> bool {
     let Some((head, tail)) = two_parts(text) else {
         return false;
@@ -149,6 +153,7 @@ pub fn reduplicated(text: &str) -> bool {
 }
 
 /// The text with every run of one character longer than `limit` cut to `limit`: `каеффф` → `каефф`.
+#[must_use]
 pub fn collapse_runs(text: &str, limit: i64) -> String {
     let mut result = String::with_capacity(text.len());
     let mut last = None;
@@ -164,6 +169,7 @@ pub fn collapse_runs(text: &str, limit: i64) -> String {
 }
 
 /// The text with every run of at least `minimum` identical characters read once: `муууу` → `му`.
+#[must_use]
 pub fn read_once(text: &str, minimum: i64) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut result = String::with_capacity(text.len());
@@ -184,6 +190,7 @@ pub fn read_once(text: &str, minimum: i64) -> String {
 
 /// The text without every hyphen that stands between two copies of one character, and without the second copy: a
 /// drawn-out sound (`ти-ише` → `тише`, `ура-а-а` → `ура`), not a boundary of parts.
+#[must_use]
 pub fn drop_hyphen_stretches(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut result = String::with_capacity(text.len());
@@ -202,6 +209,7 @@ pub fn drop_hyphen_stretches(text: &str) -> String {
 
 /// The readings of a token the character models judge: as typed with a stretch cut to `collapse` and, with `stretch`,
 /// also with every run of at least `stretch` keys read once - with `hyphens`, and every hyphen stretch dropped.
+#[must_use]
 pub fn stretch_readings(keys: &str, collapse: Option<i64>, stretch: Option<i64>, hyphens: bool) -> Vec<String> {
     let typed = collapse.map_or_else(|| keys.to_string(), |limit| collapse_runs(keys, limit));
     let Some(stretch) = stretch else {
@@ -246,6 +254,7 @@ pub struct TokenFeatures {
 }
 
 impl TokenFeatures {
+    #[must_use]
     pub fn as_pairs(&self) -> [(&'static str, i64); 9] {
         [
             ("ident", self.ident),
@@ -339,6 +348,7 @@ impl Channel {
     }
 
     /// log P(keys) with an explicit boundary, so length is scored honestly.
+    #[must_use]
     pub fn score(&self, keys: &str) -> f64 {
         let mut padded: Vec<char> = Vec::with_capacity(keys.len() + self.order);
         padded.resize(self.order - 1, BOS);
@@ -611,7 +621,7 @@ fn strict_int(value: &Value) -> Option<i64> {
 fn schema_number(value: &Value) -> Option<i64> {
     match value {
         Value::Bool(flag) => Some(i64::from(*flag)),
-        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(|x| x.to::<i64>())),
+        Value::Number(number) => number.as_i64().or_else(|| number.as_f64().filter(|x| x.fract() == 0.0 && x.abs() < 1e15).map(ks_cast::To::to::<i64>)),
         _ => None,
     }
 }
@@ -620,7 +630,7 @@ fn has_exact_keys(table: &Map<String, Value>, names: &[&str]) -> bool {
     table.len() == names.len() && names.iter().all(|name| table.contains_key(*name))
 }
 
-/// A list a Python `set()` is built of raises TypeError on a list or a dict inside.
+/// A list a Python `set()` is built of raises `TypeError` on a list or a dict inside.
 fn unhashable(list: &[Value]) -> bool {
     list.iter().any(|item| matches!(item, Value::Array(_) | Value::Object(_)))
 }
@@ -689,6 +699,7 @@ impl OrthoModel {
     }
 
     /// `OrthoModel.try_load(path)`: the model and its version, or nothing and why.
+    #[must_use]
     pub fn try_load(path: &Path, resources: Option<Arc<Resources>>) -> (Option<OrthoModel>, String) {
         match Self::load(path, None, None, resources) {
             Ok(model) => {
@@ -978,7 +989,7 @@ impl OrthoModel {
     }
 
     /// One reading scored: its character ratio, the case shape and the features of `featured`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn judged(&self, featured: &str, source_logprob: f64, target_logprob: f64, shape_ratio: f64, source: &str, known: Option<KnownRef<'_>>, shape: &str) -> OrthoScore {
         let ratio = target_logprob - source_logprob;
         let mut features = 0.0;

@@ -112,6 +112,7 @@ fn ends_a_word(character: &str) -> bool {
 }
 
 /// `served`: every token the engine hands to a model for these keys typed in this layout.
+#[must_use]
 pub fn served(keys: &str, layout: &str) -> Vec<String> {
     let (other_letters, keep) = (letter_keys(other(layout)), letter_keys(layout));
     let mut segments: Vec<Vec<char>> = Vec::new();
@@ -466,7 +467,7 @@ fn sqrt_of_fraction(numerator: &BigUint, denominator: &BigUint, extra_power: i64
     let q = (numerator.bits().to::<i64>() - denominator.bits().to::<i64>() - WIDTH).div_euclid(2);
     let round_to_odd = |n: BigUint, m: BigUint| -> BigUint {
         let a = (&n / &m).sqrt();
-        if &a * &a * &m != n { a | BigUint::from(1_u8) } else { a }
+        if &a * &a * &m == n { a } else { a | BigUint::from(1_u8) }
     };
     let (value, power) = if q >= 0 {
         (round_to_odd(numerator.clone(), denominator << (2 * q).to::<u64>()), q)
@@ -851,7 +852,7 @@ pub(crate) fn gz_text(path: &Path) -> Result<String, String> {
 /// `web_weight`: an Onboard-like weight from a rank: the bit length of the count per billion words (Zipf).
 fn web_weight(rank: i64) -> i64 {
     let per_billion = (py_round(WEB_TOP_PER_BILLION.to::<f64>() / (rank + 1).to::<f64>())).to::<i64>();
-    ((i64::BITS - per_billion.leading_zeros()).min(MAXIMUM_LEXICON_WEIGHT.to::<u32>()).max(1)).to::<i64>()
+    (per_billion.cast_unsigned().bit_width().min(MAXIMUM_LEXICON_WEIGHT.to::<u32>()).max(1)).to::<i64>()
 }
 
 /// `to_keys`: the physical keys a typist pressed to produce this token.

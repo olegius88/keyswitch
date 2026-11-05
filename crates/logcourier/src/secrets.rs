@@ -24,6 +24,7 @@ pub fn token_bot_id(token: &str) -> Result<String> {
     Ok(token.split(':').next().unwrap_or_default().to_owned())
 }
 
+#[must_use]
 pub fn redact(text: &str) -> String {
     let bytes = text.as_bytes();
     let (mut out, mut copied, mut index) = (String::with_capacity(text.len()), 0, 0);
@@ -131,13 +132,13 @@ mod platform {
     use std::process::{Command, Stdio};
 
     /// The Secret Service, through `secret-tool` of libsecret, with the attributes the Python `keyring` library uses.
-    pub fn read(service: &str, user: &str) -> Result<Option<String>, ()> {
+    pub(super) fn read(service: &str, user: &str) -> Result<Option<String>, ()> {
         let output = Command::new("secret-tool").args(["lookup", "service", service, "username", user]).stderr(Stdio::null()).output().map_err(|_| ())?;
         let value = String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_owned();
         Ok((output.status.success() && !value.is_empty()).then_some(value))
     }
 
-    pub fn write(service: &str, user: &str, value: &str) -> Result<(), ()> {
+    pub(super) fn write(service: &str, user: &str, value: &str) -> Result<(), ()> {
         let label = format!("Password for '{user}' on '{service}'");
         let mut child = Command::new("secret-tool")
             .args(["store", "--label", &label, "application", "Python keyring library", "service", service, "username", user])

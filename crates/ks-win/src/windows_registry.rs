@@ -1,7 +1,7 @@
 //! Native registry adapter isolated from platform-independent logic.
 //!
 //! The Python uses `winreg`; `RegistryValue` is what its `QueryValueEx` turns a value into, so that `isinstance` checks read
-//! the same here: a number for REG_DWORD and REG_QWORD, text up to the first zero for REG_SZ and REG_EXPAND_SZ, and bytes
+//! the same here: a number for `REG_DWORD` and `REG_QWORD`, text up to the first zero for `REG_SZ` and `REG_EXPAND_SZ`, and bytes
 //! for the rest, with an empty value of those being None.
 
 use ks_cast::To as _;
@@ -46,12 +46,12 @@ fn check(status: u32) -> io::Result<()> {
     if status == ERROR_SUCCESS { Ok(()) } else { Err(io::Error::from_raw_os_error(status.bits::<i32>())) }
 }
 
-/// `winreg.OpenKey`, with its default of KEY_READ where the caller asks for no more.
+/// `winreg.OpenKey`, with its default of `KEY_READ` where the caller asks for no more.
 fn open(root: HKEY, path: &str, access: u32) -> io::Result<Key> {
     let name = wide(path);
     let mut key: HKEY = null_mut();
     // SAFETY: `name` is NUL-terminated and `key` is a valid place for the handle.
-    check(unsafe { RegOpenKeyExW(root, name.as_ptr(), 0, access, &mut key) })?;
+    check(unsafe { RegOpenKeyExW(root, name.as_ptr(), 0, access, &raw mut key) })?;
     Ok(Key(key))
 }
 
@@ -64,7 +64,7 @@ fn query(key: &Key, name: &str) -> io::Result<RegistryValue> {
         let mut size = data.len().low::<u32>();
         // SAFETY: `name` is NUL-terminated; `size` says how many bytes `data` holds.
         let status = unsafe {
-            RegQueryValueExW(key.0, name.as_ptr(), null(), &mut value_type, data.as_mut_ptr(), &mut size)
+            RegQueryValueExW(key.0, name.as_ptr(), null(), &raw mut value_type, data.as_mut_ptr(), &raw mut size)
         };
         if status == ERROR_MORE_DATA {
             let wanted = size.to::<usize>().max(data.len() * 2);
@@ -125,7 +125,7 @@ fn enumerate_key(key: &Key, index: u32) -> Option<String> {
     let mut size = buffer.len().low::<u32>();
     // SAFETY: `size` says how many characters `buffer` holds; the optional out parameters are null.
     let status = unsafe {
-        RegEnumKeyExW(key.0, index, buffer.as_mut_ptr(), &mut size, null(), null_mut(), null_mut(), null_mut())
+        RegEnumKeyExW(key.0, index, buffer.as_mut_ptr(), &raw mut size, null(), null_mut(), null_mut(), null_mut())
     };
     if status != ERROR_SUCCESS {
         return None;
@@ -220,7 +220,7 @@ impl WindowsRegistry for NativeWindowsRegistry {
                 REG_OPTION_NON_VOLATILE,
                 KEY_SET_VALUE,
                 null(),
-                &mut raw,
+                &raw mut raw,
                 null_mut(),
             )
         })?;

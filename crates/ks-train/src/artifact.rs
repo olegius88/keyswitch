@@ -9,10 +9,12 @@ fn compact(sort_keys: bool) -> JsonOptions {
 }
 
 /// `json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"`.
+#[must_use]
 pub fn canonical(value: &Value) -> Vec<u8> {
     (json_dumps(value, &compact(true)) + "\n").into_bytes()
 }
 
+#[must_use]
 pub fn artifact_bytes(payload: &Value) -> Vec<u8> {
     let object = payload.as_object().cloned().unwrap_or_default();
     let mut items: Vec<(&String, &Value)> = object.iter().collect();

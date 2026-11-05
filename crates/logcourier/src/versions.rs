@@ -1,10 +1,10 @@
-//! KeySwitch provenance from log headers, never from installed binaries or message text.
+//! `KeySwitch` provenance from log headers, never from installed binaries or message text.
 use std::io::{Read, Seek, SeekFrom};
 
 use serde_json::{Map, Value, json};
 
 use crate::config::{Config, Source};
-use crate::constants::*;
+use crate::constants::{PROBE_BYTES, HEADER_BYTES, JSON_INDENT_SPACES};
 use crate::error::Result;
 use crate::store::Store;
 use crate::timeutil::{iso_now, new_id, sha256_hex};
@@ -14,6 +14,7 @@ const TIMESTAMP_SHAPE: &[u8] = b"0000-00-00 00:00:00,000 ";
 const LEVELS: [&[u8]; 5] = [b"DEBUG", b"INFO", b"WARNING", b"ERROR", b"CRITICAL"];
 
 /// `[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}(?:[-+][a-zA-Z0-9.-]{1,40})?` over the whole text.
+#[must_use]
 pub fn is_version(text: &str) -> bool {
     let bytes = text.as_bytes();
     let mut index = 0;
@@ -46,7 +47,8 @@ fn record_start(data: &[u8]) -> bool {
         && data.iter().zip(TIMESTAMP_SHAPE).all(|(byte, shape)| if *shape == b'0' { byte.is_ascii_digit() } else { byte == shape })
 }
 
-/// The version of a log record at the start of these bytes, when they are a KeySwitch record.
+/// The version of a log record at the start of these bytes, when they are a `KeySwitch` record.
+#[must_use]
 pub fn header_version(data: &[u8]) -> Option<String> {
     if !record_start(data) {
         return None;
@@ -105,6 +107,7 @@ pub fn latest_version<S: Read + Seek>(stream: &mut S) -> Result<Option<String>> 
 ///
 /// Lookahead only identifies the bounded header; it is not consumed. Cursor context survives a chunk or restart in the
 /// middle of a record or traceback. An unfinished header waits for more bytes instead of inheriting an old version.
+#[must_use]
 pub fn take_fragment(data: &[u8], previous: Option<String>, mut line_start: bool, lookahead: &[u8]) -> (usize, Option<String>) {
     let combined: Vec<u8> = [data, lookahead].concat();
     let mut version = previous;
@@ -175,6 +178,7 @@ fn text(value: &Value) -> String {
     }
 }
 
+#[must_use]
 pub fn caption(metadata: &Value) -> String {
     let version = &metadata["keyswitch_version"];
     let truthy = |value: &Value| value.as_str().is_some_and(|text| !text.is_empty());

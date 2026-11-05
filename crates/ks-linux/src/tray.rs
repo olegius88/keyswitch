@@ -1,4 +1,4 @@
-//! StatusNotifierItem and DBusMenu integration for desktop panels (the Python's `tray.py`), over `zbus`.
+//! `StatusNotifierItem` and `DBusMenu` integration for desktop panels (the Python's `tray.py`), over `zbus`.
 //!
 //! The objects are served on a connection of their own, whose executor answers the panel on its own thread: `on_action`
 //! is called there, and the application moves the work to its main loop.
@@ -83,7 +83,7 @@ fn action_of(item: i32) -> Option<TrayAction> {
     })
 }
 
-/// A DBusMenu property value, before it is a D-Bus variant.
+/// A `DBusMenu` property value, before it is a D-Bus variant.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Property {
     Text(String),
@@ -133,6 +133,7 @@ pub type Properties = Vec<(String, Property)>;
 
 impl MenuState {
     /// `_item_properties`: None for an item that does not exist.
+    #[must_use]
     pub fn item_properties(&self, item: i32) -> Option<Properties> {
         if item == 0 {
             return Some(vec![("children-display".to_owned(), text("submenu"))]);
@@ -173,7 +174,8 @@ impl MenuState {
         Some(properties)
     }
 
-    /// The value `GetProperty` answers when the item does not carry the property: the DBusMenu default.
+    /// The value `GetProperty` answers when the item does not carry the property: the `DBusMenu` default.
+    #[must_use]
     pub fn property_default(name: &str) -> Option<Property> {
         Some(match name {
             "type" => text("standard"),
@@ -278,19 +280,19 @@ impl Item {
         ObjectPath::from_static_str_unchecked(MENU_PATH)
     }
 
-    fn activate(&self, x: i32, y: i32) {
+    fn activate(&self, _x: i32, _y: i32) {
         self.request_open();
     }
 
-    fn secondary_activate(&self, x: i32, y: i32) {
+    fn secondary_activate(&self, _x: i32, _y: i32) {
         (self.shared.on_action)(TrayAction::ToggleEngine);
     }
 
-    fn context_menu(&self, x: i32, y: i32) {
+    fn context_menu(&self, _x: i32, _y: i32) {
         self.request_open();
     }
 
-    fn scroll(&self, delta: i32, orientation: String) {}
+    fn scroll(&self, _delta: i32, _orientation: String) {}
 
     #[zbus(signal)]
     async fn new_status(emitter: &SignalEmitter<'_>, status: String) -> zbus::Result<()>;
@@ -389,7 +391,7 @@ impl Menu {
         MenuState::property_default(&name).map(|value| variant(&value)).ok_or_else(|| zbus::fdo::Error::UnknownProperty(name))
     }
 
-    fn event(&self, id: i32, event_id: String, data: Value<'_>, timestamp: u32) {
+    fn event(&self, id: i32, event_id: String, _data: Value<'_>, _timestamp: u32) {
         self.dispatch(id, &event_id);
     }
 
@@ -397,7 +399,7 @@ impl Menu {
         events.into_iter().filter(|(id, event, _, _)| !self.dispatch(*id, event)).map(|(id, ..)| id).collect()
     }
 
-    fn about_to_show(&self, id: i32) -> bool {
+    fn about_to_show(&self, _id: i32) -> bool {
         false
     }
 
@@ -450,7 +452,7 @@ impl StatusNotifierItem {
             .and_then(|builder| builder.name(format!("{BUS_NAME_PREFIX}{}", std::process::id())))
             .and_then(|builder| builder.serve_at(MENU_PATH, Menu { shared: shared.clone() }))
             .and_then(|builder| builder.serve_at(OBJECT_PATH, Item { shared: shared.clone(), connection: holder.clone() }))
-            .and_then(|builder| builder.build())
+            .and_then(Builder::build)
             .map_err(describe)?;
         *locked(&holder) = Some(connection.clone());
         connection
@@ -535,11 +537,11 @@ impl StatusNotifierItem {
             item.icon_name = layout_icon_name(&Json::String(item.indicator_style.to_owned()), item.group).to_owned();
             let label = layout_label(item.group);
             let state = if item.enabled { "автокоррекция включена" } else { "автокоррекция на паузе" };
-            item.subtitle = if label != "—" {
-                format!("{label} · {state}")
-            } else {
+            item.subtitle = if label == "—" {
                 let mut capital = state.chars();
                 capital.next().map(|first| first.to_uppercase().chain(capital).collect()).unwrap_or_default()
+            } else {
+                format!("{label} · {state}")
             };
             (item.icon_name.clone(), item.subtitle.clone(), item.enabled, item.group)
         };

@@ -1,4 +1,4 @@
-//! Parity of `ks-text` with CPython 3.14, against golden files dumped from the interpreter.
+//! Parity of `ks-text` with `CPython` 3.14, against golden files dumped from the interpreter.
 //!
 //! The files live in `$KS_GOLDEN_DIR/text` (default: the `golden` folder of the private work tree); a test
 //! skips with a message when its file is absent. Floats are compared by their bits (a NaN only has to be a NaN).
@@ -261,7 +261,7 @@ fn numbers() {
                         failures.check("py_round", &input, same_float(pynum::py_round(x), want), true);
                         match r.parse::<i128>() {
                             Ok(v) if v.unsigned_abs() < 170_000_000_000_000_000_000_000_000_000_000_000_000 => {
-                                failures.check("round_to_int", &input, pynum::py_round_to_int(x), Some(v))
+                                failures.check("round_to_int", &input, pynum::py_round_to_int(x), Some(v));
                             }
                             _ => {}
                         }

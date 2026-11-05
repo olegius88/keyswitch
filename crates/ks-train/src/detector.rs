@@ -118,8 +118,8 @@ fn table_order(model: &LanguageModel, locale: &str) -> Vec<(String, i64)> {
                 inside = true;
             } else if line.starts_with('\\') {
                 inside = false;
-            } else if inside {
-                if let Some((_, payload)) = line.split_once(' ') {
+            } else if inside
+                && let Some((_, payload)) = line.split_once(' ') {
                     let word = LanguageModel::normalize(payload);
                     if let Some(frequency) = model.frequencies.get(&word)
                         && seen.insert(word.clone())
@@ -127,7 +127,6 @@ fn table_order(model: &LanguageModel, locale: &str) -> Vec<(String, i64)> {
                         ordered.push((word, frequency));
                     }
                 }
-            }
         }
     }
     for word in locale_fallbacks(locale) {

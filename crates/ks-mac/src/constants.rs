@@ -8,9 +8,9 @@
 /// error the correction exists to undo.
 pub const LAYOUT_SWITCH_TIMEOUT_SECONDS: f64 = 0.5;
 pub const LAYOUT_SWITCH_POLL_SECONDS: f64 = 0.01;
-/// How long start() waits for the event tap to confirm it runs.
+/// How long `start()` waits for the event tap to confirm it runs.
 pub const KEYBOARD_LISTENER_START_TIMEOUT_SECONDS: f64 = 5.0;
-/// How long stop() waits for the tap's thread to finish.
+/// How long `stop()` waits for the tap's thread to finish.
 pub const KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS: f64 = 2.0;
 /// The tap's run loop is run in slices of this length, so a stop request is seen within one.
 pub const EVENT_TAP_RUN_LOOP_SLICE_SECONDS: f64 = 0.2;
@@ -36,7 +36,7 @@ pub const CYRILLIC_CODEPOINT_RANGE: (u32, u32) = (0x0400, 0x04FF);
 // Virtual key codes, read from Apple's Events.h. They name physical positions and do not move with the layout, which is
 // what the engine's key codes mean.
 pub const MAC_VK_ANSI_Q: u32 = 0x0C;
-/// kVK_ANSI_V, the key Cmd+V pastes with.
+/// `kVK_ANSI_V`, the key Cmd+V pastes with.
 pub const MAC_VK_ANSI_V: u32 = 0x09;
 pub const MAC_VK_KEYPAD_ENTER: u32 = 0x4C;
 pub const MAC_VK_RETURN: u32 = 0x24;
@@ -110,7 +110,7 @@ pub const EVENT_MARK_REPLAYED: i64 = 0x4B53_0002;
 // UCKeyTranslate arguments.
 pub const UC_KEY_ACTION_DISPLAY: u16 = 3;
 pub const UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK: u32 = 1;
-/// shiftKey (0x0200) >> 8, the shape UCKeyTranslate wants.
+/// shiftKey (0x0200) >> 8, the shape `UCKeyTranslate` wants.
 pub const UC_MODIFIER_SHIFT: u32 = 2;
 /// alphaLock (0x0400) >> 8.
 pub const UC_MODIFIER_ALPHA_LOCK: u32 = 4;
@@ -118,7 +118,7 @@ pub const UC_MODIFIER_ALPHA_LOCK: u32 = 4;
 pub const UC_MODIFIER_OPTION: u32 = 8;
 /// controlKey (0x1000) >> 8.
 pub const UC_MODIFIER_CONTROL: u32 = 16;
-/// UTF-16 units of the buffer UCKeyTranslate writes a key's text into.
+/// UTF-16 units of the buffer `UCKeyTranslate` writes a key's text into.
 pub const UC_KEY_TRANSLATE_BUFFER_CHARACTERS: usize = 8;
 /// Largest text an accessibility attribute is copied out at: a field holding more is not read, rather than copying a
 /// whole document into memory for a few hundred characters of context.
@@ -133,13 +133,13 @@ pub const NULL_WINDOW_ID: u32 = 0;
 /// be mistaken for the focus.
 pub const NORMAL_WINDOW_LAYER: i32 = 0;
 pub const AX_SUCCESS: i32 = 0;
-/// AXValue wrapping a CFRange, from AXValue.h.
+/// `AXValue` wrapping a `CFRange`, from AXValue.h.
 pub const AX_VALUE_TYPE_CF_RANGE: u32 = 4;
-/// NSApplication presents no dock icon and no menu bar of its own.
+/// `NSApplication` presents no dock icon and no menu bar of its own.
 pub const ACTIVATION_POLICY_ACCESSORY: isize = 1;
-/// NSApplication with a dock icon and a menu bar, for as long as the settings window is open.
+/// `NSApplication` with a dock icon and a menu bar, for as long as the settings window is open.
 pub const ACTIVATION_POLICY_REGULAR: isize = 0;
-/// NSControlStateValue of a checked and an unchecked menu item.
+/// `NSControlStateValue` of a checked and an unchecked menu item.
 pub const CONTROL_STATE_ON: isize = 1;
 pub const CONTROL_STATE_OFF: isize = 0;
 
@@ -186,7 +186,7 @@ pub const MAC_SCRIPT_PROBE_KEYCODE: u32 = MAC_VK_ANSI_Q;
 
 /// What the engine calls the source of a field read through the accessibility tree.
 pub const SOURCE_AX: &str = "ax";
-/// The pane of System Settings that holds the switch KeySwitch needs. macOS has no call that grants the permission; the
+/// The pane of System Settings that holds the switch `KeySwitch` needs. macOS has no call that grants the permission; the
 /// most a program may do is ask, and then take the user to the place where the answer is given.
 pub const ACCESSIBILITY_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 /// Where programs live on macOS. The first two are the system's own, the third is a user's private one.

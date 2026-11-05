@@ -1,7 +1,7 @@
 //! Raw keyboard access for a Wayland session, given only on an administrator's explicit command (the Python's
 //! `wayland_access.py`).
 //!
-//! In a Wayland session a program sees no keys of other windows, so KeySwitch reads the keyboards and types through
+//! In a Wayland session a program sees no keys of other windows, so `KeySwitch` reads the keyboards and types through
 //! /dev/uinput itself (`wayland_helper`). The udev rule that lets the session's user do that lets every program of that
 //! user do it as well: read every key typed, passwords included, and type keys of its own, as any program can on X11 and
 //! Windows. The rule ships inside the application and an administrator enables it once with
@@ -18,6 +18,7 @@ pub const ENABLE_COMMAND: &str = "sudo keyswitch --enable-wayland-input";
 pub const DISABLE_COMMAND: &str = "sudo keyswitch --disable-wayland-input";
 
 /// What a user who meets the missing access is told, in every place that reports it.
+#[must_use]
 pub fn access_hint() -> String {
     format!(
         "в сеансе Wayland KeySwitch читает клавиатуру на уровне системы; доступ включает администратор один раз командой \
@@ -52,6 +53,7 @@ pub const SETTLE: &[&str] = &["udevadm", "settle"];
 pub type Runner<'a> = &'a dyn Fn(&[&str]) -> i32;
 
 /// Run a system command; a missing program counts as a failure, not a crash.
+#[must_use]
 pub fn run(command: &[&str]) -> i32 {
     let Some((program, arguments)) = command.split_first() else { return 1 };
     match Command::new(program).args(arguments).stdout(Stdio::null()).stderr(Stdio::null()).status() {
@@ -61,12 +63,14 @@ pub fn run(command: &[&str]) -> i32 {
 }
 
 /// The effective user id.
+#[must_use]
 pub fn effective_user() -> u32 {
     // SAFETY: `geteuid` takes no arguments, touches no memory and cannot fail.
     unsafe { libc::geteuid() }
 }
 
 /// Whether an administrator has enabled the access (the rule stands in /etc/udev/rules.d).
+#[must_use]
 pub fn access_enabled(root: &Path) -> bool {
     root.join(RULE_DESTINATION).exists()
 }
@@ -104,20 +108,17 @@ pub fn enable_wayland_input(root: &Path, run: Runner<'_>, euid: &dyn Fn() -> u32
 fn acl_devices(root: &Path) -> Vec<PathBuf> {
     let mut devices = Vec::new();
     for pattern in ACL_DEVICE_PATTERNS {
-        match pattern.strip_suffix('*') {
-            Some(prefix) => {
-                let (directory, name) = prefix.rsplit_once('/').unwrap_or(("", prefix));
-                if let Ok(entries) = fs::read_dir(root.join(directory)) {
-                    devices.extend(
-                        entries.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(name)).map(|entry| entry.path()),
-                    );
-                }
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            let (directory, name) = prefix.rsplit_once('/').unwrap_or(("", prefix));
+            if let Ok(entries) = fs::read_dir(root.join(directory)) {
+                devices.extend(
+                    entries.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(name)).map(|entry| entry.path()),
+                );
             }
-            None => {
-                let path = root.join(pattern);
-                if path.exists() {
-                    devices.push(path);
-                }
+        } else {
+            let path = root.join(pattern);
+            if path.exists() {
+                devices.push(path);
             }
         }
     }
@@ -155,10 +156,12 @@ pub fn disable_wayland_input(root: &Path, run: Runner<'_>, euid: &dyn Fn() -> u3
 
 /// `keyswitch --enable-wayland-input` and `--disable-wayland-input` as the binary runs them: the real root, the real
 /// commands, the report on the standard output.
+#[must_use]
 pub fn enable_command() -> i32 {
     enable_wayland_input(Path::new("/"), &run, &effective_user, &mut |line| println!("{line}"))
 }
 
+#[must_use]
 pub fn disable_command() -> i32 {
     disable_wayland_input(Path::new("/"), &run, &effective_user, &mut |line| println!("{line}"))
 }

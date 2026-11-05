@@ -100,6 +100,7 @@ pub struct Backend {
 }
 
 impl Backend {
+    #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
         Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0 }) }
@@ -345,10 +346,12 @@ impl FieldReader for UnreadField {
 pub struct FakeClock(Arc<AtomicU64>);
 
 impl FakeClock {
+    #[must_use]
     pub fn new() -> FakeClock {
         FakeClock(Arc::new(AtomicU64::new(FAKE_CLOCK_START_SECONDS.to_bits())))
     }
 
+    #[must_use]
     pub fn now(&self) -> f64 {
         f64::from_bits(self.0.load(Ordering::Relaxed))
     }
@@ -357,9 +360,16 @@ impl FakeClock {
         self.0.store((self.now() + seconds).to_bits(), Ordering::Relaxed);
     }
 
+    #[must_use]
     pub fn read(&self) -> Clock {
         let clock = self.clone();
         Arc::new(move || clock.now())
+    }
+}
+
+impl Default for FakeClock {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

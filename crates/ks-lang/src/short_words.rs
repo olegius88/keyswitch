@@ -4,7 +4,7 @@
 //! classifier toolchain and only admits reviewed, exact lexicon hits with a large corpus-frequency advantage.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{HEURISTIC_UNLIKELY_SOURCE_NGRAM_MAX, PAUSE_WORD_START_LETTERS, LAYOUT_GROUP_COUNT, PAUSE_WORD_START_MIN_WORDS};
 use crate::detector::{DetectionDecision, DetectorError, GroupTexts, LanguageDetector};
 use crate::language_model::LanguageModel;
 use crate::tables::WordTable;
@@ -28,6 +28,7 @@ const TRUSTED_TWO_LETTER_WORDS_RU: [&str; 28] = [
 ];
 
 /// `TRUSTED_SHORT_WORDS.get(group, frozenset())`.
+#[must_use]
 pub fn trusted_short_words(group: i64) -> Vec<&'static str> {
     match group {
         0 => TRUSTED_SHORT_WORDS_EN.to_vec(),
@@ -54,6 +55,7 @@ fn opening_word(text: &str, group: i64) -> bool {
 }
 
 /// Whether this reading is a word that opens sentences of its language.
+#[must_use]
 pub fn opens_sentences(text: &str, group: i64) -> bool {
     opening_word(&LanguageModel::normalize(text), group)
 }
@@ -67,6 +69,7 @@ pub const DICTIONARY_ONLY_REASONS: [&str; 2] = ["слово найдено то�
 pub const NATURAL_SOURCE_REASON: &str = "короткое слово читается естественно в исходном языке";
 
 /// Withhold a dictionary-only conversion of a short, natural-looking word.
+#[must_use]
 pub fn natural_short_source_veto(decision: DetectionDecision, context_group: Option<i64>) -> DetectionDecision {
     if !decision.should_convert || !DICTIONARY_ONLY_REASONS.contains(&decision.reason.as_str()) {
         return decision;
@@ -101,21 +104,25 @@ pub struct WordStarts {
 
 impl WordStarts {
     /// `counter[start]`: zero for a start nobody has.
+    #[must_use]
     pub fn count(&self, start: &str) -> u32 {
         self.counts.get(start).copied().unwrap_or(0)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.counts.len()
     }
 
     /// The counted starts and their counts, sorted by start.
+    #[must_use]
     pub fn items(&self) -> Vec<(&str, u32)> {
         let mut items: Vec<(&str, u32)> = self.counts.iter().map(|item| (item.0.as_str(), *item.1)).collect();
         items.sort_unstable();
         items
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.counts.is_empty()
     }
@@ -126,7 +133,7 @@ impl WordStarts {
 type WordStartsCache = Vec<(Arc<WordTable>, Arc<WordStarts>)>;
 static WORD_STARTS: Mutex<WordStartsCache> = Mutex::new(Vec::new());
 
-/// How many words of a lexicon begin with each PAUSE_WORD_START_LETTERS letters, counted once per model.
+/// How many words of a lexicon begin with each `PAUSE_WORD_START_LETTERS` letters, counted once per model.
 pub fn word_starts(model: &LanguageModel) -> Arc<WordStarts> {
     let mut cache = WORD_STARTS.lock().expect("the lock is not poisoned");
     if let Some(at) = cache.iter().position(|entry| Arc::ptr_eq(&entry.0, &model.frequencies)) {
@@ -149,15 +156,17 @@ pub fn word_starts(model: &LanguageModel) -> Arc<WordStarts> {
     starts
 }
 
-/// Whether PAUSE_WORD_START_LETTERS letters begin at least PAUSE_WORD_START_MIN_WORDS words of the lexicon: at a pause
+/// Whether `PAUSE_WORD_START_LETTERS` letters begin at least `PAUSE_WORD_START_MIN_WORDS` words of the lexicon: at a pause
 /// in typing they are as likely the start of a word still being typed as a word. A lone letter is not asked: typed and
 /// left at a pause it was meant converted ten times against twice in the owner's typing (field batteries,
 /// 30.10.2026), and the next key is often a click, after which no boundary decides it.
+#[must_use]
 pub fn begins_words(model: &LanguageModel, token: &str) -> bool {
     pystr::isalpha(token) && pystr::len(token) == PAUSE_WORD_START_LETTERS && word_starts(model).count(&pystr::casefold(token)) >= PAUSE_WORD_START_MIN_WORDS
 }
 
 /// Whether the decision came from the trusted short-word list.
+#[must_use]
 pub fn is_short_word_override(decision: &DetectionDecision) -> bool {
     decision.should_convert && SHORT_WORD_REASONS.contains(&decision.reason.as_str())
 }
@@ -168,7 +177,7 @@ pub fn is_short_word_override(decision: &DetectionDecision) -> bool {
 /// previous word to be in the target language (`context_group`); two-letter entries stand on their own. The
 /// message-start exception for a lone letter lives in `word_decision::automatic_word_decision`, outside this table, so
 /// the frozen context-v1 training input stays what it was.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn trusted_short_word_decision(
     detector: &LanguageDetector,
     original: &str,

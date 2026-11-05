@@ -17,7 +17,7 @@ use ks_engine::{KeySwitchEngine, LearningPrompt};
 use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use ks_linux::linux_app::{engine_builder, new_backend};
 use serde_json::json;
-use support::*;
+use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, dbus_call};
 
 const CASES: [Case; 15] = [
     Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),

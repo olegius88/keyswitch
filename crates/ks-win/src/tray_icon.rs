@@ -157,16 +157,19 @@ fn draw_flag(canvas: &mut Canvas, group: i64) {
 }
 
 /// Whether the picture is the flag one; the badge otherwise, with the label `badge_text` returns.
+#[must_use]
 pub fn is_flag(state: &TrayState) -> bool {
     state.indicator_style == "flags" && (state.group == 0 || state.group == 1)
 }
 
 /// The text the badge carries: the layout label, "?" for no layout.
+#[must_use]
 pub fn badge_text(state: &TrayState) -> &'static str {
     if state.group >= 0 { state.label() } else { "?" }
 }
 
 /// `_render`: the 64 by 64 picture of `state`; `ink` is the glyphs of `badge_text`, not needed for a flag.
+#[must_use]
 pub fn render(state: &TrayState, ink: Option<&Ink>) -> Canvas {
     let mut canvas = Canvas::new(TRAY_ICON_SIZE_PIXELS);
     if is_flag(state) {
@@ -204,6 +207,7 @@ pub fn render(state: &TrayState, ink: Option<&Ink>) -> Canvas {
 
 /// The picture at `target` pixels square, as bytes of straight-alpha BGRA (what a 32-bit icon bitmap holds), averaged over
 /// the source pixels each target pixel covers.
+#[must_use]
 pub fn scaled_bgra(canvas: &Canvas, target: usize) -> Vec<u8> {
     let target = target.max(1);
     let mut out = Vec::with_capacity(target * target * 4);

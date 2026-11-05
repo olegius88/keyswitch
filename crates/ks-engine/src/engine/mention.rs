@@ -19,7 +19,7 @@ impl EngineCore {
     /// The symbol stays out of the analysed word on purpose: the models read
     /// `ощрт` and `john`, not `"ощрт` and `@john`, and with the quote attached
     /// they fall below their own threshold. The word alone decides, and this
-    /// head is then replaced together with it (execute_correction).
+    /// head is then replaced together with it (`execute_correction`).
     pub(crate) fn mention_head(&self, application: &str) -> Strokes {
         if self.symbol_strokes.len() != 1 || self.strokes.is_empty() {
             return Vec::new();
@@ -50,7 +50,7 @@ impl EngineCore {
     /// on the key's release, in place, without changing the layout: a message
     /// continued in Russian after the list stays Russian. It stays only while
     /// nothing is typed after it; the next printable key writes the quote back
-    /// (after_mention_head) and the word that follows decides, as before,
+    /// (`after_mention_head`) and the word that follows decides, as before,
     /// whether the pair was ``@name`` or a quotation. A quote typed after a
     /// caret move or after the layout was chosen by hand is left alone.
     pub(crate) fn show_mention_head(&mut self, stroke: &Stroke) {

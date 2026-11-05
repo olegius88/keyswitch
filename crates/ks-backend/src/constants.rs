@@ -15,8 +15,8 @@ pub const COMPLETED_ACTION_EVENT_COUNT: i32 = 2;
 pub const LAYOUT_GROUP_COUNT: i32 = 2;
 /// Layout group a synthetic pointer event carries: it belongs to no layout.
 pub const POINTER_EVENT_GROUP: i32 = -1;
-/// Key name of a key event that carries a character instead of a key position (VK_PACKET on
-/// Windows, sent with KEYEVENTF_UNICODE by remote control and on-screen keyboards).
+/// Key name of a key event that carries a character instead of a key position (`VK_PACKET` on
+/// Windows, sent with `KEYEVENTF_UNICODE` by remote control and on-screen keyboards).
 pub const UNICODE_PACKET_KEY_NAME: &str = "Packet";
 
 pub const FIELD_CONTEXT_MAX_CHARACTERS: usize = 512;

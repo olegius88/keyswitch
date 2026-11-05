@@ -13,17 +13,17 @@ pub const BYTES_PER_MEBIBYTE: u64 = BYTES_PER_KIBIBYTE * BYTES_PER_KIBIBYTE;
 pub const USER_DATA_JSON_INDENT: usize = 2;
 /// Decimal places a correction's confidence keeps in the history file.
 pub const HISTORY_CONFIDENCE_DECIMALS: i64 = 2;
-/// schema_version of the learning file: 3 keeps a list of rules from the rule window; 2 and older
+/// `schema_version` of the learning file: 3 keeps a list of rules from the rule window; 2 and older
 /// kept counters of manual conversions and forbidden directions, converted on first load.
 pub const LEARNING_STORE_SCHEMA_VERSION: i64 = 3;
 /// Name suffix of the copy an older learning file is kept as before it is converted.
 pub const LEARNING_STORE_BACKUP_SUFFIX: &str = ".v2-backup";
 /// A settings or learning file that could not be read is moved aside under its name, this suffix
-/// and the local time in UNREADABLE_FILE_TIME_FORMAT, so the defaults saved next do not replace it.
+/// and the local time in `UNREADABLE_FILE_TIME_FORMAT`, so the defaults saved next do not replace it.
 pub const UNREADABLE_FILE_SUFFIX: &str = ".unreadable-";
 pub const UNREADABLE_FILE_TIME_FORMAT: &str = "%Y%m%d-%H%M%S";
 /// The confirmation threshold a learning file of schema 2 was used with unless the settings said
-/// otherwise (the removed detection.learning_confirmations defaulted to it): a counter that reached
+/// otherwise (the removed `detection.learning_confirmations` defaulted to it): a counter that reached
 /// it acted as a rule and is carried over as one.
 pub const LEGACY_RULE_CONFIRMATIONS_REQUIRED: i64 = 2;
 
@@ -34,7 +34,7 @@ pub const LOGGED_SCORE_DECIMALS: i64 = 6;
 pub const DEFAULT_LOG_ROTATION: (u64, u64) = (BYTES_PER_MEBIBYTE, 2);
 /// The diagnostics mode keeps more and larger files because a busy hour of typing fills megabytes.
 pub const TECHNICAL_LOG_ROTATION: (u64, u64) = (5 * BYTES_PER_MEBIBYTE, 5);
-/// Words that look like a password go into the log as stars (log_privacy): a token of at least this many characters,
+/// Words that look like a password go into the log as stars (`log_privacy)`: a token of at least this many characters,
 /// edge signs aside, that mixes letters and digits, and the word right after one of these words in either layout. The
 /// last few such words are remembered for the records that name them again (a correction, an edit).
 pub const LOG_SECRET_MIN_CHARACTERS: usize = 8;
@@ -48,7 +48,7 @@ pub const LOG_STRUCTURE_KEYS: [&str; 10] = [
     "language_models", "field_reader_details", "field_reader_status",
 ];
 pub const LOG_STRUCTURE_KEY_SUFFIXES: [&str; 5] = ["version", "sha256", "checksum", "_id", "path"];
-/// The record's own word and its readings, masked when the word before it was one of LOG_SECRET_MARKERS.
+/// The record's own word and its readings, masked when the word before it was one of `LOG_SECRET_MARKERS`.
 pub const LOG_WORD_KEYS: [&str; 5] = ["original", "replacement", "literal_head", "alternatives", "word"];
 
 // ---- constants/text.py
@@ -67,7 +67,7 @@ pub const SELECTION_COMMAND_MAX_CHARACTERS: usize = 1000;
 pub const CAPS_LOCK_WORD_MIN_CAPITALS: usize = 4;
 
 // ---- constants/typo.py
-/// The personal dictionary (personal_words.py): a word left as typed this many times is the user's own and never
+/// The personal dictionary (`personal_words.py)`: a word left as typed this many times is the user's own and never
 /// corrected again; one whose correction the user took back is theirs at once.
 pub const PERSONAL_WORD_MIN_COUNT: i64 = 2;
 /// Most of the user's own words kept, and most words counted on their way there; past either, the entry used longest
@@ -92,22 +92,22 @@ pub const LAYOUT_LABELS: [(i64, &str); 2] = [(0, "EN"), (1, "RU")];
 pub const LAYOUT_NAMES: [(i64, &str); 2] = [(0, "английский (EN)"), (1, "русский (RU)")];
 
 // ---- constants/settings_defaults.py
-/// Default of detection.minimum_length; every fallback to the setting uses it.
+/// Default of `detection.minimum_length`; every fallback to the setting uses it.
 pub const DEFAULT_MINIMUM_WORD_LENGTH: i64 = 3;
 /// Default of detection.confidence; every fallback to the setting uses it.
 pub const DEFAULT_CONFIDENCE_THRESHOLD: f64 = 2.0;
-/// Default of detection.pause_delay_seconds; every fallback to the setting uses it. A word typed in the
+/// Default of `detection.pause_delay_seconds`; every fallback to the setting uses it. A word typed in the
 /// wrong layout whose first letters the early switch cannot yet decide is converted after this pause, and
 /// the user watching it waited the whole pause in the middle of the word: 1.5 s until schema 8.
 pub const DEFAULT_PAUSE_DELAY_SECONDS: f64 = 0.7;
 /// The pause delay schema 7 and older seeded the settings file with; such a file adopts the new default once.
 pub const PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS: f64 = 1.5;
-/// detection.field_catch_up: how long a correction may wait for an editor that shows a word a moment after its keys
+/// `detection.field_catch_up`: how long a correction may wait for an editor that shows a word a moment after its keys
 /// (a browser or an Electron editor on Windows reports its text late), in milliseconds, or "off". A correction is made
 /// only once the field shows the very word typed; one that never does is left as typed, as before the setting.
 pub const FIELD_CATCH_UP_OFF: &str = "off";
 pub const DEFAULT_FIELD_CATCH_UP: &str = "300";
-/// Default of detection.early_switch_min_length; every fallback to the setting uses it.
+/// Default of `detection.early_switch_min_length`; every fallback to the setting uses it.
 pub const DEFAULT_EARLY_SWITCH_MIN_LENGTH: i64 = 4;
 /// Default of history.limit; every fallback to the setting uses it.
 pub const DEFAULT_HISTORY_LIMIT: i64 = 200;
@@ -118,7 +118,7 @@ pub const EARLY_SWITCH_DEFAULT_SCHEMA_VERSION: i64 = 7;
 /// them adopts the shorter one once.
 pub const PAUSE_DELAY_DEFAULT_SCHEMA_VERSION: i64 = 8;
 /// The hotkeys that act on the selected text, by their names under `hotkeys`. A settings file written before they
-/// existed gains them from the defaults when it is merged over them (config::deep_merge), so they need no schema
+/// existed gains them from the defaults when it is merged over them (`config::deep_merge`), so they need no schema
 /// step of their own.
 pub const HOTKEY_SELECTION_LAYOUT: &str = "selection_layout";
 pub const HOTKEY_SELECTION_CASE: &str = "selection_case";
@@ -130,7 +130,7 @@ pub const DEFAULT_SELECTION_CASE_HOTKEY: &str = "Alt+Pause";
 pub const DEFAULT_SELECTION_TRANSLITERATE_HOTKEY: &str = "Alt+Scroll_Lock";
 /// A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the selection
 /// hotkeys default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys.
-/// config::default_settings puts them in place of the others on macOS.
+/// `config::default_settings` puts them in place of the others on macOS.
 pub const MACOS_SELECTION_HOTKEY_DEFAULTS: [(&str, &str); 3] = [
     (HOTKEY_SELECTION_LAYOUT, "Ctrl+Alt+L"),
     (HOTKEY_SELECTION_CASE, "Ctrl+Alt+U"),

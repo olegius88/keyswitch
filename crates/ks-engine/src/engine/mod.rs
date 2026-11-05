@@ -28,7 +28,7 @@ pub use handle::KeySwitchEngine;
 pub use shared::{Command, QueueItem, Shared};
 pub use types::*;
 
-use crate::constants::*;
+use crate::constants::{DOUBLE_CAPITALS, DOUBLE_CAPITALS_MIN_LETTERS, UNSCORED_CORRECTION_CONFIDENCE, STRANDED_TERM_MAX_WORDS, MAX_REMEMBERED_APPLICATION_CONTEXTS, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX, EARLY_SWITCH_CONFIDENCE, PREFIX_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, LATE_STROKE_GRACE_SECONDS, TYPO_ENGLISH_LOCALE, UNDO_AVAILABLE_WINDOW_SECONDS, DEFAULT_FIELD_CATCH_UP, FIELD_CATCH_UP_CHOICES, FIELD_CATCH_UP_OFF, MILLISECONDS_PER_SECOND, HOOK_SILENCE_MS, INPUT_DELAY_REPORT_INTERVAL_SECONDS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS, HOOK_GAP_MS, SELECTION_HOTKEYS, ACTION_TIMEOUT_SECONDS, MAX_WORD_STROKES, BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, MANUAL_RELEASE_TIMEOUT_SECONDS, PAUSE_CORRECTION_AGREEMENT_SECONDS, DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, TRUSTED_SHORT_WORD_MAX_LENGTH, CONTEXT_ACTION_FEATURE_VERSION, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, KEPT_WORDS_TAKEN_ALONG, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, ENGINE_SWITCH_GRACE_SECONDS, NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS, NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR, JOINED_PART_MIN_LETTERS, REPLAYED_SIGNS_MIN_STEM_LETTERS, PAUSE_WORD_START_LETTERS, PAUSE_WORD_START_MIN_WORDS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, PAUSE_TRAILING_MAX_KEYS, KEPT_WORD_PROSE_MIN_COUNT, DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS, DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX, DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX, LEGACY_RULE_CONFIRMATIONS_REQUIRED, LOGGED_SCORE_DECIMALS};
 use ks_backend::{FieldContext, FieldReader, InputBackend, KeyEvent};
 use ks_config::config::SettingsStore;
 use ks_config::history::HistoryStore;
@@ -281,7 +281,7 @@ impl EngineCore {
             early_switch_undone: false,
             pause_deferral_logged: false,
             wait_deferral_logged: 0,
-            prefix_indexes: prefix_indexes,
+            prefix_indexes,
             pending: None,
             field_wait: None,
             pending_trigger_keycode: -1,
@@ -425,6 +425,7 @@ impl EngineCore {
 
     /// `known` of the policy built with an engine's models, as `KeySwitchEngine.__init__` hands it over: the orthotactic
     /// model's dictionaries are these models when they are the two it would load itself.
+    #[must_use]
     pub fn known_of(models: &[Arc<LanguageModel>]) -> Option<KnownWord> {
         let dictionaries: Vec<Arc<LanguageModel>> = models.to_vec();
         let same = dictionaries.iter().map(|model| model.locale.as_str()).eq(ORTHO_LOCALES.iter().map(|(_, locale)| *locale));
@@ -454,6 +455,7 @@ pub fn default_learning_store(
 
 /// `text_for_group`.
 #[inline]
+#[must_use]
 pub fn text_for_group(strokes: &[Stroke], group: i64) -> String {
     let group = group.to::<i32>();
     let mut text = String::with_capacity(strokes.len() * 2);

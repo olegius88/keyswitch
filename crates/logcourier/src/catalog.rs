@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use serde_json::{Value, json};
 
 use crate::config::Config;
-use crate::constants::*;
+use crate::constants::{CATALOG_MAX_ENTRIES, MAX_DOWNLOAD, CATALOG_MAX_VERSION_ENTRIES, INDEX_LIMIT, DELIVERY_BATCH_LIMIT};
 use crate::error::{Error, Result};
 use crate::rate_limit::Cancelled;
 use crate::store::{HEAD_DIGEST_KEY, LEGACY_HEAD_KEY, PENDING_KEY, Store, dumps};
@@ -112,7 +112,7 @@ pub fn current_catalog(client: &dyn Client, chat_id: &str) -> Result<Option<Valu
     }
     let name = message["document"]["file_name"].as_str().unwrap_or("");
     let good_name = name.strip_prefix("lc-index-").and_then(|rest| rest.strip_suffix(".json")).is_some_and(|id| lower_hex(id, 32));
-    if message["from"]["id"].to_string() != client.bot_id() || !good_name {
+    if message["from"]["id"] != client.bot_id() || !good_name {
         return Err(Error::telegram(
             "В группе закреплено другое сообщение. Выберите отдельную группу или восстановите последнее закрепление каталога LogCourier. Чужие закрепления не изменены.",
         ));
@@ -128,7 +128,7 @@ pub fn current_catalog(client: &dyn Client, chat_id: &str) -> Result<Option<Valu
 
 pub fn verify_connection(client: &dyn Client, chat_id: &str) -> Result<String> {
     let me = client.call("getMe", json!({}))?;
-    if me["id"].to_string() != client.bot_id() {
+    if me["id"] != client.bot_id() {
         return Err(Error::telegram("ID бота не совпал с токеном."));
     }
     let chat = client.call("getChat", json!({"chat_id": chat_id}))?;

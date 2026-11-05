@@ -25,6 +25,7 @@ pub type SettingCallback = Arc<dyn Fn(&str, &Value) + Send + Sync>;
 pub type Unsubscribe = Box<dyn Fn() + Send + Sync>;
 
 /// A JSON object with string keys; every JSON object has them, so this is the type test of the Python helper.
+#[must_use]
 pub fn string_keyed_mapping(value: &Value) -> Option<&SettingsData> {
     value.as_object()
 }
@@ -50,7 +51,7 @@ fn env_nonempty(name: &str) -> Option<String> {
 /// `Path.home()`.
 pub fn home_dir() -> PathBuf {
     let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    env_nonempty(variable).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+    env_nonempty(variable).map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// `config_dir()` with the environment given: `KEYSWITCH_CONFIG_DIR`, else `%APPDATA%\KeySwitch` on Windows and
@@ -74,6 +75,7 @@ pub fn config_dir_from(windows: bool, home: &Path, env: &dyn Fn(&str) -> Option<
     base.join("keyswitch")
 }
 
+#[must_use]
 pub fn config_dir() -> PathBuf {
     config_dir_from(running_on_windows(), &home_dir(), &|name| std::env::var(name).ok())
 }
@@ -82,8 +84,8 @@ fn running_on_windows() -> bool {
     cfg!(windows)
 }
 
-/// The shipped settings of `platform` (the running one by default, `Some("darwin")` for macOS): DEFAULT_SETTINGS
-/// everywhere, but on macOS the selection hotkeys use keys a Mac keyboard has (MACOS_SELECTION_HOTKEY_DEFAULTS).
+/// The shipped settings of `platform` (the running one by default, `Some("darwin")` for macOS): `DEFAULT_SETTINGS`
+/// everywhere, but on macOS the selection hotkeys use keys a Mac keyboard has (`MACOS_SELECTION_HOTKEY_DEFAULTS`).
 pub fn default_settings(platform: Option<&str>) -> SettingsData {
     let mut defaults = DEFAULT_SETTINGS.clone();
     let running = if cfg!(target_os = "macos") { "darwin" } else { "other" };
@@ -101,24 +103,22 @@ pub fn default_settings(platform: Option<&str>) -> SettingsData {
 ///
 /// The application then runs on defaults, and saving them must not destroy what the user had: the bytes stay next to
 /// the file under a dated name.
+#[must_use]
 pub fn set_aside_unreadable(path: &Path) -> Option<PathBuf> {
     let suffix = format!("{UNREADABLE_FILE_SUFFIX}{}", strftime(UNREADABLE_FILE_TIME_FORMAT, &local_time()));
     let target = with_name_suffix(path, &suffix);
-    match std::fs::rename(path, &target) {
-        Ok(()) => {
-            let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            warning(LOGGER_NAME, &format!("{} could not be read; kept as {}, defaults in use", path.display(), name));
-            Some(target)
-        }
-        Err(_) => {
-            warning(LOGGER_NAME, &format!("{} could not be read or moved aside", path.display()));
-            None
-        }
+    if let Ok(()) = std::fs::rename(path, &target) {
+        let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        warning(LOGGER_NAME, &format!("{} could not be read; kept as {}, defaults in use", path.display(), name));
+        Some(target)
+    } else {
+        warning(LOGGER_NAME, &format!("{} could not be read or moved aside", path.display()));
+        None
     }
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 struct Data {
@@ -139,6 +139,7 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     /// `SettingsStore(path)`: the file is read at once (`config_dir()/config.json` for `None`).
+    #[must_use]
     pub fn new(path: Option<PathBuf>) -> SettingsStore {
         let defaults = default_settings(None);
         let store = SettingsStore {
@@ -165,7 +166,7 @@ impl SettingsStore {
         // utf-8-sig: Notepad saves UTF-8 with a byte order mark, which json rejects.
         let loaded: Option<Value> = match read_text(&self.path, true) {
             Ok(text) => json_loads(&text),
-            Err(ReadError::Os(_)) | Err(ReadError::Decode) => None,
+            Err(ReadError::Os(_) | ReadError::Decode) => None,
         };
         let loaded_mapping = loaded.as_ref().and_then(|value| string_keyed_mapping(value));
         let Some(loaded_mapping) = loaded_mapping else {
@@ -232,6 +233,7 @@ impl SettingsStore {
 
     /// `get(dotted_path)`: a copy of the value, or `None` where the path leads nowhere (a stored `null` is `Some(Null)`).
     pub fn get(&self, dotted_path: &str) -> Option<Value> {
+        #[expect(clippy::redundant_closure_for_method_calls, reason = "the method path is ambiguous between the two Option impls of cloned")]
         self.with_value(dotted_path, |value| value.cloned())
     }
 
@@ -341,7 +343,7 @@ impl SettingsStore {
         })
     }
 
-    /// The shipped settings of this platform (default_settings), as a copy.
+    /// The shipped settings of this platform (`default_settings`), as a copy.
     pub fn defaults(&self) -> SettingsData {
         self.defaults.clone()
     }

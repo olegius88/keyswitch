@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::catalog::{checkpoint, current_catalog};
 use crate::config::Config;
-use crate::constants::*;
+use crate::constants::{FIRST_REGULAR_MESSAGE_ID, DELETE_BATCH_MESSAGES, TELEGRAM_BAD_REQUEST_STATUS, BOT_DELETE_WINDOW_HOURS};
 use crate::error::{Error, Result};
 use crate::rate_limit::Cancelled;
 use crate::store::{RESET_KEY, Store};
@@ -121,7 +121,7 @@ pub fn deleted_from(client: &dyn Client, chat_id: &str, first: i64, last: i64, c
     let (mut low, mut high) = (first + 1, last + 1);
     while low < high {
         checkpoint(cancelled)?;
-        let middle = (low + high) / 2;
+        let middle = i64::midpoint(low, high);
         if delete(client, chat_id, middle, last)? {
             high = middle;
         } else {

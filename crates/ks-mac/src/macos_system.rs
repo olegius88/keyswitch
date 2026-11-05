@@ -32,6 +32,7 @@ fn unescaped(text: &str) -> String {
 }
 
 /// The agent's property list, in the XML form `plistlib` writes.
+#[must_use]
 pub fn agent_document(arguments: &[String]) -> String {
     let items: String = arguments.iter().map(|argument| format!("\t\t<string>{}</string>\n", escaped(argument))).collect();
     format!(
@@ -39,8 +40,9 @@ pub fn agent_document(arguments: &[String]) -> String {
     )
 }
 
-/// What an agent will run, or nothing when it will not run at all: an agent whose RunAtLoad is off stays on disk and starts
+/// What an agent will run, or nothing when it will not run at all: an agent whose `RunAtLoad` is off stays on disk and starts
 /// nothing, so it is reported as no autostart.
+#[must_use]
 pub fn registered_arguments(document: &str) -> Vec<String> {
     let after = |key: &str| document.find(&format!("<key>{key}</key>")).map(|at| &document[at + key.len() + 11..]);
     if !after("RunAtLoad").is_some_and(|rest| rest.trim_start().starts_with("<true/>")) {
@@ -65,13 +67,14 @@ fn quoted(argument: &str) -> String {
     if safe { argument.to_owned() } else { format!("'{}'", argument.replace('\'', "'\"'\"'")) }
 }
 
-/// Manage the launch agent that starts KeySwitch when the user logs in.
+/// Manage the launch agent that starts `KeySwitch` when the user logs in.
 pub struct MacAutostartManager {
     path: PathBuf,
     executable: PathBuf,
 }
 
 impl MacAutostartManager {
+    #[must_use]
     pub fn new(path: Option<PathBuf>, executable: Option<PathBuf>) -> Self {
         MacAutostartManager {
             path: path.unwrap_or_else(|| launch_agent_path(None)),
@@ -79,6 +82,7 @@ impl MacAutostartManager {
         }
     }
 
+    #[must_use]
     pub fn status(&self) -> AutostartStatus {
         let arguments = std::fs::read_to_string(&self.path).map(|document| registered_arguments(&document)).unwrap_or_default();
         match arguments.first() {
@@ -123,10 +127,12 @@ impl Default for MacApplicationCatalog {
 }
 
 impl MacApplicationCatalog {
+    #[must_use]
     pub fn with_directories(directories: Vec<PathBuf>) -> Self {
         MacApplicationCatalog { directories }
     }
 
+    #[must_use]
     pub fn installed(&self) -> Vec<Application> {
         let mut applications: Vec<Application> = Vec::new();
         for directory in &self.directories {
@@ -136,11 +142,10 @@ impl MacApplicationCatalog {
                 let mut names: Vec<PathBuf> = entries.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect();
                 names.sort();
                 for path in names.into_iter().filter(|path| path.to_string_lossy().ends_with(BUNDLE_SUFFIX)) {
-                    if let Some(application) = from_executable(&path.display().to_string()) {
-                        if !applications.iter().any(|known| known.identifier == application.identifier) {
+                    if let Some(application) = from_executable(&path.display().to_string())
+                        && !applications.iter().any(|known| known.identifier == application.identifier) {
                             applications.push(application);
                         }
-                    }
                 }
             }
         }
@@ -151,6 +156,7 @@ impl MacApplicationCatalog {
 
 /// Name a program by its bundle: the identifier is the bundle's name folded, because that is what the engine is told the
 /// frontmost program is called.
+#[must_use]
 pub fn from_executable(executable: &str) -> Option<Application> {
     let path = executable.trim();
     let file = Path::new(path).file_name()?.to_string_lossy().into_owned();

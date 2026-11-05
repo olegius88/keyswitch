@@ -8,9 +8,9 @@
 //!
 //! * The hook thread runs `handle_native` for every key of the system, and every key waits for its answer. It takes only
 //!   small mutexes that are held for field copies, reads atomics, and makes short calls that read system state. It
-//!   never sends input: SendInput makes the system call the hook, which would then wait for itself.
-//! * The engine's worker types corrections. It holds `inject_lock` across SendInput and across its waits for a layout,
-//!   and the hook never takes that lock. `hold` is taken by both, and never across SendInput or a wait.
+//!   never sends input: `SendInput` makes the system call the hook, which would then wait for itself.
+//! * The engine's worker types corrections. It holds `inject_lock` across `SendInput` and across its waits for a layout,
+//!   and the hook never takes that lock. `hold` is taken by both, and never across `SendInput` or a wait.
 //!
 //! A panic on the hook's path takes the program down (a callback of the system cannot unwind, and the release profile
 //! aborts), so nothing on that path indexes or unwraps; what the Python's callback would have raised lets the key pass.
@@ -72,11 +72,12 @@ pub struct NativeKeyEvent {
     pub injected: bool,
     pub timestamp: i64,
     pub replayed: bool,
-    /// Injected by another program; `injected` means KeySwitch's own keys only.
+    /// Injected by another program; `injected` means `KeySwitch`'s own keys only.
     pub foreign: bool,
 }
 
 impl NativeKeyEvent {
+    #[must_use]
     pub const fn new(pressed: bool, virtual_key: u32, scan_code: u32, extended: bool, injected: bool, timestamp: i64) -> Self {
         NativeKeyEvent { pressed, virtual_key, scan_code, extended, injected, timestamp, replayed: false, foreign: false }
     }
@@ -90,13 +91,14 @@ pub struct NativeInput {
     pub extended: bool,
     pub synthetic: bool,
     pub replayed: bool,
-    /// `scan_code` is a Unicode character (KEYEVENTF_UNICODE), not a key position.
+    /// `scan_code` is a Unicode character (`KEYEVENTF_UNICODE`), not a key position.
     pub unicode: bool,
     /// A replay of a key another program injected.
     pub foreign: bool,
 }
 
 impl NativeInput {
+    #[must_use]
     pub const fn new(pressed: bool) -> Self {
         NativeInput {
             pressed,
@@ -110,14 +112,17 @@ impl NativeInput {
         }
     }
 
+    #[must_use]
     pub const fn key(pressed: bool, virtual_key: u32) -> Self {
         NativeInput { virtual_key, ..NativeInput::new(pressed) }
     }
 
+    #[must_use]
     pub const fn extended_key(pressed: bool, virtual_key: u32) -> Self {
         NativeInput { virtual_key, extended: true, ..NativeInput::new(pressed) }
     }
 
+    #[must_use]
     pub const fn scan(pressed: bool, scan_code: u32) -> Self {
         NativeInput { scan_code, ..NativeInput::new(pressed) }
     }
@@ -133,7 +138,7 @@ pub trait WindowsAPI: Send + Sync {
     fn foreground_layout(&self) -> i64;
     fn request_layout(&self, layout: i64) -> bool;
     fn translate_key(&self, virtual_key: u32, scan_code: u32, state: u32, layout: i64) -> String;
-    /// SendInput: how many events it took. Never called on the hook's thread.
+    /// `SendInput`: how many events it took. Never called on the hook's thread.
     fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError>;
     fn active_application(&self) -> String;
     fn foreground_window(&self) -> i64;
@@ -144,11 +149,11 @@ pub trait WindowsAPI: Send + Sync {
     fn activate_window(&self, window: i64) -> bool;
     fn keep_window_inactive(&self, window: i64) -> bool;
     fn caps_lock_enabled(&self) -> bool;
-    /// GetAsyncKeyState: whether the key is down on the keyboard right now.
+    /// `GetAsyncKeyState`: whether the key is down on the keyboard right now.
     fn key_down(&self, virtual_key: u32) -> bool;
-    /// GetTickCount: milliseconds since boot, the clock of a hook's key time.
+    /// `GetTickCount`: milliseconds since boot, the clock of a hook's key time.
     fn tick_count(&self) -> i64;
-    /// GetLastInputInfo: the time of the newest key or pointer event of the session, on the clock of tick_count.
+    /// `GetLastInputInfo`: the time of the newest key or pointer event of the session, on the clock of `tick_count`.
     fn last_input_time(&self) -> Result<i64, WindowsBackendError>;
     /// The times of the recent key and pointer events the hooks got, newest last, and of the hooks' start.
     fn hook_input_times(&self) -> Vec<i64>;
@@ -224,7 +229,7 @@ pub struct ClipboardContents {
 /// has it open, and the backend asks again until its deadline.
 pub trait WindowsSelectionAPI {
     fn window_class(&self, window: i64) -> String;
-    /// Whether the thread of `window` shows a text caret: GetGUIThreadInfo's hwndCaret, with a rcCaret that is not empty.
+    /// Whether the thread of `window` shows a text caret: `GetGUIThreadInfo`'s hwndCaret, with a rcCaret that is not empty.
     fn text_caret(&self, window: i64) -> bool;
     fn clipboard_sequence(&self) -> i64;
     fn read_clipboard(&self, limit_bytes: usize) -> Option<ClipboardContents>;
@@ -270,6 +275,7 @@ pub struct SystemClock {
 }
 
 impl SystemClock {
+    #[must_use]
     pub fn new() -> Self {
         SystemClock { started: Instant::now() }
     }
@@ -295,6 +301,7 @@ impl Clock for SystemClock {
     }
 }
 
+#[must_use]
 pub fn primary_language(layout: i64) -> i64 {
     (layout & LOWORD_MASK) & PRIMARY_LANGID_MASK
 }
@@ -399,7 +406,7 @@ struct HookState {
 
 /// While a correction is being injected the user's own keys are kept back here and typed again afterwards, so they can
 /// neither land between the backspaces and the replacement nor be lost. Both threads take this mutex; it is held for
-/// field copies and for the short calls of `hold_input` that read the focus, never across SendInput or a wait.
+/// field copies and for the short calls of `hold_input` that read the focus, never across `SendInput` or a wait.
 #[derive(Default)]
 struct HoldState {
     holding: bool,
@@ -411,7 +418,7 @@ struct HoldState {
 }
 
 /// An input time the hooks have not got yet, the input times seen since it with no hook event between, and the last one
-/// reported as passed them (take_unseen_input). Only the engine's thread asks.
+/// reported as passed them (`take_unseen_input`). Only the engine's thread asks.
 #[derive(Default)]
 struct UnseenState {
     unseen_input: Option<i64>,
@@ -461,16 +468,16 @@ struct Inner {
     hook: Mutex<HookState>,
     /// Atomic: the hook's thread toggles it and the engine's thread reads it while it types.
     caps_lock: AtomicBool,
-    /// Runs a short job off the hook's thread (mask_menu): SendInput there would wait for the hook it is in.
+    /// Runs a short job off the hook's thread (`mask_menu)`: `SendInput` there would wait for the hook it is in.
     start_job: JobStarter,
     /// Atomic: the hook's thread counts pointer presses, the engine's thread compares the count.
     pointer_epoch: AtomicU64,
     hold: Mutex<HoldState>,
-    /// Held by the engine's thread across SendInput and layout waits. The hook's thread never takes it.
+    /// Held by the engine's thread across `SendInput` and layout waits. The hook's thread never takes it.
     inject_lock: Mutex<()>,
     input_delay: InputDelay,
     unseen: Mutex<UnseenState>,
-    /// UI Automation for the selection hotkeys, made on first use by the factory (read_selection). Engine's thread only.
+    /// UI Automation for the selection hotkeys, made on first use by the factory (`read_selection`). Engine's thread only.
     selection_reader: Mutex<Option<Box<dyn SelectionReader>>>,
     selection_reader_factory: SelectionReaderFactory,
 }
@@ -529,6 +536,7 @@ impl WindowsBackend {
         }
     }
 
+    #[must_use]
     pub fn running(&self) -> bool {
         self.inner.running.load(Ordering::Acquire)
     }
@@ -538,11 +546,13 @@ impl WindowsBackend {
     }
 
     /// The hook's answer for one key: whether the window must not get it.
+    #[must_use]
     pub fn handle_native(&self, native: NativeKeyEvent) -> bool {
         self.inner.handle_native(native)
     }
 
     /// The modifiers and Caps Lock as the hook's thread keeps them.
+    #[must_use]
     pub fn normalized_state(&self) -> u32 {
         self.inner.normalized_state()
     }
@@ -778,7 +788,7 @@ impl Inner {
         if !valid_group(group) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         self.switch_group_inner(group).map(drop)
     }
 
@@ -855,7 +865,7 @@ impl Inner {
         decision
     }
 
-    /// Press the mask key (VK_MENU_MASK) while Alt or Win is held under a hotkey key the window does not get.
+    /// Press the mask key (`VK_MENU_MASK`) while Alt or Win is held under a hotkey key the window does not get.
     ///
     /// Seeing Alt go down and up with no key between, a window opens its menu bar on the release (Win opens the Start
     /// menu): after Alt+Pause, Notepad of Windows 11 took the result of the selection hotkey into its menu and left the
@@ -888,7 +898,7 @@ impl Inner {
     /// Replay held events before allowing fresh physical input through.
     ///
     /// Replays have their own native marker: they reach the engine but must never enter this buffer again. Never hold the
-    /// mutex across SendInput, which calls the hook synchronously on another thread.
+    /// mutex across `SendInput`, which calls the hook synchronously on another thread.
     fn release_input(&self) -> Result<i32, WindowsBackendError> {
         if lock(&self.hold).deferred_action.is_some() {
             return Ok(0);
@@ -975,10 +985,10 @@ impl Inner {
     /// How long ago input the hooks never got was made, once that is certain; None otherwise.
     ///
     /// A program in front that reads the keyboard as raw input and has a keyboard hook of its own keeps every keyboard hook
-    /// of the system silent, its own too, while GetLastInputInfo moves on with each key (Windows 10 19045 and 11 26200; raw
-    /// input alone silences nothing): KeySwitch sees none of what is typed there. An input time no hook got is certain to
-    /// have passed them once they got a later event, since they get events in order, or once HOOK_SILENCE_MS went by
-    /// without one, and it counts only when GetLastInputInfo moved on UNSEEN_INPUT_MIN_TIMES times meanwhile: a lone input
+    /// of the system silent, its own too, while `GetLastInputInfo` moves on with each key (Windows 10 19045 and 11 26200; raw
+    /// input alone silences nothing): `KeySwitch` sees none of what is typed there. An input time no hook got is certain to
+    /// have passed them once they got a later event, since they get events in order, or once `HOOK_SILENCE_MS` went by
+    /// without one, and it counts only when `GetLastInputInfo` moved on `UNSEEN_INPUT_MIN_TIMES` times meanwhile: a lone input
     /// the hooks did not get between keys they got is no program keeping keys away.
     fn take_unseen_input(&self) -> Result<Option<i64>, WindowsBackendError> {
         let seen = self.api.hook_input_times();
@@ -1249,7 +1259,7 @@ impl Inner {
         let mut late_typed = false;
         let mut failure: Option<WindowsBackendError> = None;
         let held_count = {
-            let inject_inner = lock(&self.inject_lock);
+            let _inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
                 // The layout is switched first so that the deletion and the replacement travel in one SendInput call:
                 // Windows keeps the events of a single call together, but lets the user's keys slip in between separate
@@ -1389,13 +1399,10 @@ impl Inner {
 
     fn uia_reader<'a>(&self, slot: &'a mut Option<Box<dyn SelectionReader>>) -> Option<&'a dyn SelectionReader> {
         if slot.is_none() {
-            match (self.selection_reader_factory)() {
-                Ok(reader) => *slot = Some(reader),
-                Err(_) => {
-                    // Without UI Automation (a refused COM call) the clipboard is the way left.
-                    log::info(LOGGER, "UI Automation недоступна для чтения выделения, выделение копируется");
-                    return None;
-                }
+            if let Ok(reader) = (self.selection_reader_factory)() { *slot = Some(reader) } else {
+                // Without UI Automation (a refused COM call) the clipboard is the way left.
+                log::info(LOGGER, "UI Automation недоступна для чтения выделения, выделение копируется");
+                return None;
             }
         }
         slot.as_deref()
@@ -1463,7 +1470,7 @@ impl Inner {
     ///
     /// Ctrl+Insert is the copy of Windows besides Ctrl+C ("Ctrl+C (or Ctrl+Insert): Copy the selected item", Keyboard
     /// shortcuts in Windows, Microsoft Support), and unlike Ctrl+C it is no interrupt: in a terminal program the console
-    /// classes do not catch (mintty, PuTTY, a remote session) Ctrl+C with nothing selected stops the running program. The
+    /// classes do not catch (mintty, `PuTTY`, a remote session) Ctrl+C with nothing selected stops the running program. The
     /// user's clipboard is kept before the copy, and the copy is waited for by the clipboard's sequence number: no change
     /// in time means nothing was selected (or the program does not copy with Ctrl+Insert), and the clipboard is then
     /// untouched. A clipboard that cannot be put back as it was is not borrowed at all. One that could not be put back
@@ -1497,10 +1504,10 @@ impl Inner {
 
     /// Type `replacement` over the selection as Unicode characters, then select it again where that is exact.
     ///
-    /// Characters typed with KEYEVENTF_UNICODE need no layout, so every character the selection may hold is typed as it
+    /// Characters typed with `KEYEVENTF_UNICODE` need no layout, so every character the selection may hold is typed as it
     /// is; the layout moves to `final_group` afterwards. Shift+Left selects the result back, so that another press of a
-    /// selection hotkey acts on it. A field that loses characters typed in a row (SLOW_INPUT_FIELD_CLASSES) gets the result
-    /// pasted instead, where UI Automation can show it selected (pasted_selection).
+    /// selection hotkey acts on it. A field that loses characters typed in a row (`SLOW_INPUT_FIELD_CLASSES`) gets the result
+    /// pasted instead, where UI Automation can show it selected (`pasted_selection`).
     fn replace_selection(
         &self,
         selected: &SelectedText,
@@ -1525,7 +1532,7 @@ impl Inner {
             }
             reselect.push(NativeInput::key(false, VK_SHIFT));
         }
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         if let Some((hold_pointer_epoch, hold_window)) = self.holding_place()
             && self.input_place_changed(hold_pointer_epoch, hold_window)
         {
@@ -1553,9 +1560,9 @@ impl Inner {
     /// Paste `replacement` with Ctrl+V and select it back, then give the clipboard back what it held.
     ///
     /// The field takes the text when it handles Ctrl+V, at a moment nobody announces: the user's clipboard comes back once
-    /// UI Automation shows the result selected, or after SELECTION_PASTE_CONFIRM_SECONDS, and only while it still holds the
+    /// UI Automation shows the result selected, or after `SELECTION_PASTE_CONFIRM_SECONDS`, and only while it still holds the
     /// replacement (anything copied meanwhile is the user's). The replacement and the restored data are both kept out of
-    /// the clipboard history (write_clipboard). A clipboard that cannot be put back as it was is not borrowed at all, and
+    /// the clipboard history (`write_clipboard`). A clipboard that cannot be put back as it was is not borrowed at all, and
     /// one that could not be put back is an error the status line reports. Says whether the result was seen selected.
     fn pasted_selection(
         &self,

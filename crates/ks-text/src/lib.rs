@@ -1,4 +1,4 @@
-//! Text that behaves exactly as in CPython 3.14 (Unicode 16.0).
+//! Text that behaves exactly as in `CPython` 3.14 (Unicode 16.0).
 //!
 //! Everything above this crate calls it instead of the `char`/`str` methods of Rust, whose answers differ
 //! (`isspace`, `isdigit`, `isalpha`, `lower`, `round`, `max`, string lengths ...). See each module.
@@ -24,17 +24,18 @@ pub use pynum::{
 pub use ucd::UNICODE_VERSION;
 
 /// Sizes of the generated tables, in bytes of read-only data (for the record and the size budget).
+#[must_use]
 pub fn table_bytes() -> usize {
     use unicode_tables as t;
-    std::mem::size_of_val(&t::FLAG_STARTS)
-        + std::mem::size_of_val(&t::FLAG_VALUES)
-        + std::mem::size_of_val(&t::ASCII_FLAGS)
-        + std::mem::size_of_val(&t::CYRILLIC_FLAGS)
-        + std::mem::size_of_val(&t::LOWER_RUNS)
-        + std::mem::size_of_val(&t::UPPER_RUNS)
-        + std::mem::size_of_val(&t::FOLD_RUNS)
-        + std::mem::size_of_val(&t::TITLE_RUNS)
-        + std::mem::size_of_val(&t::DECOMP_CP) * 3
-        + std::mem::size_of_val(&t::COMPOSE_A) * 3
-        + std::mem::size_of_val(&t::CCC_RUNS)
+    size_of_val(&t::FLAG_STARTS)
+        + size_of_val(&t::FLAG_VALUES)
+        + size_of_val(&t::ASCII_FLAGS)
+        + size_of_val(&t::CYRILLIC_FLAGS)
+        + size_of_val(&t::LOWER_RUNS)
+        + size_of_val(&t::UPPER_RUNS)
+        + size_of_val(&t::FOLD_RUNS)
+        + size_of_val(&t::TITLE_RUNS)
+        + size_of_val(&t::DECOMP_CP) * 3
+        + size_of_val(&t::COMPOSE_A) * 3
+        + size_of_val(&t::CCC_RUNS)
 }

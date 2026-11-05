@@ -59,6 +59,7 @@ pub struct DictionaryProvenance {
 }
 
 impl DictionaryProvenance {
+    #[must_use]
     pub fn payload(&self) -> Value {
         json!({"locale": self.locale, "dictionary": self.dictionary.payload(), "affix": self.affix.payload()})
     }
@@ -281,7 +282,7 @@ pub fn build_unknown_typo_disjoint_corpus(onboard: &[HashSet<String>; 2], exclud
             return Err(format!("Hunspell snapshot group {group} must be {}", LOCALES[group]));
         }
         let mut ordered: Vec<([u8; 32], String)> = snapshot.words.iter().filter(|word| !onboard[group].contains(*word)).filter_map(|word| { let signature = physical_signature(word, group.to::<i64>()); (!signature.is_empty()).then(|| (namespaced(rank_namespace, &signature), signature)) }).collect();
-        ordered.sort_by(|a, b| a.0.cmp(&b.0));
+        ordered.sort_by_key(|a| a.0);
         let mut selected: Vec<(String, String, String, &'static str)> = Vec::new();
         for (_, signature) in &ordered {
             let digest = namespaced(choice_namespace, signature);
@@ -347,6 +348,7 @@ pub fn unknown_typo_physical_signatures(corpus: &ExternalCorpus) -> Result<BTree
 }
 
 /// The Onboard words of each group, as the evaluator holds them: long enough for a training signature.
+#[must_use]
 pub fn onboard_words(words: &[Vec<LexiconWord>; 2], minimum_word_length: usize) -> [HashSet<String>; 2] {
     let of = |group: usize| words[group].iter().filter(|word| word.physical_signature.chars().count() >= minimum_word_length).map(|word| word.word.clone()).collect();
     [of(0), of(1)]
@@ -367,7 +369,7 @@ pub struct Corpora {
 pub fn model_blind_corpora(root: &Path, models: &[&LanguageModel; 2], protected: &ProtectedTokens, verify_frozen_source: bool) -> Result<(Value, Corpora), String> {
     let config = read_json(&root.join("model/intent_v1/config.json"))?;
     let shape = &config["dataset"];
-    let number = |name: &str| shape[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("dataset.{name}"));
+    let number = |name: &str| shape[name].as_u64().map(ks_cast::To::to::<usize>).ok_or_else(|| format!("dataset.{name}"));
     let dataset_config = DatasetConfig { minimum_word_length: number("minimum_word_length")?, maximum_word_length: number("maximum_word_length")?, typo_augmentations: number("typo_augmentations")? };
     let words = super::pipeline::onboard_lexicon(root, &config, &dataset_config)?;
     let onboard = onboard_words(&words, dataset_config.minimum_word_length);

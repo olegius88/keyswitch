@@ -1,4 +1,4 @@
-//! Per-character predicates identical to CPython 3.14 (Unicode 16.0), for every code point 0..=0x10FFFF.
+//! Per-character predicates identical to `CPython` 3.14 (Unicode 16.0), for every code point 0..=0x10FFFF.
 //!
 //! Rust's `char::is_alphabetic`, `is_whitespace`, `is_numeric`, `is_uppercase` ... differ from Python's
 //! `str` methods and from what `re` treats as `\w`, `\d`, `\s` (for example `'\x1c'.isspace()` is True in
@@ -20,6 +20,7 @@ pub use t::UNICODE_VERSION;
 
 /// All property flags of a code point (`t::ALPHA | ...`); 0 above U+10FFFF.
 #[inline]
+#[must_use]
 pub fn flags(cp: u32) -> u16 {
     if cp < 128 {
         t::ASCII_FLAGS[cp.to::<usize>()]
@@ -105,6 +106,7 @@ predicate!(
     re_letter, re_letter_cp, |f, cp| f & ALNUM != 0 && f & t::DECIMAL == 0 && cp != 0x5F);
 
 /// The value of a decimal digit (`unicodedata.decimal(c, None)`): `0..=9` or `None`.
+#[must_use]
 pub fn decimal_value(c: char) -> Option<u32> {
     let cp = c.to::<u32>();
     if cp < 128 {

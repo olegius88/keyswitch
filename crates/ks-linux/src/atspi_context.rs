@@ -1,6 +1,6 @@
 //! Optional Linux AT-SPI text access with bounded traversal and IPC timeouts (the Python's `atspi_context.py`).
 //!
-//! The Python reaches AT-SPI through libatspi's GObject bindings. Here the accessibility bus is spoken to directly
+//! The Python reaches AT-SPI through libatspi's `GObject` bindings. Here the accessibility bus is spoken to directly
 //! (`atspi_bus`), and this file holds what the reader decides, over the small `AtspiApi` a fake can replace in tests.
 
 use ks_cast::To as _;
@@ -43,6 +43,7 @@ pub enum AtspiError {
 
 impl AtspiError {
     /// What the diagnostics say of a failure: its class and name, never its text, which may carry what the user typed.
+    #[must_use]
     pub fn failure(&self) -> ReaderFailure {
         match self {
             AtspiError::Unavailable(_) => ReaderFailure { failure_type: "runtime_error", failure_name: "RuntimeError", failure_code: None, permanent: false },
@@ -229,7 +230,7 @@ impl AtspiFieldReader {
     /// The text selected in the focused field, for the selection hotkeys; a refusal when there is none to change: no field
     /// found or no text in it, a password field, a field the user cannot edit, no selection or several. The selection's
     /// bounds are passed to `get_text` as they come: its end is "the first character past the desired range"
-    /// (docs.gtk.org/atspi2/method.Text.get_text.html).
+    /// (`docs.gtk.org/atspi2/method.Text.get_text.html`).
     pub fn read_selection(&self, application: &str, window: i64) -> Result<SelectedText, SelectionError> {
         let found = self.focused(application, window, Self::deadline()).map_err(|_| refused(RefusalReason::Unsupported))?;
         let Some((node, _field_id)) = found else { return Err(refused(RefusalReason::Unsupported)) };
@@ -260,7 +261,7 @@ impl AtspiFieldReader {
         Ok(SelectedText { text: selected, source: SOURCE_ATSPI.to_owned() })
     }
 
-    /// Writes `replacement` over the selection last read, through the field's EditableText; None without one.
+    /// Writes `replacement` over the selection last read, through the field's `EditableText`; None without one.
     ///
     /// The program changes its own text, so any character goes in as it is (`—`, `«»`, an emoji) and no layout or key is
     /// involved. The field must still be focused and show the very selection that was read. The selected range is deleted

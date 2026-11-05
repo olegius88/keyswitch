@@ -47,6 +47,7 @@ impl Split {
     pub const ALL: [Split; 5] = [Split::Train, Split::Development, Split::Calibration, Split::Threshold, Split::Test];
     pub const PRESEALED: [Split; 4] = [Split::Train, Split::Development, Split::Calibration, Split::Threshold];
 
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Split::Train => "train",
@@ -83,6 +84,7 @@ fn draw(digest: &[u8; 32]) -> u64 {
 }
 
 /// `stable_split`: a physical signature's immutable bucket.
+#[must_use]
 pub fn stable_split(signature: &str) -> Split {
     let bucket = draw(&sha(&[SPLIT_NAMESPACE.as_bytes(), b"\0", signature.as_bytes()])) % SPLIT_BUCKET_COUNT;
     let mut cursor = 0;
@@ -105,6 +107,7 @@ fn translate(text: &str, source: &str, target: &str) -> String {
 }
 
 /// `_normalise_lexical_word`.
+#[must_use]
 pub fn normalise_lexical_word(word: &str, group: i64) -> String {
     let folded = pystr::casefold(word);
     let normalized = pystr::strip(&folded);
@@ -116,6 +119,7 @@ pub fn normalise_lexical_word(word: &str, group: i64) -> String {
 }
 
 /// `physical_signature`: the layout-independent physical key sequence of a word.
+#[must_use]
 pub fn physical_signature(word: &str, group: i64) -> String {
     let normalized = normalise_lexical_word(word, group);
     if normalized.is_empty() || group == 0 { normalized } else { translate(&normalized, "ru", "us") }
@@ -131,6 +135,7 @@ pub struct LexiconWord {
 }
 
 /// `load_onboard_unigrams`: the deterministic filter of the one-gram section of an Onboard model.
+#[must_use]
 pub fn load_onboard_unigrams(raw: &[u8], group: i64, minimum_length: usize, maximum_length: usize) -> Vec<LexiconWord> {
     let text = String::from_utf8_lossy(raw);
     let mut frequencies: HashMap<String, i64> = HashMap::new();
@@ -180,6 +185,7 @@ pub struct PreparedLexicon {
 }
 
 /// `prepare_lexicon`: deduplicate train words while retaining all safety collisions.
+#[must_use]
 pub fn prepare_lexicon(words: Vec<LexiconWord>, minimum_training_signature_length: usize) -> PreparedLexicon {
     let mut grouped: BTreeMap<String, Vec<LexiconWord>> = BTreeMap::new();
     for word in words {
@@ -209,6 +215,7 @@ pub fn prepare_lexicon(words: Vec<LexiconWord>, minimum_training_signature_lengt
 }
 
 /// `typo_variants`: symmetric physical-key typos made without consulting either language.
+#[must_use]
 pub fn typo_variants(signature: &str, maximum_augmentations: usize) -> Vec<(String, &'static str)> {
     let mut variants = vec![(signature.to_owned(), "identity")];
     let keys: Vec<char> = signature.chars().collect();
@@ -257,6 +264,7 @@ pub struct LexicalExample {
 
 impl LexicalExample {
     /// `json.dumps(asdict(example), ensure_ascii=False, sort_keys=True, separators=(",", ":"))`.
+    #[must_use]
     pub fn canonical(&self) -> String {
         let group = self.context_group.map_or_else(|| "null".to_owned(), |group| group.to_string());
         format!(
@@ -280,11 +288,11 @@ impl LexicalExample {
     }
 
     /// The key of the rows of a split.
-    fn split_order<'a>(&'a self) -> (&'a str, &'a str, &'static str, bool, i64) {
+    fn split_order(&self) -> (&str, &str, &'static str, bool, i64) {
         (&self.base_signature, &self.variant_kind, self.trigger.as_str(), self.label, self.source_group)
     }
 
-    fn safety_order<'a>(&'a self) -> (&'a str, &'static str, i64) {
+    fn safety_order(&self) -> (&str, &'static str, i64) {
         (&self.base_signature, self.trigger.as_str(), self.source_group)
     }
 }
@@ -320,6 +328,7 @@ pub struct VariantQuarantine {
 }
 
 impl VariantQuarantine {
+    #[must_use]
     pub fn signature_count(&self) -> usize {
         self.occurrences.iter().map(|item| &item.physical_signature).collect::<HashSet<_>>().len()
     }
@@ -363,6 +372,7 @@ pub struct DatasetBundle {
 }
 
 impl DatasetBundle {
+    #[must_use]
     pub fn split(&self, split: Split) -> &[LexicalExample] {
         &self.by_split[split.index()]
     }
@@ -464,6 +474,7 @@ fn hard_negative_examples(token: &str, safety: bool) -> Vec<LexicalExample> {
 }
 
 /// `build_dataset`: balanced positive and negative examples for an explicit phase.
+#[must_use]
 pub fn build_dataset(prepared: &PreparedLexicon, config: &DatasetConfig, included: &[Split]) -> DatasetBundle {
     let quarantine = build_variant_quarantine(prepared, config, included);
     let quarantined: HashSet<&String> = quarantine.occurrences.iter().map(|item| &item.physical_signature).collect();
@@ -572,6 +583,7 @@ pub struct HardNegativeCorpus {
 }
 
 impl HardNegativeCorpus {
+    #[must_use]
     pub fn provenance(&self) -> Value {
         let per_group = |table: &BTreeMap<i64, i64>| -> Value { Value::Object(table.iter().map(|(group, count)| (group.to_string(), json!(count))).collect()) };
         let roles: serde_json::Map<String, Value> = Split::PRESEALED.iter().map(|split| (split.as_str().to_owned(), per_group(&self.role_words_by_group[split.as_str()]))).collect();
@@ -738,6 +750,7 @@ pub fn decode_hard_negative_corpus(raw: &[u8], config: &Value, dataset: &Dataset
 }
 
 /// `merge_hard_negative_development`: each external-development signature joins exactly one pre-seal role.
+#[must_use]
 pub fn merge_hard_negative_development(mut dataset: DatasetBundle, corpus: &HardNegativeCorpus) -> DatasetBundle {
     for split in Split::ALL {
         let rows = &mut dataset.by_split[split.index()];
@@ -919,6 +932,7 @@ pub fn assert_no_split_leakage(dataset: &DatasetBundle, quarantine_splits: &[Spl
 }
 
 /// `dataset_fingerprint`: the hash of every sealed row, for exact provenance.
+#[must_use]
 pub fn dataset_fingerprint(dataset: &DatasetBundle) -> String {
     let mut hasher = Sha256::new();
     for (label, quarantine) in [("candidate-variant-quarantine", &dataset.variant_quarantine), ("sealed-variant-quarantine", &dataset.sealed_variant_quarantine)] {
@@ -949,6 +963,7 @@ pub fn dataset_fingerprint(dataset: &DatasetBundle) -> String {
 }
 
 /// `TrainOnlyLanguageScorers.provenance_payload`: the training partition's words the classifier never reads.
+#[must_use]
 pub fn train_only_scorer_provenance(prepared: &PreparedLexicon, quarantine: &VariantQuarantine) -> Value {
     let quarantined: HashSet<&String> = quarantine.occurrences.iter().map(|item| &item.physical_signature).collect();
     let mut records: Vec<&LexiconWord> = prepared.words_by_split[Split::Train.index()].iter().collect();

@@ -59,6 +59,7 @@ impl SourceArchive {
         Ok(normalized)
     }
 
+    #[must_use]
     pub fn all_paths(&self) -> Vec<&'static str> {
         self.sources.iter().map(|(name, _)| *name).collect()
     }

@@ -455,7 +455,7 @@ fn packed_cases() {
         fail.check("pack", name, packed.is_some(), row["packed"].as_bool().unwrap());
         if let Some(packed) = packed {
             fail.check("len", name, packed.len().to::<u64>(), row["len"].as_u64().unwrap());
-            fail.check("iter", name, packed.iter().map(|entry| entry.0).collect::<Vec<_>>(), strings(&row["iter"]).iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            fail.check("iter", name, packed.iter().map(|entry| entry.0).collect::<Vec<_>>(), strings(&row["iter"]).iter().map(ToString::to_string).collect::<Vec<_>>());
             for probe in row["probes"].as_array().unwrap() {
                 fail.check("get", probe[0].as_str().unwrap(), packed.get(probe[0].as_str().unwrap()).map(hex), probe[1].as_str().map(str::to_string));
             }
@@ -738,7 +738,7 @@ fn hexes(values: &[f64]) -> Vec<String> {
 }
 
 fn texts(value: &Value) -> Vec<String> {
-    strings(value).iter().map(|text| text.to_string()).collect()
+    strings(value).iter().map(ToString::to_string).collect()
 }
 
 #[test]
@@ -781,7 +781,7 @@ fn boundary_words() {
             fail.check("features", word, candidates.iter().map(features_digest).collect::<Vec<_>>(), texts(&part[1]));
             fail.check("probabilities", word, hexes(&policy.probabilities(&candidates).unwrap()), texts(&part[2]));
             let predicted = policy.predict(&candidates).unwrap();
-            fail.check("suffix_length", word, predicted.suffix_length.map(|length| length.to::<u64>()), part[3].as_u64());
+            fail.check("suffix_length", word, predicted.suffix_length.map(ks_cast::To::to::<u64>), part[3].as_u64());
             fail.check("probability", word, hex(predicted.probability).as_str(), part[4].as_str().unwrap());
             fail.check("prediction version", word, predicted.version.as_str(), part[5].as_str().unwrap());
             let mut next = 6;
@@ -794,7 +794,7 @@ fn boundary_words() {
                 fail.check("features v1", word, old.iter().map(features_digest).collect::<Vec<_>>(), texts(&want[1]));
                 fail.check("probabilities v1", word, hexes(&legacy.probabilities(&old).unwrap()), texts(&want[2]));
                 let predicted = legacy.predict(&old).unwrap();
-                fail.check("suffix_length v1", word, predicted.suffix_length.map(|length| length.to::<u64>()), want[3].as_u64());
+                fail.check("suffix_length v1", word, predicted.suffix_length.map(ks_cast::To::to::<u64>), want[3].as_u64());
                 fail.check("probability v1", word, hex(predicted.probability).as_str(), want[4].as_str().unwrap());
             }
             if index % 64 == 0 {

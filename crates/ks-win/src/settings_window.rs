@@ -48,11 +48,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_CLIPCHILDREN, WS_EX_CLIENTEDGE, WS_EX_CONTROLPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
 };
 
-use crate::constants::*;
+use crate::constants::{SETTINGS_WINDOW_CLASS, PAGE_CLASS, MAIN_WINDOW_WIDTH_PIXELS, MAIN_WINDOW_HEIGHT_PIXELS, SETTINGS_WINDOW_TITLE, BASE_DPI, MAIN_WINDOW_MIN_WIDTH_PIXELS, MAIN_WINDOW_MIN_HEIGHT_PIXELS, DESKTOP_SIDEBAR_WIDTH_PIXELS, SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS, SIDEBAR_ITEM_PADDING_X_PIXELS, SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS, SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS, NAVIGATION_BUTTON_HEIGHT_PIXELS, NAVIGATION_BUTTON_SPACING_PIXELS, SIDEBAR_SEPARATOR_PADDING_Y_PIXELS, SIDEBAR_STATUS_PADDING_TOP_PIXELS, PAGE_CAPTION_PADDING_TOP_PIXELS, PAGE_PADDING_X_PIXELS, PAGE_CONTENT_PADDING_Y_PIXELS, SECTION_BOTTOM_MARGIN_PIXELS, PAGE_SCROLL_STEP_PIXELS, WHEEL_STEPS_PER_NOTCH, WHEEL_DELTA, APPLICATION_CAPTURE_DELAY_MS, SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS, AUTOCORRECTION_COLUMN_GAP_PIXELS, AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT, AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT, SETTING_ROW_PADDING_PIXELS, MODIFIED_MARKER_COLUMN_PIXELS, RESET_BUTTON_COLUMN_PIXELS, DESCRIPTION_INDENT_PIXELS, CHOICE_CONTROL_WIDTH_PIXELS, NUMBER_CONTROL_WIDTH_PIXELS, TEXT_CONTROL_WIDTH_PIXELS, SETTING_CONTROL_PADDING_LEFT_PIXELS, ROW_HEIGHT_PIXELS, UPDOWN_WIDTH_PIXELS, MODIFIED_MARKER_WIDTH_PIXELS, BUTTON_PADDING_X_PIXELS, BUTTON_HEIGHT_PIXELS, CARD_TITLE_GAP_PIXELS, STATUS_LINE_GAP_PIXELS, TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS, MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, STANDARD_GAP_PIXELS, APPLICATION_LIST_HEIGHT_ROWS, GROUP_GAP_PIXELS, WORD_LIST_HEIGHT_ROWS, HISTORY_TIME_COLUMN_WIDTH_PIXELS, HISTORY_WORD_COLUMN_WIDTH_PIXELS, HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS, HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS, HISTORY_TREE_MIN_ROWS, LEARNING_WORD_COLUMN_WIDTH_PIXELS, LEARNING_CONDITION_COLUMN_WIDTH_PIXELS, LEARNING_ACTION_COLUMN_WIDTH_PIXELS, LEARNING_TREE_HEIGHT_ROWS, DIAGNOSTICS_TEXT_HEIGHT_ROWS};
 use crate::win32_controls::{self as w32, Brushes, Fonts, MessageKind, Themed, scaled};
 use crate::windows_native::wide;
 use crate::windows_system::{WindowsApplicationCatalog, open_directory};
-use crate::windows_ui_model::*;
+use crate::windows_ui_model::{UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ID_BASE: usize = 1000;
@@ -263,13 +263,13 @@ fn system_dark() -> bool {
 /// Registers the classes and makes the hidden frame window.
 pub fn create(services: Services) -> Option<HWND> {
     let controls = INITCOMMONCONTROLSEX {
-        dwSize: (std::mem::size_of::<INITCOMMONCONTROLSEX>()).low::<u32>(),
+        dwSize: (size_of::<INITCOMMONCONTROLSEX>()).low::<u32>(),
         dwICC: ICC_WIN95_CLASSES | ICC_STANDARD_CLASSES | ICC_UPDOWN_CLASS,
     };
     // SAFETY: the structure is fully initialised and lives through the call; the class descriptions point at strings that
     // live through RegisterClassW, which copies them; the cursor and icon loads take system or module resources.
     unsafe {
-        InitCommonControlsEx(&controls);
+        InitCommonControlsEx(&raw const controls);
         let instance = w32::hinstance();
         let class = wide(SETTINGS_WINDOW_CLASS);
         let frame = WNDCLASSW {
@@ -284,7 +284,7 @@ pub fn create(services: Services) -> Option<HWND> {
             lpszMenuName: null(),
             lpszClassName: class.as_ptr(),
         };
-        if RegisterClassW(&frame) == 0 {
+        if RegisterClassW(&raw const frame) == 0 {
             return None;
         }
         let page_class = wide(PAGE_CLASS);
@@ -300,7 +300,7 @@ pub fn create(services: Services) -> Option<HWND> {
             lpszMenuName: null(),
             lpszClassName: page_class.as_ptr(),
         };
-        if RegisterClassW(&page) == 0 {
+        if RegisterClassW(&raw const page) == 0 {
             return None;
         }
     }
@@ -308,7 +308,7 @@ pub fn create(services: Services) -> Option<HWND> {
     let style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
     let mut frame = RECT { left: 0, top: 0, right: scaled(MAIN_WINDOW_WIDTH_PIXELS, dpi), bottom: scaled(MAIN_WINDOW_HEIGHT_PIXELS, dpi) };
     // SAFETY: fills the rectangle it is given.
-    unsafe { AdjustWindowRectExForDpi(&mut frame, style, 0, 0, dpi.bits::<u32>()) };
+    unsafe { AdjustWindowRectExForDpi(&raw mut frame, style, 0, 0, dpi.bits::<u32>()) };
     let window = w32::create_window(
         SETTINGS_WINDOW_CLASS,
         SETTINGS_WINDOW_TITLE,
@@ -364,6 +364,7 @@ fn unsafe_system_dpi() -> i32 {
 }
 
 /// Messages the application's own code sends or posts to the frame; true when the frame has taken it.
+#[must_use]
 pub fn is_dialog_message(message: &windows_sys::Win32::UI::WindowsAndMessaging::MSG) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::IsDialogMessageW;
     if crate::rule_editor_dialog::is_dialog_message(message) {
@@ -423,11 +424,13 @@ pub fn open_rule_editor(draft: RuleDraft, return_window: Option<i64>) {
     with_ui(|ui| ui.open_rule_editor(draft, return_window));
 }
 
+#[must_use]
 pub fn dark() -> bool {
     ui().and_then(|ui| ui.dark.get()).unwrap_or(false)
 }
 
 /// The window the user is looking at is the frame itself.
+#[must_use]
 pub fn frame_window() -> Option<HWND> {
     ui().map(|ui| ui.window)
 }
@@ -521,7 +524,7 @@ impl Ui {
                 let mut outer = RECT { left: 0, top: 0, right: scaled(MAIN_WINDOW_MIN_WIDTH_PIXELS, dpi), bottom: scaled(MAIN_WINDOW_MIN_HEIGHT_PIXELS, dpi) };
                 // SAFETY: fills the rectangle; `lparam` points at the structure the system gave for this message.
                 unsafe {
-                    AdjustWindowRectExForDpi(&mut outer, WS_OVERLAPPEDWINDOW, 0, 0, dpi.bits::<u32>());
+                    AdjustWindowRectExForDpi(&raw mut outer, WS_OVERLAPPEDWINDOW, 0, 0, dpi.bits::<u32>());
                     let info = &mut *lparam.pointer_mut::<MINMAXINFO>();
                     info.ptMinTrackSize = POINT { x: outer.right - outer.left, y: outer.bottom - outer.top };
                 }
@@ -795,7 +798,7 @@ impl Ui {
         }
         // SAFETY: the panel is ours.
         unsafe { ShowWindow(page.panel, SW_SHOW) };
-        for button in self.controls.borrow().navigation.iter() {
+        for button in &self.controls.borrow().navigation {
             w32::invalidate(*button);
         }
         match PAGE_NAMES[index].0 {
@@ -910,9 +913,9 @@ impl Ui {
                 continue;
             }
             apply_moves(&moves, scroll);
-            let info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_RANGE | SIF_PAGE | SIF_POS, nMin: 0, nMax: content.max(1) - 1, nPage: client.bottom.max(0).bits::<u32>(), nPos: scroll, nTrackPos: 0 };
+            let info = SCROLLINFO { cbSize: (size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_RANGE | SIF_PAGE | SIF_POS, nMin: 0, nMax: content.max(1) - 1, nPage: client.bottom.max(0).bits::<u32>(), nPos: scroll, nTrackPos: 0 };
             // SAFETY: the structure is fully initialised and lives through the call.
-            unsafe { SetScrollInfo(page.panel, SB_VERT, &info, 1) };
+            unsafe { SetScrollInfo(page.panel, SB_VERT, &raw const info, 1) };
             // A scroll bar that appeared or went changes the width the page has: lay out once more.
             let after = w32::client_rect(page.panel);
             if after.right == client.right || pass == 1 {
@@ -932,10 +935,10 @@ impl Ui {
             return;
         }
         page.scroll.set(target);
-        let info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_POS, nMin: 0, nMax: 0, nPage: 0, nPos: target, nTrackPos: 0 };
+        let info = SCROLLINFO { cbSize: (size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_POS, nMin: 0, nMax: 0, nPage: 0, nPos: target, nTrackPos: 0 };
         // SAFETY: the structure is fully initialised; the panel is ours; scrolling moves its children with it.
         unsafe {
-            SetScrollInfo(page.panel, SB_VERT, &info, 1);
+            SetScrollInfo(page.panel, SB_VERT, &raw const info, 1);
             ScrollWindowEx(page.panel, 0, -delta, null(), null(), null_mut(), null_mut(), SW_SCROLLCHILDREN | 0x0002 | 0x0004);
         }
     }
@@ -962,9 +965,9 @@ impl Ui {
                 let page = self.page_of(panel)?;
                 let client = w32::client_rect(panel);
                 let step = scaled(PAGE_SCROLL_STEP_PIXELS, self.dpi.get());
-                let mut info = SCROLLINFO { cbSize: (std::mem::size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_ALL, nMin: 0, nMax: 0, nPage: 0, nPos: 0, nTrackPos: 0 };
+                let mut info = SCROLLINFO { cbSize: (size_of::<SCROLLINFO>()).low::<u32>(), fMask: SIF_ALL, nMin: 0, nMax: 0, nPage: 0, nPos: 0, nTrackPos: 0 };
                 // SAFETY: the structure is initialised and lives through the call.
-                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetScrollInfo(panel, SB_VERT, &mut info) };
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetScrollInfo(panel, SB_VERT, &raw mut info) };
                 let current = page.scroll.get();
                 let target = match low_word(wparam).low::<i32>() {
                     code if code == SB_LINEUP => current - step,
@@ -1030,7 +1033,7 @@ impl Ui {
         // SAFETY: PAINTSTRUCT is plain data filled by BeginPaint.
         let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
         // SAFETY: balanced with EndPaint below on the same window.
-        let hdc = unsafe { BeginPaint(panel, &mut paint) };
+        let hdc = unsafe { BeginPaint(panel, &raw mut paint) };
         if let (Some(page), Some(resources)) = (self.page_of(panel), self.resources.borrow().as_ref()) {
             let palette = resources.brushes.palette;
             let scroll = page.scroll.get();
@@ -1040,7 +1043,7 @@ impl Ui {
             }
         }
         // SAFETY: ends the paint begun above.
-        unsafe { EndPaint(panel, &paint) };
+        unsafe { EndPaint(panel, &raw const paint) };
     }
 
     // ------------------------------------------------------------------------------------------- the commands
@@ -1196,16 +1199,13 @@ impl Ui {
         let stored = match spec.kind {
             ControlKind::Bool => Some(Value::Bool(w32::is_checked(title))),
             ControlKind::Choice => w32::combo_selected_text(control).map(|label| Value::String(choice_value(&spec, &label))),
-            ControlKind::Int | ControlKind::Float => match parse_number(&spec, &w32::text_of(control)) {
-                Some((value, shown)) => {
-                    w32::set_text(control, &shown);
-                    Some(value)
-                }
-                None => {
-                    let stored = self.settings().get(&spec.path).map_or_else(|| py_str(&json!(spec.minimum)), |value| py_str(&value));
-                    w32::set_text(control, &stored);
-                    None
-                }
+            ControlKind::Int | ControlKind::Float => if let Some((value, shown)) = parse_number(&spec, &w32::text_of(control)) {
+                w32::set_text(control, &shown);
+                Some(value)
+            } else {
+                let stored = self.settings().get(&spec.path).map_or_else(|| py_str(&json!(spec.minimum)), |value| py_str(&value));
+                w32::set_text(control, &stored);
+                None
             },
             ControlKind::Text => {
                 let value = w32::text_of(control);
@@ -1631,20 +1631,17 @@ impl Ui {
         let snapshot = self.services.engine.snapshot();
         let built = if ready { self.services.engine.engine().ok() } else { None };
         let guard = built.as_ref().map(|engine| engine.core());
-        let (intent, context, prefix) = match guard.as_ref().and_then(|guard| guard.as_ref()) {
-            Some(core) => (
-                core.intent_model_status.as_dict(),
-                Map::from_iter([("available".to_owned(), json!(core.context_policy.model.is_some())), ("status".to_owned(), json!(core.context_policy.status))]),
-                Map::from_iter([("available".to_owned(), json!(core.prefix_model.is_some())), ("status".to_owned(), json!(core.prefix_model.as_ref().map_or_else(String::new, |model| model.version().to_owned())))]),
-            ),
-            None => {
-                let status = if snapshot.last_error.is_empty() { LOADING_ACTION.to_owned() } else { snapshot.last_error.clone() };
-                (
-                    json!({"status": status}),
-                    Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
-                    Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
-                )
-            }
+        let (intent, context, prefix) = if let Some(core) = guard.as_ref().and_then(|guard| guard.as_ref()) { (
+            core.intent_model_status.as_dict(),
+            Map::from_iter([("available".to_owned(), json!(core.context_policy.model.is_some())), ("status".to_owned(), json!(core.context_policy.status))]),
+            Map::from_iter([("available".to_owned(), json!(core.prefix_model.is_some())), ("status".to_owned(), json!(core.prefix_model.as_ref().map_or_else(String::new, |model| model.version().to_owned())))]),
+        ) } else {
+            let status = if snapshot.last_error.is_empty() { LOADING_ACTION.to_owned() } else { snapshot.last_error.clone() };
+            (
+                json!({"status": status}),
+                Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
+                Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
+            )
         };
         drop(guard);
         let input = DiagnosticsInput {
@@ -1690,7 +1687,7 @@ fn window_rect_in(parent: HWND, child: HWND) -> RECT {
     let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: fills the rectangle; the mapping converts screen coordinates to the parent's client ones.
     unsafe {
-        GetWindowRect(child, &mut rect);
+        GetWindowRect(child, &raw mut rect);
         let mut points = [POINT { x: rect.left, y: rect.top }, POINT { x: rect.right, y: rect.bottom }];
         windows_sys::Win32::Graphics::Gdi::MapWindowPoints(null_mut(), parent, points.as_mut_ptr(), 2);
         RECT { left: points[0].x, top: points[0].y, right: points[1].x, bottom: points[1].y }
@@ -1801,15 +1798,14 @@ fn layout_setting(setting: &mut SettingNode, x: i32, width: i32, mut y: i32, con
     let reset_column = scaled(RESET_BUTTON_COLUMN_PIXELS, dpi);
     let body_x = x + marker_column;
     let body_width = (width - marker_column - reset_column).max(scaled(120, dpi));
-    let indent;
-    let after;
-    if setting.kind == ControlKind::Bool {
+    
+    
+    let (after, indent) = if setting.kind == ControlKind::Bool {
         let box_width = scaled(16 + 8, dpi);
         let text = w32::text_of(setting.title);
         let height = w32::wrapped_height(fonts.base, &text, body_width - box_width).max(scaled(18, dpi));
         context.moves.push((setting.title, body_x, y, body_width, height));
-        after = y + height;
-        indent = scaled(DESCRIPTION_INDENT_PIXELS, dpi);
+        (y + height, scaled(DESCRIPTION_INDENT_PIXELS, dpi))
     } else {
         let control_width = scaled(
             match setting.kind {
@@ -1837,9 +1833,8 @@ fn layout_setting(setting: &mut SettingNode, x: i32, width: i32, mut y: i32, con
             }
             _ => context.moves.push((setting.control, control_x, control_y, control_width, control_height)),
         }
-        after = y + row_height;
-        indent = 0;
-    }
+        (y + row_height, 0)
+    };
     let description = w32::text_of(setting.description);
     let description_height = w32::wrapped_height(fonts.base, &description, body_width - indent);
     context.moves.push((setting.description, body_x + indent, after, body_width - indent, description_height));
@@ -2073,7 +2068,7 @@ impl Builder<'_> {
         let text = wide(RESET_BUTTON_HINT);
         // SAFETY: TTTOOLINFOW is plain data; the text lives through the call, which copies it.
         let mut info: TTTOOLINFOW = unsafe { std::mem::zeroed() };
-        info.cbSize = (std::mem::size_of::<TTTOOLINFOW>()).low::<u32>();
+        info.cbSize = (size_of::<TTTOOLINFOW>()).low::<u32>();
         info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
         info.hwnd = self.panel;
         info.uId = tool.to::<usize>();

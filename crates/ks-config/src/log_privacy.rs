@@ -1,6 +1,6 @@
 //! Words that look like a password never reach the technical log as typed.
 //!
-//! The technical log holds every word typed, and it is what goes with a report (LogCourier delivers it to a chat). A
+//! The technical log holds every word typed, and it is what goes with a report (`LogCourier` delivers it to a chat). A
 //! word typed right after «пароль» or «password» (in either layout) and every long token that mixes letters and digits
 //! go into it as stars, as many as the word has characters, in every text a record carries: the word evaluated, its
 //! readings and replacements, and the words around it. The passwords that reached the log before the rule were such
@@ -64,7 +64,7 @@ pub fn markers() -> &'static HashSet<String> {
     MARKERS.get_or_init(compute_markers)
 }
 
-/// A token of LOG_SECRET_MIN_CHARACTERS characters or more, edge signs aside, with letters and digits in it: a password
+/// A token of `LOG_SECRET_MIN_CHARACTERS` characters or more, edge signs aside, with letters and digits in it: a password
 /// or a key looks like it (`parol123`).
 pub fn secret_token(token: &str) -> bool {
     let core = strip_chars(token, EDGE_SIGNS);
@@ -73,6 +73,7 @@ pub fn secret_token(token: &str) -> bool {
 
 /// `text` with each secret word as stars: a long token of letters and digits, the word right after a password marker,
 /// and each word of `secrets` (casefolded, edge signs aside).
+#[must_use]
 pub fn masked_text(text: &str, secrets: &HashSet<String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut last = 0;
@@ -111,7 +112,7 @@ fn masked(value: &Value, secrets: &HashSet<String>) -> Value {
     }
 }
 
-/// The words of the texts under a record's word keys (LOG_WORD_KEYS), at any depth.
+/// The words of the texts under a record's word keys (`LOG_WORD_KEYS`), at any depth.
 fn words(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
@@ -137,7 +138,7 @@ fn texts(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// Masks the secret words of each technical record (masked_text), and remembers the last words typed right after a
+/// Masks the secret words of each technical record (`masked_text`), and remembers the last words typed right after a
 /// password marker: a later record names such a word again without the marker (a correction, an edit).
 #[derive(Default)]
 pub struct LogRedactor {
@@ -145,6 +146,7 @@ pub struct LogRedactor {
 }
 
 impl LogRedactor {
+    #[must_use]
     pub fn new() -> LogRedactor {
         LogRedactor::default()
     }

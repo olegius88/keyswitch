@@ -1,4 +1,4 @@
-//! Training of the context action model: the corpus frames and curricula, the features, sparse AdaGrad softmax over packed
+//! Training of the context action model: the corpus frames and curricula, the features, sparse `AdaGrad` softmax over packed
 //! rows, the epoch and threshold selection, the artifact's bytes and the seal. A fit builds the same candidate as the
 //! Python trainer did, to the bit, so that a model can be retrained without Python.
 #![forbid(unsafe_code)]
@@ -51,11 +51,13 @@ pub const PROBABILITY_SUM_TOLERANCE: f64 = 1e-8;
 pub const EPOCH_NET_BENEFIT_TOLERANCE: i64 = 2;
 
 /// A record a person opens to read: indented, keys sorted, and a final newline.
+#[must_use]
 pub fn train_json(value: &serde_json::Value) -> Vec<u8> {
     (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
 }
 
 /// The same, keys in the order they were written.
+#[must_use]
 pub fn train_json_unsorted(value: &serde_json::Value) -> Vec<u8> {
     (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
 }

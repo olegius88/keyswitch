@@ -1,4 +1,4 @@
-//! The command line of LogCourier: status, the catalog and fetching archives.
+//! The command line of `LogCourier`: status, the catalog and fetching archives.
 use ks_cast::To as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use ks_text::{Indent, JsonOptions, json_dumps};
 use crate::catalog::list_entries;
 use crate::config::{data_directory, load_config, private_directory, private_new_file};
-use crate::constants::*;
+use crate::constants::{JSON_INDENT_SPACES, SELECTION_HASH_PREFIX_CHARACTERS, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, MAX_CATALOG_PAGES, MAX_DOWNLOAD};
 use crate::error::{Error, Result};
 use crate::secrets::{read_token, redact};
 use crate::telegram::{Client, Telegram};
@@ -45,11 +45,10 @@ fn selection_directory(root: &Path, entries: &[Value], scope: Option<&str>) -> R
         }
     }
     let target = root.join("selection.json");
-    if let Ok(info) = std::fs::symlink_metadata(&target) {
-        if info.file_type().is_symlink() || std::fs::read(&target)? != data {
+    if let Ok(info) = std::fs::symlink_metadata(&target)
+        && (info.file_type().is_symlink() || std::fs::read(&target)? != data) {
             return Err(Error::value("Манифест подборки занят другим файлом; перезапись запрещена."));
         }
-    }
     Ok((root, Some(data)))
 }
 

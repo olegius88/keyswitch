@@ -125,6 +125,7 @@ const MT_N: usize = 624;
 const MT_M: usize = 397;
 
 impl Twister {
+    #[must_use]
     pub fn new(seed: u64) -> Twister {
         let mut key = vec![seed.to::<u32>()];
         if seed >> 32 != 0 {
@@ -178,7 +179,7 @@ impl Twister {
 
     /// `_randbelow_with_getrandbits`.
     fn below(&mut self, n: u32) -> u32 {
-        let bits = u32::BITS - n.leading_zeros();
+        let bits = n.bit_width();
         loop {
             let value = self.next_u32() >> (32 - bits);
             if value < n {
@@ -210,10 +211,12 @@ impl Featured<'_> {
     }
 }
 
+#[must_use]
 pub fn ignored_score() -> WordScore {
     WordScore { value: 0.0, known: false, frequency: 0, gram_ratio: 0.0, exact: false, spell_known: false, ngram_score: 0.0, invalid_ratio: 1.0, raw_ngram_score: 0.0 }
 }
 
+#[must_use]
 pub fn balanced_ranges(length: usize, chunks: usize) -> Vec<std::ops::Range<usize>> {
     if length == 0 {
         return Vec::new();
@@ -314,9 +317,10 @@ impl Ftrl {
         -(z - sign * self.l1) / denominator
     }
 
+    #[must_use]
     pub fn bias(&self) -> f64 {
         let denominator = (self.beta + self.bias_n.sqrt()) / self.alpha;
-        if denominator != 0.0 { -self.bias_z / denominator } else { 0.0 }
+        if denominator == 0.0 { 0.0 } else { -self.bias_z / denominator }
     }
 
     /// One epoch in `order`: the update of `FTRLProximal.update`, operation for operation.
@@ -361,7 +365,7 @@ impl Ftrl {
         }
     }
 
-    /// `score`: the bias and CPython's compensated sum of the weighted features.
+    /// `score`: the bias and `CPython`'s compensated sum of the weighted features.
     fn score(&self, rows: &Featured<'_>, row: usize) -> f64 {
         let (mut total, mut compensation) = (0.0_f64, 0.0_f64);
         for position in rows.row(row) {
@@ -380,6 +384,7 @@ impl Ftrl {
         self.bias() + total
     }
 
+    #[must_use]
     pub fn sparse_weights(&self) -> Vec<(usize, f64)> {
         (0..self.z.len()).filter_map(|index| { let weight = self.weight(index); (weight != 0.0).then_some((index, weight)) }).collect()
     }
@@ -389,6 +394,7 @@ impl Ftrl {
     }
 }
 
+#[must_use]
 pub fn logistic_loss(logit: f64, label: bool) -> f64 {
     logit.max(0.0) - f64::from(u8::from(label)) * logit + (-logit.abs()).exp().ln_1p()
 }
@@ -416,14 +422,17 @@ fn share(good: i64, other: i64) -> f64 {
 }
 
 impl Confusion {
+    #[must_use]
     pub fn precision(&self) -> f64 {
         share(self.true_positive, self.false_positive)
     }
 
+    #[must_use]
     pub fn recall(&self) -> f64 {
         share(self.true_positive, self.false_negative)
     }
 
+    #[must_use]
     pub fn specificity(&self) -> f64 {
         share(self.true_negative, self.false_positive)
     }
@@ -442,6 +451,7 @@ impl Confusion {
 }
 
 /// `wilson_upper_bound`.
+#[must_use]
 pub fn wilson_upper(successes: i64, samples: i64, z: f64) -> f64 {
     if samples == 0 {
         return 1.0;
@@ -467,6 +477,7 @@ pub struct Scored<'a> {
     pub direction: usize,
 }
 
+#[must_use]
 pub fn is_typo_kind(kind: &str) -> bool {
     matches!(kind, "deletion" | "duplication" | "transposition")
 }
@@ -592,6 +603,7 @@ pub struct Selection {
 }
 
 impl Selection {
+    #[must_use]
     pub fn logit(&self) -> f64 {
         self.logits[0].max(self.logits[1])
     }
@@ -747,7 +759,7 @@ pub struct Quantized {
 /// `quantize_weights`.
 pub fn quantize(weights: &[(usize, f64)], dimension: usize) -> Quantized {
     let maximum = weights.iter().map(|entry| entry.1.abs()).fold(0.0, f64::max);
-    let scale = if maximum != 0.0 { maximum / QUANTIZED_LIMIT.to::<f64>() } else { 1.0 };
+    let scale = if maximum == 0.0 { 1.0 } else { maximum / QUANTIZED_LIMIT.to::<f64>() };
     let (mut values, mut support) = (vec![0_i16; dimension], vec![0_u8; dimension.div_ceil(8)]);
     let mut maximum_error = 0.0_f64;
     for (index, weight) in weights {
@@ -762,6 +774,7 @@ pub fn quantize(weights: &[(usize, f64)], dimension: usize) -> Quantized {
 }
 
 /// `QuantizedLinearScorer.score` over all rows, on threads.
+#[must_use]
 pub fn score_quantized(quantized: &Quantized, bias: f64, rows: &Featured<'_>, workers: usize) -> Vec<f64> {
     parallel_scores(rows, workers, &|row| {
         let mut logit = bias;
@@ -845,6 +858,7 @@ pub fn fit_calibration(rows: &Featured<'_>, raw: &[f64], config: &FitConfig) -> 
 }
 
 /// `calibrate_raw_logits`.
+#[must_use]
 pub fn calibrate<'a>(rows: &Featured<'a>, raw: &[f64], calibration: &[Platt; 2]) -> Vec<Scored<'a>> {
     rows.examples
         .iter()
@@ -866,12 +880,14 @@ pub struct Veto {
 }
 
 impl Veto {
+    #[must_use]
     pub fn payload(&self) -> Value {
         json!({"raw_logit": self.raw_logit, "positive_samples": self.positive_samples, "vetoed_positive_samples": self.vetoed_positive_samples, "false_negative_rate": self.false_negative_rate})
     }
 }
 
 /// `veto_metrics`.
+#[must_use]
 pub fn veto_metrics(items: &[Scored<'_>], raw_logit: f64) -> Veto {
     let positives: Vec<&Scored<'_>> = items.iter().filter(|item| item.example.label).collect();
     let vetoed = positives.iter().filter(|item| item.raw < raw_logit).count().to::<i64>();
@@ -879,6 +895,7 @@ pub fn veto_metrics(items: &[Scored<'_>], raw_logit: f64) -> Veto {
 }
 
 /// `choose_veto_threshold`.
+#[must_use]
 pub fn choose_veto(items: &[Scored<'_>], config: &FitConfig) -> Veto {
     let mut scores: Vec<f64> = items.iter().filter(|item| item.example.label).map(|item| item.raw).collect();
     scores.sort_by(|a, b| a.partial_cmp(b).expect("finite logits"));
@@ -963,7 +980,7 @@ fn maximum_margin(base: &Selections, by_trigger: &BTreeMap<&'static str, Vec<Sco
     candidates.dedup();
     let (mut lower, mut upper, mut best) = (0_i64, candidates.len().to::<i64>() - 1, 0_i64);
     while lower <= upper {
-        let middle = (lower + upper) / 2;
+        let middle = i64::midpoint(lower, upper);
         if selections_pass(config, &apply_margin(base, by_trigger, config, candidates[middle.to::<usize>()])) {
             best = middle;
             lower = middle + 1;
@@ -992,6 +1009,7 @@ pub fn choose_thresholds(scored: &[Scored<'_>], config: &FitConfig) -> Result<Se
 }
 
 /// `metrics_payload`.
+#[must_use]
 pub fn metrics_payload(metrics: &Confusion) -> Value {
     let round = |value: f64| py_round_ndigits(value, METRIC_DECIMALS);
     json!({"true_positive": metrics.true_positive, "false_negative": metrics.false_negative, "true_negative": metrics.true_negative, "false_positive": metrics.false_positive,
@@ -1000,6 +1018,7 @@ pub fn metrics_payload(metrics: &Confusion) -> Value {
 }
 
 /// `binary_gate_breakdown`.
+#[must_use]
 pub fn binary_gate(metrics: &Confusion, precision: f64, recall: f64, specificity: f64, max_fpr: f64, familywise: bool) -> Value {
     let z = if familywise { SELECTION_Z } else { WILSON_95_Z };
     let upper = wilson_upper(metrics.false_positive, metrics.negatives(), z);
@@ -1010,6 +1029,7 @@ pub fn binary_gate(metrics: &Confusion, precision: f64, recall: f64, specificity
 }
 
 /// `context_stress_gate_breakdown` with the same metrics in every profile.
+#[must_use]
 pub fn context_stress_gate(config: &FitConfig, metrics: &BTreeMap<&'static str, (Confusion, Confusion)>, selection_phase: bool) -> Value {
     let mut expected: Vec<&str> = STRESS_PROFILES.iter().map(|profile| profile.0).collect();
     expected.sort_unstable();
@@ -1035,6 +1055,7 @@ pub fn context_stress_gate(config: &FitConfig, metrics: &BTreeMap<&'static str, 
 }
 
 /// `threshold_selection_gate_breakdown`.
+#[must_use]
 pub fn selection_gate(config: &FitConfig, selections: &Selections) -> Value {
     let mut per_trigger = Map::new();
     let mut all_passed = true;

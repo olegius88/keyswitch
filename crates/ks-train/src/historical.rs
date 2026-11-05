@@ -127,7 +127,7 @@ impl Builder<'_> {
 }
 
 /// `build_corpus` of the packaged scenarios, with the reference lexicons.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn build_corpus(tools: &Tools, detector: &LanguageDetector, models: &Lexicons) -> Result<Vec<ScenarioRow>, String> {
     let payload = read_json(&tools.root.join("model/context_v1/scenarios.json"))?;
     if payload.get("schema_version").and_then(Value::as_i64) != Some(1) {
@@ -510,13 +510,11 @@ pub fn historical_curriculum(tools: &Tools, detector: &LanguageDetector, models:
             continue;
         }
         let mut afters: Vec<&str> = vec![row.after.as_str()];
-        if !row.after.is_empty() {
-            if let Some(completed) = word_at_start(pystr::lstrip(&row.after)) {
-                if completed != row.after {
+        if !row.after.is_empty()
+            && let Some(completed) = word_at_start(pystr::lstrip(&row.after))
+                && completed != row.after {
                     afters.push(completed);
                 }
-            }
-        }
         for after in afters {
             for boundary in boundaries(row.trigger) {
                 let key: [u8; 32] = {

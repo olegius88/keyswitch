@@ -1,4 +1,4 @@
-//! The program on macOS: AppKit owns the main thread, the models load in the background, the menu bar item comes up at once.
+//! The program on macOS: `AppKit` owns the main thread, the models load in the background, the menu bar item comes up at once.
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -83,7 +83,7 @@ pub fn install_platform() {
         let seconds = now.as_secs().bits::<i64>();
         let mut tm = Tm::default();
         // SAFETY: both pointers are valid for the call.
-        unsafe { localtime_r(&seconds, &mut tm) };
+        unsafe { localtime_r(&raw const seconds, &raw mut tm) };
         logsetup::LocalTime { year: tm.year + 1900, month: (tm.mon + 1).bits::<u32>(), day: tm.mday.bits::<u32>(), hour: tm.hour.bits::<u32>(), minute: tm.min.bits::<u32>(), second: tm.sec.bits::<u32>(), millisecond: now.subsec_millis() }
     }
     logsetup::set_local_clock(local_clock);
@@ -141,12 +141,11 @@ fn sync_indicator() {
                 Ok(tray) => app.tray = Some(tray),
                 Err(error) => logsetup::error(LOGGER, &error),
             }
-        } else if !requested {
-            if let Some(tray) = app.tray.take() {
+        } else if !requested
+            && let Some(tray) = app.tray.take() {
                 tray.close();
                 return false;
             }
-        }
         true
     });
     if shown == Some(false) {
@@ -221,7 +220,7 @@ pub fn quit() {
 
 fn attach_engine(services: &Arc<Services>) {
     services.engine.when_built(Box::new(|engine: &KeySwitchEngine| {
-        engine.subscribe(Arc::new(|snapshot| {
+        engine.subscribe(Arc::new(|_snapshot| {
             run_on_main(Box::new(|| {
                 sync_tray();
                 settings_window::refresh_status();
@@ -322,7 +321,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
             KeySwitchEngine::new(settings, history, input, Some(learning), BACKEND_LABEL, None, Some(factory), &resources, ks_context::input_context::monotonic_clock())
         })
     };
-    let post: Post = Arc::new(|action| run_on_main(action));
+    let post: Post = Arc::new(run_on_main);
     let enabled = setting_bool(&settings, "enabled", true);
     let engine = DeferredEngine::new(build, learning.clone(), enabled, post, true);
     let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input });
@@ -360,5 +359,5 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     0
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 fn unused(_: PathBuf) {}

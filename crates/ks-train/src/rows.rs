@@ -48,7 +48,7 @@ pub struct ActionRow {
 }
 
 impl ActionRow {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(identifier: impl Into<String>, original: impl Into<String>, group: i64, field: FieldContext, trigger: &'static str, action: ContextAction, category: impl Into<String>, boundary_text: impl Into<String>) -> ActionRow {
         ActionRow {
             identifier: identifier.into(),
@@ -68,11 +68,13 @@ impl ActionRow {
         }
     }
 
+    #[must_use]
     pub fn weighing(mut self, sample_weight: f64) -> ActionRow {
         self.sample_weight = sample_weight;
         self
     }
 
+    #[must_use]
     pub fn originating(mut self, after_origin: AfterOrigin) -> ActionRow {
         self.after_origin = after_origin;
         self
@@ -80,6 +82,7 @@ impl ActionRow {
 }
 
 /// `FieldContext(application, field_id, before, after, role)`.
+#[must_use]
 pub fn field_of(application: &str, field_id: &str, before: &str, after: &str, role: FieldRole) -> FieldContext {
     let mut field = FieldContext::new(application, field_id);
     field.before = before.to_owned();
@@ -88,10 +91,12 @@ pub fn field_of(application: &str, field_id: &str, before: &str, after: &str, ro
     field
 }
 
+#[must_use]
 pub fn public_field(application: &str, before: &str, after: &str) -> FieldContext {
     field_of(application, PUBLIC_TRAINING, before, after, FieldRole::Unknown)
 }
 
+#[must_use]
 pub fn application_of(identifier: &str) -> &'static str {
     APPLICATIONS[variant_choice(identifier, "application", APPLICATIONS.len())]
 }
@@ -130,6 +135,7 @@ fn word_end(text: &str, start: usize) -> usize {
 }
 
 /// `WORDS.finditer(text)`: the byte spans of the words.
+#[must_use]
 pub fn word_spans(text: &str) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut position = 0;
@@ -143,6 +149,7 @@ pub fn word_spans(text: &str) -> Vec<(usize, usize)> {
 }
 
 /// `WORDS.findall(text)`.
+#[must_use]
 pub fn words_of(text: &str) -> Vec<&str> {
     word_spans(text).into_iter().map(|(start, end)| &text[start..end]).collect()
 }
@@ -153,6 +160,7 @@ pub fn has_word(text: &str) -> bool {
 }
 
 /// `WORDS.match(text)`: the word at the very start of the text.
+#[must_use]
 pub fn word_at_start(text: &str) -> Option<&str> {
     text.chars().next().filter(|character| word_letter(*character))?;
     Some(&text[..word_end(text, 0)])
@@ -177,16 +185,19 @@ pub fn joined_spans(text: &str) -> Vec<(usize, usize)> {
     spans
 }
 
+#[must_use]
 pub fn is_alpha(character: char) -> bool {
     let mut buffer = [0_u8; 4];
     pystr::isalpha(character.encode_utf8(&mut buffer))
 }
 
+#[must_use]
 pub fn alpha_only(text: &str) -> String {
     text.chars().filter(|character| is_alpha(*character)).collect()
 }
 
 /// `"а" <= char.casefold() <= "я" or char.casefold() == "ё"`.
+#[must_use]
 pub fn cyrillic_letter(character: char) -> bool {
     if character.is_ascii() {
         return false;
@@ -202,6 +213,7 @@ pub fn cyrillic(word: &str) -> bool {
 }
 
 /// `natural_mixed_contexts`: left contexts of a split's own rows, per language, for the insertion frames, sorted.
+#[must_use]
 pub fn natural_mixed_contexts(rows: &[CorpusRow]) -> [Vec<String>; 2] {
     let mut pools: [BTreeSet<&str>; 2] = [BTreeSet::new(), BTreeSet::new()];
     for row in rows {
@@ -248,6 +260,7 @@ pub struct ContextRing<C> {
 }
 
 impl<C: RingContext> ContextRing<C> {
+    #[must_use]
     pub fn new(pool: Vec<C>) -> ContextRing<C> {
         let mut ring: Vec<(u64, u32)> = Vec::with_capacity(pool.len() * CONTEXT_RING_POINTS);
         for (position, context) in pool.iter().enumerate() {
@@ -260,14 +273,17 @@ impl<C: RingContext> ContextRing<C> {
         ContextRing { pool, points: ring.iter().map(|entry| entry.0).collect(), owners: ring.iter().map(|entry| entry.1).collect() }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.pool.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pool.is_empty()
     }
 
+    #[must_use]
     pub fn choice(&self, identifier: &str, purpose: &str) -> &C {
         let point = ring_point(&format!("{purpose}:{identifier}"));
         let slot = self.points.partition_point(|value| *value < point) % self.points.len();
@@ -276,6 +292,7 @@ impl<C: RingContext> ContextRing<C> {
 }
 
 /// `_varied_boundary`: the boundary a curriculum word ends at, by hash.
+#[must_use]
 pub fn varied_boundary(identifier: &str) -> (&'static str, String) {
     let trigger = TRIGGERS[variant_choice(identifier, "trigger", TRIGGERS.len())];
     let mut boundary = String::new();
@@ -291,6 +308,7 @@ pub fn varied_boundary(identifier: &str) -> (&'static str, String) {
 }
 
 /// `select_rows`: languages balanced before scoring, at most two contexts per family.
+#[must_use]
 pub fn select_rows(rows: &[CorpusRow], maximum: usize) -> Vec<CorpusRow> {
     let mut ordered: Vec<&CorpusRow> = rows.iter().collect();
     ordered.sort_by_cached_key(|row| sha256(&row.identifier));
@@ -347,6 +365,7 @@ fn stranded_previous(tools: &Tools, before: &str, group: i64) -> Option<String> 
 }
 
 /// A curated letter, whose intent is observable: its own reading is a word or it is not.
+#[must_use]
 pub fn curated_letter(original: &str, alternate: &str) -> bool {
     let trusted = |text: &str| ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS.contains(&pystr::casefold(text).as_str());
     pystr::len(original) == 1 && pystr::len(alternate) == 1 && (trusted(original) || trusted(alternate))

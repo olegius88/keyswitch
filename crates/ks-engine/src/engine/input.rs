@@ -225,7 +225,12 @@ impl EngineCore {
             self.caret_moved = false;
             if !self.strokes.is_empty() {
                 self.strokes.pop();
-                if !self.strokes.is_empty() {
+                if self.strokes.is_empty() {
+                    self.source_group = -1;
+                    self.reset_pause_correction();
+                    self.early_switch_origin = None;
+                    self.early_switch_at = None;
+                } else {
                     // Erasing is editing, not typing: the letters left are a word the
                     // user is still changing, and a pause over them is a pause to think,
                     // not a boundary. Re-arming the pause timer here corrected the
@@ -233,11 +238,6 @@ impl EngineCore {
                     // erased letter had never gone (seen 02.10.2026). The next
                     // letter arms the timer again, as it does for a reopened word.
                     self.reset_pause_correction();
-                } else {
-                    self.source_group = -1;
-                    self.reset_pause_correction();
-                    self.early_switch_origin = None;
-                    self.early_switch_at = None;
                 }
                 self.shared.update(Update { current_word: Some(text_for_group(&self.strokes, self.source_group)), ..Update::default() });
             } else if !self.symbol_strokes.is_empty() {
@@ -517,6 +517,7 @@ impl EngineCore {
             && !pystr::isspace(first)
     }
 
+    #[must_use]
     pub fn _is_boundary(event: &KeyEvent) -> bool {
         let name = event.key_name.as_str();
         if WORD_BOUNDARY_KEYS.contains(&name) || ACTION_BOUNDARY_KEYS.contains(&name) {

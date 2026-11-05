@@ -3,7 +3,7 @@ use ks_cast::To as _;
 use serde_json::Value;
 
 use crate::config::{Config, Source};
-use crate::constants::*;
+use crate::constants::{WAKE_POLL_SECONDS, MAX_QUEUE_BYTES, CHUNK_BYTES, MAX_DOWNLOAD, GROUP_INTERVAL, BOT_DELETE_WINDOW_HOURS, MAX_INTERVAL_MINUTES, MAX_ROTATIONS};
 use crate::error::{Error, Result};
 use crate::secrets::token_bot_id;
 
@@ -32,6 +32,7 @@ fn number(value: f64) -> String {
     if value.fract() == 0.0 { format!("{}", value.to::<i64>()) } else { format!("{value}").replace('.', ",") }
 }
 
+#[must_use]
 pub fn delivery_note() -> String {
     format!(
         "Логи могут содержать переписку, имена, пути и другие личные данные.\r\nЭто передача полного содержимого, не обезличенная телеметрия.\r\n\r\nСбор раз в {}; отправка по выбранному интервалу.\r\nОчередь: до {} МиБ. Локальный фрагмент: до {} МиБ до сжатия.\r\nПеред отправкой фрагменты объединяются в пакеты до {} МБ.\r\nДокументы и закрепления — не чаще одного раза в {}.\r\nПауза Telegram сохраняется после перезапуска; кнопка её не сбрасывает.\r\nПри заполнении очереди сбор остановится. Ротация исходной программы\r\nможет удалить ещё не прочитанные записи — увеличьте её срок хранения.\r\n\r\nПри неопределённом ответе сети возможен повторный файл с тем же ID.\r\nКаталог и скачивание исключают повторы по идентификатору архива.\r\nФайлы в Telegram автоматически не удаляются.",
@@ -43,6 +44,7 @@ pub fn delivery_note() -> String {
     )
 }
 
+#[must_use]
 pub fn reset_warning(chat_id: &str) -> String {
     format!(
         "Группа {chat_id}: сборщик снимет в ней все закрепления и начнёт новый каталог. Архивы, отправленные раньше, в новый каталог не попадут.\r\n\r\nС удалением бот удалит сообщения группы, в том числе чужие (нужно право бота «Удаление сообщений»). Telegram даёт ботам удалять только сообщения, отправленные за последние {BOT_DELETE_WINDOW_HOURS} часов; номера более ранних программа назовёт, их можно удалить вручную.\r\n\r\nНеотправленная очередь сохранится и уйдёт в новый каталог.\r\n\r\nДа — начать заново и удалить сообщения. Нет — начать заново без удаления. Отмена — ничего не менять."
@@ -92,11 +94,13 @@ pub fn source_from(path: &str, label: &str, rotations: &str, existing: bool, sou
     Ok(source)
 }
 
+#[must_use]
 pub fn group_label(group: &Value) -> String {
     format!("{} ({})", group["title"].as_str().unwrap_or("Группа"), group["id"])
 }
 
 /// The status block: `stamp` is the last delivery in the local form, `None` before the first.
+#[must_use]
 pub fn summary(message: &str, stats: &Value, sources: &[Source], stamp: Option<&str>) -> String {
     let versions = stats["keyswitch_versions"].as_object();
     let listed: Vec<String> = versions
@@ -119,6 +123,7 @@ pub fn summary(message: &str, stats: &Value, sources: &[Source], stamp: Option<&
     )
 }
 
+#[must_use]
 pub fn tray_tooltip(message: &str) -> String {
     format!("LogCourier — {message}").chars().take(TRAY_TOOLTIP_MAX_CHARACTERS).collect()
 }
@@ -140,7 +145,7 @@ mod tests {
 
     const TOKEN: &str = "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-    fn form<'a>(sources: &'a [Source]) -> Form<'a> {
+    fn form(sources: &[Source]) -> Form<'_> {
         Form { token: TOKEN, chat: "-100", device: "ПК", sources, consent: true, auto: true, interval: "15" }
     }
 

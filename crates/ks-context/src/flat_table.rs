@@ -39,21 +39,25 @@ pub struct NameIndex {
 
 impl NameIndex {
     /// How many names the table holds (`len(dict)`).
+    #[must_use]
     pub fn len(&self) -> usize {
         self.order.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.order.is_empty()
     }
 
     /// The name of an entry of the file.
+    #[must_use]
     pub fn name(&self, entry: usize) -> &str {
         let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
         &self.arena[start..self.ends[entry].to::<usize>()]
     }
 
     /// The entry of a name, if the table holds it.
+    #[must_use]
     pub fn find(&self, name: &str) -> Option<usize> {
         let hash = name_hash(name);
         let mut at = self.hashes.partition_point(|&found| found < hash);
@@ -73,6 +77,7 @@ impl NameIndex {
     }
 
     /// Bytes of heap the index holds.
+    #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.arena.capacity() + 4 * (self.ends.capacity() + self.hashes.capacity() + self.order.capacity())
     }
@@ -132,19 +137,23 @@ pub struct CountTable {
 
 impl CountTable {
     /// `table.get(word, 0)`.
+    #[must_use]
     pub fn count(&self, word: &str) -> u64 {
         self.index.find(word).map_or(0, |entry| u64::from(self.counts[entry]))
     }
 
     /// `word in table`.
+    #[must_use]
     pub fn contains(&self, word: &str) -> bool {
         self.index.find(word).is_some()
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.index.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
     }
@@ -154,6 +163,7 @@ impl CountTable {
         self.index.names()
     }
 
+    #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.index.heap_bytes() + 4 * self.counts.capacity()
     }
@@ -293,11 +303,13 @@ pub struct CountTables {
 
 impl CountTables {
     /// The table of an alphabet (`table[alphabet]`); every alphabet the file was checked for is there.
+    #[must_use]
     pub fn alphabet(&self, name: &str) -> &CountTable {
         static EMPTY: std::sync::OnceLock<CountTable> = std::sync::OnceLock::new();
         self.tables.iter().find(|entry| entry.0 == name).map_or_else(|| EMPTY.get_or_init(CountTable::default), |entry| &entry.1)
     }
 
+    #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.tables.iter().map(|entry| entry.1.heap_bytes()).sum()
     }
@@ -411,6 +423,7 @@ pub struct WeightTable {
 
 impl WeightTable {
     /// A table with no features: a model whose answers come from elsewhere.
+    #[must_use]
     pub fn empty() -> WeightTable {
         WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new(), order: Vec::new() }, values: Vec::new() }
     }
@@ -420,14 +433,17 @@ pub const ACTION_COUNT: usize = 4;
 
 impl WeightTable {
     /// `weights.get(name)`.
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&[f64; ACTION_COUNT]> {
         self.index.find(name).map(|entry| self.values[ACTION_COUNT * entry..ACTION_COUNT * (entry + 1)].try_into().expect("four weights"))
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.index.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
     }
@@ -448,6 +464,7 @@ impl WeightTable {
         WeightTable { index: names.index(), values }
     }
 
+    #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.index.heap_bytes() + 8 * self.values.capacity()
     }

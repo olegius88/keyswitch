@@ -61,7 +61,7 @@ static CLOCK: Mutex<Option<fn() -> LocalTime>> = Mutex::new(None);
 static PLATFORM: Mutex<Option<String>> = Mutex::new(None);
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The platform crate sets the clock that reads the local time (with `localtime_r` or `GetLocalTime`).
@@ -75,6 +75,7 @@ pub fn set_platform_description(description: &str) {
 }
 
 /// The broken-down UTC time of `unix_milliseconds` since the epoch (the fallback clock).
+#[must_use]
 pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
     let seconds = unix_milliseconds.div_euclid(1000);
     let millisecond = unix_milliseconds.rem_euclid(1000).to::<u32>();
@@ -102,6 +103,7 @@ pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
 }
 
 /// The current time in UTC.
+#[must_use]
 pub fn utc_now() -> LocalTime {
     let milliseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_millis().to::<i64>(),
@@ -111,6 +113,7 @@ pub fn utc_now() -> LocalTime {
 }
 
 /// The current local time: the platform's clock when it has been set, UTC otherwise.
+#[must_use]
 pub fn local_time() -> LocalTime {
     let clock = *locked(&CLOCK);
     match clock {
@@ -120,6 +123,7 @@ pub fn local_time() -> LocalTime {
 }
 
 /// `time.strftime(format, ...)` for the directives this program uses: `%Y %m %d %H %M %S` and `%%`.
+#[must_use]
 pub fn strftime(format: &str, time: &LocalTime) -> String {
     let mut out = String::new();
     let mut chars = format.chars();
@@ -185,6 +189,7 @@ pub enum Level {
 
 impl Level {
     /// `logging.getLevelName(level)`.
+    #[must_use]
     pub fn name(self) -> &'static str {
         match self {
             Level::Debug => "DEBUG",
@@ -206,6 +211,7 @@ pub struct LogRecord {
 }
 
 /// `log_formatter().format(record)`: the line without its line ending.
+#[must_use]
 pub fn format_record(record: &LogRecord) -> String {
     let t = &record.time;
     format!(
@@ -337,14 +343,17 @@ impl RotatingFileHandler {
     }
 
     /// `handler.baseFilename`.
+    #[must_use]
     pub fn base_filename(&self) -> PathBuf {
         self.lock().base_filename.clone()
     }
     /// `handler.maxBytes`.
+    #[must_use]
     pub fn max_bytes(&self) -> u64 {
         self.lock().max_bytes
     }
     /// `handler.backupCount`.
+    #[must_use]
     pub fn backup_count(&self) -> u64 {
         self.lock().backup_count
     }
@@ -392,7 +401,7 @@ pub fn log(level: Level, logger_name: &str, message: &str) {
     }
     match handler {
         Some(handler) => {
-            handler.emit(&LogRecord { time: local_time(), level, name: logger_name.to_string(), message: message.to_string() })
+            handler.emit(&LogRecord { time: local_time(), level, name: logger_name.to_string(), message: message.to_string() });
         }
         None if level >= Level::Warning => eprintln!("{message}"),
         None => {}
@@ -428,19 +437,23 @@ pub fn uninstall_handler() {
 // ---------------------------------------------------------------- the module
 
 /// Directory holding the log file and its rotated copies.
+#[must_use]
 pub fn log_directory() -> PathBuf {
     data_dir()
 }
 
+#[must_use]
 pub fn log_path() -> PathBuf {
     log_directory().join(LOG_FILE_NAME)
 }
 
+#[must_use]
 pub fn rotation_limits(technical: bool) -> (u64, u64) {
     if technical { TECHNICAL_LOG_ROTATION } else { DEFAULT_LOG_ROTATION }
 }
 
 /// Human wording of the current budget, shown on the diagnostics page.
+#[must_use]
 pub fn rotation_summary(technical: bool) -> String {
     let (maximum, backups) = rotation_limits(technical);
     format!("{} МБ × {} файлов", maximum / BYTES_PER_MEBIBYTE, backups + 1)
@@ -465,14 +478,16 @@ pub fn install_handler(handler: &RotatingFileHandler) {
 }
 
 /// State of the file log, so a silent journal is visible in a report.
+#[must_use]
 pub fn log_status() -> Map<String, Value> {
     log_status_of(&log_path())
 }
 
 /// `log_status` for a given log file path.
+#[must_use]
 pub fn log_status_of(path: &Path) -> Map<String, Value> {
     let handler = file_handler();
-    let size = std::fs::metadata(path).map(|m| m.len().to::<i64>()).unwrap_or(-1);
+    let size = std::fs::metadata(path).map_or(-1, |m| m.len().to::<i64>());
     let level = locked(&ROOT).level;
     let technical = handler.as_ref().is_some_and(|h| h.max_bytes() == TECHNICAL_LOG_ROTATION.0);
     let mut status = Map::new();
@@ -485,6 +500,7 @@ pub fn log_status_of(path: &Path) -> Map<String, Value> {
 }
 
 /// The rotating handler installed by [`configure_logging`], if any.
+#[must_use]
 pub fn file_handler() -> Option<RotatingFileHandler> {
     locked(&ROOT).handler.clone()
 }
@@ -667,7 +683,7 @@ mod tests {
 
     #[test]
     fn the_handler_follows_the_setting_and_the_root_is_wired() {
-        let _turn = ROOT_TURN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _turn = ROOT_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = directory("follow");
         let settings = Arc::new(SettingsStore::new(Some(dir.join("config.json"))));
         settings.set("diagnostics.technical_logging", Value::Bool(true), true).unwrap();

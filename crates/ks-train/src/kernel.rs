@@ -1,4 +1,4 @@
-//! Training-only sparse AdaGrad softmax over packed rows.
+//! Training-only sparse `AdaGrad` softmax over packed rows.
 use ks_cast::To as _;
 use std::collections::HashMap;
 
@@ -38,6 +38,7 @@ impl Packed {
         Ok(result)
     }
 
+    #[must_use]
     pub fn rows(&self) -> usize {
         self.labels.len()
     }
@@ -84,6 +85,7 @@ pub fn epoch(data: &Packed, weights: &mut [f64], accumulators: &mut [f64], rate:
     }
 }
 
+#[must_use]
 pub fn predict(data: &Packed, weights: &[f64]) -> Vec<f64> {
     let mut output = vec![0.0; data.rows() * ACTIONS];
     let mut p = [0.0; ACTIONS];
@@ -95,6 +97,7 @@ pub fn predict(data: &Packed, weights: &[f64]) -> Vec<f64> {
 }
 
 /// The importance-weighted log loss of `predictions` on `data`, summed over its rows.
+#[must_use]
 pub fn log_loss(predictions: &[f64], data: &Packed) -> f64 {
     let terms: Vec<f64> = data
         .labels

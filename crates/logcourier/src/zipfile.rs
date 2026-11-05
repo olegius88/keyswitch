@@ -25,6 +25,7 @@ pub struct ZipWriter {
 }
 
 impl ZipWriter {
+    #[must_use]
     pub fn new() -> ZipWriter {
         ZipWriter::default()
     }
@@ -69,6 +70,7 @@ impl ZipWriter {
         self.entries += 1;
     }
 
+    #[must_use]
     pub fn finish(mut self) -> Vec<u8> {
         let start = self.output.len().low::<u32>();
         self.output.extend_from_slice(&self.central);

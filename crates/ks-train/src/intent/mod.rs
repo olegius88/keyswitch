@@ -20,7 +20,7 @@ const SAFETY_COLLISION_MIN_WORD_CHARACTERS: usize = 3;
 pub fn dataset_stages(root: &Path) -> Result<(), String> {
     let config = read_json(&root.join("model/intent_v1/config.json"))?;
     let shape = &config["dataset"];
-    let number = |name: &str| shape[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("dataset.{name}"));
+    let number = |name: &str| shape[name].as_u64().map(ks_cast::To::to::<usize>).ok_or_else(|| format!("dataset.{name}"));
     let dataset_config = DatasetConfig { minimum_word_length: number("minimum_word_length")?, maximum_word_length: number("maximum_word_length")?, typo_augmentations: number("typo_augmentations")? };
     let languages = &config["sources"]["languages"];
     let english = dataset::load_onboard_unigrams(&dataset::read_frozen(root, &languages["en_US"])?, 0, SAFETY_COLLISION_MIN_WORD_CHARACTERS, dataset_config.maximum_word_length);
@@ -168,12 +168,9 @@ fn receipts(root: &Path, arguments: &[String]) -> Result<(), String> {
     if arguments.iter().any(|argument| argument == "--preseal") {
         let (config, corpora) = external::model_blind_corpora(root, &references, &protected, true)?;
         let text = pretty(&external::preseal_receipt(&config, &corpora)?) + "\n";
-        return match output {
-            Some(path) => std::fs::write(path, text).map_err(|error| format!("{path}: {error}")),
-            None => {
-                print!("{text}");
-                Ok(())
-            }
+        return if let Some(path) = output { std::fs::write(path, text).map_err(|error| format!("{path}: {error}")) } else {
+            print!("{text}");
+            Ok(())
         };
     }
     let (_, corpora) = external::model_blind_corpora(root, &references, &protected, false)?;

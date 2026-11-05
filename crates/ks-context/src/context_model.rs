@@ -42,6 +42,7 @@ pub enum ContextAction {
 pub const ACTIONS: [ContextAction; ACTION_COUNT] = [ContextAction::Keep, ContextAction::Convert, ContextAction::Wait, ContextAction::Suggest];
 
 impl ContextAction {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             ContextAction::Keep => "keep",
@@ -62,6 +63,7 @@ pub enum AfterOrigin {
 }
 
 impl AfterOrigin {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             AfterOrigin::None => "none",
@@ -73,7 +75,7 @@ impl AfterOrigin {
 }
 
 /// How the text before a word was given: as the field holds it, or ending in the other reading of a waiting word the
-/// engine asks the next word after (engine.decide_after_waiting_word): a hypothesis, not text that was typed.
+/// engine asks the next word after (`engine.decide_after_waiting_word)`: a hypothesis, not text that was typed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeforeOrigin {
     Field,
@@ -81,6 +83,7 @@ pub enum BeforeOrigin {
 }
 
 impl BeforeOrigin {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             BeforeOrigin::Field => "field",
@@ -130,19 +133,20 @@ pub struct ContextEvidence {
     /// Whether the reading is no word itself but one typo away from one (`one_typo_from_word`).
     pub source_typo: bool,
     pub target_typo: bool,
-    /// Whether the reading is a word that opens sentences of its language (short_words.opens_sentences).
+    /// Whether the reading is a word that opens sentences of its language (`short_words.opens_sentences`).
     pub source_opening: bool,
     pub target_opening: bool,
     /// Whether letters were typed into the middle of a word whose other letters are all in the other layout
-    /// (engine.decide_inside_word): the question is then what the whole word is.
+    /// (`engine.decide_inside_word)`: the question is then what the whole word is.
     pub inside: bool,
     /// A training frame whose token reads as uncounted in every term table, as a term no table holds does at serving
-    /// (context_action_features.own_bucket); never set outside training.
+    /// (`context_action_features.own_bucket`); never set outside training.
     pub term_counts_dropped: bool,
 }
 
 impl ContextEvidence {
     /// The evidence with its defaults (`ContextEvidence(original, alternative, source_group, field)`).
+    #[must_use]
     pub fn new(original: &str, alternative: &str, source_group: i64, field: FieldContext) -> Self {
         ContextEvidence {
             original: original.to_string(),
@@ -178,6 +182,7 @@ impl ContextEvidence {
 
     /// `__post_init__`: replacing literal field contents must not retain a stale empty flag. A planned conversion is
     /// explicit and remains subject to validation. Call it again after changing `field` or `after_origin`.
+    #[must_use]
     pub fn finished(mut self) -> Self {
         if matches!(self.after_origin, AfterOrigin::None | AfterOrigin::Field) {
             self.after_origin = if self.field.after.is_empty() { AfterOrigin::None } else { AfterOrigin::Field };
@@ -195,6 +200,7 @@ pub struct ContextPrediction {
     pub supported: bool,
 }
 
+#[must_use]
 pub fn normalized(text: &str) -> String {
     ks_text::normalize::nfc(&pystr::casefold(text))
 }
@@ -205,6 +211,7 @@ pub fn normalized(text: &str) -> String {
 /// the frequency lexicon is read, as for the boundary model's misspellings, so the check costs dictionary lookups and
 /// no spell checker calls. Short readings are not checked: almost every short string has a neighbour in a lexicon this
 /// large.
+#[must_use]
 pub fn one_typo_from_word(text: &str, model: &LanguageModel) -> bool {
     let word = LanguageModel::normalize(text);
     if pystr::len(&word) < CONTEXT_TYPO_MIN_CHARACTERS || word != pystr::casefold(text) || !pystr::isalpha(&word) || model.frequencies.get_or_zero(&word) != 0 {
@@ -251,6 +258,7 @@ pub struct AffixCounts {
 }
 
 impl AffixCounts {
+    #[must_use]
     pub fn get(&self, affix: &str) -> u64 {
         self.entries.binary_search_by(|entry| entry.0.as_str().cmp(affix)).map_or(0, |found| u64::from(self.entries[found].1))
     }
@@ -329,6 +337,7 @@ impl TermTables {
 }
 
 /// `bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, count)`.
+#[must_use]
 pub fn bucket_of(count: u64) -> usize {
     CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS.partition_point(|&bound| bound.to::<u64>() <= count)
 }
@@ -345,6 +354,7 @@ pub fn term_bucket(text: &str, alphabet: &str, tables: &TermTables) -> &'static 
 }
 
 /// `softmax`: the sum of the exponentials is Python's `sum`.
+#[must_use]
 pub fn softmax(scores: &[f64]) -> [f64; ACTION_COUNT] {
     let maximum = ks_text::max_first(scores.iter().copied()).expect("four scores");
     let values: Vec<f64> = scores.iter().map(|&value| (value - maximum).exp()).collect();
@@ -357,6 +367,7 @@ pub fn softmax(scores: &[f64]) -> [f64; ACTION_COUNT] {
 }
 
 /// The index of the first greatest probability: `max(range(4), key=probabilities.__getitem__)`.
+#[must_use]
 pub fn first_greatest(probabilities: &[f64; ACTION_COUNT]) -> usize {
     let mut best = 0;
     for index in 1..ACTION_COUNT {
@@ -373,7 +384,7 @@ pub struct ContextModel {
     pub conversion_threshold: f64,
     pub feature_version: i64,
     /// Whether the single-letter head has weights here: its class is the one place a verdict on a letter is the
-    /// model's own opinion (context_policy).
+    /// model's own opinion (`context_policy`).
     pub answers_letters: bool,
     /// Whether the variable head has weights here: a letter after a word of Cyrillic letters is its class.
     pub answers_variables: bool,
@@ -381,7 +392,7 @@ pub struct ContextModel {
     pub answers_alnum: bool,
     /// Whether the resume head has weights here: a short word right after Latin text, asked again once its next word is
     /// planned for conversion, is its class, and the engine takes such a word along in the middle of a line on its
-    /// verdict (engine.take_along).
+    /// verdict (`engine.take_along`).
     pub answers_resume: bool,
     /// Whether the Cyrillic-letter head has weights here: a Latin letter whose Cyrillic reading is a Russian word of one
     /// letter, after Russian text, is its class.
@@ -496,6 +507,7 @@ impl ContextModel {
     }
 
     /// `ContextModel.try_load()`: the model and its version, or nothing and why.
+    #[must_use]
     pub fn try_load(models_dir: &Path) -> (Option<ContextModel>, String) {
         match Self::load(models_dir) {
             Ok(model) => {
@@ -507,6 +519,7 @@ impl ContextModel {
     }
 
     /// Use the same language-support gate during calibration and inference.
+    #[must_use]
     pub fn supports_features(&self, features: &FeatureMap) -> bool {
         if self.feature_version == BASELINE_FEATURE_VERSION {
             return features.keys().any(|name| (name.starts_with("pair:") || name.starts_with("before:word:") || name.starts_with("after:word:") || name.starts_with("app:")) && self.weights.get(name).is_some());
@@ -537,7 +550,7 @@ impl ContextModel {
 
     /// The model's verdict stands; this is where an explicit exception would refuse it.
     ///
-    /// KeySwitch exists because rule-based switching hit a wall: the rules multiplied until they argued with each other
+    /// `KeySwitch` exists because rule-based switching hit a wall: the rules multiplied until they argued with each other
     /// over the nuances of two languages. So when the model says convert, the product converts. What may still refuse a
     /// conversion is an exception the user can see and name - an excluded word or application, their own switching
     /// settings, a rule they taught the engine, or a case analysed one by one - and those live in the engine and the
@@ -549,6 +562,7 @@ impl ContextModel {
     /// trained to tell apart - and cost 14 of 300 restorations on chat-like first words while preventing no corruption at
     /// all. A weak class is a training problem; it is answered with the corpus, the labels and the features, and proved
     /// by measurement.
+    #[must_use]
     pub fn allows_automatic_conversion(&self, _features: &FeatureMap) -> bool {
         true
     }
@@ -577,6 +591,7 @@ impl ContextModel {
         ContextPrediction { action, probability: probabilities[selected], probabilities, model_version: self.version.clone(), supported: self.supports_features(&features) }
     }
 
+    #[must_use]
     pub fn predict(&self, item: &ContextEvidence) -> ContextPrediction {
         if let Some(answer) = &self.answer {
             return answer(item);

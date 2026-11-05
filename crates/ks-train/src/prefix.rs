@@ -607,17 +607,16 @@ fn reuse_installed(request: &PrefixRequest<'_>) -> Result<Option<Value>, String>
 }
 
 /// `fit`: an explicit candidate fit, preserving all existing model directories.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let output = request.output;
     if output.exists() {
         return Err("refusing to overwrite a prefix experiment".to_owned());
     }
-    if request.reuse_installed {
-        if let Some(seal) = reuse_installed(request)? {
+    if request.reuse_installed
+        && let Some(seal) = reuse_installed(request)? {
             return Ok(seal);
         }
-    }
     let cfg = read_json(request.recipe)?;
     let feature_version = cfg.int("runtime_feature_version");
     let frozen = prefix_provenance(request.root, request.recipe)?;
@@ -671,13 +670,12 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         let loss = fsum(&terms).expect("finite losses") / denominator;
         assert!(loss.is_finite(), "prefix optimisation diverged");
         let candidate = assess(&sequence_scores(&development_frames, &probabilities), &thresholds, loss);
-        if let Some(found) = &candidate {
-            if selected.as_ref().is_none_or(|known| better(found, known)) {
+        if let Some(found) = &candidate
+            && selected.as_ref().is_none_or(|known| better(found, known)) {
                 best.clone_from(&rounded);
                 selected = Some(found.clone());
                 selected_epoch = epoch + 1;
             }
-        }
         history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": candidate.as_ref().map_or(Value::Null, Selection::value)}));
         println!("prefix-v2 epoch {}: development loss {loss:.9}, early recall {:?}", epoch + 1, candidate.as_ref().map(|found| found.minimum_recall));
     }
@@ -760,5 +758,5 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
 }
 
 mod indexmap_like {
-    pub type Map = ks_context::context_action_features::FeatureMap;
+    pub(super) type Map = ks_context::context_action_features::FeatureMap;
 }

@@ -24,7 +24,7 @@ use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS};
-use crate::wayland_constants::*;
+use crate::wayland_constants::{EVDEV_KEY_BACKSPACE, EVDEV_KEY_TAB, EVDEV_KEY_ENTER, EVDEV_KEY_KPENTER, EVDEV_KEY_ESC, EVDEV_KEY_SPACE, EVDEV_KEY_PAUSE, EVDEV_KEY_CAPSLOCK, EVDEV_KEY_LEFTSHIFT, EVDEV_KEY_RIGHTSHIFT, EVDEV_KEY_LEFTCTRL, EVDEV_KEY_RIGHTCTRL, EVDEV_KEY_LEFTALT, EVDEV_KEY_RIGHTALT, EVDEV_KEY_LEFTMETA, EVDEV_KEY_RIGHTMETA, EVDEV_KEY_HOME, EVDEV_KEY_END, EVDEV_KEY_PAGEUP, EVDEV_KEY_PAGEDOWN, EVDEV_KEY_LEFT, EVDEV_KEY_RIGHT, EVDEV_KEY_UP, EVDEV_KEY_DOWN, EVDEV_KEY_INSERT, EVDEV_KEY_DELETE, EVDEV_KEY_SEMICOLON, EVDEV_KEY_EQUAL, EVDEV_KEY_COMMA, EVDEV_KEY_MINUS, EVDEV_KEY_DOT, EVDEV_KEY_SLASH, EVDEV_KEY_GRAVE, EVDEV_KEY_LEFTBRACE, EVDEV_KEY_BACKSLASH, EVDEV_KEY_RIGHTBRACE, EVDEV_KEY_APOSTROPHE, EVDEV_KEY_Q, EVDEV_MODIFIER_KEYS, UINT32_MODULO_MASK, MODIFIER_RECHECK_GAP_MS, EVDEV_SHIFT_KEYS, EVDEV_CONTROL_KEYS, EVDEV_ALT_KEYS, EVDEV_SUPER_KEYS, LAYOUT_SWITCH_TIMEOUT_SECONDS, LAYOUT_SWITCH_POLL_SECONDS, WAYLAND_TYPED_INPUT_SETTLE_SECONDS, WAYLAND_UINPUT_MAX_KEYCODE};
 use crate::wayland_helper::{Flag, seconds};
 
 const LOGGER: &str = "keyswitch.wayland_backend";
@@ -108,6 +108,7 @@ pub struct NativeKeyEvent {
 }
 
 impl NativeKeyEvent {
+    #[must_use]
     pub fn new(pressed: bool, keycode: u32, timestamp: u32) -> NativeKeyEvent {
         NativeKeyEvent { pressed, keycode, timestamp, ..NativeKeyEvent::default() }
     }
@@ -123,6 +124,7 @@ pub struct NativeInput {
 }
 
 impl NativeInput {
+    #[must_use]
     pub fn synthetic(pressed: bool, keycode: u32) -> NativeInput {
         NativeInput { pressed, keycode, synthetic: true, replayed: false }
     }
@@ -164,6 +166,7 @@ pub trait WaylandApi: Send + Sync {
     fn close(&self);
 }
 
+#[must_use]
 pub fn is_cyrillic(text: &str) -> bool {
     text.chars().next().is_some_and(|first| (0x0400..=0x04FF).contains(&first.to::<u32>()))
 }
@@ -187,6 +190,7 @@ pub fn select_layout_indices(layout_count: usize, translate: &dyn Fn(u32, u32, i
 }
 
 /// Translate an evdev keycode and XKB keysym into the engine's X11 key vocabulary.
+#[must_use]
 pub fn key_name(keycode: u32, symbol_name: &str, plain_char: &str) -> String {
     if let Some(name) = evdev_key_name(keycode) {
         return name.to_owned();
@@ -287,6 +291,7 @@ impl WaylandBackend {
         }
     }
 
+    #[must_use]
     pub fn running(&self) -> bool {
         self.inner.running.load(Ordering::SeqCst)
     }
@@ -296,29 +301,35 @@ impl WaylandBackend {
     }
 
     /// The same handler the helper's keys go through, for a test or a caller that feeds keys itself.
+    #[must_use]
     pub fn handle_native(&self, native: NativeKeyEvent) -> bool {
         self.inner.handle_native(native)
     }
 
+    #[must_use]
     pub fn window_process_id(&self, window: i64) -> i64 {
         self.inner.api.window_process_id(window)
     }
 
     /// The same, as a function a reader of accessibility can keep.
+    #[must_use]
     pub fn process_for_window(&self) -> crate::x11_backend::ProcessForWindow {
         let inner = self.inner.clone();
         Arc::new(move |window| u32::try_from(inner.api.window_process_id(window)).unwrap_or(0))
     }
 
+    #[must_use]
     pub fn window_origin(&self, window: i64) -> Option<(i64, i64)> {
         self.inner.api.window_origin(window)
     }
 
     /// Whether the compositor says the keyboard of `window` is in a password field.
+    #[must_use]
     pub fn window_is_password(&self, window: i64) -> bool {
         self.inner.api.window_is_password(window)
     }
 
+    #[must_use]
     pub fn position_window(&self, window: i64, x: i64, y: i64) -> bool {
         self.inner.api.position_window(window, x, y)
     }
@@ -374,7 +385,7 @@ impl Inner {
     fn current_group(&self) -> Result<i32, BackendError> {
         let active = self.api.current_layout_index();
         let indices = self.layout_list()?;
-        Ok(indices.iter().position(|index| *index == active).map_or(-1, |position| position.low::<i32>()))
+        Ok(indices.iter().position(|index| *index == active).map_or(-1, ks_cast::To::low::<i32>))
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -912,7 +923,7 @@ impl Inner {
             let state = self.state();
             if state.holding { state.hold_known_seq } else { state.known_seq }
         };
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         let main = (|| -> Result<(), BackendError> {
             if self.state().hold_broken {
                 return Err(failed(INPUT_AHEAD_ERROR));
@@ -1014,14 +1025,14 @@ impl Inner {
 
     /// Write `replacement` over the selection, then leave the layout in `final_group`.
     ///
-    /// A field with AT-SPI's EditableText takes the text from the reader itself, any character included. Otherwise it is typed
+    /// A field with AT-SPI's `EditableText` takes the text from the reader itself, any character included. Otherwise it is typed
     /// through the input helper: keys, not characters, reach the compositor, so each run of one script is typed in its layout
     /// group, and the layout changes only after the keys before had time to arrive (`switch_group_after_typing`). A character
     /// no key of either layout types then leaves the selection as it is, with nothing typed: Wayland lets no program but the
     /// focused one put text on the clipboard. The layout ends in `final_group` or where it was.
     fn replace_selection(&self, selected: &SelectedText, replacement: &str, final_group: Option<i32>) -> Result<bool, SelectionError> {
         {
-            let inject_inner = lock(&self.inject_lock);
+            let _inject_inner = lock(&self.inject_lock);
             self.check_hold()?;
             let written = match lock(&self.selection_source).as_mut() {
                 Some(source) => source.write_selection(selected, replacement)?,
@@ -1052,7 +1063,7 @@ impl Inner {
             let state = self.state();
             Some(if state.holding { state.hold_known_seq } else { state.known_seq })
         };
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         self.check_hold()?;
         for (index, (group, keys)) in runs.iter().enumerate() {
             let group = (*group).low::<i32>();
@@ -1210,7 +1221,7 @@ impl InputBackend for WaylandBackend {
         if !(0 <= group && group.to::<usize>() < self.inner.group_count()) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
-        let inject_inner = lock(&self.inner.inject_lock);
+        let _inject_inner = lock(&self.inner.inject_lock);
         self.inner.switch_group(group)
     }
 

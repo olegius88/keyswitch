@@ -13,6 +13,7 @@ const FAILURE_SECTIONS: [(&str, &str); 10] = [("fallback_regression", "model_vs_
 const COMPACT_MAX_DEPTH: usize = 3;
 const COMPACT_MAX_INLINE_ITEMS: usize = 16;
 
+#[must_use]
 pub fn pretty_sorted(value: &Value) -> String {
     ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() }) + "\n"
 }
@@ -45,6 +46,7 @@ pub fn manifest_of(built: &Candidate, config_sha256: &str, toolchain: &Value, se
 }
 
 /// The test report: the manifest's sealed sections, without what only the sidecar has to carry.
+#[must_use]
 pub fn report_of(manifest: &Map<String, Value>) -> Value {
     let mut report = Map::new();
     for name in ["model_id", "calibration_scope", "config_sha256", "build_provenance_sha256", "split_namespace", "sealed_evaluation", "gate_policy", "thresholds", "threshold_selection_gate_breakdown", "sealed_test", "sealed_test_typos", "sealed_test_context_stress", "safety", "veto", "quality_gate_breakdown", "quality_gates_passed", "artifact_sha256", "artifact_model_version"] {
@@ -81,6 +83,7 @@ pub struct Outputs {
 }
 
 impl Outputs {
+    #[must_use]
     pub fn defaults(root: &Path) -> Outputs {
         Outputs { artifact: root.join("resources/models/layout_intent_v1.ksm"), manifest: root.join("model/intent_v1/manifest.json"), report: root.join("model/intent_v1/test-report.json"), environment: root.join("model/intent_v1/build-environment.json"), diagnostic: None, dry_run: false }
     }
@@ -241,11 +244,10 @@ pub fn rejection_receipt(root: &Path, version: u32, strict_report: &Path, remedi
     let mut failure = Map::new();
     failure.insert("failed_strict_gates".to_owned(), json!(failed));
     for gate in &failed {
-        if let Some((_, section)) = FAILURE_SECTIONS.iter().find(|(name, _)| name == gate) {
-            if let Some(value) = report.get(*section) {
+        if let Some((_, section)) = FAILURE_SECTIONS.iter().find(|(name, _)| name == gate)
+            && let Some(value) = report.get(*section) {
                 failure.insert((*section).to_owned(), compact(value, 0));
             }
-        }
     }
     let text = |value: &Value, label: &str| -> Result<String, String> { value.as_str().map(str::to_owned).ok_or_else(|| format!("{label} must be a string")) };
     Ok(json!({

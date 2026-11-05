@@ -20,7 +20,7 @@ use ks_text::{pystr, ucd};
 use std::sync::Arc;
 
 /// A curated one-letter Russian word typed in the English layout right after an English term inside a Russian phrase
-/// (KeySwitchEngine.stranded_letter): an explicit rule like the message-start one.
+/// (`KeySwitchEngine.stranded_letter)`: an explicit rule like the message-start one.
 pub const STRANDED_SHORT_WORD_REASON: &str = "однобуквенное слово из безопасного списка после английского термина в русской фразе";
 /// A lone letter the action model alone would convert: it has never seen one (ContextPolicy.decide).
 pub const LONE_LETTER_REASON: &str = "одиночную букву переводят только правила из безопасного списка";
@@ -64,7 +64,7 @@ impl From<FeatureError> for PolicyError {
 /// A Russian abbreviation or slang word typed as intended: Russian text uses it, nothing uses its Latin keys.
 ///
 /// `пдф` and `впн` are in no lexicon, so they read as gibberish both ways and the language models lean to the Latin
-/// reading; the action model learned the term tables (context_action_features) but on the owner's typing still turned
+/// reading; the action model learned the term tables (`context_action_features`) but on the owner's typing still turned
 /// them into `gla` and `dgy` (field logs, 03.10.2026). The tables (context-term-frequency.json) say what decides: the
 /// Cyrillic form occurs inside Russian technical text again and again, and its Latin keys occur neither there nor in
 /// English text. A form whose Latin keys are a term (`тз` and `np`) is the model's to decide.
@@ -91,6 +91,7 @@ pub struct ContextResult {
 
 impl ContextResult {
     /// `ContextResult(decision)` with its defaults.
+    #[must_use]
     pub fn new(decision: DetectionDecision) -> Self {
         ContextResult {
             decision,
@@ -130,12 +131,13 @@ fn split_scoped(core: &str, colons: bool) -> Vec<String> {
 
 /// A Latin reading that is a quoted word or parts joined by colons, the shapes of code and of a cited word.
 ///
-/// A quote opens it (WORD_QUOTES) and may close it, with one sign after the closing quote (`"legacy",`); the parts
+/// A quote opens it (`WORD_QUOTES`) and may close it, with one sign after the closing quote (`"legacy",`); the parts
 /// between dots, or between colons (`std::swap`, `x:Name`), are letters. A colon is a part's edge only when the token was
 /// typed with a small letter: the `Ж` of a Russian word in capitals is a colon too (`ОЖОГ` is `J:JU`).
 ///
 /// The Python reads `core[0]` of an empty reading in a branch it takes for any empty string (`"" in WORD_QUOTES`) and
 /// raises; an empty reading here is no quoted word.
+#[must_use]
 pub fn quoted_or_scoped(replacement: &str, original: &str) -> bool {
     let mut core = replacement.to_string();
     let lead = pystr::slice(&core, None, Some(1)).to_string();
@@ -162,6 +164,7 @@ pub fn quoted_or_scoped(replacement: &str, original: &str) -> bool {
 /// not Russian written badly, and left in the population such fragments set every threshold. A hyphen or an apostrophe
 /// inside a token is different: the engine joins those to the word before it tests for a boundary at all, so `Я-то`,
 /// `из-за` and `don't` reach a model whole and are ordinary words of their language.
+#[must_use]
 pub fn word_shaped(token: &str) -> bool {
     let chars: Vec<char> = token.chars().collect();
     if chars.len() < MINIMUM_SHAPED_TOKEN_CHARACTERS || !ucd::isalpha(chars[0]) || !ucd::isalpha(chars[chars.len() - 1]) {
@@ -191,8 +194,9 @@ fn typo_of(text: &str, detector: &LanguageDetector, group: i64) -> Result<bool, 
 /// Whether `text` ends with what was `typed`, its first letter in either case.
 ///
 /// An editor may capitalise the first word of a sentence as it is finished, as macOS automatic capitalisation does. The
-/// letters are still the ones the user typed, so the word is the one the observer saw: TextEdit showed `Ghbdtn` where
+/// letters are still the ones the user typed, so the word is the one the observer saw: `TextEdit` showed `Ghbdtn` where
 /// `ghbdtn` was typed, and the field checks refused every first word of a sentence (02.10.2026).
+#[must_use]
 pub fn ends_with_typed(text: &str, typed: &str) -> bool {
     if text.ends_with(typed) {
         return true;
@@ -209,8 +213,9 @@ pub fn ends_with_typed(text: &str, typed: &str) -> bool {
 ///
 /// `ahead` is the boundary and the keys the engine has queued behind it: the window takes a key in as soon as the hook
 /// lets it through, while the engine decides on the word a moment later. One character after the word is the boundary
-/// (ends_with_typed on `before[:-1]`); more, and every such word was refused as typed into a changed field: `e 'njuj `
+/// (`ends_with_typed` on `before[:-1]`); more, and every such word was refused as typed into a changed field: `e 'njuj `
 /// typed at 40 ms a key into a GTK window of KDE Plasma kept its `e` in five of ten runs (27.10.2026).
+#[must_use]
 pub fn shown_ahead(before: &str, typed: &str, ahead: &str) -> usize {
     for shown in (2..=pystr::len(ahead)).rev() {
         if before.ends_with(pystr::slice(ahead, None, Some(shown.to::<i64>()))) && ends_with_typed(pystr::slice(before, None, Some(-shown.to::<i64>())), typed) {
@@ -222,10 +227,11 @@ pub fn shown_ahead(before: &str, typed: &str, ahead: &str) -> usize {
 
 /// What a field shows of `typed` before its caret when it has not taken the last letters in yet, or None.
 ///
-/// A browser or an Electron editor reports its text a moment after the key: up to FIELD_PENDING_MAX_CHARACTERS of the last
+/// A browser or an Electron editor reports its text a moment after the key: up to `FIELD_PENDING_MAX_CHARACTERS` of the last
 /// letters may be missing, and at least one letter is there. Missing, not shifted: letters standing right after the caret
-/// are a caret reported short of them (caret_lag), and further off than it allows, a changed field. The early switch reads
-/// a word so (engine._typed_in_field), and so does the decision at its boundary.
+/// are a caret reported short of them (`caret_lag`), and further off than it allows, a changed field. The early switch reads
+/// a word so (engine._`typed_in_field`), and so does the decision at its boundary.
+#[must_use]
 pub fn typed_short_of(before: &str, after: &str, typed: &str) -> Option<String> {
     let most = FIELD_PENDING_MAX_CHARACTERS.min(pystr::len(typed).saturating_sub(1));
     for pending in 1..=most {
@@ -240,12 +246,13 @@ pub fn typed_short_of(before: &str, after: &str, typed: &str) -> Option<String> 
 /// How many characters a field reports its caret short of the end of `typed`, or None.
 ///
 /// A native snapshot normally ends its text before the caret with what was typed, the boundary after it or not yet
-/// (ends_with_typed). VS Code Insiders (06.10.2026) reported the caret of its chat box one character early: the last typed
+/// (`ends_with_typed`). VS Code Insiders (06.10.2026) reported the caret of its chat box one character early: the last typed
 /// letter stood after the caret, a word just begun read as typed into another one, and every word was refused as a changed
 /// field although the text was exactly the one typed, as the manual conversion of the same words showed. Up to
-/// FIELD_CARET_LAG_MAX_CHARACTERS characters after the reported caret are taken as typed before it when that is what makes
+/// `FIELD_CARET_LAG_MAX_CHARACTERS` characters after the reported caret are taken as typed before it when that is what makes
 /// the text end with the typed word; text that does not hold it there is still a changed field. `exact` asks for the text
 /// to end with `typed` itself, the boundary already part of it and nothing after it.
+#[must_use]
 pub fn caret_lag(before: &str, after: &str, typed: &str, exact: bool) -> Option<usize> {
     for lag in 0..=FIELD_CARET_LAG_MAX_CHARACTERS.min(pystr::len(after)) {
         let head = format!("{before}{}", pystr::slice(after, None, Some(lag.to::<i64>())));
@@ -284,7 +291,7 @@ impl Default for EvidenceOptions<'_> {
 
 /// Build the same lexical and optional orthotactic evidence for any caller. `shared` is the packaged identifier lexicon
 /// the engine, the trainer and the evaluator share (`shared_identifiers()`), used when `identifiers` is not given.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn evidence_for_decision(
     baseline: &DetectionDecision, alternative: &str, target_group: i64, detector: &LanguageDetector, field: &FieldContext, trigger: &str,
     options: &EvidenceOptions<'_>, shared: Option<&IdentifierLexicon>,
@@ -379,7 +386,7 @@ pub type SharedOrtho = (Option<Arc<OrthoModel>>, String);
 impl ContextPolicy {
     /// `ContextPolicy(reader, known=known)` with an orthotactic model of its own. `known` answers the orthotactic model's
     /// dictionary questions with the engine's own models, which it would otherwise find again by normalising the Russian
-    /// supplement once more (ortho_model._engine_dictionaries).
+    /// supplement once more (`ortho_model`._`engine_dictionaries`).
     pub fn new(resources: &Arc<Resources>, reader: Option<Arc<dyn FieldReader>>, known: Option<KnownWord>, clock: Option<Clock>) -> Self {
         let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), None, known, Some(resources.clone())) {
             Ok(model) => {
@@ -410,6 +417,7 @@ impl ContextPolicy {
     }
 
     /// `shared_identifiers()`.
+    #[must_use]
     pub fn shared_identifiers(&self) -> Option<&IdentifierLexicon> {
         self.identifiers.as_deref()
     }
@@ -418,7 +426,7 @@ impl ContextPolicy {
         &self.model.as_ref().expect("a policy with a model").tables
     }
 
-    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     pub fn decide(
         &self, baseline: &DetectionDecision, alternative: &str, target_group: i64, detector: &LanguageDetector, trigger: &str, mode: &str,
         options: &DecideOptions<'_>,
@@ -684,7 +692,7 @@ impl ContextPolicy {
     /// letters joined by single dots are the shapes a Latin reading may keep. Until 04.10.2026 a dot inside was refused as
     /// well (`дюп` is `l.g`), and on the owner's own typing that left every domain and address typed in the Russian layout
     /// as it was, with the model sure of each at p=1.0; the model of 0.38.0 keeps `дюп` itself. A quoted token and parts
-    /// joined by colons are shapes too (quoted_or_scoped): `"Boot` typed in the Russian layout is `ЭИщще`, `std::swap` is
+    /// joined by colons are shapes too (`quoted_or_scoped)`: `"Boot` typed in the Russian layout is `ЭИщще`, `std::swap` is
     /// `ыевЖЖыцфз`, and the model converts them, most at p=1.0, which this refusal overruled in 146 messages of the
     /// developer-chat development set (19.10.2026); a sign after a word without a quote stays refused, since `б` and `ю`
     /// end Russian words (`учеб` is `ext,`). The refusal is recorded as a safety decision, not as the model's opinion.
@@ -719,6 +727,7 @@ impl ContextPolicy {
     /// It also stays out of a contextual veto: when the detector itself wanted to convert and the model refused, that
     /// refusal is the context model's job and is left alone. This layer only adds recall where the detector abstained,
     /// which is exactly the population no dictionary covers.
+    #[must_use]
     pub fn licensed(
         &self, result: ContextResult, baseline: &DetectionDecision, alternative: &str, target_group: i64, field: &FieldContext,
         detector: Option<&LanguageDetector>,
@@ -742,6 +751,7 @@ impl ContextPolicy {
     ///
     /// The features of a schema 2 artifact ask dictionaries about parts of the token; the detector's own models answer, so
     /// the model never loads a second copy of them.
+    #[must_use]
     pub fn orthotactic(
         &self, baseline: &DetectionDecision, alternative: &str, target_group: i64, field: &FieldContext, detector: Option<&LanguageDetector>,
     ) -> Option<DetectionDecision> {
@@ -771,7 +781,7 @@ impl ContextPolicy {
         let evidence = OrthoEvidence { keys, shape, source_script };
         let score = match detector {
             Some(detector) => {
-                let known = |script: &str, word: &str| detector.model(if script == "en" { 0 } else { 1 }).is_some_and(|scorer| scorer.score(word).known);
+                let known = |script: &str, word: &str| detector.model(i64::from(script != "en")).is_some_and(|scorer| scorer.score(word).known);
                 model.score(&evidence, Some(&known))
             }
             None => model.score(&evidence, None),

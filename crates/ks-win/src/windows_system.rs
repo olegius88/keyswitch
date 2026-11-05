@@ -116,6 +116,7 @@ pub fn windows_launcher_command(start_hidden: bool, executable: Option<&Path>) -
 }
 
 /// `subprocess.list2cmdline`: the quoting of the MS C runtime.
+#[must_use]
 pub fn list2cmdline(arguments: &[String]) -> String {
     let mut result = String::new();
     for argument in arguments {
@@ -215,7 +216,7 @@ impl WindowsAutostartManager {
         })
     }
 
-    /// True only when the next logon really starts KeySwitch.
+    /// True only when the next logon really starts `KeySwitch`.
     pub fn enabled(&self) -> Result<bool, WindowsSystemError> {
         Ok(self.status()?.effective())
     }
@@ -242,7 +243,7 @@ impl WindowsAutostartManager {
     /// Write or remove the value; `override_system_block` also lifts a Windows block.
     ///
     /// The startup sync at every launch must not fight a choice the user made in Windows, so only an explicit toggle in the
-    /// KeySwitch interface clears the approval record.
+    /// `KeySwitch` interface clears the approval record.
     pub fn set_enabled(
         &self,
         enabled: bool,
@@ -303,6 +304,7 @@ impl WindowsApplicationCatalog {
         Ok(applications)
     }
 
+    #[must_use]
     pub fn from_executable(executable: &str) -> Option<WindowsApplication> {
         let clean_executable = clean_windows_executable(executable);
         let stem = ntpath_splitext(ntpath_basename(&clean_executable)).0.to_owned();
@@ -314,7 +316,8 @@ impl WindowsApplicationCatalog {
     }
 }
 
-/// Remove quotes and a DisplayIcon index from an executable path.
+/// Remove quotes and a `DisplayIcon` index from an executable path.
+#[must_use]
 pub fn clean_windows_executable(value: &str) -> String {
     let text = pystr::strip(value);
     if let Some(rest) = text.strip_prefix('"')
@@ -372,6 +375,7 @@ fn ntpath_tail(path: &str) -> &str {
 }
 
 /// `ntpath.basename`.
+#[must_use]
 pub fn ntpath_basename(path: &str) -> &str {
     let tail = ntpath_tail(path);
     match tail.rfind(['\\', '/']) {
@@ -381,6 +385,7 @@ pub fn ntpath_basename(path: &str) -> &str {
 }
 
 /// `ntpath.splitext`: the extension is everything from the last dot of the last component, leading dots aside.
+#[must_use]
 pub fn ntpath_splitext(path: &str) -> (&str, &str) {
     let name_start = path.rfind(['\\', '/']).map_or(0, |separator| separator + 1);
     if let Some(dot) = path.rfind('.')
@@ -576,7 +581,7 @@ mod tests {
         assert_eq!(started.lock().unwrap().len(), 1);
     }
 
-    /// The expected values were read from `subprocess.list2cmdline`, CPython 3.14.
+    /// The expected values were read from `subprocess.list2cmdline`, `CPython` 3.14.
     #[test]
     fn list2cmdline_quotes_as_the_python_does() {
         let line = |arguments: &[&str]| list2cmdline(&arguments.iter().map(|&item| item.to_owned()).collect::<Vec<_>>());
@@ -586,7 +591,7 @@ mod tests {
         assert_eq!(line(&["tab\tx", "back\\slash\\\\"]), "\"tab\tx\" back\\slash\\\\");
     }
 
-    /// The expected values were read from `shlex.split(command, posix=False)`, CPython 3.14.
+    /// The expected values were read from `shlex.split(command, posix=False)`, `CPython` 3.14.
     #[test]
     fn the_first_shell_word_is_the_python_one() {
         for (command, word) in [
@@ -605,7 +610,7 @@ mod tests {
         }
     }
 
-    /// The expected values were read from `ntpath`, CPython 3.14.
+    /// The expected values were read from `ntpath`, `CPython` 3.14.
     #[test]
     fn the_path_functions_are_the_python_ones() {
         for (path, basename, splitext) in [

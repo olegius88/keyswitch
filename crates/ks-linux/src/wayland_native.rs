@@ -37,9 +37,9 @@ use zbus::{MatchRule, Message};
 
 use crate::wayland_access::access_hint;
 use crate::wayland_backend::{NativeKeyEvent, NativeListener, ReadyCallback, WaylandApi, join_within};
-use crate::wayland_constants::*;
-use crate::wayland_desktop::*;
-use crate::wayland_helper::*;
+use crate::wayland_constants::{EVDEV_READ_BATCH_EVENTS, EVIOCGID, EVDEV_NAME_BUFFER_BYTES, EVIOCGNAME_256, EVIOCGPHYS_256, EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES, EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES, EVIOCGBIT_REL_8, EVIOCGBIT_ABS_8, UI_SET_EVBIT, EV_SYN, EV_KEY, WAYLAND_UINPUT_MAX_KEYCODE, UI_SET_KEYBIT, EV_LED, WAYLAND_FORWARDED_LEDS, UI_SET_LEDBIT, BUS_I8042, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, WAYLAND_UINPUT_VERSION, UINPUT_MAX_NAME_BYTES, UI_DEV_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY, EVIOCSCLOCKID, EVIOCGRAB, EVIOCGKEY_96, EVIOCGLED_8, LED_CAPSL, IN_NONBLOCK, IN_CLOEXEC, IN_CREATE, IN_ATTRIB, IN_DELETE, INOTIFY_READ_BUFFER_BYTES, INOTIFY_EVENT_HEADER_BYTES, WAYLAND_REPEAT_DEFAULT_DELAY_MS, UINT32_MODULO_MASK, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, WAYLAND_KEYMAP_WAIT_SECONDS, WAYLAND_XKB_KEYCODE_OFFSET, XKB_KEYSYM_NAME_BUFFER_BYTES, WAYLAND_IPC_TIMEOUT_SECONDS, WAYLAND_SEAT_INTERFACE_MAX_VERSION, WL_SEAT_CAPABILITY_KEYBOARD, WAYLAND_KEYMAP_ROUNDTRIPS, WAYLAND_DBUS_CALL_TIMEOUT_MS, LAYOUT_SWITCH_POLL_SECONDS, LEARNING_PROMPT_WINDOW_TITLE, SWAY_IPC_HEADER_BYTES, SWAY_IPC_GET_INPUTS, SWAY_IPC_GET_TREE, SWAY_IPC_RUN_COMMAND, SWAY_IPC_SUBSCRIBE, SWAY_IPC_EVENT_INPUT, SWAY_IPC_EVENT_WINDOW, WAYLAND_HELPER_RESTARTS, WAYLAND_HELPER_RESTART_DELAY_SECONDS};
+use crate::wayland_desktop::{DesktopWindowInfo, DesktopSnapshot, parse_gnome_state, GNOME_DBUS_NAME, GNOME_DBUS_PATH, GNOME_DBUS_INTERFACE, GNOME_EXTENSIONS_BUS_NAME, GNOME_EXTENSIONS_PATH, GNOME_EXTENSIONS_INTERFACE, GNOME_EXTENSION_UUID, parse_kwin_report, KdeWindowIdMap, KDE_KEYBOARD_BUS_NAME, KDE_KEYBOARD_PATH, KDE_KEYBOARD_INTERFACE, parse_kde_layouts, KWIN_BUS_NAME, KWIN_SCRIPTING_PATH, KWIN_SCRIPTING_INTERFACE, KWIN_SCRIPT_INTERFACE, build_kwin_watcher_script, KwinAction, build_kwin_action_script, encode_sway_ipc, decode_sway_ipc_header, parse_sway_inputs, parse_sway_focused_window, sway_switch_layout_command, find_sway_window_by_pid, sway_popup_move_command, sway_focus_command, detect_desktop_kind, DesktopKind};
+use crate::wayland_helper::{RawInputEvent, InputDeviceInfo, HelperOs, seconds, WaylandInputHelper, Flag, ByteChannel, HelperClient, HelperKey, HelperCallbacks, classify_input_device, DeviceRole};
 
 const LOGGER: &str = "keyswitch.wayland_native";
 
@@ -68,10 +68,11 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// `CLOCK_MONOTONIC` in seconds: the clock evdev stamps its events with (`EVIOCSCLOCKID`) and Python's `time.monotonic()`.
+#[must_use]
 pub fn clock_monotonic() -> f64 {
     let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: `now` is a valid, writable `timespec` for the call to fill in.
-    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) };
     now.tv_sec.to::<f64>() + now.tv_nsec.to::<f64>() / 1e9
 }
 
@@ -97,6 +98,7 @@ fn ioctl_value(fd: RawFd, request: libc::c_ulong, value: libc::c_ulong) -> io::R
 }
 
 /// The numbers of the set bits of a bitmap, least significant bit of the first byte first.
+#[must_use]
 pub fn bits_from_bytes(buffer: &[u8]) -> HashSet<u32> {
     let mut bits = HashSet::new();
     for (index, value) in buffer.iter().enumerate() {
@@ -110,9 +112,10 @@ pub fn bits_from_bytes(buffer: &[u8]) -> HashSet<u32> {
 }
 
 /// The same for sysfs's capability files: hexadecimal words of the machine's `unsigned long`, most significant first.
+#[must_use]
 pub fn bits_from_sysfs(raw: &str) -> HashSet<u32> {
     let tokens = pystr::split(raw);
-    let word_bits = std::mem::size_of::<libc::c_ulong>() * BITS_PER_BYTE;
+    let word_bits = size_of::<libc::c_ulong>() * BITS_PER_BYTE;
     let mut bits = HashSet::new();
     for (word_index, token) in tokens.iter().rev().enumerate() {
         let Ok(word) = u64::from_str_radix(token, 16) else { continue };
@@ -135,8 +138,8 @@ fn read_sysfs_hex(path: &Path) -> u32 {
 
 /// `struct input_event` as the kernel lays it out here: the timestamp, then type, code and value.
 fn input_event_bytes(ev_type: u32, code: u32, value: i32) -> Vec<u8> {
-    let mut bytes = vec![0u8; std::mem::size_of::<libc::input_event>()];
-    let header = std::mem::size_of::<libc::timeval>();
+    let mut bytes = vec![0u8; size_of::<libc::input_event>()];
+    let header = size_of::<libc::timeval>();
     bytes[header..header + 2].copy_from_slice(&ev_type.low::<u16>().to_ne_bytes());
     bytes[header + 2..header + 4].copy_from_slice(&code.low::<u16>().to_ne_bytes());
     bytes[header + 4..header + 8].copy_from_slice(&value.to_ne_bytes());
@@ -144,8 +147,8 @@ fn input_event_bytes(ev_type: u32, code: u32, value: i32) -> Vec<u8> {
 }
 
 fn decode_input_event(bytes: &[u8]) -> RawInputEvent {
-    let word = std::mem::size_of::<libc::time_t>();
-    let header = std::mem::size_of::<libc::timeval>();
+    let word = size_of::<libc::time_t>();
+    let header = size_of::<libc::timeval>();
     let read_word = |from: usize| -> i64 {
         let mut raw = [0u8; 8];
         raw[..word.min(8)].copy_from_slice(&bytes[from..from + word.min(8)]);
@@ -185,7 +188,7 @@ fn open_raw(path: &str, flags: c_int) -> io::Result<RawFd> {
 
 /// Everything that reads until the descriptor has nothing more (`EAGAIN`) is this loop.
 fn read_all_events(fd: RawFd) -> io::Result<Vec<RawInputEvent>> {
-    let size = std::mem::size_of::<libc::input_event>();
+    let size = size_of::<libc::input_event>();
     let mut events = Vec::new();
     let mut buffer = vec![0u8; size * EVDEV_READ_BATCH_EVENTS.to::<usize>()];
     loop {
@@ -207,6 +210,7 @@ fn read_all_events(fd: RawFd) -> io::Result<Vec<RawInputEvent>> {
 pub struct LinuxHelperOs;
 
 impl LinuxHelperOs {
+    #[must_use]
     pub fn new() -> LinuxHelperOs {
         LinuxHelperOs
     }
@@ -433,6 +437,7 @@ extern "C" fn request_stop(_signal: c_int) {
 }
 
 /// Entry point for `keyswitch --wayland-input-helper <fd>`.
+#[must_use]
 pub fn run_wayland_input_helper(socket_fd: i32) -> i32 {
     // SAFETY: the parent passed this descriptor to the process and nothing else owns it.
     let channel = unsafe { UnixStream::from_raw_fd(socket_fd) };
@@ -445,8 +450,8 @@ pub fn run_wayland_input_helper(socket_fd: i32) -> i32 {
             {
                 action.sa_sigaction = request_stop as extern "C" fn(c_int) as usize;
             }
-            libc::sigemptyset(&mut action.sa_mask);
-            libc::sigaction(signal, &action, std::ptr::null_mut());
+            libc::sigemptyset(&raw mut action.sa_mask);
+            libc::sigaction(signal, &raw const action, std::ptr::null_mut());
         }
     }
     // SAFETY: ignoring a signal is a plain disposition change.
@@ -706,7 +711,7 @@ impl WaylandXkbMonitor {
         let (Ok(layout), Ok(variant)) = (CString::new(codes.join(",")), CString::new(variants.join(","))) else { return };
         let names = XkbRuleNames { rules: c"evdev".as_ptr(), model: c"pc105".as_ptr(), layout: layout.as_ptr(), variant: variant.as_ptr(), options: c"".as_ptr() };
         // SAFETY: `context` is valid, and `names` points to strings that live through the call.
-        let keymap = unsafe { (self.shared.xkb.keymap_new_from_names)(self.shared.context, &names, 0) };
+        let keymap = unsafe { (self.shared.xkb.keymap_new_from_names)(self.shared.context, &raw const names, 0) };
         if !keymap.is_null() {
             self.shared.install_keymap(keymap);
         }
@@ -818,6 +823,7 @@ const WL_REGISTRY_BIND: u16 = 0;
 const WL_SEAT_GET_KEYBOARD: u16 = 1;
 
 /// The path of the compositor's socket: `WAYLAND_DISPLAY` in `XDG_RUNTIME_DIR` (or a path of its own), `wayland-0` if unset.
+#[must_use]
 pub fn wayland_socket_path(display: Option<&str>, runtime_dir: Option<&str>) -> Option<PathBuf> {
     let display = display.filter(|name| !name.is_empty()).unwrap_or("wayland-0");
     if display.starts_with('/') {
@@ -864,10 +870,12 @@ impl WlSocket {
         Ok(WlSocket { stream: UnixStream::connect(path)?, input: Vec::new(), descriptors: VecDeque::new(), next_id: 1 })
     }
 
+    #[must_use]
     pub fn from_stream(stream: UnixStream) -> WlSocket {
         WlSocket { stream, input: Vec::new(), descriptors: VecDeque::new(), next_id: 1 }
     }
 
+    #[must_use]
     pub fn fileno(&self) -> RawFd {
         self.stream.as_raw_fd()
     }
@@ -889,25 +897,25 @@ impl WlSocket {
         let mut io_vector = libc::iovec { iov_base: data.as_mut_ptr().cast::<c_void>(), iov_len: data.len() };
         // SAFETY: an all-zero `msghdr` is a valid empty message header.
         let mut header: libc::msghdr = unsafe { std::mem::zeroed() };
-        header.msg_iov = &mut io_vector;
+        header.msg_iov = &raw mut io_vector;
         header.msg_iovlen = 1;
         header.msg_control = control.as_mut_ptr().cast::<c_void>();
         header.msg_controllen = control.len();
         // SAFETY: `header` points to buffers that stay alive and are as large as it says.
-        let count = (check((unsafe { libc::recvmsg(self.stream.as_raw_fd(), &mut header, libc::MSG_CMSG_CLOEXEC) }).low::<c_int>())?).to::<usize>();
+        let count = (check((unsafe { libc::recvmsg(self.stream.as_raw_fd(), &raw mut header, libc::MSG_CMSG_CLOEXEC) }).low::<c_int>())?).to::<usize>();
         // SAFETY: `header` was filled in by the kernel; the control-message macros walk only what it reports.
         unsafe {
-            let mut message = libc::CMSG_FIRSTHDR(&header);
+            let mut message = libc::CMSG_FIRSTHDR(&raw const header);
             while !message.is_null() {
                 if (*message).cmsg_level == libc::SOL_SOCKET && (*message).cmsg_type == libc::SCM_RIGHTS {
                     let payload = ((*message).cmsg_len).to::<usize>() - libc::CMSG_LEN(0).to::<usize>();
                     let data_pointer = libc::CMSG_DATA(message).cast::<RawFd>();
-                    for index in 0..payload / std::mem::size_of::<RawFd>() {
+                    for index in 0..payload / size_of::<RawFd>() {
                         // SAFETY (of the descriptor): the kernel installed it in this process for this message.
                         self.descriptors.push_back(OwnedFd::from_raw_fd(data_pointer.add(index).read_unaligned()));
                     }
                 }
-                message = libc::CMSG_NXTHDR(&header, message);
+                message = libc::CMSG_NXTHDR(&raw const header, message);
             }
         }
         self.input.extend_from_slice(&data[..count]);
@@ -1346,7 +1354,7 @@ impl DesktopAdapter for GnomeShellAdapter {
     }
 }
 
-/// The Python's `Report` method of the KWin callback object, on a D-Bus path of its own.
+/// The Python's `Report` method of the `KWin` callback object, on a D-Bus path of its own.
 struct KwinReport {
     shared: Arc<KdeShared>,
 }
@@ -1413,7 +1421,7 @@ impl KdeShared {
         let _ = call(&self.connection, KWIN_BUS_NAME, KWIN_SCRIPTING_PATH, KWIN_SCRIPTING_INTERFACE, "unloadScript", &(plugin,));
     }
 
-    /// Loads a script file under `plugin`, runs it, and gives back the id of the script; `None` if KWin refused.
+    /// Loads a script file under `plugin`, runs it, and gives back the id of the script; `None` if `KWin` refused.
     fn load_and_run(&self, path: &Path, plugin: &str) -> Option<i32> {
         let reply = call(&self.connection, KWIN_BUS_NAME, KWIN_SCRIPTING_PATH, KWIN_SCRIPTING_INTERFACE, "loadScript", &(path.to_string_lossy().as_ref(), plugin)).ok()?;
         let script_id = reply.body().deserialize::<i32>().ok()?;
@@ -1427,7 +1435,7 @@ impl KdeShared {
 
 static SCRIPT_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// A script file only the user can read, which KWin (the same user) loads by its path. Created exclusively, so a file or link
+/// A script file only the user can read, which `KWin` (the same user) loads by its path. Created exclusively, so a file or link
 /// somebody else put there is never followed.
 fn write_script_file(prefix: &str, code: &str) -> io::Result<PathBuf> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -1447,7 +1455,7 @@ fn write_script_file(prefix: &str, code: &str) -> io::Result<PathBuf> {
     Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free name for a script file"))
 }
 
-/// KDE Plasma 6 / KWin Wayland integration via `org.kde.keyboard` and KWin Scripting.
+/// KDE Plasma 6 / `KWin` Wayland integration via `org.kde.keyboard` and `KWin` Scripting.
 pub struct KdePlasmaAdapter {
     shared: Arc<KdeShared>,
     stop: Arc<AtomicBool>,
@@ -1488,7 +1496,7 @@ impl KdePlasmaAdapter {
     }
 
     fn install_kwin_watcher(&self) {
-        let Some(unique_name) = self.shared.connection.unique_name().map(|name| name.to_string()) else { return };
+        let Some(unique_name) = self.shared.connection.unique_name().map(ToString::to_string) else { return };
         let plugin = format!("{KWIN_WATCHER_PLUGIN}_{}", std::process::id());
         let script = build_kwin_watcher_script(&unique_name, KWIN_CALLBACK_PATH, KWIN_CALLBACK_IFACE);
         let Ok(path) = write_script_file("keyswitch-kwin-", &script) else { return };
@@ -1552,7 +1560,7 @@ impl DesktopAdapter for KdePlasmaAdapter {
     }
 
     fn input_anchor(&self) -> Option<ScreenAnchor> {
-        if let Some(unique_name) = self.shared.connection.unique_name().map(|name| name.to_string()) {
+        if let Some(unique_name) = self.shared.connection.unique_name().map(ToString::to_string) {
             let action = KwinAction { report_target: Some((&unique_name, KWIN_CALLBACK_PATH, KWIN_CALLBACK_IFACE)), ..KwinAction::default() };
             self.run_kwin_oneshot(&build_kwin_action_script(&action));
         }
@@ -1682,6 +1690,7 @@ pub struct SwayIpcAdapter {
 }
 
 impl SwayIpcAdapter {
+    #[must_use]
     pub fn new(socket_path: &str) -> SwayIpcAdapter {
         let adapter = SwayIpcAdapter {
             shared: Arc::new(SwayShared {
@@ -1855,7 +1864,7 @@ impl DesktopAdapter for GenericWaylandAdapter {
     fn input_anchor(&self) -> Option<ScreenAnchor> {
         None
     }
-    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
+    fn position_window(&self, _window: i64, _x: i64, _y: i64) -> bool {
         false
     }
     fn activate_window(&self, _window: i64) -> bool {
@@ -1887,6 +1896,7 @@ pub struct LogindLockMonitor {
 }
 
 impl LogindLockMonitor {
+    #[must_use]
     pub fn new(on_change: Box<dyn Fn() + Send + Sync>) -> LogindLockMonitor {
         let shared = Arc::new(LogindShared {
             locked_hint: AtomicBool::new(false),
@@ -1902,6 +1912,7 @@ impl LogindLockMonitor {
         LogindLockMonitor { shared, stop, _connection: connection }
     }
 
+    #[must_use]
     pub fn grab_blocked(&self) -> bool {
         self.shared.locked_hint.load(Ordering::SeqCst) || !self.shared.session_active.load(Ordering::SeqCst) || self.shared.sleeping.load(Ordering::SeqCst)
     }
@@ -2205,6 +2216,7 @@ impl NativeWaylandApi {
 }
 
 /// `int(time.monotonic() * 1000) & 0xFFFFFFFF`: what the engine and the helper's key stamps are compared with.
+#[must_use]
 pub fn monotonic_ms() -> u32 {
     ((clock_monotonic() * 1000.0).to::<u64>() & u64::from(UINT32_MODULO_MASK)).low::<u32>()
 }
@@ -2332,7 +2344,7 @@ impl WaylandApi for NativeWaylandApi {
 
     /// Run the input helper until stopped; a helper that dies is started again.
     ///
-    /// Its grab ends with it, so the keyboard keeps working, but KeySwitch would stay deaf: it is restarted up to
+    /// Its grab ends with it, so the keyboard keeps working, but `KeySwitch` would stay deaf: it is restarted up to
     /// `WAYLAND_HELPER_RESTARTS` times, and the parent forgets the keys it believed held down. A helper that fails at the first
     /// start is the caller's error.
     fn run_input_listener(&self, listener: NativeListener, ready: ReadyCallback) -> Result<(), String> {

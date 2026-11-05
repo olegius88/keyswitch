@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use ks_text::{Indent, JsonOptions, json_dumps};
 use serde_json::{Map, Value, json};
 
-use crate::constants::*;
+use crate::constants::{DEFAULT_ROTATIONS, MAX_ROTATIONS, MAX_SOURCE_LABEL_CHARACTERS, DEFAULT_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, MAX_DEVICE_NAME_CHARACTERS, MAX_SOURCES, CONFIG_MAX_BYTES, JSON_INDENT_SPACES};
 use crate::error::{Error, Result};
 use crate::timeutil::new_id;
 
@@ -65,7 +65,7 @@ impl Source {
     }
 
     fn from_json(value: &Value) -> Result<Source> {
-        let object = value.as_object().ok_or_else(|| Error::Other("TypeError"))?;
+        let object = value.as_object().ok_or(Error::Other("TypeError"))?;
         let mut source = Source::new("", "log");
         for (key, item) in object {
             let wrong = || Error::value("Некорректные типы настроек источника.");
@@ -115,6 +115,7 @@ fn case_folded_path(path: &str) -> String {
 }
 
 impl Config {
+    #[must_use]
     pub fn destination(&self) -> String {
         format!("{}:{}", self.bot_id, self.chat_id)
     }

@@ -14,12 +14,12 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
-pub fn key_value(event: &KeyEvent) -> Value {
+pub(crate) fn key_value(event: &KeyEvent) -> Value {
     json!({"$key": [event.pressed, event.keycode, event.key_name, event.character, event.characters, event.group, event.state,
                     event.timestamp, event.synthetic, event.deferred, event.foreign]})
 }
 
-pub fn key_from(value: &Value) -> Option<KeyEvent> {
+pub(crate) fn key_from(value: &Value) -> Option<KeyEvent> {
     let fields = value.get("$key")?.as_array()?;
     Some(KeyEvent {
         pressed: fields[0].as_bool()?,
@@ -36,7 +36,7 @@ pub fn key_from(value: &Value) -> Option<KeyEvent> {
     })
 }
 
-pub const REASONS: [RefusalReason; 20] = [
+pub(crate) const REASONS: [RefusalReason; 20] = [
     RefusalReason::Disabled, RefusalReason::OwnWindow, RefusalReason::ExcludedApplication, RefusalReason::SensitiveField,
     RefusalReason::Unsupported, RefusalReason::NoSelection, RefusalReason::MultipleSelection, RefusalReason::ReadOnly,
     RefusalReason::TooLong, RefusalReason::LineBreaks, RefusalReason::Untypeable, RefusalReason::Terminal,
@@ -45,7 +45,7 @@ pub const REASONS: [RefusalReason; 20] = [
 ];
 
 /// What the entry in progress is answered from.
-pub struct Tape {
+pub(crate) struct Tape {
     pub calls: Vec<Value>,
     pub at: usize,
     pub difference: Option<(String, String)>,
@@ -59,12 +59,12 @@ pub struct Tape {
 }
 
 impl Tape {
-    pub fn new(clock: Arc<AtomicU64>, status: String) -> Tape {
+    pub(crate) fn new(clock: Arc<AtomicU64>, status: String) -> Tape {
         Tape { calls: Vec::new(), at: 0, difference: None, status, clock, shared: Weak::new(), pure: Vec::new(), future: Vec::new() }
     }
 
     /// Notes the first answer of each pure read in a list of entries.
-    pub fn look_ahead(&mut self, calls: &[Value]) {
+    pub(crate) fn look_ahead(&mut self, calls: &[Value]) {
         for call in calls {
             let method = call["m"].as_str().unwrap_or("");
             if is_pure(method) && !self.future.iter().any(|(name, _)| name == method) {
@@ -73,7 +73,7 @@ impl Tape {
         }
     }
 
-    pub fn load(&mut self, calls: &[Value]) {
+    pub(crate) fn load(&mut self, calls: &[Value]) {
         self.calls = calls.to_vec();
         self.at = 0;
     }
@@ -126,7 +126,7 @@ impl Tape {
     }
 
     /// The Python calls the Rust engine did not make, when the entry is over.
-    pub fn leftover(&mut self) -> Option<String> {
+    pub(crate) fn leftover(&mut self) -> Option<String> {
         self.skip_foreign();
         while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) {
             self.pass_pure();
@@ -149,12 +149,9 @@ impl Tape {
             }
             if self.calls.get(ahead).is_none_or(|call| call["m"] != method) {
                 let known = self.pure.iter().find(|(name, _)| name == method).map(|(_, answer)| answer.clone());
-                return match known.or_else(|| self.first_read(method)) {
-                    Some(answer) => Some(answer),
-                    None => {
-                        self.note(format!("{method} read where the Python never read it"), String::new());
-                        None
-                    }
+                return if let Some(answer) = known.or_else(|| self.first_read(method)) { Some(answer) } else {
+                    self.note(format!("{method} read where the Python never read it"), String::new());
+                    None
                 };
             }
             while self.at < ahead {
@@ -207,7 +204,7 @@ impl Tape {
 
     /// Whether the next call the Python made, past its pure reads, is this one: a test may give its fake the method
     /// after the engine was built.
-    pub fn next_is(&self, method: &str) -> bool {
+    pub(crate) fn next_is(&self, method: &str) -> bool {
         self.calls[self.at.min(self.calls.len())..]
             .iter()
             .find(|call| !is_pure(call["m"].as_str().unwrap_or("")) && (call["o"] != "r" || call["m"] == "read"))
@@ -233,13 +230,13 @@ fn pure_answer(call: &Value) -> Value {
     }
 }
 
-pub fn compact(value: &Value) -> String {
+pub(crate) fn compact(value: &Value) -> String {
     let text = value.to_string();
     if text.chars().count() > 600 { format!("{}…", text.chars().take(600).collect::<String>()) } else { text }
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct Capabilities {
+pub(crate) struct Capabilities {
     pub take_unseen_input: bool,
     pub take_input_delay: bool,
     pub take_hook_gap: bool,
@@ -251,7 +248,7 @@ pub struct Capabilities {
     pub swallows_hotkeys: bool,
 }
 
-pub struct TraceBackend {
+pub(crate) struct TraceBackend {
     pub tape: Arc<Mutex<Tape>>,
     pub capabilities: Capabilities,
 }
@@ -517,7 +514,7 @@ impl InputBackend for TraceBackend {
     }
 }
 
-pub struct TraceReader {
+pub(crate) struct TraceReader {
     pub tape: Arc<Mutex<Tape>>,
 }
 
@@ -529,7 +526,7 @@ fn word_score_value(score: Option<&WordScore>) -> Value {
     })
 }
 
-pub fn field_value(field: &FieldContext) -> Value {
+pub(crate) fn field_value(field: &FieldContext) -> Value {
     json!({"$dc": "FieldContext", "application": field.application, "field_id": field.field_id, "before": field.before, "after": field.after,
            "role": field.role.as_str(), "selection": field.selection, "sensitive": field.sensitive, "source": field.source})
 }
@@ -548,7 +545,7 @@ fn evidence_value(item: &ContextEvidence) -> Value {
 }
 
 /// A context model that asks the tape: the evidence is compared with what the Python's model was asked.
-pub fn answering_model(tape: Arc<Mutex<Tape>>, attributes: &Value, tables: Arc<TermTables>) -> ContextModel {
+pub(crate) fn answering_model(tape: Arc<Mutex<Tape>>, attributes: &Value, tables: Arc<TermTables>) -> ContextModel {
     let mut model = ContextModel::new(WeightTable::empty(), attributes["version"].as_str().unwrap_or(""), attributes["conversion_threshold"].as_f64().unwrap_or(0.5), tables);
     let flag = |name: &str| attributes[name].as_bool().unwrap_or(false);
     model.feature_version = attributes["feature_version"].as_i64().unwrap_or(0);
@@ -585,7 +582,7 @@ pub fn answering_model(tape: Arc<Mutex<Tape>>, attributes: &Value, tables: Arc<T
     model
 }
 
-pub fn role_from(name: &str) -> FieldRole {
+pub(crate) fn role_from(name: &str) -> FieldRole {
     match name {
         "text" => FieldRole::Text,
         "code" => FieldRole::Code,

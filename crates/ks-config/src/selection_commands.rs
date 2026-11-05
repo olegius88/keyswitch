@@ -1,8 +1,8 @@
 //! The selection hotkeys: what they ask of a platform, and what every platform shares.
 //!
-//! A selection hotkey reads the text selected in the focused field, changes it (selection_text) and types the result
+//! A selection hotkey reads the text selected in the focused field, changes it (`selection_text`) and types the result
 //! over it, as typing over a selection replaces it in any editor. The engine decides whether a command may run at all
-//! (KeySwitch on, not its own window, not an excluded program or a password field) and when (every key of the hotkey
+//! (`KeySwitch` on, not its own window, not an excluded program or a password field) and when (every key of the hotkey
 //! released, as for Pause). A backend that offers the two calls below reads and replaces; one that does not is reported
 //! as unable to, and nothing is typed.
 //!
@@ -23,8 +23,9 @@ pub use ks_backend::selected_text::{SOURCE_ATSPI, SOURCE_CLIPBOARD, SOURCE_UIA};
 pub use ks_backend::{RefusalReason, SelectedText, SelectionRefused};
 
 /// What the status line says when a selection hotkey changes nothing; the reason itself goes into the log.
+#[must_use]
 pub fn refusal_message(reason: RefusalReason) -> String {
-    use RefusalReason::*;
+    use RefusalReason::{Disabled, OwnWindow, ExcludedApplication, SensitiveField, Unsupported, NoSelection, MultipleSelection, ReadOnly, TooLong, LineBreaks, Untypeable, Terminal, ClipboardBusy, ClipboardUnrestorable, NotSettable, FocusChanged, ReleaseTimeout, NoLayout, EmptyResult, NoCaret};
     match reason {
         Disabled => "Выделение не изменено: KeySwitch на паузе".to_string(),
         OwnWindow => "Выделение в окне KeySwitch не меняется".to_string(),
@@ -62,6 +63,7 @@ pub enum SelectionCommand {
 
 impl SelectionCommand {
     /// The name the log and the settings give it: "layout", "case", "transliterate".
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             SelectionCommand::Layout => "layout",
@@ -70,7 +72,8 @@ impl SelectionCommand {
         }
     }
 
-    /// COMMAND_TITLES: what the status line calls each command once it has changed the selection.
+    /// `COMMAND_TITLES`: what the status line calls each command once it has changed the selection.
+    #[must_use]
     pub fn title(self) -> &'static str {
         match self {
             SelectionCommand::Layout => "Раскладка выделения изменена",
@@ -88,6 +91,7 @@ pub const COMMANDS: [(&str, SelectionCommand); 3] = [
 ];
 
 /// `COMMANDS.get(name)`.
+#[must_use]
 pub fn command_of_hotkey(name: &str) -> Option<SelectionCommand> {
     COMMANDS.iter().find(|(hotkey, _)| *hotkey == name).map(|(_, command)| *command)
 }
@@ -112,12 +116,13 @@ pub struct SelectionPlan {
 }
 
 impl SelectionPlan {
+    #[must_use]
     pub fn changes(&self, text: &str) -> bool {
         self.replacement != text
     }
 }
 
-/// The selected text, or SelectionRefused for a selection the hotkeys do not change.
+/// The selected text, or `SelectionRefused` for a selection the hotkeys do not change.
 pub fn checked_selection(text: &str) -> Result<&str, SelectionRefused> {
     if text.is_empty() {
         return Err(SelectionRefused::new(RefusalReason::NoSelection));
@@ -175,7 +180,7 @@ pub type KeyChoice = (i64, bool);
 ///
 /// `tables` give each group's key for each character it types. A character is typed in the group the previous one was
 /// typed in when that group has it (spaces, digits and signs on the same key in both layouts do not switch), and
-/// otherwise in the first group that has it. A character no group types makes the whole text SelectionRefused, before
+/// otherwise in the first group that has it. A character no group types makes the whole text `SelectionRefused`, before
 /// a single key is typed.
 pub fn typing_runs(
     text: &str,
@@ -202,7 +207,7 @@ pub fn typing_runs(
 }
 
 /// The code point ranges (first, last) of the characters of Unicode categories Mn, Me and Cf (combining marks and
-/// format characters such as the zero-width joiner of an emoji sequence), as `unicodedata.category` of CPython 3.14
+/// format characters such as the zero-width joiner of an emoji sequence), as `unicodedata.category` of `CPython` 3.14
 /// (Unicode 16.0) gives them. They are the characters the caret does not step over on their own: a selection with them
 /// is not selected back key by key.
 pub const JOINED_CATEGORY_RANGES: &[(u32, u32)] = &[
@@ -273,6 +278,7 @@ pub const JOINED_CATEGORY_RANGES: &[(u32, u32)] = &[
 ];
 
 /// Whether the character is of category Mn, Me or Cf.
+#[must_use]
 pub fn joined_category(character: char) -> bool {
     let code = character.to::<u32>();
     let index = JOINED_CATEGORY_RANGES.partition_point(|range| range.1 < code);
@@ -284,6 +290,7 @@ pub fn joined_category(character: char) -> bool {
 /// The caret steps over one character a press, but over a combining mark together with its letter and over an
 /// emoji sequence as a whole, and some editors count a character above the Basic Multilingual Plane as two; such a
 /// result is left unselected rather than selected wrong.
+#[must_use]
 pub fn caret_steps(text: &str) -> Option<usize> {
     if text.chars().any(|character| character.to::<u32>() > BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT || joined_category(character)) {
         return None;

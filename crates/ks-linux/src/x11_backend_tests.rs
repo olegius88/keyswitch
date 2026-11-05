@@ -185,7 +185,7 @@ impl X11Api for Fake {
         self.with(|state| state.classes.get(&window).cloned())
     }
     fn set_input_focus(&self, _window: u32) {}
-    fn move_raise(&self, _window: u32, x: i32, y: i32) {}
+    fn move_raise(&self, _window: u32, _x: i32, _y: i32) {}
 }
 
 fn payload(event_type: u8, keycode: u8, state: u16, timestamp: u32) -> Vec<u8> {
@@ -314,7 +314,7 @@ fn expected_keys_are_recognised_once_in_order_and_forgotten_after_the_deadline()
     assert!(shared.consume_expected(false, A));
     assert!(!shared.consume_expected(false, A));
     shared.expect(&[&[(true, A)]]);
-    lock(&shared.expected).deadline = Instant::now() - Duration::from_secs(1);
+    lock(&shared.expected).deadline = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
     assert!(!shared.consume_expected(true, A));
     assert_eq!(expected_len(&backend), 0, "a late key empties the queue");
 }
@@ -588,7 +588,7 @@ fn a_kept_tail_is_typed_back_in_the_source_group_where_the_layout_stays() {
     let outcome = backend.inject_correction(Injection { source_group: Some(1), late: &late, kept_tail: 1, ..injection(&strokes, 0, Some(&space)) });
     assert_eq!(outcome, Ok(0));
     let mut want = vec![Call::Lock(0)];
-    for _ in 0..(3 + 1 + 1) {
+    for _ in 0..=(3 + 1) {
         want.extend(tap(BACKSPACE));
     }
     want.extend(tap(A));

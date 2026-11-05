@@ -1,6 +1,6 @@
 //! One command that turns a prepared working tree into a published release: the version into every file that spells it,
 //! the changelog section closed, the checks, the commit, the tag and the push, the release workflow waited for, the
-//! published files checked. It writes no prose: the changelog's Unreleased entries and RELEASE_NOTES.md are the author's,
+//! published files checked. It writes no prose: the changelog's Unreleased entries and `RELEASE_NOTES.md` are the author's,
 //! and it refuses to run without them.
 //!
 //!     ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main]
@@ -232,14 +232,11 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
 fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
     let tag = release_tag(options);
     if !output(root, "git", &["status", "--porcelain"])?.is_empty() {
-        let message = match &options.message_file {
-            Some(path) => std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?,
-            None => {
-                let text = std::fs::read_to_string(root.join("CHANGELOG.md")).map_err(|error| error.to_string())?;
-                let sections = changelog_sections(&text);
-                let entries = sections.iter().find(|(heading, _)| heading.split(' ').next() == Some(options.version.as_str())).map(|(_, entries)| entries.join("\n")).filter(|entries| !entries.is_empty());
-                format!("Release KeySwitch {}\n\n{}\n", options.version, entries.ok_or_else(|| format!("CHANGELOG.md has no entries under {}; nothing to describe", options.version))?)
-            }
+        let message = if let Some(path) = &options.message_file { std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))? } else {
+            let text = std::fs::read_to_string(root.join("CHANGELOG.md")).map_err(|error| error.to_string())?;
+            let sections = changelog_sections(&text);
+            let entries = sections.iter().find(|(heading, _)| heading.split(' ').next() == Some(options.version.as_str())).map(|(_, entries)| entries.join("\n")).filter(|entries| !entries.is_empty());
+            format!("Release KeySwitch {}\n\n{}\n", options.version, entries.ok_or_else(|| format!("CHANGELOG.md has no entries under {}; nothing to describe", options.version))?)
         };
         output(root, "git", &["add", "-A"])?;
         output(root, "git", &["commit", "-m", &message])?;

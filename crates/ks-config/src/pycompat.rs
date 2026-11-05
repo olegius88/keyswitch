@@ -5,8 +5,8 @@
 //!   `\r\n` on Windows when writing), and `utf-8-sig` drops a byte order mark;
 //! - `Path.with_suffix`, which the atomic writes use for their temporary files;
 //! - `==` and truthiness of JSON values (`1 == True == 1.0`, a dict equals a dict in any order);
-//! - `json.loads`: serde_json parses the text. It differs from Python on `NaN`/`Infinity`, integers beyond 64 bits,
-//!   a lone surrogate escape, a float that overflows and nesting deeper than 128 levels: Python reads those, serde_json
+//! - `json.loads`: `serde_json` parses the text. It differs from Python on `NaN`/`Infinity`, integers beyond 64 bits,
+//!   a lone surrogate escape, a float that overflows and nesting deeper than 128 levels: Python reads those, `serde_json`
 //!   refuses them, so the Rust side treats such a file as unreadable. A file written by either program holds none of them.
 
 use ks_cast::To as _;
@@ -19,6 +19,7 @@ pub const WINDOWS_NEWLINES: bool = cfg!(windows);
 
 /// The text a Python `read_text` returns for these bytes: decoded strictly, a byte order mark dropped when
 /// `skip_bom` (the `utf-8-sig` codec), `\r\n` and a lone `\r` turned into `\n`. `None` is a `UnicodeDecodeError`.
+#[must_use]
 pub fn decode_text(bytes: &[u8], skip_bom: bool) -> Option<String> {
     let bytes = if skip_bom { bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes) } else { bytes };
     let text = std::str::from_utf8(bytes).ok()?;
@@ -54,6 +55,7 @@ pub fn read_text(path: &Path, skip_bom: bool) -> Result<String, ReadError> {
 }
 
 /// The bytes `write_text` puts in the file for `text`.
+#[must_use]
 pub fn encoded_text(text: &str) -> Vec<u8> {
     if WINDOWS_NEWLINES && text.contains('\n') {
         text.replace('\n', "\r\n").into_bytes()
@@ -69,6 +71,7 @@ pub fn write_text(path: &Path, text: &str) -> io::Result<()> {
 
 /// `Path.with_suffix(suffix)`: the last suffix of the name (the part from its last dot, unless that dot starts the
 /// name or ends it) is replaced, or the new one is appended.
+#[must_use]
 pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let existing = match name.rfind('.') {
@@ -79,13 +82,15 @@ pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 
 /// `path.with_name(name + suffix)`.
+#[must_use]
 pub fn with_name_suffix(path: &Path, suffix: &str) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     path.with_file_name(format!("{name}{suffix}"))
 }
 
 /// `json.loads(text)`, or `None` for a `ValueError` (see the note on top about the few texts Python reads and
-/// serde_json does not).
+/// `serde_json` does not).
+#[must_use]
 pub fn json_loads(text: &str) -> Option<Value> {
     serde_json::from_str(text).ok()
 }
@@ -110,6 +115,7 @@ fn as_number(value: &Value) -> Option<Result<i128, f64>> {
 }
 
 /// Python `a == b` for JSON values: `True == 1 == 1.0`, strings by code points, lists in order, dicts in any order.
+#[must_use]
 pub fn py_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
@@ -130,6 +136,7 @@ pub fn py_eq(a: &Value, b: &Value) -> bool {
 }
 
 /// Python `bool(value)` of a JSON value.
+#[must_use]
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -145,6 +152,7 @@ pub fn truthy(value: &Value) -> bool {
 }
 
 /// `type(value) is int`: an integer that is not a bool and not a float.
+#[must_use]
 pub fn as_py_int(value: &Value) -> Option<i64> {
     match value {
         Value::Number(n) => n.as_i64(),
@@ -153,6 +161,7 @@ pub fn as_py_int(value: &Value) -> Option<i64> {
 }
 
 /// `isinstance(value, int) and not isinstance(value, bool)`, whatever the size (a float is not an int).
+#[must_use]
 pub fn is_py_int(value: &Value) -> bool {
     matches!(value, Value::Number(n) if n.is_i64() || n.is_u64())
 }

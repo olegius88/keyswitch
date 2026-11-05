@@ -34,6 +34,7 @@ impl Error {
     }
 
     /// The name of the Python class, which is what a report may say about a private failure.
+    #[must_use]
     pub fn type_name(&self) -> &'static str {
         match self {
             Error::Value(_) => "ValueError",
@@ -46,6 +47,7 @@ impl Error {
     }
 
     /// Whether the text is meant for the user (`ValueError` and `RuntimeError` in the Python).
+    #[must_use]
     pub fn has_user_text(&self) -> bool {
         !matches!(self, Error::Os(_) | Error::Other(_))
     }
@@ -65,7 +67,7 @@ impl fmt::Display for Error {
 
 impl From<std::io::Error> for Error {
     fn from(error: std::io::Error) -> Error {
-        use std::io::ErrorKind::*;
+        use std::io::ErrorKind::{NotFound, PermissionDenied, AlreadyExists, IsADirectory, NotADirectory, TimedOut};
         Error::Os(match error.kind() {
             NotFound => "FileNotFoundError",
             PermissionDenied => "PermissionError",
@@ -85,6 +87,7 @@ impl From<sqlite::Error> for Error {
 }
 
 /// Whether an operating system error was a missing file.
+#[must_use]
 pub fn not_found(error: &Error) -> bool {
     matches!(error, Error::Os("FileNotFoundError"))
 }

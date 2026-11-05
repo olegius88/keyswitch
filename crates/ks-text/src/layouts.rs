@@ -66,7 +66,7 @@ fn maps() -> &'static Maps {
         let ru_to_us = case_aware_map(RU_KEYS, US_KEYS);
         let sorted = |m: &Vec<(char, char)>| {
             let mut s = m.clone();
-            s.sort();
+            s.sort_unstable();
             s
         };
         Maps { us_to_ru_sorted: sorted(&us_to_ru), ru_to_us_sorted: sorted(&ru_to_us), us_to_ru, ru_to_us }
@@ -104,11 +104,13 @@ impl LayoutPair {
     }
 
     /// `us_to_ru`, in the dict's insertion order.
+    #[must_use]
     pub fn us_to_ru(&self) -> Vec<(char, char)> {
         maps().us_to_ru.clone()
     }
 
     /// `ru_to_us`, in the dict's insertion order.
+    #[must_use]
     pub fn ru_to_us(&self) -> Vec<(char, char)> {
         maps().ru_to_us.clone()
     }

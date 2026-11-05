@@ -4,11 +4,11 @@
 //! the system waits for it. The hook thread counts here how long after the key it ran and how long
 //! it took; the engine's worker takes the counts once a minute and logs them when a key was late.
 //!
-//! Keys other programs inject (TeamViewer types every character it receives as one) carry no time
+//! Keys other programs inject (`TeamViewer` types every character it receives as one) carry no time
 //! the user pressed them at; only how long the hook took over them is counted, so that on a
-//! computer controlled from another one the log still says whether KeySwitch held its input up.
+//! computer controlled from another one the log still says whether `KeySwitch` held its input up.
 //!
-//! A key the hook reached HOOK_GAP_MS late, or answered that slowly, also leaves a gap: Windows
+//! A key the hook reached `HOOK_GAP_MS` late, or answered that slowly, also leaves a gap: Windows
 //! gives the keys that waited behind it that long to the window without the hook, and the engine
 //! no longer knows what stands after the word it tracks.
 
@@ -19,13 +19,13 @@ use crate::constants::{HOOK_GAP_MS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBA
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputDelayReport {
     pub keys: i64,
-    /// Keys the hook saw INPUT_DELAY_LATE_MS or more after the system stamped them.
+    /// Keys the hook saw `INPUT_DELAY_LATE_MS` or more after the system stamped them.
     pub late_keys: i64,
     pub worst_late_ms: i64,
-    /// Keys, typed or another program's, whose hook callback took INPUT_DELAY_SLOW_CALLBACK_MS or more.
+    /// Keys, typed or another program's, whose hook callback took `INPUT_DELAY_SLOW_CALLBACK_MS` or more.
     pub slow_callbacks: i64,
     pub worst_callback_ms: i64,
-    /// Typed keys stamped INPUT_DELAY_UNSTAMPED_MS or more before the hook saw them: a time of
+    /// Typed keys stamped `INPUT_DELAY_UNSTAMPED_MS` or more before the hook saw them: a time of
     /// their sender's own, no delay.
     pub unstamped_keys: i64,
     /// Keys another program injected, timed by the hook's answer alone.
@@ -33,6 +33,7 @@ pub struct InputDelayReport {
 }
 
 impl InputDelayReport {
+    #[must_use]
     pub fn stalled(&self) -> bool {
         self.late_keys != 0 || self.slow_callbacks != 0
     }
@@ -58,6 +59,7 @@ pub struct InputDelay {
 }
 
 impl InputDelay {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

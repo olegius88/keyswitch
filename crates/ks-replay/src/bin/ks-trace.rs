@@ -13,10 +13,10 @@
 
 #[path = "trace"]
 mod trace {
-    pub mod backend;
-    pub mod compare;
-    pub mod entries;
-    pub mod run;
+    pub(crate) mod backend;
+    pub(crate) mod compare;
+    pub(crate) mod entries;
+    pub(crate) mod run;
 }
 
 use serde_json::{json, Map, Value};

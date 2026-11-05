@@ -376,7 +376,7 @@ pub fn prefix_report(root: &Path, resources: &Arc<Resources>, split: &str, scrat
     });
     let mut results: BTreeMap<String, BTreeMap<&str, BTreeMap<&str, i64>>> = BTreeMap::new();
     let mut failures: Vec<Value> = Vec::new();
-    for (task, done) in tasks.iter().zip(outcome.into_inner().expect("finished").into_iter()) {
+    for (task, done) in tasks.iter().zip(outcome.into_inner().expect("finished")) {
         let (counts, failed) = done.ok_or("a task did not run")??;
         let (profile, native, name) = *task;
         let room = PREFIX_MAX_RECORDED_FAILURES.saturating_sub(failures.len());

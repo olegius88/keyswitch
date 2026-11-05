@@ -560,7 +560,7 @@ impl Typist {
             if job.mode == US_SIGNS_MODE && intended == 1 && token.chars().any(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4]))) {
                 let signed: Vec<String> = token.chars().zip(keys.iter()).map(|(character, key)| if matches!(character, '.' | ',') { character.to_string() } else { key.clone() }).collect();
                 // The sign typed on the key of the English layout means that key's reading there: `2ю` is meant `2.`.
-                meant = if signed != keys { 1 - intended } else { intended };
+                meant = if signed == keys { intended } else { 1 - intended };
                 keys = signed;
             }
             let group = session.backend.group();
@@ -724,7 +724,7 @@ pub(crate) fn recipe_previous_line(recipe: &Value, text: &str, index: usize, mes
         return None;
     }
     let half = value / MIXED_PREFIX_KINDS;
-    if code_lines != 0 && value % MIXED_PREFIX_KINDS == 0 {
+    if code_lines != 0 && value.is_multiple_of(MIXED_PREFIX_KINDS) {
         return Some(("code", (half % code_lines.to::<u64>()).to::<usize>()));
     }
     if lines_above != 0 {
@@ -758,7 +758,7 @@ pub fn jobs_for(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Re
         let mut prefix = String::new();
         if (value % MIXED_DRAW_RESOLUTION).to::<f64>() < prefix_rate * MIXED_DRAW_RESOLUTION.to::<f64>() {
             let half = value / MIXED_PREFIX_KINDS;
-            let line = if !code.is_empty() && value % MIXED_PREFIX_KINDS == 0 {
+            let line = if !code.is_empty() && value.is_multiple_of(MIXED_PREFIX_KINDS) {
                 &code[(half % code.len().to::<u64>()).to::<usize>()]
             } else if !above_pool.is_empty() {
                 &above_pool[(half % above_pool.len().to::<u64>()).to::<usize>()]
@@ -921,7 +921,7 @@ pub fn capture(resource_dir: &Path, manifest: &Path, messages: &Path, model: &Pa
 }
 
 /// `evaluate`: final text against intended text, per typing mode.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn evaluate(resource_dir: &Path, messages: &Path, recipe: &Value, code: Option<&Path>, model: &Path, output: &Path, workers: usize) -> Result<Value, String> {
     let jobs = jobs_for(messages, recipe, code)?;
     let bench = Bench::new(resource_dir)?;
@@ -1088,7 +1088,7 @@ fn ledger_records(ledger: &Path, suffix: &str) -> Result<Vec<(PathBuf, Value)>, 
 }
 
 /// `evaluate_devchat_test.evaluate`: development read freely, the test once, each with its floors.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let split = request.split;
     let directory = request.directory;

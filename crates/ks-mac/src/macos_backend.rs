@@ -121,6 +121,7 @@ pub struct NativeInput {
 }
 
 impl NativeInput {
+    #[must_use]
     pub const fn new(pressed: bool, keycode: u32) -> Self {
         NativeInput { pressed, keycode, replayed: false, shift: false, command: false }
     }
@@ -186,6 +187,7 @@ pub trait MacAPI: Send + Sync {
 /// Caps Lock is never down. macOS sends one flags change per toggle and none when the key comes up, and its flag holds the
 /// lock rather than the key: read as a held modifier, an engaged lock kept every correction waiting for a release that
 /// comes only when the lock is turned off.
+#[must_use]
 pub fn modifier_pressed(keycode: u32, flags: u64) -> bool {
     let device = MAC_MODIFIER_DEVICE_FLAGS.iter().find(|(key, _)| *key == keycode).map(|(_, flag)| *flag);
     if let Some(device) = device.filter(|_| flags & MAC_DEVICE_FLAGS_MASK != 0) {
@@ -194,6 +196,7 @@ pub fn modifier_pressed(keycode: u32, flags: u64) -> bool {
     MAC_MODIFIER_SHARED_FLAGS.iter().find(|(key, _)| *key == keycode).is_some_and(|(_, shared)| flags & shared != 0)
 }
 
+#[must_use]
 pub fn is_cyrillic(text: &str) -> bool {
     text.chars().next().is_some_and(|first| (CYRILLIC_CODEPOINT_RANGE.0..=CYRILLIC_CODEPOINT_RANGE.1).contains(&first.to::<u32>()))
 }
@@ -229,6 +232,7 @@ pub fn select_source_pair(sources: &[String], translate: &dyn Fn(u32, u32, &str)
 ///
 /// macOS has no per-key names, so a letter key is named after the character it produces in the English layout, which is
 /// how the engine's own key names for letters and digits are spelled.
+#[must_use]
 pub fn key_name(keycode: u32, character: &str) -> String {
     if let Some((_, name)) = KEY_NAMES.iter().find(|(key, _)| *key == keycode) {
         return (*name).to_owned();
@@ -426,11 +430,13 @@ impl MacBackend {
         }
     }
 
+    #[must_use]
     pub fn running(&self) -> bool {
         self.inner.running.load(Ordering::Acquire)
     }
 
     /// How often the system switched the tap off and it was revived.
+    #[must_use]
     pub fn tap_revivals(&self) -> u64 {
         self.inner.tap_revivals.load(Ordering::Relaxed)
     }
@@ -440,6 +446,7 @@ impl MacBackend {
     }
 
     /// The tap's answer for one event: whether the window must not get it.
+    #[must_use]
     pub fn handle_native(&self, native: NativeKeyEvent) -> bool {
         self.inner.handle_native(native)
     }
@@ -450,6 +457,7 @@ impl MacBackend {
     }
 
     /// Whether macOS currently lets the program watch the keyboard.
+    #[must_use]
     pub fn permission_granted(&self) -> bool {
         self.inner.api.accessibility_trusted(false)
     }
@@ -458,6 +466,7 @@ impl MacBackend {
     ///
     /// macOS grants nothing on request: it shows its own dialog, and the pane is opened as well because that dialog appears
     /// only once per program.
+    #[must_use]
     pub fn request_permission(&self) -> bool {
         let granted = self.inner.api.accessibility_trusted(true);
         if !granted {
@@ -527,7 +536,7 @@ impl InputBackend for MacBackend {
         self.inner.inject_correction(&injection)
     }
 
-    /// The tap can keep a key from the window, so KeySwitch's own hotkeys stay its own (`engine.consumes_key`): TextEdit typed
+    /// The tap can keep a key from the window, so `KeySwitch`'s own hotkeys stay its own (`engine.consumes_key`): `TextEdit` typed
     /// Control+Option+Z as an invisible U+001A, and the undo deleted that in place of the word's last letter.
     fn swallows_hotkeys(&self) -> bool {
         true
@@ -549,7 +558,7 @@ impl InputBackend for MacBackend {
         self.inner.api.input_anchor()
     }
 
-    /// macOS gives the focus back to the program a prompt covered on its own, because KeySwitch runs without a place in the
+    /// macOS gives the focus back to the program a prompt covered on its own, because `KeySwitch` runs without a place in the
     /// dock and never becomes the active program, so there is nothing here to undo.
     fn restore_window(&self, _window: Option<i64>) -> bool {
         false
@@ -672,12 +681,11 @@ impl Inner {
         }
         self.api.stop_event_tap();
         let tap_thread = lock(&self.thread).take();
-        if let Some(tap_thread) = tap_thread {
-            if tap_thread.id != thread::current().id() {
+        if let Some(tap_thread) = tap_thread
+            && tap_thread.id != thread::current().id() {
                 // Disconnected or timed out: either way the wait is over, and the thread is left to end alone.
                 let _ = tap_thread.finished.recv_timeout(Duration::from_secs_f64(KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS));
             }
-        }
         self.running.store(false, Ordering::Release);
     }
 
@@ -985,7 +993,7 @@ impl Inner {
         if !valid(literal_group) || literal.iter().any(|stroke| stroke.group != literal_group) {
             return Err(failed("Некорректная раскладка пунктуации; замена отменена"));
         }
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         let mut late_deleted = false;
         let mut late_typed = false;
         let mut failure: Option<MacBackendError> = (|| -> Result<(), MacBackendError> {
@@ -1044,7 +1052,7 @@ impl Inner {
     /// Shift+Left as many times as the result has characters. The layout moves to `final_group` afterwards.
     fn replace_selection(&self, selected: &SelectedText, replacement: &str, final_group: Option<i32>) -> Result<bool, SelectionError> {
         let steps = caret_steps(replacement);
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         if self.pointer_or_focus_moved() {
             return Err(refused(RefusalReason::FocusChanged));
         }
@@ -1055,8 +1063,8 @@ impl Inner {
             Err(error) => return Err(error),
         };
         let mut reselected = where_ == SelectionAfter::Kept;
-        if where_ == SelectionAfter::CaretAfter {
-            if let Some(steps) = steps {
+        if where_ == SelectionAfter::CaretAfter
+            && let Some(steps) = steps {
                 let mut inputs = vec![NativeInput::new(true, MAC_VK_SHIFT)];
                 for _ in 0..steps {
                     for pressed in [true, false] {
@@ -1067,7 +1075,6 @@ impl Inner {
                 self.post_exact(&inputs)?;
                 reselected = true;
             }
-        }
         if let Some(group) = final_group {
             self.switch_group_confirmed(group)?;
         }
@@ -1090,20 +1097,17 @@ impl Inner {
         }
         let before = access.selected_range(selected)?;
         let ours = board.put_text(replacement);
-        let pasted = match ours {
-            None => Err(failed("macOS не положила текст в буфер обмена")),
-            Some(_) => {
-                let outcome = self.post_exact(&[
-                    NativeInput::new(true, MAC_VK_COMMAND),
-                    NativeInput { command: true, ..NativeInput::new(true, MAC_VK_ANSI_V) },
-                    NativeInput { command: true, ..NativeInput::new(false, MAC_VK_ANSI_V) },
-                    NativeInput::new(false, MAC_VK_COMMAND),
-                ]);
-                if outcome.is_ok() {
-                    self.clock.sleep(MACOS_PASTE_RESTORE_DELAY_SECONDS);
-                }
-                outcome
+        let pasted = if ours.is_none() { Err(failed("macOS не положила текст в буфер обмена")) } else {
+            let outcome = self.post_exact(&[
+                NativeInput::new(true, MAC_VK_COMMAND),
+                NativeInput { command: true, ..NativeInput::new(true, MAC_VK_ANSI_V) },
+                NativeInput { command: true, ..NativeInput::new(false, MAC_VK_ANSI_V) },
+                NativeInput::new(false, MAC_VK_COMMAND),
+            ]);
+            if outcome.is_ok() {
+                self.clock.sleep(MACOS_PASTE_RESTORE_DELAY_SECONDS);
             }
+            outcome
         };
         let restored = ours.is_some_and(|ours| board.pasteboard_change_count() != ours) || board.write_pasteboard(&saved);
         pasted?;

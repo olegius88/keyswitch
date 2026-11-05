@@ -7,16 +7,16 @@ use ks_cast::To as _;
 use std::cmp::Ordering;
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct BigUint {
+pub(crate) struct BigUint {
     limbs: Vec<u32>,
 }
 
 impl BigUint {
-    pub fn zero() -> Self {
+    pub(crate) fn zero() -> Self {
         BigUint { limbs: Vec::new() }
     }
 
-    pub fn from_u64(v: u64) -> Self {
+    pub(crate) fn from_u64(v: u64) -> Self {
         let mut b = BigUint { limbs: vec![v.low::<u32>(), (v >> 32).to::<u32>()] };
         b.trim();
         b
@@ -28,12 +28,12 @@ impl BigUint {
         }
     }
 
-    pub fn is_zero(&self) -> bool {
+    pub(crate) fn is_zero(&self) -> bool {
         self.limbs.is_empty()
     }
 
     /// `int.bit_length()`.
-    pub fn bit_length(&self) -> u64 {
+    pub(crate) fn bit_length(&self) -> u64 {
         match self.limbs.last() {
             None => 0,
             Some(&top) => (self.limbs.len().to::<u64>() - 1) * 32 + u64::from(32 - top.leading_zeros()),
@@ -45,7 +45,7 @@ impl BigUint {
         limb < self.limbs.len() && (self.limbs[limb] >> (i % 32)) & 1 == 1
     }
 
-    pub fn shl(&self, n: u64) -> Self {
+    pub(crate) fn shl(&self, n: u64) -> Self {
         if self.is_zero() {
             return Self::zero();
         }
@@ -66,7 +66,7 @@ impl BigUint {
         b
     }
 
-    pub fn shr(&self, n: u64) -> Self {
+    pub(crate) fn shr(&self, n: u64) -> Self {
         let (words, bits) = ((n / 32).to::<usize>(), (n % 32).to::<u32>());
         if words >= self.limbs.len() {
             return Self::zero();
@@ -82,7 +82,7 @@ impl BigUint {
         b
     }
 
-    pub fn add(&self, other: &Self) -> Self {
+    pub(crate) fn add(&self, other: &Self) -> Self {
         let n = self.limbs.len().max(other.limbs.len());
         let mut limbs = Vec::with_capacity(n + 1);
         let mut carry = 0u64;
@@ -98,7 +98,7 @@ impl BigUint {
     }
 
     /// `self - other`; requires `self >= other`.
-    pub fn sub(&self, other: &Self) -> Self {
+    pub(crate) fn sub(&self, other: &Self) -> Self {
         assert!(self.cmp(other) != Ordering::Less, "BigUint subtraction underflow");
         let mut limbs = Vec::with_capacity(self.limbs.len());
         let mut borrow = 0i64;
@@ -117,7 +117,7 @@ impl BigUint {
         b
     }
 
-    pub fn mul(&self, other: &Self) -> Self {
+    pub(crate) fn mul(&self, other: &Self) -> Self {
         if self.is_zero() || other.is_zero() {
             return Self::zero();
         }
@@ -137,7 +137,7 @@ impl BigUint {
     }
 
     /// Quotient and remainder by shift-and-subtract; `divisor` must not be zero.
-    pub fn divrem(&self, divisor: &Self) -> (Self, Self) {
+    pub(crate) fn divrem(&self, divisor: &Self) -> (Self, Self) {
         assert!(!divisor.is_zero(), "division by zero");
         if self.cmp(divisor) == Ordering::Less {
             return (Self::zero(), self.clone());
@@ -164,7 +164,7 @@ impl BigUint {
     }
 
     /// Remainder by a small number.
-    pub fn rem_small(&self, m: u32) -> u32 {
+    pub(crate) fn rem_small(&self, m: u32) -> u32 {
         let mut r = 0u64;
         for &l in self.limbs.iter().rev() {
             r = ((r << 32) | u64::from(l)) % u64::from(m);
@@ -173,7 +173,7 @@ impl BigUint {
     }
 
     /// `math.isqrt`: the floor of the square root (Newton iteration from above).
-    pub fn isqrt(&self) -> Self {
+    pub(crate) fn isqrt(&self) -> Self {
         if self.is_zero() {
             return Self::zero();
         }
@@ -190,7 +190,7 @@ impl BigUint {
 
     /// The correctly rounded (half to even) double nearest to `self * 2^exp2`, subnormals and overflow
     /// to infinity included: what `int / int` does in Python when the divisor is a power of two.
-    pub fn to_f64_scaled(&self, exp2: i64) -> f64 {
+    pub(crate) fn to_f64_scaled(&self, exp2: i64) -> f64 {
         if self.is_zero() {
             return 0.0;
         }

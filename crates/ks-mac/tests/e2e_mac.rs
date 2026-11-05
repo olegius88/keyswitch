@@ -1,4 +1,4 @@
-//! The real thing on a Mac: the program, TextEdit in front, keys posted at the HID level, the document read back through
+//! The real thing on a Mac: the program, `TextEdit` in front, keys posted at the HID level, the document read back through
 //! the accessibility tree. Started from a Terminal that holds the Accessibility permission, by `packaging/e2e-mac.command`,
 //! with `KS_E2E_BINARY` naming the program; otherwise, and on other systems, it says so and passes.
 
@@ -107,7 +107,7 @@ mod scenario {
         })
     }
 
-    /// Lets HIToolbox hear about layout changes: without a run loop this process keeps a stale one.
+    /// Lets `HIToolbox` hear about layout changes: without a run loop this process keeps a stale one.
     fn pump(seconds: f64) {
         // SAFETY: the mode is the framework's constant.
         unsafe {
@@ -121,7 +121,7 @@ mod scenario {
         unsafe {
             let service = IOServiceGetMatchingService(0, IOServiceMatching(name.as_ptr()));
             let mut connect = 0_u32;
-            let status = IOServiceOpen(service, mach_task_self_, IOHID_PARAM_CONNECT, &mut connect);
+            let status = IOServiceOpen(service, mach_task_self_, IOHID_PARAM_CONNECT, &raw mut connect);
             if status != 0 {
                 return Err(format!("IOServiceOpen: {status}"));
             }
@@ -140,7 +140,7 @@ mod scenario {
     }
 
     impl Driver {
-        /// Stops the run unless TextEdit is in front: no key may reach another program.
+        /// Stops the run unless `TextEdit` is in front: no key may reach another program.
         fn guard(&self) -> Result<(), String> {
             for _ in 0..FRONT_ATTEMPTS {
                 if frontmost_application().1 == "TextEdit" {
@@ -392,17 +392,16 @@ mod scenario {
         let _ = child.wait();
         let _ = Command::new("pkill").args(["-x", "TextEdit"]).status();
         let failures = driver.failures.borrow().clone();
-        if !failures.is_empty() || outcome.is_err() {
-            if let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
+        if (!failures.is_empty() || outcome.is_err())
+            && let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
                 println!("{}", log.lines().rev().take(30).collect::<Vec<&str>>().join("\n"));
             }
-        }
         let _ = std::fs::remove_dir_all(&root);
         outcome?;
         if failures.is_empty() { Ok(()) } else { Err(failures.join(", ")) }
     }
 
-    pub fn main() {
+    pub(crate) fn main() {
         let Some(binary) = std::env::var_os("KS_E2E_BINARY") else {
             println!("KS_E2E_BINARY is not set: no program to drive, skipped");
             return;

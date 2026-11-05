@@ -67,7 +67,7 @@ impl EngineCore {
     /// runs only once the key that triggered it is up. A user who presses the next
     /// letter before the space comes up (rollover typing) has the next word begun by
     /// then, and keys still queued behind the trigger stand in the field too.
-    /// collect_late_input deletes such keys with the word and types them again; the
+    /// `collect_late_input` deletes such keys with the word and types them again; the
     /// field check has to expect them as well. It refused every such correction as a
     /// changed field: with the field reader on, `ghbdtn vbh` typed with the `v` pressed
     /// before the space came up stayed as typed, its next word with it (Windows field
@@ -123,7 +123,7 @@ impl EngineCore {
         "other_text"
     }
 
-    /// How long a correction may wait for its field (detection.field_catch_up); a value not offered is the default.
+    /// How long a correction may wait for its field (`detection.field_catch_up`); a value not offered is the default.
     fn field_catch_up_seconds(&self) -> f64 {
         let mut value = self.text_setting("detection.field_catch_up", DEFAULT_FIELD_CATCH_UP);
         if !FIELD_CATCH_UP_CHOICES.contains(&value.as_str()) {
@@ -135,10 +135,10 @@ impl EngineCore {
     /// Whether a correction waits for a field that has not shown its word yet, rather than give it up.
     ///
     /// A browser or an Electron editor on Windows reports its text a moment after the keys: the word is there short
-    /// of its last letters or its boundary (_typed_in_field), and refused as a changed field, the correction was
+    /// of its last letters or its boundary (_`typed_in_field`), and refused as a changed field, the correction was
     /// lost (`ашкуащч` stayed for `firefox` in Antigravity, field typing of 19.10.2026). It is tried again on
-    /// the engine's timer (retry_field_wait) for as long as detection.field_catch_up allows, and made only once the
-    /// field shows the very word typed (_field_refusal); one that never does is given up as before.
+    /// the engine's timer (`retry_field_wait`) for as long as `detection.field_catch_up` allows, and made only once the
+    /// field shows the very word typed (_`field_refusal`); one that never does is given up as before.
     fn waits_for_field(&mut self, plan: &PlanRef, learning_prompt: Option<&LearningPrompt>, field: &FieldContext, waiting: Option<&FieldWait>) -> bool {
         let mut typed = plan.original.clone();
         typed.extend(plan.trailing.iter().map(|stroke| stroke.character.as_str()));
@@ -172,7 +172,7 @@ impl EngineCore {
         true
     }
 
-    /// A correction waiting for its field (waits_for_field) is tried again once no key is held down; a correction
+    /// A correction waiting for its field (`waits_for_field`) is tried again once no key is held down; a correction
     /// planned since then supersedes it, and it is given up as an unseen field always was.
     pub fn retry_field_wait(&mut self) {
         let Some(waiting) = self.field_wait.clone() else {
@@ -516,9 +516,7 @@ impl EngineCore {
             // nothing before it, and the model declined `b redis` as `и redis` (rollover typing).
             context_reset_reason = "";
         }
-        if !context_reset_reason.is_empty() {
-            self.context_policy.stream.clear();
-        } else {
+        if context_reset_reason.is_empty() {
             // The shown "@" is the replacement itself, not a literal after it.
             let boundary: String = if plan.mode == "mention_shown" {
                 String::new()
@@ -528,6 +526,8 @@ impl EngineCore {
                 text
             };
             self.context_policy.stream.replace_suffix(&plan.original, &plan.replacement, &boundary);
+        } else {
+            self.context_policy.stream.clear();
         }
         let erased_strokes = if plan.replaced_strokes.is_empty() { plan.strokes.len() } else { plan.replaced_strokes.len() };
         technical_event!(

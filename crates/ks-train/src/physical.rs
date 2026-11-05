@@ -54,24 +54,29 @@ pub fn translated(text: &str, group: i64) -> Result<String, char> {
 }
 
 /// `translated` where the Python lets the exception stop the fit.
+#[must_use]
 pub fn reading(text: &str, group: i64) -> String {
     translated(text, group).unwrap_or_else(|glyph| panic!("unsupported physical glyph U+{:04X} in group {group}", u32::from(glyph)))
 }
 
 /// The first key that types a character in this layout.
+#[must_use]
 pub fn key_of(character: char, group: usize) -> Option<&'static PhysicalKey> {
     BY_CHARACTER[group].get(&character).map(|index| &KEYS[*index])
 }
 
+#[must_use]
 pub fn sha256(text: &str) -> [u8; 32] {
     Sha256::digest(text.as_bytes()).into()
 }
 
 /// `hashlib.sha256(text.encode()).hexdigest()`.
+#[must_use]
 pub fn hex_digest(text: &str) -> String {
     hex(&sha256(text))
 }
 
+#[must_use]
 pub fn hex(bytes: &[u8]) -> String {
     let mut result = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -81,6 +86,7 @@ pub fn hex(bytes: &[u8]) -> String {
 }
 
 /// `variant_choice`: a number below `count` from the first eight hex digits of the hash of `purpose:identifier`.
+#[must_use]
 pub fn variant_choice(identifier: &str, purpose: &str, count: usize) -> usize {
     let mut hasher = Sha256::new();
     hasher.update(purpose.as_bytes());
@@ -91,6 +97,7 @@ pub fn variant_choice(identifier: &str, purpose: &str, count: usize) -> usize {
 }
 
 /// `_ring_point`: the first sixteen hex digits of the hash.
+#[must_use]
 pub fn ring_point(text: &str) -> u64 {
     let digest = sha256(text);
     u64::from_be_bytes([digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7]])
@@ -98,6 +105,7 @@ pub fn ring_point(text: &str) -> u64 {
 
 static PAIR: LazyLock<LayoutPair> = LazyLock::new(LayoutPair::default);
 
+#[must_use]
 pub fn pair() -> &'static LayoutPair {
     &PAIR
 }
@@ -127,12 +135,9 @@ pub fn physical_aliases(form: &str, aliases: &mut BTreeSet<String>) {
                         group = 1 - group;
                     }
                 }
-                match key_of(character, group) {
-                    Some(key) => positions.push(key.keycode.to_string()),
-                    None => {
-                        whole = false;
-                        break;
-                    }
+                if let Some(key) = key_of(character, group) { positions.push(key.keycode.to_string()) } else {
+                    whole = false;
+                    break;
                 }
             }
             if whole {
@@ -158,6 +163,7 @@ pub fn expanded_aliases(form: &str) -> BTreeSet<String> {
 }
 
 /// `repr(str)`: a Python string as its source text.
+#[must_use]
 pub fn py_repr(text: &str) -> String {
     let quote = if text.contains('\'') && !text.contains('"') { '"' } else { '\'' };
     let mut result = String::with_capacity(text.len() + 2);

@@ -11,7 +11,7 @@ use ks_backend::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK};
 use ks_backend::{BackendError, ScreenAnchor};
 use objc2::msg_send;
 
-use crate::constants::*;
+use crate::constants::{CF_STRING_ENCODING_UTF8, CF_STRING_MAX_BYTES, CF_NUMBER_SINT32_TYPE, UC_MODIFIER_SHIFT, UC_MODIFIER_ALPHA_LOCK, UC_MODIFIER_OPTION, UC_MODIFIER_CONTROL, WINDOW_LIST_ON_SCREEN_ONLY, WINDOW_LIST_EXCLUDE_DESKTOP, NULL_WINDOW_ID, NORMAL_WINDOW_LAYER, EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT, EVENT_LEFT_MOUSE_DOWN, EVENT_RIGHT_MOUSE_DOWN, EVENT_OTHER_MOUSE_DOWN, EVENT_SOURCE_USER_DATA_FIELD, KEYBOARD_EVENT_KEYCODE_FIELD, EVENT_FLAGS_CHANGED, EVENT_KEY_DOWN, EVENT_MARK_INJECTED, EVENT_MARK_REPLAYED, MACOS_MAIN_THREAD_WAIT_SECONDS, MACOS_TAP_MAIN_THREAD_WAIT_SECONDS, MACOS_LAYOUT_SWITCH_WAIT_SECONDS, UC_KEY_TRANSLATE_BUFFER_CHARACTERS, UC_KEY_ACTION_DISPLAY, UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, EVENT_FLAG_SHIFT, EVENT_FLAG_DEVICE_LEFT_SHIFT, EVENT_FLAG_COMMAND, EVENT_FLAG_DEVICE_LEFT_COMMAND, SESSION_EVENT_TAP, EVENT_FLAG_ALPHA_SHIFT, EVENT_KEY_UP, HEAD_INSERT_EVENT_TAP, EVENT_TAP_OPTION_DEFAULT, EVENT_TAP_RUN_LOOP_SLICE_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS, AX_SUCCESS, AX_VALUE_TYPE_CF_RANGE};
 use crate::macos_backend::{MacAPI, MacBackendError, MacPasteboardAPI, NativeInput, NativeKeyEvent, PasteboardContents, TapListener, TapReady, modifier_pressed};
 use crate::macos_context::{AccessibilityAPI, SelectionAccessibilityAPI};
 use crate::macos_main_thread::MainThreadRunner;
@@ -107,7 +107,7 @@ unsafe extern "C" {
     fn getpid() -> i32;
 }
 
-/// The pane of System Settings that holds the switch KeySwitch needs. macOS has no call that grants the permission; the
+/// The pane of System Settings that holds the switch `KeySwitch` needs. macOS has no call that grants the permission; the
 /// most a program may do is ask, and then take the user to the place where the answer is given.
 const ACCESSIBILITY_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
 
@@ -129,7 +129,7 @@ fn post_to_main_queue(number: u64) {
 
 pub static MAIN_THREAD: MainThreadRunner = MainThreadRunner::new(is_main_thread, post_to_main_queue);
 
-/// Work for the main thread, without waiting for it: what AppKit may only be told there.
+/// Work for the main thread, without waiting for it: what `AppKit` may only be told there.
 pub fn run_on_main(action: Box<dyn FnOnce() + Send>) {
     extern "C" fn trampoline(context: *mut c_void) {
         // SAFETY: the box was leaked below for this one call.
@@ -260,6 +260,7 @@ impl Default for NativeMacAPI {
 }
 
 impl NativeMacAPI {
+    #[must_use]
     pub fn new() -> Self {
         NativeMacAPI { state: Arc::new(State::default()) }
     }
@@ -400,7 +401,7 @@ impl MacAPI for NativeMacAPI {
             }
             let (mut dead, mut length) = (0u32, 0);
             let mut buffer = [0u16; UC_KEY_TRANSLATE_BUFFER_CHARACTERS];
-            let status = UCKeyTranslate(pointer, keycode.low::<u16>(), UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &mut dead, buffer.len().to::<c_ulong>(), &mut length, buffer.as_mut_ptr());
+            let status = UCKeyTranslate(pointer, keycode.low::<u16>(), UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &raw mut dead, buffer.len().to::<c_ulong>(), &raw mut length, buffer.as_mut_ptr());
             if status != 0 || length == 0 {
                 return String::new();
             }
@@ -675,6 +676,7 @@ impl Default for NativeAccessibility {
 }
 
 impl NativeAccessibility {
+    #[must_use]
     pub fn new() -> Self {
         // SAFETY: creates the system-wide element, kept for the life of this object.
         NativeAccessibility { system: (unsafe { AXUIElementCreateSystemWide() }).to::<usize>(), names: Mutex::new(HashMap::new()) }
@@ -700,7 +702,7 @@ impl NativeAccessibility {
         }
         let mut value: CFRef = std::ptr::null();
         // SAFETY: the element and the key are valid; the value is written by the call.
-        let status = unsafe { AXUIElementCopyAttributeValue(element.pointer::<c_void>(), key, &mut value) };
+        let status = unsafe { AXUIElementCopyAttributeValue(element.pointer::<c_void>(), key, &raw mut value) };
         if status == AX_SUCCESS { value } else { std::ptr::null() }
     }
 }
@@ -753,7 +755,7 @@ impl SelectionAccessibilityAPI for NativeAccessibility {
         }
         let mut settable = false;
         // SAFETY: the element and the key are valid; the answer is written by the call.
-        let status = unsafe { AXUIElementIsAttributeSettable(element.pointer::<c_void>(), key, &mut settable) };
+        let status = unsafe { AXUIElementIsAttributeSettable(element.pointer::<c_void>(), key, &raw mut settable) };
         status == AX_SUCCESS && settable
     }
 

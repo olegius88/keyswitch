@@ -170,8 +170,8 @@ impl EngineCore {
     /// the token was judged whole and its whole other reading (`ьщтпщ-сервиса`) is no word
     /// either. Asked alone, behind the head as typed, the part after the hyphen is decided as
     /// any word (19 of 20 authored terms and Russian words, 13.10.2026). Any sign typed the same
-    /// in both layouts joins parts the same way (_joins_parts); a slash has its own rule
-    /// (literal_head). A token the code guard protects stays whole, as before: an identifier, an
+    /// in both layouts joins parts the same way (_`joins_parts`); a slash has its own rule
+    /// (`literal_head`). A token the code guard protects stays whole, as before: an identifier, an
     /// assignment or an address (`user_name`, `foo=bar`, `user@host`) is not prose whose words were
     /// typed in two layouts. As after a slash, the head is never replaced, a head segment that itself
     /// looks like a word in the wrong layout abstains (one span cannot fix two words), and only
@@ -187,8 +187,8 @@ impl EngineCore {
     }
 
     /// The strokes up to the last joining sign, when the token is parts joined by it and every part before
-    /// it is settled as typed (joined_head); 0 otherwise. Pause converts the part after them alone, whatever
-    /// decides automatic corrections (schedule_manual_conversion).
+    /// it is settled as typed (`joined_head`); 0 otherwise. Pause converts the part after them alone, whatever
+    /// decides automatic corrections (`schedule_manual_conversion`).
     pub(crate) fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
         let last_join = strokes.iter().rposition(|stroke| Self::_joins_parts(stroke));
         let targets = self.other_groups(source_group);
@@ -220,16 +220,16 @@ impl EngineCore {
         if lettered { head } else { 0 }
     }
 
-    /// The part after the last joining sign asked as a word of its own (joined_head).
+    /// The part after the last joining sign asked as a word of its own (`joined_head`).
     ///
     /// Returns the head's length and the part's decision when the model converts the part and the
     /// head stays: a token kept whole (`mongo-cthdbcf`), or one converted whole although the model,
     /// asked about the head alone, keeps it (`docker-j,hfp` became `вщслук-образ`; `docker` alone is
     /// kept at p=1.0, while `BB` of `BB-fccbcntyn` is only a suggestion and the whole `ИИ-ассистент`
-    /// stands). Signs split off the end (replayed_signs) stay split off the part: `mongo-cthdbcf/` is
+    /// stands). Signs split off the end (`replayed_signs`) stay split off the part: `mongo-cthdbcf/` is
     /// `mongo-сервиса.`. Otherwise the token stays as the whole of it was judged, with that
     /// judgement's context result.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn decide_joined_part(
         &mut self, strokes: &[Stroke], signs: &[Stroke], source_group: i64, targets: &[i64], application: &str, trigger: CorrectionTrigger,
         boundary: Option<&Stroke>, whole: &DetectionDecision,
@@ -432,7 +432,7 @@ impl EngineCore {
             .map_or_else(String::new, |field| field.field_id.clone())
     }
 
-    /// The start of a word still being typed: PAUSE_WORD_START_LETTERS letters that many words of
+    /// The start of a word still being typed: `PAUSE_WORD_START_LETTERS` letters that many words of
     /// their own language begin with, whose other reading is no word of the other language's prose.
     /// `иг` is the start of `игру` and `bu` no English word, while `ша` typed for `if` is.
     pub(crate) fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
@@ -475,7 +475,7 @@ impl EngineCore {
             })
     }
 
-    /// Make `keys`, typed after the last word, part of what Pause deletes and types again (pause_reaches_past).
+    /// Make `keys`, typed after the last word, part of what Pause deletes and types again (`pause_reaches_past`).
     ///
     /// They are the same in every layout, so they take the group of the word's boundary: a correction types its
     /// literal keys in one layout.
@@ -576,8 +576,8 @@ impl EngineCore {
         model.score(text).known || model.score(&text.replace('ё', "е").replace('Ё', "Е")).known
     }
 
-    /// Whether the text is a word of the group's language: the lexicon holds it (known_reading), or prose of that
-    /// language uses it at least KEPT_WORD_PROSE_MIN_COUNT times (the term tables): the shipped Russian lexicon holds no
+    /// Whether the text is a word of the group's language: the lexicon holds it (`known_reading`), or prose of that
+    /// language uses it at least `KEPT_WORD_PROSE_MIN_COUNT` times (the term tables): the shipped Russian lexicon holds no
     /// `ой`, `ох` or `эх`.
     pub(crate) fn word_of_its_language(&self, group: i64, text: &str) -> EngineResult<bool> {
         let prose = if group == 1 { "russian" } else { "english" };

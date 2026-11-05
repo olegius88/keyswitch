@@ -22,19 +22,20 @@ use crate::constants::{
 };
 use crate::windows_backend::{NativeInput, NativeKeyEvent};
 
-/// The time of every key and pointer event the hooks got, newest last (hook_input_times).
+/// The time of every key and pointer event the hooks got, newest last (`hook_input_times`).
 ///
 /// The hook's thread is the only writer and must never wait, so there is no lock: a copy on the engine's thread can run
 /// while a key comes. `next` is published after its slot, so every slot below it holds a time. A slot the copy reaches
 /// late may already hold a newer time than the one it replaced; that only touches the oldest entries, which would have
-/// dropped out of the next copy anyway, and take_unseen_input asks of them nothing but whether a time is among them.
-/// The newest entry of a copy is overwritten only after HOOK_INPUT_TIMES_KEPT more events during one copy.
+/// dropped out of the next copy anyway, and `take_unseen_input` asks of them nothing but whether a time is among them.
+/// The newest entry of a copy is overwritten only after `HOOK_INPUT_TIMES_KEPT` more events during one copy.
 pub struct InputTimes {
     slots: [AtomicU32; HOOK_INPUT_TIMES_KEPT],
     next: AtomicU64,
 }
 
 impl InputTimes {
+    #[must_use]
     pub const fn new() -> Self {
         InputTimes { slots: [const { AtomicU32::new(0) }; HOOK_INPUT_TIMES_KEPT], next: AtomicU64::new(0) }
     }
@@ -65,6 +66,7 @@ impl Default for InputTimes {
 }
 
 /// The key event of a message a keyboard hook got, or None for a message that is no key.
+#[must_use]
 pub fn native_key_event(
     message: u32,
     vk_code: u32,
@@ -99,6 +101,7 @@ pub struct KeyboardFields {
     pub extra: usize,
 }
 
+#[must_use]
 pub fn keyboard_fields(item: &NativeInput) -> KeyboardFields {
     let mut flags = 0;
     if !item.pressed {
@@ -130,7 +133,8 @@ pub fn keyboard_fields(item: &NativeInput) -> KeyboardFields {
     }
 }
 
-/// The keyboard state ToUnicodeEx translates `virtual_key` in, or None when `state` holds Win, which types nothing.
+/// The keyboard state `ToUnicodeEx` translates `virtual_key` in, or None when `state` holds Win, which types nothing.
+#[must_use]
 pub fn keyboard_state(virtual_key: u32, state: u32) -> Option<[u8; KEYBOARD_STATE_ARRAY_SIZE]> {
     let mut keys = [0u8; KEYBOARD_STATE_ARRAY_SIZE];
     let mut press = |pressed: [u32; 3]| {
@@ -164,6 +168,7 @@ pub fn keyboard_state(virtual_key: u32, state: u32) -> Option<[u8; KEYBOARD_STAT
 }
 
 /// `bytes.decode("utf-16-le", "replace").split("\0", 1)[0]`.
+#[must_use]
 pub fn clipboard_bytes_to_text(data: &[u8]) -> String {
     let (pairs, odd_byte) = data.as_chunks::<2>();
     let units = pairs.iter().map(|pair| u16::from_le_bytes(*pair));
@@ -243,7 +248,7 @@ mod win32 {
     /// taken back on that thread after the last one is removed. The system calls the hook procedures on that same thread,
     /// so they can never see it freed; the atomic is what lets it be a safe static at all.
     static HOOK_LISTENER: AtomicPtr<HookListener> = AtomicPtr::new(null_mut());
-    /// The thread of the running hook, 0 when none: stop_keyboard_hook posts to it from another thread.
+    /// The thread of the running hook, 0 when none: `stop_keyboard_hook` posts to it from another thread.
     static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
     /// A NUL-terminated wide string.
@@ -279,7 +284,7 @@ mod win32 {
         unsafe {
             let mut info: GUITHREADINFO = zeroed();
             info.cbSize = (size_of::<GUITHREADINFO>()).low::<u32>();
-            (GetGUIThreadInfo(thread_id, &mut info) != 0).then_some(info)
+            (GetGUIThreadInfo(thread_id, &raw mut info) != 0).then_some(info)
         }
     }
 
@@ -391,10 +396,11 @@ mod win32 {
         }
     }
 
-    /// Small owner of the User32/Kernel32 calls required by KeySwitch.
+    /// Small owner of the User32/Kernel32 calls required by `KeySwitch`.
     pub struct NativeWindowsAPI;
 
     impl NativeWindowsAPI {
+        #[must_use]
         pub fn new() -> Self {
             NativeWindowsAPI
         }
@@ -506,7 +512,7 @@ mod win32 {
             }
             let mut process_id = 0u32;
             // SAFETY: `process_id` is a valid place for the id; a stale window makes the call answer 0.
-            if unsafe { GetWindowThreadProcessId(window, &mut process_id) } == 0 {
+            if unsafe { GetWindowThreadProcessId(window, &raw mut process_id) } == 0 {
                 return String::new();
             }
             // SAFETY: OpenProcess takes its arguments by value and returns a handle or null, closed below.
@@ -517,7 +523,7 @@ mod win32 {
             let mut size = PROCESS_IMAGE_NAME_BUFFER_CHARACTERS.low::<u32>();
             let mut buffer = vec![0u16; PROCESS_IMAGE_NAME_BUFFER_CHARACTERS];
             // SAFETY: `size` says how many characters `buffer` holds; `process` is the open handle above.
-            let queried = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut size) };
+            let queried = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &raw mut size) };
             // SAFETY: `process` is open and closed once.
             unsafe { CloseHandle(process) };
             if queried == 0 {
@@ -543,7 +549,7 @@ mod win32 {
             }
             let mut process_id = 0u32;
             // SAFETY: `process_id` is a valid place for the id; a stale window makes the call answer 0.
-            if unsafe { GetWindowThreadProcessId(to_hwnd(window), &mut process_id) } == 0 {
+            if unsafe { GetWindowThreadProcessId(to_hwnd(window), &raw mut process_id) } == 0 {
                 return 0;
             }
             i64::from(process_id)
@@ -565,13 +571,13 @@ mod win32 {
             {
                 let mut point = POINT { x: info.rcCaret.left, y: info.rcCaret.bottom };
                 // SAFETY: `point` is a valid POINT; a stale window makes the call fail.
-                if unsafe { ClientToScreen(info.hwndCaret, &mut point) } != 0 {
+                if unsafe { ClientToScreen(info.hwndCaret, &raw mut point) } != 0 {
                     return Some(ScreenAnchor { x: point.x, y: point.y, window: anchor_window });
                 }
             }
             let mut point = POINT { x: 0, y: 0 };
             // SAFETY: `point` is a valid POINT.
-            if unsafe { GetCursorPos(&mut point) } != 0 {
+            if unsafe { GetCursorPos(&raw mut point) } != 0 {
                 return Some(ScreenAnchor { x: point.x, y: point.y, window: anchor_window });
             }
             None
@@ -657,7 +663,7 @@ mod win32 {
         fn last_input_time(&self) -> Result<i64, WindowsBackendError> {
             let mut info = LASTINPUTINFO { cbSize: (size_of::<LASTINPUTINFO>()).low::<u32>(), dwTime: 0 };
             // SAFETY: `info` is valid and its cbSize is set.
-            if unsafe { GetLastInputInfo(&mut info) } == 0 {
+            if unsafe { GetLastInputInfo(&raw mut info) } == 0 {
                 return Err(error("GetLastInputInfo завершился ошибкой"));
             }
             Ok(i64::from(info.dwTime))
@@ -684,7 +690,7 @@ mod win32 {
             // SAFETY: MSG is plain data, valid when zeroed, and the call writes only into this local.
             unsafe {
                 let mut queue_message: MSG = zeroed();
-                PeekMessageW(&mut queue_message, null_mut(), WM_USER, WM_USER, PM_NOREMOVE);
+                PeekMessageW(&raw mut queue_message, null_mut(), WM_USER, WM_USER, PM_NOREMOVE);
             }
             // SAFETY: a null name asks for the handle of this process's own executable.
             let module = unsafe { GetModuleHandleW(null()) };
@@ -714,7 +720,7 @@ mod win32 {
             let mut message: MSG = unsafe { zeroed() };
             let result = loop {
                 // SAFETY: `message` is a valid MSG this thread owns; the loop is the one that serves the hooks.
-                let got = unsafe { GetMessageW(&mut message, null_mut(), 0, 0) };
+                let got = unsafe { GetMessageW(&raw mut message, null_mut(), 0, 0) };
                 if got == 0 {
                     break Ok(());
                 }
@@ -723,8 +729,8 @@ mod win32 {
                 }
                 // SAFETY: `message` was just filled by GetMessageW.
                 unsafe {
-                    TranslateMessage(&message);
-                    DispatchMessageW(&message);
+                    TranslateMessage(&raw const message);
+                    DispatchMessageW(&raw const message);
                 }
             };
             hook_cleanup(mouse_hook, hook);
@@ -805,9 +811,9 @@ mod win32 {
 
         /// Put `contents` back as the clipboard's only data, kept out of the clipboard history.
         ///
-        /// SetClipboardData fails for a clipboard opened without a window ("If an application calls OpenClipboard with hwnd
-        /// set to NULL, EmptyClipboard sets the clipboard owner to NULL; this causes SetClipboardData to fail",
-        /// OpenClipboard on Microsoft Learn), so a hidden window of this thread owns it for the call. The window is
+        /// `SetClipboardData` fails for a clipboard opened without a window ("If an application calls `OpenClipboard` with hwnd
+        /// set to NULL, `EmptyClipboard` sets the clipboard owner to NULL; this causes `SetClipboardData` to fail",
+        /// `OpenClipboard` on Microsoft Learn), so a hidden window of this thread owns it for the call. The window is
         /// destroyed at once: it would not answer the messages a clipboard owner is sent, and nothing here is rendered
         /// late, so no owner is needed afterwards.
         fn write_clipboard(&self, contents: &ClipboardContents) -> Result<bool, WindowsBackendError> {
@@ -876,7 +882,7 @@ mod win32 {
         let marker = vec![0u8; size_of::<u32>()];
         let mut items: Vec<(u32, &[u8])> = contents.formats.iter().map(|(item, data)| (*item, data.as_slice())).collect();
         // An empty clipboard is put back empty, without even this marker.
-        if !items.is_empty() && history != 0 && items.iter().all(|(item, data)| *item != history) {
+        if !items.is_empty() && history != 0 && items.iter().all(|(item, _data)| *item != history) {
             items.push((history, &marker));
         }
         for (item, data) in items {

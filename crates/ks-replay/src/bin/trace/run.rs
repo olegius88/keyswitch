@@ -27,13 +27,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 const TREE_MARK: &str = "@TREE@";
 
 /// The tree that holds the resources and the pinned lexicons: this workspace, or the one `KS_REPLAY_TREE` names.
-fn reference_tree() -> std::path::PathBuf {
+fn reference_tree() -> PathBuf {
     std::env::var_os("KS_REPLAY_TREE").map_or_else(
         || {
             let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
             workspace.canonicalize().unwrap_or(workspace)
         },
-        std::path::PathBuf::from,
+        PathBuf::from,
     )
 }
 
@@ -52,7 +52,7 @@ struct Kind {
     model: Option<ContextModel>,
 }
 
-pub struct Worker {
+pub(crate) struct Worker {
     resources: Arc<Resources>,
     packaged: Option<Kind>,
     reference: Option<Kind>,
@@ -203,7 +203,7 @@ fn event_name(line: &str) -> String {
 }
 
 /// A path without its indices, so that causes group.
-pub fn general(path: &str) -> String {
+pub(crate) fn general(path: &str) -> String {
     let mut out = String::new();
     let mut depth = 0;
     for character in path.chars() {
@@ -263,7 +263,7 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
 }
 
 impl Worker {
-    pub fn new() -> Worker {
+    pub(crate) fn new() -> Worker {
         let resources = Resources::new(reference_tree().join("resources"));
         let (intent_model, intent_model_status) = resources.intent_model();
         let root = std::env::temp_dir().join(format!("ks-trace-{}", std::process::id()));
@@ -289,7 +289,7 @@ impl Worker {
         }
     }
 
-    pub fn clean(&self) {
+    pub(crate) fn clean(&self) {
         logsetup::uninstall_handler();
         let _ = std::fs::remove_dir_all(&self.root);
     }
@@ -361,7 +361,7 @@ impl Worker {
         Kind { models, prefix_indexes, policy: Some(policy), model }
     }
 
-    pub fn run_file(&mut self, path: &Path, verbose: bool) -> Value {
+    pub(crate) fn run_file(&mut self, path: &Path, verbose: bool) -> Value {
         let file_name = path.to_string_lossy().into_owned();
         let read = std::fs::File::open(path).ok().and_then(|file| {
             let mut text = String::new();
@@ -468,7 +468,7 @@ impl Worker {
             (kind.policy.take().expect("one trace at a time"), kind.models.clone(), kind.prefix_indexes.clone(), kind.model.take())
         };
         policy.stream = InputContext::with_clock(clock.clone());
-        policy.reader = (!trace["reader_type"].as_str().is_some_and(|name| name == "NoneType")).then(|| reader.clone());
+        policy.reader = trace["reader_type"].as_str().is_none_or(|name| name != "NoneType").then(|| reader.clone());
         policy.model = context_model;
         {
             let mut tape = tape.lock().unwrap_or_else(PoisonError::into_inner);
@@ -541,7 +541,7 @@ impl Worker {
         (done, found)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn run_step(
         &mut self, step: &Value, engine: &KeySwitchEngine, tape: &Arc<Mutex<Tape>>, clock: &Arc<AtomicU64>, reader: &Arc<dyn FieldReader>,
         plans: &Arc<Mutex<Vec<Value>>>, requests: &Arc<Mutex<Vec<Value>>>, state: &mut Expected, saved_model: &mut Option<ContextModel>,
@@ -582,19 +582,16 @@ impl Worker {
                     "personal" => entries::personal_step(core, name, &args),
                     "queue" => entries::queue_step(core, name, &args, &step["r"]),
                     "policy" => {
-                        match name {
-                            "reader" => core.context_policy.reader = (!args.positional[0].is_null()).then(|| reader.clone()),
-                            _ => {
-                                let old = core.context_policy.model.take();
-                                if let Some(old) = old
-                                    && old.answer.is_none()
-                                {
-                                    *saved_model = Some(old);
-                                }
-                                if let (Some(attributes), Some(real)) = (args.positional[0].as_object(), saved_model.as_ref()) {
-                                    let attributes = Value::Object(attributes.clone());
-                                    core.context_policy.model = Some(answering_model(tape.clone(), &attributes, real.tables.clone()));
-                                }
+                        if name == "reader" { core.context_policy.reader = (!args.positional[0].is_null()).then(|| reader.clone()) } else {
+                            let old = core.context_policy.model.take();
+                            if let Some(old) = old
+                                && old.answer.is_none()
+                            {
+                                *saved_model = Some(old);
+                            }
+                            if let (Some(attributes), Some(real)) = (args.positional[0].as_object(), saved_model.as_ref()) {
+                                let attributes = Value::Object(attributes.clone());
+                                core.context_policy.model = Some(answering_model(tape.clone(), &attributes, real.tables.clone()));
                             }
                         }
                         Outcome::Done { returned: None, error: None }

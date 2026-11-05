@@ -262,7 +262,7 @@ fn sequence_document_counts(rows: &[CorpusRow]) -> Value {
     let name_of = |group: Option<i64>| group.map_or_else(|| "None".to_owned(), |group| group.to_string());
     for row in &selected {
         let name = name_of(row.group);
-        let mut representable = !sequence_plan(row, false).unsupported.is_empty() == false;
+        let mut representable = sequence_plan(row, false).unsupported.is_empty() != false;
         if matches!(row.group, Some(0 | 1)) {
             let has_letter = row.original.chars().any(|character| crate::evaluate::script_group(character) == row.group);
             representable = representable && has_letter && sequence_plan(row, true).unsupported.is_empty();
@@ -483,7 +483,7 @@ pub fn reconcile(root: &Path, directory: &Path, source_root: &Path, report: &Pat
     let manifest = read_json(&directory.join("manifest.json"))?;
     let namespace = manifest["namespace"].as_str().ok_or("a namespace")?.to_owned();
     let sampling = &manifest["sampling"];
-    let bound = |name: &str| sampling[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("sampling.{name}"));
+    let bound = |name: &str| sampling[name].as_u64().map(ks_cast::To::to::<usize>).ok_or_else(|| format!("sampling.{name}"));
     let (sentences, metadata, sources) = base_sentences(source_root, &namespace, bound("max_documents_per_source")?, bound("max_sentences_per_document")?)?;
     if Value::Array(sources) != manifest["sources"] {
         return Err("pinned source inventory differs from original freeze".to_owned());
@@ -1083,7 +1083,7 @@ pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, out
         }
         files.insert(split.to_owned(), json!({"path": name, "sha256": checksum(&destination)?, "content_sha256": digest, "rows": rows, "raw_bytes": bytes, "gzip_members_from": ["base", "technical"]}));
     }
-    if (membership["row_ids_sha256"].as_array().map(Vec::len).unwrap_or(0)).to::<u64>() != files["test"]["rows"].as_u64().unwrap_or(0) {
+    if membership["row_ids_sha256"].as_array().map_or(0, Vec::len).to::<u64>() != files["test"]["rows"].as_u64().unwrap_or(0) {
         return Err("combined test membership row count mismatch".to_owned());
     }
     let membership_path = output.join("test-membership.json");

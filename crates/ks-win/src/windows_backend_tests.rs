@@ -251,7 +251,7 @@ impl WindowsAPI for FakeWindowsAPI {
         }
         let code = if layout == ENGLISH_HKL { virtual_key + 32 } else { 0x430 + virtual_key - VK_A };
         let base = char::from_u32(code).unwrap().to_string();
-        if (modifiers & SHIFT_MASK != 0) != (modifiers & LOCK_MASK != 0) { pystr::upper(&base) } else { base }
+        if (modifiers & SHIFT_MASK != 0) == (modifiers & LOCK_MASK != 0) { base } else { pystr::upper(&base) }
     }
 
     fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError> {
@@ -790,7 +790,7 @@ fn stop_does_not_wait_for_the_current_thread() {
 
 #[test]
 fn a_modifier_whose_release_the_hook_missed_is_forgotten() {
-    crate::log::capture::install();
+    log::capture::install();
     let api = FakeWindowsAPI::plain();
     let subject = backend(&api);
     let events = collected();
@@ -812,7 +812,7 @@ fn a_modifier_whose_release_the_hook_missed_is_forgotten() {
     press(VK_A, 5200);
     assert_eq!(last_state(), 0);
     assert_eq!(api.state().key_down_calls, [CTRL]);
-    assert!(crate::log::capture::contains(
+    assert!(log::capture::contains(
         "keyswitch.windows_backend: Отпускание модификаторов не дошло до перехватчика, они забыты: Control_L"
     ));
 
@@ -1431,7 +1431,7 @@ fn a_replayed_second_enter_keeps_what_follows_it_until_it_is_completed() {
     assert_eq!(sent[6], [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]);
 }
 
-/// SendInput returns only after the hook, on its own thread, has answered every event. If the engine's thread held any
+/// `SendInput` returns only after the hook, on its own thread, has answered every event. If the engine's thread held any
 /// lock the hook takes across the send, this would stop for good.
 #[test]
 fn the_hook_on_its_own_thread_never_waits_for_a_send_in_progress() {
@@ -1761,14 +1761,14 @@ fn without_ui_automation_the_selection_is_copied_and_the_clipboard_given_back() 
 
 #[test]
 fn a_reader_that_cannot_be_built_is_tried_again_next_time() {
-    crate::log::capture::install();
+    log::capture::install();
     let api = FakeWindowsAPI::with_clipboard();
     let reader = script(|script| script.unavailable = true);
     let subject = reading_backend(&api, &reader);
     subject.read_selection("Notepad", SELECTION_FIXTURE_WINDOW).unwrap();
     subject.read_selection("Notepad", SELECTION_FIXTURE_WINDOW).unwrap();
     assert_eq!(reader.lock().unwrap().attempts, 2);
-    assert!(crate::log::capture::contains(
+    assert!(log::capture::contains(
         "keyswitch.windows_backend: UI Automation недоступна для чтения выделения, выделение копируется"
     ));
     {
@@ -1915,7 +1915,7 @@ fn another_window_or_a_short_send_changes_nothing_more() {
     assert!(matches!(subject.replace_selection(&selected, "y", None), Err(SelectionError::Failed(_))));
 }
 
-/// Notepad of Windows 11 (SLOW_INPUT_FIELD_CLASSES) gets the result pasted, and the clipboard back.
+/// Notepad of Windows 11 (`SLOW_INPUT_FIELD_CLASSES`) gets the result pasted, and the clipboard back.
 fn pasting_api() -> Arc<FakeWindowsAPI> {
     let api = FakeWindowsAPI::with_clipboard();
     api.state().window_classes.insert(WINDOWS_FAKE_HWND, "RichEditD2DPT".to_owned());
@@ -2068,7 +2068,7 @@ fn the_mask_key_also_covers_win_and_never_goes_on_a_thread_of_its_own_in_this_te
 
 #[test]
 fn without_alt_nothing_is_pressed_and_a_failed_mask_is_survived() {
-    crate::log::capture::install();
+    log::capture::install();
     let (api, subject, _names) = mask_setup();
     let hook = api.hook();
     assert!(chord(&hook, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT));
@@ -2077,7 +2077,7 @@ fn without_alt_nothing_is_pressed_and_a_failed_mask_is_survived() {
     hook(native(false, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, false, 5200));
     api.state().send_error = true;
     assert!(chord(&hook, VK_LMENU, SCAN_CODE_LEFT_ALT));
-    assert!(crate::log::capture::contains("keyswitch.windows_backend: Клавиша-маска для Alt не отправлена"));
+    assert!(log::capture::contains("keyswitch.windows_backend: Клавиша-маска для Alt не отправлена"));
     api.state().send_error = false;
     subject.stop();
 }
@@ -2183,10 +2183,10 @@ mod golden {
             "current_layout" => state.current_layout = number(value),
             "foreground" => state.foreground = number(value),
             "ticks" => state.ticks = number(value),
-            "send_count" => state.send_count = value.as_u64().map(|count| count.to::<usize>()),
+            "send_count" => state.send_count = value.as_u64().map(ks_cast::To::to::<usize>),
             "accept_switch" => state.accept_switch = flag(value),
             "apply_switch" => state.apply_switch = flag(value),
-            "released" => state.released_keys = numbers(value).into_iter().map(|key| key.low::<u32>()).collect(),
+            "released" => state.released_keys = numbers(value).into_iter().map(ks_cast::To::low::<u32>).collect(),
             "window_class" => {
                 let foreground = state.foreground;
                 state.window_classes.insert(foreground, text(value));
@@ -2239,11 +2239,11 @@ mod golden {
             strokes: &all,
             target_group: number(&op["target"]).low::<i32>(),
             boundary: boundary.as_ref(),
-            source_group: op["source"].as_i64().map(|group| group.low::<i32>()),
+            source_group: op["source"].as_i64().map(ks_cast::To::low::<i32>),
             late: &late,
             trailing: &trailing,
             kept_tail: number(&op["kept_tail"]).to::<usize>(),
-            erased: op["erased"].as_u64().map(|count| count.to::<usize>()),
+            erased: op["erased"].as_u64().map(ks_cast::To::to::<usize>),
         });
         outcome.map_or_else(|error| json!(error_text(&error)), |count| json!(count))
     }
@@ -2304,7 +2304,7 @@ mod golden {
             },
             "replace_selection" => {
                 let selected = selected_by(op["source"].as_str().unwrap(), op["selected"].as_str().unwrap());
-                let final_group = op["final"].as_i64().map(|group| group.low::<i32>());
+                let final_group = op["final"].as_i64().map(ks_cast::To::low::<i32>);
                 match subject.replace_selection(&selected, op["replacement"].as_str().unwrap(), final_group) {
                     Ok(reselected) => json!(reselected),
                     Err(error) => json!(selection_error_text(&error)),

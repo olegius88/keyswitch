@@ -1,7 +1,7 @@
 //! What the selection hotkeys do to the selected text: its layout, its case and its transliteration.
 //!
 //! Pure functions of the text, verified without any platform; the platforms only read the selection and type the
-//! result over it (selection_commands).
+//! result over it (`selection_commands`).
 
 use crate::constants::CAPS_LOCK_WORD_MIN_CAPITALS;
 use ks_text::layouts::{LayoutPair, RU_KEYS, US_KEYS};
@@ -14,8 +14,8 @@ use std::sync::OnceLock;
 pub const US_LAYOUT: &str = "us";
 pub const RU_LAYOUT: &str = "ru";
 
-/// Signs the two layouts type with Shift, on the keys of US_KEYS and RU_KEYS and on the keys those rows leave out (the
-/// number row and the slash key). LayoutPair maps the unshifted rows and the capital letters; these are the rest of the
+/// Signs the two layouts type with Shift, on the keys of `US_KEYS` and `RU_KEYS` and on the keys those rows leave out (the
+/// number row and the slash key). `LayoutPair` maps the unshifted rows and the capital letters; these are the rest of the
 /// keys a selection typed in the wrong layout holds. Read from xkeyboard-config: /usr/share/X11/xkb/symbols/us,
 /// variant "basic", and /usr/share/X11/xkb/symbols/ru, its default variant "winkeys" (the Russian layout of Windows):
 /// Shift+2 is `@` and `"`, Shift+3 `#` and `№`, Shift+4 `$` and `;`, Shift+6 `^` and `:`, Shift+7 `&` and `?`, the
@@ -38,7 +38,7 @@ impl Table {
                 None => mapping.push((from, to)),
             }
         }
-        mapping.sort();
+        mapping.sort_unstable();
         Table(mapping)
     }
 
@@ -92,12 +92,14 @@ fn tables() -> &'static Tables {
     })
 }
 
-/// LATIN_LETTERS.
+/// `LATIN_LETTERS`.
+#[must_use]
 pub fn latin_letters() -> &'static HashSet<char> {
     &tables().latin_letters
 }
 
-/// CYRILLIC_LETTERS.
+/// `CYRILLIC_LETTERS`.
+#[must_use]
 pub fn cyrillic_letters() -> &'static HashSet<char> {
     &tables().cyrillic_letters
 }
@@ -166,10 +168,11 @@ fn converted_runs(text: &str, source: &str) -> String {
 /// A selection in one script was typed in the other layout as a whole, and all of it is retyped; pressing again
 /// converts back. A selection mixing the scripts is mostly right: the script with more letters is what was meant, and
 /// only the runs of the other one are retyped into its layout (`привет vbh` is `привет мир`, `hello руддщ` is
-/// `hello hello`), with the signs on their keys inside them (converted_runs). A selection with as many letters of one
+/// `hello hello`), with the signs on their keys inside them (`converted_runs`). A selection with as many letters of one
 /// as of the other, or with no letters at all (`?/`), was typed in the layout that is on now and is retyped whole.
 /// The conversion names the layout the keyboard is switched to afterwards: the other one for a whole selection, that
 /// of the majority for a mixed one.
+#[must_use]
 pub fn convert_layout(text: &str, current_layout: &str) -> LayoutConversion {
     let (latin, cyrillic) = letter_counts(text);
     if latin > 0 && cyrillic > 0 && latin != cyrillic {
@@ -245,7 +248,7 @@ fn letter_runs(text: &str) -> Vec<String> {
 /// Whether the text looks typed with Caps Lock on: `пРИВЕТ мИР`, every word small at its first letter only.
 ///
 /// A word of one letter says nothing, and a word all in capitals fits too (`пРИВЕТ, Я ТУТ`); at least one word must
-/// show the small first letter followed by CAPS_LOCK_WORD_MIN_CAPITALS capitals or more. `iOS` and `eSIM` have fewer
+/// show the small first letter followed by `CAPS_LOCK_WORD_MIN_CAPITALS` capitals or more. `iOS` and `eSIM` have fewer
 /// and are names written that way, not Caps Lock.
 fn typed_under_caps_lock(text: &str) -> bool {
     let mut seen = false;
@@ -270,6 +273,7 @@ fn typed_under_caps_lock(text: &str) -> bool {
 /// other mixture of cases (`Привет мир`) goes to small letters. Title Case capitalizes every word rather than the
 /// first of a sentence: words are found by letters alone, sentences are not (`т. е.`, `Dr.`). A step that would not
 /// change the text (`Я` is in capitals and in Title Case at once) is passed over.
+#[must_use]
 pub fn cycle_case(text: &str) -> String {
     let letters = cased(text);
     if letters.is_empty() {
@@ -290,8 +294,8 @@ pub fn cycle_case(text: &str) -> String {
 }
 
 /// Russian letters in Latin by ICAO Doc 9303, Machine Readable Travel Documents, Eighth Edition 2021, Part 3, section
-/// 6, table B "Transliteration of Cyrillic Characters" (https://www.icao.int/sites/default/files/publications/DocSeries/
-/// 9303_p3_cons_en.pdf), the transliteration of machine readable travel documents. Ё and Э are E like Е, Й is I like И,
+/// 6, table B "Transliteration of Cyrillic Characters" (<https://www.icao.int/sites/default/files/publications/DocSeries>/
+/// `9303_p3_cons_en.pdf`), the transliteration of machine readable travel documents. Ё and Э are E like Е, Й is I like И,
 /// Ъ is IE, and Ь has no row in the table, so it is left out.
 pub const CYRILLIC_TO_LATIN: &[(&str, &str)] = &[
     ("а", "a"), ("б", "b"), ("в", "v"), ("г", "g"), ("д", "d"), ("е", "e"), ("ё", "e"), ("ж", "zh"), ("з", "z"),
@@ -391,7 +395,7 @@ fn word_edge(text: &[char], index: usize) -> bool {
     index >= text.len() || !latin_letter(text[index])
 }
 
-/// A sequence read by its place in the word (VERB_ENDING, TS_BEFORE_K, INITIAL_YE), with its Cyrillic.
+/// A sequence read by its place in the word (`VERB_ENDING`, `TS_BEFORE_K`, `INITIAL_YE`), with its Cyrillic.
 fn placed_sequence(text: &[char], index: usize) -> Option<(String, &'static str)> {
     let candidates = [
         (VERB_ENDING, word_edge(text, index + VERB_ENDING.0.len())),
@@ -408,7 +412,7 @@ fn placed_sequence(text: &[char], index: usize) -> Option<(String, &'static str)
     None
 }
 
-/// Whether the `i` that ends at `end` is й (see SHORT_I).
+/// Whether the `i` that ends at `end` is й (see `SHORT_I`).
 fn short_i(text: &[char], end: usize, parts: &str) -> bool {
     let written: Vec<char> = pystr::lower(parts).chars().collect();
     let vowel = written.last().copied();
@@ -466,6 +470,7 @@ fn to_cyrillic(text: &[char]) -> String {
 /// The script with more letters in the selection is the one written over, and only its letters change: `Привет, John`
 /// is `Privet, John`. A tie goes to the Russian letters, which the standard is written for. Letters of neither
 /// alphabet stay as they are.
+#[must_use]
 pub fn transliterate(text: &str) -> String {
     let (latin, cyrillic) = letter_counts(text);
     let chars: Vec<char> = text.chars().collect();

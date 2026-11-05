@@ -7,6 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+#[must_use]
 pub fn now_seconds() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |elapsed| elapsed.as_secs_f64())
 }
@@ -18,6 +19,7 @@ pub fn monotonic() -> f64 {
 }
 
 /// (year, month, day) of a count of days since 1970-01-01.
+#[must_use]
 pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -48,10 +50,12 @@ fn moment(seconds: f64) -> Moment {
 }
 
 /// `datetime.now(timezone.utc).isoformat()`.
+#[must_use]
 pub fn iso_now() -> String {
     iso_at(now_seconds())
 }
 
+#[must_use]
 pub fn iso_at(seconds: f64) -> String {
     let at = moment(seconds);
     let (y, m, d) = at.date;
@@ -64,6 +68,7 @@ pub fn iso_at(seconds: f64) -> String {
 }
 
 /// The time part of an archive's name: `%Y%m%dT%H%M%SZ`.
+#[must_use]
 pub fn stamp_at(seconds: f64) -> String {
     let at = moment(seconds);
     let (y, m, d) = at.date;
@@ -76,6 +81,7 @@ fn digits(text: &[u8]) -> bool {
 }
 
 /// The date of an ISO text as `datetime.fromisoformat` would read it, or None when it would refuse the text.
+#[must_use]
 pub fn iso_date(text: &str) -> Option<&str> {
     let bytes = text.as_bytes();
     if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
@@ -124,6 +130,7 @@ pub fn new_id() -> String {
 }
 
 /// The lower-case hexadecimal SHA-256 of some bytes.
+#[must_use]
 pub fn sha256_hex(data: &[u8]) -> String {
     Sha256::digest(data).iter().map(|byte| format!("{byte:02x}")).collect()
 }

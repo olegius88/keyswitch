@@ -1,5 +1,5 @@
-//! The menu bar item, drawn through AppKit. The menu is rebuilt when AppKit announces it is about to open, rather than
-//! whenever the state changes: every AppKit call then happens on the main thread, while the engine keeps changing the state
+//! The menu bar item, drawn through `AppKit`. The menu is rebuilt when `AppKit` announces it is about to open, rather than
+//! whenever the state changes: every `AppKit` call then happens on the main thread, while the engine keeps changing the state
 //! from its own.
 #[cfg(target_os = "macos")]
 pub use native::StatusItem;
@@ -17,7 +17,7 @@ mod native {
 
     use crate::macos_objc::{Id, string};
 
-    /// NSVariableStatusItemLength.
+    /// `NSVariableStatusItemLength`.
     const VARIABLE_STATUS_ITEM_LENGTH: f64 = -1.0;
     const ACTIVATION_POLICY_ACCESSORY: isize = 1;
     const CONTROL_STATE_ON: isize = 1;
@@ -101,17 +101,14 @@ mod native {
         pub fn start(handler: Handler, state: TrayState) -> Result<StatusItem, String> {
             objc2::rc::autoreleasepool(|_| {
                 // The item can come back after its setting was turned off and on; a class registers once.
-                let target_class = match AnyClass::get(c"KeySwitchMenuTarget") {
-                    Some(registered) => registered,
-                    None => {
-                        let mut builder = ClassBuilder::new(c"KeySwitchMenuTarget", class!(NSObject)).ok_or("не удалось создать класс-получатель для меню")?;
-                        // SAFETY: the functions have the signatures of these selectors.
-                        unsafe {
-                            builder.add_method(sel!(keySwitchMenuItem:), { let method: extern "C-unwind" fn(_, _, _) = menu_item_chosen; method });
-                            builder.add_method(sel!(menuNeedsUpdate:), { let method: extern "C-unwind" fn(_, _, _) = menu_needs_update; method });
-                        }
-                        builder.register()
+                let target_class = if let Some(registered) = AnyClass::get(c"KeySwitchMenuTarget") { registered } else {
+                    let mut builder = ClassBuilder::new(c"KeySwitchMenuTarget", class!(NSObject)).ok_or("не удалось создать класс-получатель для меню")?;
+                    // SAFETY: the functions have the signatures of these selectors.
+                    unsafe {
+                        builder.add_method(sel!(keySwitchMenuItem:), { let method: extern "C-unwind" fn(_, _, _) = menu_item_chosen; method });
+                        builder.add_method(sel!(menuNeedsUpdate:), { let method: extern "C-unwind" fn(_, _, _) = menu_needs_update; method });
                     }
+                    builder.register()
                 };
                 // SAFETY: messages on the main thread to AppKit's shared objects and the objects made here, kept for the life of the program.
                 unsafe {
@@ -167,6 +164,7 @@ mod native {
             });
         }
 
+        #[must_use]
         pub fn state(&self) -> TrayState {
             locked().state.clone()
         }
@@ -186,6 +184,6 @@ mod native {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     const _: *const c_void = std::ptr::null();
 }

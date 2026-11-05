@@ -65,6 +65,7 @@ fn translated(text: &str, source: &str, target: &str) -> String {
 }
 
 /// `canonical_tokens`: the words of a phrase, in `[^\W_]+(?:['’\-][^\W_]+)*`.
+#[must_use]
 pub fn canonical_tokens(text: &str) -> Vec<String> {
     let normalized = pystr::casefold(&ks_text::normalize::nfc(text)).replace('ё', "е").replace('’', "'");
     let characters: Vec<char> = normalized.chars().collect();
@@ -381,7 +382,7 @@ fn examples(directory: &Path, split: &str) -> Result<Vec<Example>, String> {
     text.lines()
         .map(|line| {
             let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
-            let labels = row["labels"].as_array().ok_or("labels")?.iter().filter_map(Value::as_u64).map(|label| label.to::<usize>()).collect();
+            let labels = row["labels"].as_array().ok_or("labels")?.iter().filter_map(Value::as_u64).map(ks_cast::To::to::<usize>).collect();
             let values = row["features"].as_array().ok_or("features")?.iter().map(|table| table.as_object().map_or_else(IndexMap::new, |table| table.iter().map(|(name, value)| (name.clone(), value.as_f64().unwrap_or(0.0))).collect())).collect();
             Ok(Example { category: row["category"].as_str().ok_or("category")?.to_owned(), labels, features: values })
         })

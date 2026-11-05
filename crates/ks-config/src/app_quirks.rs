@@ -29,6 +29,7 @@ pub struct MentionHead {
 }
 
 impl MentionHead {
+    #[must_use]
     pub fn applies(&self, application: &str, typed: &str, meant: &str) -> bool {
         if typed != self.typed || meant != self.meant {
             return false;

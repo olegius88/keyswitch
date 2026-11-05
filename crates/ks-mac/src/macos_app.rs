@@ -15,6 +15,7 @@ const USAGE: &str = "usage: keyswitch [-h] [--hidden] [--diagnose] [--version]\n
 
 /// The `resources` folder of the bundle (`Contents/Resources/resources`), beside the executable in a build tree, or the
 /// one `KEYSWITCH_RESOURCES` names.
+#[must_use]
 pub fn resource_dir() -> PathBuf {
     if let Some(over) = std::env::var_os("KEYSWITCH_RESOURCES").filter(|value| !value.is_empty()) {
         return PathBuf::from(over);
@@ -33,6 +34,7 @@ pub fn resource_dir_from(executable: &Path, is_dir: &dyn Fn(&Path) -> bool) -> P
 }
 
 /// Everything a support report needs, without starting the engine.
+#[must_use]
 pub fn diagnose() -> i32 {
     let backend = match MacBackend::new(None) {
         Ok(backend) => backend,
@@ -71,6 +73,7 @@ pub fn diagnose() -> i32 {
     i32::from(!probe.available)
 }
 
+#[must_use]
 pub fn main(arguments: &[String]) -> i32 {
     let (mut hidden, mut wants_diagnose, mut no_engine) = (false, false, false);
     for argument in arguments {
@@ -87,7 +90,7 @@ pub fn main(arguments: &[String]) -> i32 {
                 return 0;
             }
             other => {
-                eprint!("{USAGE}keyswitch: error: unrecognized arguments: {other}\n");
+                eprintln!("{USAGE}keyswitch: error: unrecognized arguments: {other}");
                 return 2;
             }
         }

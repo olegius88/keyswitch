@@ -1,4 +1,4 @@
-//! The macOS platform of KeySwitch: the Quartz event tap, typing, input sources, the pasteboard, the accessibility field
+//! The macOS platform of `KeySwitch`: the Quartz event tap, typing, input sources, the pasteboard, the accessibility field
 //! reader, the menu bar item and the settings window.
 //!
 //! One file per module of the Python it comes from, under the same name. `macos_backend`, `macos_context`,

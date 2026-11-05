@@ -68,6 +68,7 @@ pub fn captured_sources(manifest: &Path) -> Result<Vec<CapturedSource>, String> 
     Ok(sources)
 }
 
+#[must_use]
 pub fn role_of(name: &str) -> FieldRole {
     match name {
         "text" => FieldRole::Text,
@@ -80,6 +81,7 @@ pub fn role_of(name: &str) -> FieldRole {
     }
 }
 
+#[must_use]
 pub fn after_origin_of(name: &str) -> AfterOrigin {
     match name {
         "none" => AfterOrigin::None,
@@ -190,11 +192,11 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
     let [mut keeps_ranked, mut converts] = ranked;
     let available = (keeps_ranked.len(), converts.len());
     let share = convert_share.unwrap_or(available.1.to::<f64>() / ((available.0 + available.1).max(1)).to::<f64>());
-    converts.sort_by(|a, b| a.0.cmp(&b.0));
+    converts.sort_by_key(|a| a.0);
     converts.truncate((budget.to::<f64>() * share).to::<usize>());
     // Correctly typed words no lexicon knows are the keep answers a uniform sample nearly never draws.
     let keep_budget = budget.to::<usize>() - converts.len();
-    keeps_ranked.sort_by(|a, b| a.0.cmp(&b.0));
+    keeps_ranked.sort_by_key(|a| a.0);
     let unknown: Vec<usize> = keeps_ranked
         .iter()
         .enumerate()
@@ -327,6 +329,7 @@ pub fn captured_head_curriculum(tools: &Tools, split: &str, options: &Value, que
 }
 
 /// `any cyrillic` of `natural_anchors`.
+#[must_use]
 pub fn group_of_word(text: &str) -> i64 {
     i64::from(cyrillic_any(text))
 }

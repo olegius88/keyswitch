@@ -1,5 +1,5 @@
 //! The real thing on Windows: the low-level hook, then the installed program against an edit control of this process,
-//! keys through SendInput, corrections through SendInput back. Runs with `KS_E2E_BINARY` naming the program; otherwise,
+//! keys through `SendInput`, corrections through `SendInput` back. Runs with `KS_E2E_BINARY` naming the program; otherwise,
 //! and on other systems, it says so and passes.
 
 #[cfg(not(windows))]
@@ -79,7 +79,7 @@ mod scenario {
                 let mut area = unsafe { std::mem::zeroed() };
                 // SAFETY: the rectangle is ours and both windows belong to this thread.
                 unsafe {
-                    GetClientRect(window, &mut area);
+                    GetClientRect(window, &raw mut area);
                     MoveWindow(edit.pointer_mut::<std::ffi::c_void>(), 0, 0, area.right, area.bottom, 1);
                 }
             }
@@ -111,7 +111,7 @@ mod scenario {
                 description.lpfnWndProc = Some(window_procedure);
                 description.hInstance = instance;
                 description.lpszClassName = class.as_ptr();
-                RegisterClassW(&description);
+                RegisterClassW(&raw const description);
                 let window = CreateWindowExW(0, class.as_ptr(), title.as_ptr(), WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 640, 240, std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null());
                 if window.is_null() {
                     return Err("the window was not created".to_owned());
@@ -159,9 +159,9 @@ mod scenario {
                 let mut message: MSG = unsafe { std::mem::zeroed() };
                 // SAFETY: the message is ours for the length of the calls.
                 unsafe {
-                    while PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
-                        TranslateMessage(&message);
-                        DispatchMessageW(&message);
+                    while PeekMessageW(&raw mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                        TranslateMessage(&raw const message);
+                        DispatchMessageW(&raw const message);
                     }
                 }
                 if condition(self) {
@@ -528,7 +528,7 @@ mod scenario {
         outcome
     }
 
-    pub fn main() {
+    pub(crate) fn main() {
         let Some(binary) = std::env::var_os("KS_E2E_BINARY") else {
             println!("KS_E2E_BINARY is not set: no installed program to drive, skipped");
             return;

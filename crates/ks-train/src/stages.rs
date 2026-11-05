@@ -11,12 +11,12 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub struct Writer {
+pub(crate) struct Writer {
     folder: PathBuf,
 }
 
 impl Writer {
-    pub fn new(folder: &Path) -> Writer {
+    pub(crate) fn new(folder: &Path) -> Writer {
         std::fs::create_dir_all(folder).expect("a folder for the stages");
         Writer { folder: folder.to_path_buf() }
     }

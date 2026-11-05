@@ -24,6 +24,7 @@ pub const CONTEXT_TTL: f64 = FIELD_CONTEXT_TTL_SECONDS;
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 
 /// The real monotonic clock, seconds since the first call of this function.
+#[must_use]
 pub fn monotonic_clock() -> Clock {
     let start = Instant::now();
     Arc::new(move || start.elapsed().as_secs_f64())
@@ -46,6 +47,7 @@ impl Default for InputContext {
 }
 
 impl InputContext {
+    #[must_use]
     pub fn new() -> Self {
         InputContext::with_clock(monotonic_clock())
     }
@@ -109,6 +111,7 @@ impl InputContext {
         self.revision += 1;
     }
 
+    #[must_use]
     pub fn before_word(&self, original: &str) -> String {
         if self.now() - self.updated_at > CONTEXT_TTL {
             return String::new();
@@ -147,6 +150,7 @@ impl InputContext {
         }
     }
 
+    #[must_use]
     pub fn snapshot(&self, original: &str) -> FieldContext {
         let mut field = FieldContext::new(self.application.clone(), self.window.to_string());
         field.before = self.before_word(original);

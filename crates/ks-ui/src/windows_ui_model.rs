@@ -68,7 +68,7 @@ pub const SELECTION_HOTKEY_DESCRIPTIONS: [(&str, &str); 3] = [
          (Privet → Привет). Мягкий знак эта таблица не передаёт",
     ),
 ];
-/// What both settings windows say of detection.field_catch_up.
+/// What both settings windows say of `detection.field_catch_up`.
 pub const FIELD_CATCH_UP_TITLE: &str = "Ждать отстающее поле";
 pub const FIELD_CATCH_UP_DESCRIPTION: &str = "Браузеры и редакторы на Electron показывают набранное с задержкой. Сколько ждать, \
                                               пока поле покажет слово, прежде чем отказаться от его исправления";
@@ -126,6 +126,7 @@ fn choice(mut base: SettingSpec, choices: &[(&str, &str)]) -> SettingSpec {
 
 use ControlKind::{Bool, Choice, Float, Int, Text};
 
+#[must_use]
 pub fn autocorrection_settings() -> Vec<SettingSpec> {
     vec![
         spec(
@@ -271,6 +272,7 @@ pub fn autocorrection_settings() -> Vec<SettingSpec> {
 }
 
 /// Shown on the layouts page only, under «Ручное переключение».
+#[must_use]
 pub fn manual_switch_settings() -> Vec<SettingSpec> {
     vec![spec(
         "detection.respect_manual_layout",
@@ -280,6 +282,7 @@ pub fn manual_switch_settings() -> Vec<SettingSpec> {
     )]
 }
 
+#[must_use]
 pub fn trigger_settings() -> Vec<SettingSpec> {
     vec![
         spec("detection.correct_on_pause", "Пауза в наборе", "Проверять текущее слово после паузы без ввода.", Bool),
@@ -316,6 +319,7 @@ pub fn trigger_settings() -> Vec<SettingSpec> {
     ]
 }
 
+#[must_use]
 pub fn hotkey_settings() -> Vec<SettingSpec> {
     let mut specs = vec![
         spec("hotkeys.toggle", "Включить или приостановить", "Глобальная пауза автоматического переключения.", Text),
@@ -350,6 +354,7 @@ pub fn hotkey_settings() -> Vec<SettingSpec> {
     specs
 }
 
+#[must_use]
 pub fn system_settings() -> Vec<SettingSpec> {
     vec![
         spec("general.autostart", "Запускать вместе с Windows", "Стартовать после входа пользователя в систему.", Bool),
@@ -391,6 +396,7 @@ pub fn system_settings() -> Vec<SettingSpec> {
     ]
 }
 
+#[must_use]
 pub fn update_settings() -> Vec<SettingSpec> {
     vec![
         spec(
@@ -411,6 +417,7 @@ pub fn update_settings() -> Vec<SettingSpec> {
     ]
 }
 
+#[must_use]
 pub fn diagnostic_settings() -> Vec<SettingSpec> {
     vec![spec(
         "diagnostics.technical_logging",
@@ -420,6 +427,7 @@ pub fn diagnostic_settings() -> Vec<SettingSpec> {
     )]
 }
 
+#[must_use]
 pub fn application_settings() -> Vec<SettingSpec> {
     MENTION_HEADS.iter().map(|head| spec(head.setting, head.title, head.description, Bool)).collect()
 }
@@ -427,6 +435,7 @@ pub fn application_settings() -> Vec<SettingSpec> {
 // ------------------------------------------------------------------------------------------------ reading settings
 
 /// Python's truth value of a JSON value, as `bool(self.settings.get(path, ...))` reads it.
+#[must_use]
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,
@@ -439,6 +448,7 @@ pub fn truthy(value: &Value) -> bool {
 }
 
 /// Python's `str(value)` of a settings value.
+#[must_use]
 pub fn py_str(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -459,12 +469,14 @@ pub fn control_text(spec: &SettingSpec, stored: Option<&Value>) -> String {
 }
 
 /// `_save_choice`: the stored value of the label that was picked; an unknown label is stored as it is.
+#[must_use]
 pub fn choice_value(spec: &SettingSpec, selected: &str) -> String {
     spec.choices.iter().find(|(_, label)| label == selected).map_or_else(|| selected.to_owned(), |(key, _)| key.clone())
 }
 
 /// What `_save_number` stores and shows for the text of a number box; None when the text is no number, which restores
 /// the stored value.
+#[must_use]
 pub fn parse_number(spec: &SettingSpec, text: &str) -> Option<(Value, String)> {
     let cleaned = pystr::strip(text).replace(',', ".");
     let mut numeric: f64 = cleaned.parse().ok()?;
@@ -483,6 +495,7 @@ pub fn parse_number(spec: &SettingSpec, text: &str) -> Option<(Value, String)> {
 }
 
 /// The value one press of a spin arrow gives: the shown number plus `steps` of the setting's step.
+#[must_use]
 pub fn stepped_text(spec: &SettingSpec, shown: &str, steps: i32) -> String {
     let cleaned = pystr::strip(shown).replace(',', ".");
     let current: f64 = cleaned.parse().unwrap_or(spec.minimum);
@@ -501,12 +514,14 @@ pub fn string_list(value: Option<&Value>) -> Vec<String> {
 }
 
 /// `sorted(items, key=str.casefold)`.
+#[must_use]
 pub fn sorted_casefold(mut items: Vec<String>) -> Vec<String> {
     items.sort_by_cached_key(|item| pystr::casefold(item));
     items
 }
 
 /// `_add_application`: the list with the program added, or None when there is nothing to store.
+#[must_use]
 pub fn with_application(mut applications: Vec<String>, identifier: &str) -> Option<Vec<String>> {
     let normalized = pystr::casefold(pystr::strip(identifier));
     if normalized.is_empty() || applications.iter().any(|item| pystr::casefold(item) == normalized) {
@@ -517,6 +532,7 @@ pub fn with_application(mut applications: Vec<String>, identifier: &str) -> Opti
 }
 
 /// `_add_word`: the list with the word added, or None when it is blank or already there.
+#[must_use]
 pub fn with_word(mut words: Vec<String>, word: &str) -> Option<Vec<String>> {
     let word = pystr::strip(word);
     if word.is_empty() || words.iter().any(|item| pystr::casefold(item) == pystr::casefold(word)) {
@@ -527,12 +543,14 @@ pub fn with_word(mut words: Vec<String>, word: &str) -> Option<Vec<String>> {
 }
 
 /// `_remove_application` and `_remove_word`: the list without the value, compared by case folding.
+#[must_use]
 pub fn without(items: Vec<String>, value: &str) -> Vec<String> {
     let folded = pystr::casefold(value);
     items.into_iter().filter(|item| pystr::casefold(item) != folded).collect()
 }
 
 /// The label of a catalog entry in the combo box: `name — identifier`.
+#[must_use]
 pub fn catalog_label(name: &str, identifier: &str) -> String {
     format!("{name} — {identifier}")
 }
@@ -540,6 +558,7 @@ pub fn catalog_label(name: &str, identifier: &str) -> String {
 // --------------------------------------------------------------------------------------------- status and listings
 
 /// The engine's status line (`_apply_snapshot`).
+#[must_use]
 pub fn status_line(enabled: bool, running: bool) -> &'static str {
     if enabled && running {
         "Автокоррекция включена"
@@ -551,6 +570,7 @@ pub fn status_line(enabled: bool, running: bool) -> &'static str {
 }
 
 /// A history row (`_insert_history`): time, was, became, application, confidence.
+#[must_use]
 pub fn history_row(entry: &HistoryEntry) -> [String; 5] {
     [
         entry.timestamp.clone(),
@@ -562,10 +582,12 @@ pub fn history_row(entry: &HistoryEntry) -> [String; 5] {
 }
 
 /// A row of the rules list (`_refresh_learning_rules`).
+#[must_use]
 pub fn rule_row(rule: &LearnedRule) -> [String; 4] {
     [rule.pattern.clone(), other_layout_text(&rule.pattern, rule.source_group), condition_text(rule), action_text(rule)]
 }
 
+#[must_use]
 pub fn learning_count_text(count: usize) -> String {
     if count > 0 { format!("Правил: {count}") } else { "Правил пока нет".to_owned() }
 }
@@ -586,10 +608,12 @@ pub fn log_state_text(status: &Map<String, Value>, path: &str, rotation: &str) -
     format!("Файл журнала: {path}\nСостояние: {state}\nРотация в режиме диагностики: {rotation}, включение начинает новый файл")
 }
 
+#[must_use]
 pub fn locations_text(settings: &str, history: &str, rules: &str, log: &str) -> String {
     format!("Настройки: {settings}\nИстория: {history}\nПравила переключения: {rules}\nЖурнал: {log}")
 }
 
+#[must_use]
 pub fn capture_hint_text() -> String {
     format!(
         "После закрытия подсказки переключитесь на нужное приложение. KeySwitch определит его через {}.",
@@ -623,6 +647,7 @@ pub struct DiagnosticsInput {
 }
 
 /// `_diagnostics`: the report as indented JSON with the Russian text left readable.
+#[must_use]
 pub fn diagnostics_text(input: &DiagnosticsInput, mode: Value, read_field: Value, last_action: &str, early_switch: Value) -> String {
     let mut context = input.context_model.clone();
     context.insert("mode".into(), mode);
@@ -705,6 +730,7 @@ pub struct UpdateView {
     pub release_enabled: bool,
 }
 
+#[must_use]
 pub fn update_view(snapshot: &UpdateSnapshot) -> UpdateView {
     let busy = matches!(snapshot.phase, UpdatePhase::Checking | UpdatePhase::Downloading);
     UpdateView {
@@ -733,6 +759,7 @@ pub fn dark_theme(theme: &str, system_dark: impl FnOnce() -> bool) -> bool {
 }
 
 /// `dark_from_apps_use_light_theme`: 0 asks apps to be dark; anything else, and no value, is light.
+#[must_use]
 pub fn dark_from_apps_use_light_theme(value: Option<i64>) -> bool {
     value == Some(0)
 }
@@ -742,6 +769,7 @@ pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
     /// A Win32 COLORREF.
+    #[must_use]
     pub fn colorref(self) -> u32 {
         u32::from(self.0) | u32::from(self.1) << 8 | u32::from(self.2) << 16
     }
@@ -767,6 +795,7 @@ pub struct Palette {
     pub field: Rgb,
 }
 
+#[must_use]
 pub fn palette(dark: bool) -> Palette {
     let (background, content, sidebar, foreground, muted, line, field) = if dark {
         (Rgb(0x18, 0x1a, 0x1f), Rgb(0x20, 0x23, 0x2a), Rgb(0x11, 0x13, 0x18), Rgb(0xf4, 0xf6, 0xfb), Rgb(0xae, 0xb5, 0xc4), Rgb(0x3a, 0x3f, 0x4b), Rgb(0x2b, 0x2f, 0x38))
@@ -799,6 +828,7 @@ pub const PROMPT_HINT_COLOR: Rgb = Rgb(0xb7, 0xbd, 0xc9);
 
 /// Where the prompt goes: centred over the caret, above it, kept inside the virtual screen. `screen` is
 /// `(x, y, width, height)` of the virtual screen.
+#[must_use]
 pub fn prompt_position(anchor: (i32, i32), size: (i32, i32), screen: (i32, i32, i32, i32), gap: i32, margin: i32) -> (i32, i32) {
     let (width, height) = size;
     let x = anchor.0 - width / 2;

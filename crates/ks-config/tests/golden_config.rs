@@ -1,4 +1,4 @@
-//! Parity of `ks-config` with the Python program, against golden files dumped by gen_golden_config.py.
+//! Parity of `ks-config` with the Python program, against golden files dumped by `gen_golden_config.py`.
 //! They live in `$KS_GOLDEN_DIR/config`; a test skips with a message when its file is absent.
 
 use ks_cast::To as _;
@@ -47,7 +47,7 @@ fn tempdir(tag: &str) -> PathBuf {
     d
 }
 fn file_hex(path: &Path) -> Value {
-    std::fs::read(path).map(|b| Value::String(hex(&b))).unwrap_or(Value::Null)
+    std::fs::read(path).map_or(Value::Null, |b| Value::String(hex(&b)))
 }
 fn listing(dir: &Path) -> Value {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -179,7 +179,7 @@ fn history() {
                 }
                 "read" => match store.read(op[1].as_i64()) {
                     Ok(items) => {
-                        value = json!([items.iter().map(|e| json!([e.timestamp, e.original, e.replacement, e.application, format!("{:016x}", e.confidence.to_bits())])).collect::<Vec<_>>()])
+                        value = json!([items.iter().map(|e| json!([e.timestamp, e.original, e.replacement, e.application, format!("{:016x}", e.confidence.to_bits())])).collect::<Vec<_>>()]);
                     }
                     Err(e) => err = bad(e),
                 },
@@ -283,12 +283,12 @@ fn learning() {
             match s(&op[0]) {
                 "add" => {
                     if let Err(e) = store.add_rule(rule_from(&op[1])) {
-                        err = e2(e)
+                        err = e2(e);
                     }
                 }
                 "replace" => {
                     if let Err(e) = store.replace_rule(&rule_from(&op[1]), rule_from(&op[2])) {
-                        err = e2(e)
+                        err = e2(e);
                     }
                 }
                 "remove" => value = json!(store.remove_rule(&rule_from(&op[1])).unwrap()),
@@ -406,7 +406,7 @@ fn selection() {
                 f.eq(title, &json!(cmd.title()), &r["titles"][title]);
             }
             for (name, cmd) in r["commands"].as_object().unwrap() {
-                f.eq(name, &json!(command_of_hotkey(name).map(|c| c.as_str())), cmd);
+                f.eq(name, &json!(command_of_hotkey(name).map(SelectionCommand::as_str)), cmd);
             }
             continue;
         }
@@ -433,7 +433,7 @@ fn selection() {
                 "case" => SelectionCommand::Case,
                 _ => SelectionCommand::Transliterate,
             };
-            let names: Vec<String> = SETS[p[1].parse::<usize>().unwrap()].iter().map(|x| x.to_string()).collect();
+            let names: Vec<String> = SETS[p[1].parse::<usize>().unwrap()].iter().map(ToString::to_string).collect();
             let got = refusal(plan_selection(cmd, t, p[2].parse().unwrap(), &names), |pl| json!([pl.replacement, pl.source_group, pl.target_group]));
             f.eq(&format!("plan {key} {t:?}"), &got, want);
         }

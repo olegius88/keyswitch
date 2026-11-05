@@ -26,6 +26,7 @@ impl LoadError {
     }
 
     /// The `OSError` subclass Python raises for an I/O failure on `path`, with its text.
+    #[must_use]
     pub fn os(error: &io::Error, path: &Path) -> Self {
         let name = match error.kind() {
             io::ErrorKind::NotFound => "FileNotFoundError",

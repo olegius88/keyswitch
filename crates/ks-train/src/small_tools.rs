@@ -399,7 +399,7 @@ fn copy_tree(from: &Path, to: &Path, skip: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// `build`: the complete repository, written and signed with the key in the ambient GnuPG home.
+/// `build`: the complete repository, written and signed with the key in the ambient `GnuPG` home.
 pub fn apt_build(root: &Path, repository: &Path, packages: &[PathBuf], passphrase: Option<&Path>) -> Result<String, String> {
     let sources = read_sources(root)?;
     if packages.is_empty() {
@@ -410,7 +410,7 @@ pub fn apt_build(root: &Path, repository: &Path, packages: &[PathBuf], passphras
     std::fs::create_dir_all(repository.join(&pool)).map_err(io)?;
     std::fs::create_dir_all(&index_directory).map_err(io)?;
     let mut ordered: Vec<&PathBuf> = packages.iter().collect();
-    ordered.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+    ordered.sort_by_key(|path| path.file_name().map(std::ffi::OsStr::to_os_string));
     let mut entries = Vec::new();
     for package in ordered {
         let architecture = deb_field(package, "Architecture")?;
@@ -522,7 +522,7 @@ fn archived_files(folder: &Path, root: &Path, into: &mut std::collections::BTree
             archived_files(&path, root, into)?;
         } else {
             let name = path.strip_prefix(root).map_err(|error| error.to_string())?.to_string_lossy().replace('\\', "/");
-            into.insert(name, crate::corpus::checksum(&path)?);
+            into.insert(name, checksum(&path)?);
         }
     }
     Ok(())
@@ -538,11 +538,11 @@ pub fn archive(root: &Path, write: bool) -> Result<(), String> {
     if write {
         return std::fs::write(root.join(ARCHIVE_RECORD), crate::train_json(&value)).map_err(|error| error.to_string());
     }
-    let recorded = crate::corpus::read_json(&root.join(ARCHIVE_RECORD))?;
+    let recorded = read_json(&root.join(ARCHIVE_RECORD))?;
     if recorded != value {
-        let empty = serde_json::Map::new();
+        let empty = Map::new();
         let table = recorded.as_object().unwrap_or(&empty);
-        let changed: Vec<&String> = files.iter().filter(|(name, digest)| table.get(*name).and_then(serde_json::Value::as_str) != Some(digest.as_str())).map(|(name, _)| name).collect();
+        let changed: Vec<&String> = files.iter().filter(|(name, digest)| table.get(*name).and_then(Value::as_str) != Some(digest.as_str())).map(|(name, _)| name).collect();
         let missing: Vec<&String> = table.keys().filter(|name| !files.contains_key(*name)).collect();
         return Err(format!("archived files moved: changed {changed:?}, missing {missing:?}"));
     }

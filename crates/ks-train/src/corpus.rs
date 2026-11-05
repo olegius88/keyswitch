@@ -51,6 +51,7 @@ pub struct CorpusRow {
 
 impl CorpusRow {
     /// `canonical(asdict(row))`.
+    #[must_use]
     pub fn line(&self) -> Vec<u8> {
         crate::artifact::canonical(&serde_json::json!({
             "identifier": self.identifier, "original": self.original, "group": self.group, "before": self.before, "after": self.after, "lemma": self.lemma, "family": self.family,
@@ -150,6 +151,7 @@ fn draw(text: &str) -> u64 {
 }
 
 /// `typo_variants`: three predetermined internal edits.
+#[must_use]
 pub fn typo_variants(original: &str, identifier: &str) -> Vec<String> {
     let letters: Vec<char> = original.chars().collect();
     let length = letters.len();

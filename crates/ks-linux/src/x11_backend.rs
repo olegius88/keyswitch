@@ -79,7 +79,7 @@ pub trait X11Api: Send + Sync {
     /// `XSync` of the control connection.
     fn sync(&self);
     fn flush(&self);
-    /// `XkbKeycodeToKeysym`: 0 for NoSymbol.
+    /// `XkbKeycodeToKeysym`: 0 for `NoSymbol`.
     fn keysym(&self, keycode: u8, group: u8, level: u8) -> u32;
     /// `XkbLookupKeySym` with a core state (modifiers and the group in bits 13-14).
     fn lookup_keysym(&self, keycode: u8, state: u16) -> Option<u32>;
@@ -175,10 +175,12 @@ pub struct X11Backend {
 }
 
 impl X11Backend {
+    #[must_use]
     pub fn new(connector: Connector, selection_factory: Option<SelectionFactory>) -> X11Backend {
         X11Backend::with_group_count(LAYOUT_GROUP_COUNT.to::<usize>(), connector, selection_factory)
     }
 
+    #[must_use]
     pub fn with_group_count(group_count: usize, connector: Connector, selection_factory: Option<SelectionFactory>) -> X11Backend {
         X11Backend {
             shared: Arc::new(Shared {
@@ -207,21 +209,25 @@ impl X11Backend {
         if self.shared.api().is_some() { Ok(()) } else { self.shared.open().map(|_| ()) }
     }
 
+    #[must_use]
     pub fn running(&self) -> bool {
         self.shared.running.load(Ordering::SeqCst)
     }
 
     /// The exact client process of a window, for a reader of accessibility.
+    #[must_use]
     pub fn window_process_id(&self, window: i64) -> u32 {
         self.shared.window_process_id(window)
     }
 
     /// The same, as a function a reader can keep.
+    #[must_use]
     pub fn process_for_window(&self) -> ProcessForWindow {
         let shared = self.shared.clone();
         Arc::new(move |window| shared.window_process_id(window))
     }
 
+    #[must_use]
     pub fn position_window(&self, window: i64, x: i32, y: i32) -> bool {
         match (self.shared.api(), u32::try_from(window)) {
             (Some(api), Ok(window)) if window != 0 => {
@@ -552,7 +558,7 @@ impl Shared {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
         let Some(api) = self.api() else { return Err(failed("X11 backend не запущен")) };
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         if !api.lock_group(group.low::<u8>()) {
             return Err(failed(format!("Не удалось переключить XKB-группу на {group}")));
         }
@@ -706,7 +712,7 @@ impl Shared {
         let source_boundary_sequence = if preserve_boundary_layout && kept_tail == 0 { &boundary_sequence } else { &none };
         // After a kept word the boundary follows it in the same layout.
         let kept_boundary_sequence = if kept_tail != 0 { &boundary_sequence } else { &none };
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         self.expect(&[&sequence, target_boundary_sequence, source_boundary_sequence, &kept_sequence, kept_boundary_sequence]);
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {
@@ -798,7 +804,7 @@ impl Shared {
             reselect.push((false, shift_keycode));
         }
         let typed: Vec<(bool, u8)> = runs.iter().flat_map(|(_, events)| events.iter().copied()).collect();
-        let inject_inner = lock(&self.inject_lock);
+        let _inject_inner = lock(&self.inject_lock);
         self.expect(&[&typed, &reselect]);
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {
@@ -827,18 +833,18 @@ impl InputBackend for X11Backend {
 
     /// Accepted for the shared backend contract and deliberately ignored.
     ///
-    /// XRecord is a passive observer: X11 delivers the key to the focused client no matter what this process decides, so a
+    /// `XRecord` is a passive observer: X11 delivers the key to the focused client no matter what this process decides, so a
     /// key can never be withheld the way the Windows hook withholds it.
     fn set_key_filter(&self, _predicate: Option<KeyFilter>) {}
 
-    /// Accepted for the shared contract; XRecord cannot withhold keys.
+    /// Accepted for the shared contract; `XRecord` cannot withhold keys.
     fn hold_input(&self) {}
 
     fn release_input(&self) -> Result<i32, BackendError> {
         Ok(0)
     }
 
-    /// XRecord cannot defer actions; there is nothing to deliver here.
+    /// `XRecord` cannot defer actions; there is nothing to deliver here.
     fn complete_action(&self, _deliver: bool) -> Result<i32, BackendError> {
         Ok(0)
     }
@@ -886,8 +892,8 @@ impl InputBackend for X11Backend {
 
     /// Writes `replacement` over the selection, then leaves the layout group in `final_group`.
     ///
-    /// A field with AT-SPI's EditableText takes the text from the reader itself, any character included. Otherwise it is
-    /// typed: XTest types keys, not characters, so each character goes on the key and in the group that type it, and a run of
+    /// A field with AT-SPI's `EditableText` takes the text from the reader itself, any character included. Otherwise it is
+    /// typed: `XTest` types keys, not characters, so each character goes on the key and in the group that type it, and a run of
     /// one script is typed in one group. A character no key of either group types leaves the selection as it is, with nothing
     /// typed: a paste would need the clipboard, whose owner on X11 has to answer every program that asks for it. Typed text
     /// is selected back with Shift+Left, and the group is left in `final_group` or where it was.

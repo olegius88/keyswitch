@@ -98,7 +98,8 @@ pub struct CorrectionPlan {
 
 impl CorrectionPlan {
     /// The positional fields; `automatic` True and `mode` "boundary" are the defaults of the dataclass.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         strokes: Strokes, boundary: Option<Stroke>, source_group: i64, target_group: i64, original: String, replacement: String,
         confidence: f64, application: &str,
@@ -127,6 +128,7 @@ impl CorrectionPlan {
     }
 
     /// The plan changes the case of letters in their own layout: a case fix, or its undo.
+    #[must_use]
     pub fn case_fix(&self) -> bool {
         !self.replaced.is_empty()
     }
@@ -200,6 +202,7 @@ pub struct InsertionPoint {
 }
 
 impl InsertionPoint {
+    #[must_use]
     pub fn inside_word(&self) -> bool {
         !self.head.is_empty() || !self.tail.is_empty()
     }
@@ -307,6 +310,7 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
+    #[must_use]
     pub fn new(value: &str) -> Hotkey {
         let text = value.replace('<', "").replace('>', "+");
         let mut modifiers = 0;
@@ -327,6 +331,7 @@ impl Hotkey {
         Hotkey { modifiers, key }
     }
 
+    #[must_use]
     pub fn matches(&self, event: &KeyEvent) -> bool {
         if !event.pressed || self.key.is_empty() {
             return false;

@@ -1,6 +1,6 @@
 //! Everything the engine says goes to the log in one format, parsed by tools: `TECHNICAL` and one JSON object.
 
-use super::*;
+use super::{Alternatives, DetectionDecision, Value, EngineCore, FieldReader, logged, EngineResult, WordOptions, InputBackend, text_for_group, WaitingContextWord, ms, pystr, KeyEvent, is_navigation_key, Arc};
 use ks_config::settings_diagnostics::settings_snapshot;
 use ks_lang::WordScore;
 use serde_json::{json, Map};

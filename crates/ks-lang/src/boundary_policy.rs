@@ -7,7 +7,7 @@
 
 use ks_cast::To as _;
 use crate::boundary_model::{features as legacy_features, BoundaryModel, Features, MAX_SUFFIX};
-use crate::constants::*;
+use crate::constants::{BOUNDARY_V3_FEATURE_VERSION, BOUNDARY_SUPPORTED_FEATURE_VERSIONS, BOUNDARY_MISSING_LETTERS, BOUNDARY_V1_FEATURE_VERSION, BOUNDARY_AMBIGUOUS_PUNCTUATION, BOUNDARY_V2_FEATURE_VERSION, BOUNDARY_POLICY_MAX_BYTES, BOUNDARY_V2_VERSION_PREFIX};
 use crate::language_model::LanguageModel;
 use crate::load_error::{json_loads, read_limited, LoadError};
 use indexmap::IndexMap;
@@ -20,11 +20,13 @@ pub const FEATURE_VERSION: i64 = BOUNDARY_V3_FEATURE_VERSION;
 pub const SUPPORTED_FEATURE_VERSIONS: [i64; 2] = BOUNDARY_SUPPORTED_FEATURE_VERSIONS;
 
 /// `ARTIFACT` under the `resources` folder of the install.
+#[must_use]
 pub fn artifact(resource_dir: &Path) -> PathBuf {
     resource_dir.join("models").join("boundary-v2.json")
 }
 
 /// A reading that is no word itself but a known word with one letter missing, not its last.
+#[must_use]
 pub fn misspelled(text: &str, model: &LanguageModel) -> bool {
     let word = LanguageModel::normalize(text);
     if word.is_empty() || word != pystr::casefold(text) || !pystr::isalpha(&word) || model.frequencies.get_or_zero(&word) != 0 {
@@ -44,6 +46,7 @@ pub fn misspelled(text: &str, model: &LanguageModel) -> bool {
 }
 
 /// `features(original, alternative, suffix, source, target, version)`; the default version is `FEATURE_VERSION`.
+#[must_use]
 pub fn features(original: &str, alternative: &str, suffix: i64, source: &LanguageModel, target: &LanguageModel, version: i64) -> Features {
     let mut values = legacy_features(original, alternative, suffix, source, target);
     // The rejected v1 experiment's features alone: the engine replay compares it, and no release loads one.
@@ -134,6 +137,7 @@ impl BoundaryPolicy {
     }
 
     /// The features of the version this artifact was trained on.
+    #[must_use]
     pub fn extract(&self, original: &str, alternative: &str, suffix: i64, source: &LanguageModel, target: &LanguageModel) -> Features {
         features(original, alternative, suffix, source, target, self.feature_version)
     }
@@ -146,7 +150,7 @@ impl BoundaryPolicy {
         let value = json_loads(&raw)?;
         // `value in (2, 3)`: 2.0 is 2, and `true` is 1, which is no version here.
         let feature_version = match value.get("feature_version") {
-            Some(Value::Number(number)) if value.is_object() => number.as_f64().map(|version| version.to::<i64>()).filter(|version| {
+            Some(Value::Number(number)) if value.is_object() => number.as_f64().map(ks_cast::To::to::<i64>).filter(|version| {
                 SUPPORTED_FEATURE_VERSIONS.contains(version) && number.as_f64() == Some((*version).to::<f64>())
             }),
             _ => None,

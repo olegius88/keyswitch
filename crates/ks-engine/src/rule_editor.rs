@@ -20,6 +20,7 @@ pub const PROMPT_TITLE: &str = "Добавить правило переключ
 pub const PROMPT_HINT: &str = "Enter - открыть правило    Esc - закрыть";
 pub const PROMPT_EMPTY: &str = "Слова нет: откроется пустое правило";
 
+#[must_use]
 pub fn match_label(rule_match: RuleMatch) -> &'static str {
     match rule_match {
         RuleMatch::Contains => "содержать данное сочетание букв",
@@ -28,6 +29,7 @@ pub fn match_label(rule_match: RuleMatch) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn action_label(action: RuleAction) -> &'static str {
     match action {
         RuleAction::Convert => "Переводить слово в другую раскладку",
@@ -36,6 +38,7 @@ pub fn action_label(action: RuleAction) -> &'static str {
 }
 
 /// How the settings list names a condition in one short phrase.
+#[must_use]
 pub fn match_short_label(rule_match: RuleMatch) -> &'static str {
     match rule_match {
         RuleMatch::Contains => "содержит",
@@ -62,10 +65,12 @@ impl Default for RuleDraft {
 }
 
 /// The form as the offer fills it: the word, as a whole, with its action.
+#[must_use]
 pub fn draft_from_prompt(prompt: &LearningPrompt) -> RuleDraft {
     RuleDraft { pattern: prompt.original.clone(), action: prompt.action, application: prompt.application.clone(), ..RuleDraft::default() }
 }
 
+#[must_use]
 pub fn draft_from_rule(rule: &LearnedRule) -> RuleDraft {
     RuleDraft {
         pattern: rule.pattern.clone(),
@@ -85,6 +90,7 @@ fn letters_of(keys: &str) -> Vec<String> {
 ///
 /// Punctuation and digits say nothing; letters of both alphabets cannot come from one layout, so such a pattern has no
 /// layout at all.
+#[must_use]
 pub fn pattern_group(pattern: &str) -> Option<i64> {
     let (latin_letters, cyrillic_letters) = (letters_of(US_KEYS), letters_of(RU_KEYS));
     let letters: Vec<String> = pattern.chars().filter(|character| ks_text::ucd::isalpha(*character)).map(|character| pystr::casefold(&character.to_string())).collect();
@@ -93,10 +99,11 @@ pub fn pattern_group(pattern: &str) -> Option<i64> {
     if latin == cyrillic || letters.iter().any(|letter| !latin_letters.contains(letter) && !cyrillic_letters.contains(letter)) {
         return None;
     }
-    Some(if latin { 0 } else { 1 })
+    Some(i64::from(!latin))
 }
 
 /// The same keys as the other layout prints them.
+#[must_use]
 pub fn other_layout_text(pattern: &str, group: i64) -> String {
     let pair = LayoutPair::default();
     let (source, target) = if group == 0 { ("us", "ru") } else { ("ru", "us") };
@@ -125,6 +132,7 @@ pub fn draft_problem(draft: &RuleDraft) -> String {
 }
 
 /// One line under the letters: which layout they are typed in and what the other prints.
+#[must_use]
 pub fn layout_hint(draft: &RuleDraft) -> String {
     let pattern = pystr::strip(&draft.pattern);
     let Some(group) = pattern_group(pattern) else {
@@ -133,10 +141,12 @@ pub fn layout_hint(draft: &RuleDraft) -> String {
     format!("Набрано в раскладке {}; в {} это «{}»", layout_label(group), layout_label(1 - group), other_layout_text(pattern, group))
 }
 
+#[must_use]
 pub fn condition_text(rule: &LearnedRule) -> String {
     format!("{}{}", match_short_label(rule.r#match), if rule.case_sensitive { ", с учётом регистра" } else { "" })
 }
 
+#[must_use]
 pub fn action_text(rule: &LearnedRule) -> String {
     if rule.action == RuleAction::Keep {
         return "не переводить".to_owned();
@@ -145,6 +155,7 @@ pub fn action_text(rule: &LearnedRule) -> String {
 }
 
 /// The middle line of the offer: the word and what the rule would do with it.
+#[must_use]
 pub fn prompt_word_line(prompt: &LearningPrompt) -> String {
     if prompt.original.is_empty() {
         return PROMPT_EMPTY.to_owned();

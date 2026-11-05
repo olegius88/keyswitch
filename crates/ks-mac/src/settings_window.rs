@@ -1,4 +1,4 @@
-//! The settings window in AppKit: tabs built from the same setting descriptions as on Windows, the lists and actions beside
+//! The settings window in `AppKit`: tabs built from the same setting descriptions as on Windows, the lists and actions beside
 //! them, the learning prompt and the rule editor.
 use ks_cast::To as _;
 use std::cell::RefCell;
@@ -8,7 +8,7 @@ use ks_config::history::data_dir;
 use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
-use ks_ui::windows_ui_model::*;
+use ks_ui::windows_ui_model::{SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, UpdateController, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -347,15 +347,12 @@ impl Ui {
                     }
                     ControlKind::Int | ControlKind::Float => {
                         let shown: Id = msg_send![control, stringValue];
-                        match parse_number(&spec, &text_of(shown)) {
-                            Some((value, text)) => {
-                                let _: () = msg_send![control, setStringValue: string(&text)];
-                                Some(value)
-                            }
-                            None => {
-                                let _: () = msg_send![control, setStringValue: string(&control_text(&spec, settings.get(&spec.path).as_ref()))];
-                                None
-                            }
+                        if let Some((value, text)) = parse_number(&spec, &text_of(shown)) {
+                            let _: () = msg_send![control, setStringValue: string(&text)];
+                            Some(value)
+                        } else {
+                            let _: () = msg_send![control, setStringValue: string(&control_text(&spec, settings.get(&spec.path).as_ref()))];
+                            None
                         }
                     }
                     ControlKind::Text => {
@@ -366,11 +363,10 @@ impl Ui {
                 }
             }
         });
-        if let Some(value) = value {
-            if let Err(error) = settings.set(&spec.path, value, true) {
+        if let Some(value) = value
+            && let Err(error) = settings.set(&spec.path, value, true) {
                 show_error(&format!("Настройка не сохранена: {error}"));
             }
-        }
     }
 
     fn refresh_status(&self) {

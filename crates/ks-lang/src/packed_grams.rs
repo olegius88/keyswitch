@@ -91,6 +91,7 @@ fn sorted_keys<'a, I: Iterator<Item = &'a str> + Clone>(names: I, max_width: usi
 impl PackedGrams {
     /// `PackedGrams.pack(table)`: the table packed, or `None` where packing does not fit (too few entries, too many
     /// characters, too long or an empty gram, a zero character). A key given twice keeps its last value.
+    #[must_use]
     pub fn pack(table: &[(&str, f64)]) -> Option<PackedGrams> {
         let sorted = sorted_keys(table.iter().map(|entry| entry.0), PACKED_GRAM_MAX_CHARACTERS)?;
         if sorted.winners.len() < PACKED_GRAM_MIN_ENTRIES {
@@ -130,19 +131,23 @@ impl PackedGrams {
         }
     }
 
+    #[must_use]
     pub fn get(&self, gram: &str) -> Option<f64> {
         self.get_chars(&gram.chars().collect::<Vec<char>>())
     }
 
+    #[must_use]
     pub fn get_chars(&self, gram: &[char]) -> Option<f64> {
         self.get_index(gram).map(|index| self.value(index))
     }
 
     /// `len(table)`.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.keys.len() / self.width
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
@@ -156,6 +161,7 @@ impl PackedGrams {
     }
 
     /// The bytes of the two arrays, for the record.
+    #[must_use]
     pub fn heap_bytes(&self) -> usize {
         self.keys.len()
             + match &self.values {
@@ -176,25 +182,22 @@ pub enum GramTable {
 impl GramTable {
     /// The table of the names and the integers the artifact stores, `dict(zip(names, raw))`.
     pub(crate) fn from_raw<'a, I: Iterator<Item = &'a str> + Clone>(names: I, raw: &[i32]) -> GramTable {
-        match sorted_keys(names.clone(), PACKED_GRAM_KEY_BYTES) {
-            Some(sorted) => {
-                let picked = sorted.winners.iter().map(|&index| raw[index.to::<usize>()]);
-                let values = if raw.iter().all(|&value| i16::try_from(value).is_ok()) {
-                    GramValues::Small(picked.map(|value| value.to::<i16>()).collect())
-                } else {
-                    GramValues::Int(picked.collect())
-                };
-                GramTable::Packed(PackedGrams { alphabet: sorted.alphabet, width: sorted.width, keys: sorted.keys, values, scale: 1.0 })
+        if let Some(sorted) = sorted_keys(names.clone(), PACKED_GRAM_KEY_BYTES) {
+            let picked = sorted.winners.iter().map(|&index| raw[index.to::<usize>()]);
+            let values = if raw.iter().all(|&value| i16::try_from(value).is_ok()) {
+                GramValues::Small(picked.map(ks_cast::To::to::<i16>).collect())
+            } else {
+                GramValues::Int(picked.collect())
+            };
+            GramTable::Packed(PackedGrams { alphabet: sorted.alphabet, width: sorted.width, keys: sorted.keys, values, scale: 1.0 })
+        } else {
+            let mut builder = TableBuilder::new();
+            let mut longest = 0;
+            for (name, &value) in names.zip(raw) {
+                longest = longest.max(name.chars().count());
+                builder.push(name, i64::from(value));
             }
-            None => {
-                let mut builder = TableBuilder::new();
-                let mut longest = 0;
-                for (name, &value) in names.zip(raw) {
-                    longest = longest.max(name.chars().count());
-                    builder.push(name, i64::from(value));
-                }
-                GramTable::Plain { table: builder.finish(|_earlier, later| later), scale: 1.0, longest }
-            }
+            GramTable::Plain { table: builder.finish(|_earlier, later| later), scale: 1.0, longest }
         }
     }
 
@@ -214,6 +217,7 @@ impl GramTable {
         }
     }
 
+    #[must_use]
     pub fn get(&self, gram: &str) -> Option<f64> {
         match self {
             GramTable::Packed(packed) => packed.get(gram),
@@ -221,6 +225,7 @@ impl GramTable {
         }
     }
 
+    #[must_use]
     pub fn get_chars(&self, gram: &[char]) -> Option<f64> {
         match self {
             GramTable::Packed(packed) => packed.get_chars(gram),
@@ -228,6 +233,7 @@ impl GramTable {
         }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         match self {
             GramTable::Packed(packed) => packed.len(),
@@ -235,11 +241,13 @@ impl GramTable {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// The packed table, where it is one.
+    #[must_use]
     pub fn packed(&self) -> Option<&PackedGrams> {
         match self {
             GramTable::Packed(packed) => Some(packed),

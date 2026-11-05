@@ -39,6 +39,7 @@ fn integer_text(value: f64) -> String {
 }
 
 /// A whole value without a fraction part, a fraction with a decimal comma: 3, 2,5.
+#[must_use]
 pub fn russian_number(value: f64) -> String {
     if is_integer(value) {
         return integer_text(value);
@@ -61,6 +62,7 @@ fn abs_int_mod(value: f64, m: u32) -> u32 {
 }
 
 /// The number and the noun form it takes: 1 секунду, 2 секунды, 5 секунд, 2,5 секунды.
+#[must_use]
 pub fn quantity(value: f64, forms: NounForms) -> String {
     let [one, few, many] = forms;
     let written = russian_number(value);

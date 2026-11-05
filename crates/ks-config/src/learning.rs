@@ -27,6 +27,7 @@ pub enum RuleMatch {
 }
 
 impl RuleMatch {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             RuleMatch::Exact => "exact",
@@ -47,6 +48,7 @@ pub enum RuleAction {
 }
 
 impl RuleAction {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             RuleAction::Convert => "convert",
@@ -129,6 +131,7 @@ pub type RuleIdentity = (i64, RuleMatch, bool, String);
 
 impl LearnedRule {
     /// `LearnedRule(pattern, source, target)`: a whole-word, case-insensitive "convert" rule.
+    #[must_use]
     pub fn new(pattern: &str, source_group: i64, target_group: i64) -> LearnedRule {
         LearnedRule {
             pattern: pattern.to_string(),
@@ -140,15 +143,18 @@ impl LearnedRule {
         }
     }
 
+    #[must_use]
     pub fn key(&self) -> String {
         if self.case_sensitive { self.pattern.clone() } else { casefold(&self.pattern) }
     }
 
     /// Two rules with one identity cannot both exist: the later replaces the earlier.
+    #[must_use]
     pub fn identity(&self) -> RuleIdentity {
         (self.source_group, self.r#match, self.case_sensitive, self.key())
     }
 
+    #[must_use]
     pub fn matches(&self, word: &str) -> bool {
         let text = if self.case_sensitive { word.to_string() } else { casefold(word) };
         let key = self.key();
@@ -163,6 +169,7 @@ impl LearnedRule {
     ///
     /// A rule on a part of the word can be met by letters not typed yet, so it answers yes only once the typed letters
     /// already lead into the part.
+    #[must_use]
     pub fn may_match_continuation(&self, prefix: &str) -> bool {
         let text = if self.case_sensitive { prefix.to_string() } else { casefold(prefix) };
         let key = self.key();
@@ -178,6 +185,7 @@ impl LearnedRule {
     }
 
     /// `(rank of the condition, length of the pattern, is a "keep" rule)`: the greater decides.
+    #[must_use]
     pub fn specificity(&self) -> (usize, usize, bool) {
         let rank = RULE_MATCHES.iter().position(|item| *item == self.r#match).expect("a known condition");
         (rank, self.pattern.chars().count(), self.action == RuleAction::Keep)
@@ -308,7 +316,7 @@ pub fn migrate_legacy(payload: &Map<String, Value>, confirmations_required: i64)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 struct State {

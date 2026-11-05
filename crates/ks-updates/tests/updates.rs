@@ -192,7 +192,7 @@ fn a_release_without_the_asset_of_this_architecture_is_reported() {
 #[test]
 fn transport_encoding_and_response_limits_fail_closed() {
     let wrong_url = FakeResponse::new(release_payload("1.0.0", UpdateTarget::WindowsX64, b"x").to_string().as_bytes(), "https://example.invalid/latest").0;
-    let oversized = vec![b'x'; ks_updates::constants::MAX_RELEASE_JSON_BYTES + 1];
+    let oversized = vec![b'x'; constants::MAX_RELEASE_JSON_BYTES + 1];
     let cases: Vec<(io::Result<FakeResponse>, bool)> = vec![
         (Err(io::Error::other("offline")), false),
         (Ok(FakeResponse::new(b"\xff", LATEST_RELEASE_URL).0), true),
@@ -437,9 +437,7 @@ fn current_available_and_observer_isolation() {
     let failed = Arc::new(AtomicUsize::new(0));
     let flag = failed.clone();
     manager.subscribe(Arc::new(move |snapshot| {
-        if snapshot.phase != UpdatePhase::Idle && flag.fetch_add(1, Ordering::SeqCst) == 0 {
-            panic!("observer");
-        }
+        assert!(!(snapshot.phase != UpdatePhase::Idle && flag.fetch_add(1, Ordering::SeqCst) == 0), "observer");
     }));
     assert!(manager.check(false, false));
     assert!(failed.load(Ordering::SeqCst) > 0);
@@ -665,7 +663,7 @@ fn installer_path_and_arguments_are_strict() {
     let directory = temp_dir("launch");
     let spawned: Mutex<Vec<(PathBuf, Vec<String>)>> = Mutex::default();
     let spawn = |path: &Path, arguments: &[&str]| -> io::Result<()> {
-        spawned.lock().unwrap().push((path.to_path_buf(), arguments.iter().map(|a| a.to_string()).collect()));
+        spawned.lock().unwrap().push((path.to_path_buf(), arguments.iter().map(ToString::to_string).collect()));
         Ok(())
     };
     let missing = directory.join("KeySwitch-Setup-1.0.0-x64.exe");
@@ -728,6 +726,6 @@ fn automatic_checks_follow_the_setting_and_can_be_stopped() {
     drop(early);
     std::thread::sleep(Duration::from_millis(100));
     assert!(quiet.checks.lock().unwrap().is_empty());
-    assert_eq!(ks_updates::constants::UPDATE_CHECK_INITIAL_DELAY, Duration::from_secs(30));
-    assert_eq!(ks_updates::constants::UPDATE_CHECK_INTERVAL, Duration::from_secs(21_600));
+    assert_eq!(constants::UPDATE_CHECK_INITIAL_DELAY, Duration::from_secs(30));
+    assert_eq!(constants::UPDATE_CHECK_INTERVAL, Duration::from_secs(21_600));
 }

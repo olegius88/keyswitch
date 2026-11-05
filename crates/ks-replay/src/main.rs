@@ -37,7 +37,7 @@ impl Counts {
 }
 
 fn vkey(version: &str) -> Vec<i64> {
-    let parts: Option<Vec<i64>> = version.split('.').map(|part| ks_text::py_int(part).map(|value| value.to::<i64>())).collect();
+    let parts: Option<Vec<i64>> = version.split('.').map(|part| ks_text::py_int(part).map(ks_cast::To::to::<i64>)).collect();
     parts.unwrap_or_else(|| vec![0])
 }
 

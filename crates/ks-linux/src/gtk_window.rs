@@ -38,7 +38,7 @@ use ks_updates::{UpdateController, UpdatePhase, UpdateSnapshot};
 use serde_json::{Value, json};
 
 use crate::gtk_app;
-use crate::gtk_model::*;
+use crate::gtk_model::{GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
 use crate::system::AutostartManager;
 
 const CONFIDENCE_SETTING_STEP: f64 = 0.1;
@@ -87,7 +87,8 @@ impl ApplicationChoice {
     }
 }
 
-/// `installed_application_choices`: visible desktop applications with the best WM_CLASS candidate.
+/// `installed_application_choices`: visible desktop applications with the best `WM_CLASS` candidate.
+#[must_use]
 pub fn installed_application_choices() -> Vec<ApplicationChoice> {
     let mut choices: Vec<ApplicationChoice> = Vec::new();
     for application in gio::AppInfo::all() {
@@ -97,7 +98,7 @@ pub fn installed_application_choices() -> Vec<ApplicationChoice> {
         let desktop_id = application.id().map(|id| id.to_string()).unwrap_or_default();
         let desktop_id = desktop_id.strip_suffix(".desktop").unwrap_or(&desktop_id).to_owned();
         let startup_class =
-            application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(|info| info.startup_wm_class()).map(|class| class.to_string()).unwrap_or_default();
+            application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map(|class| class.to_string()).unwrap_or_default();
         let executable = application.executable().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         let identifier = [startup_class, executable, desktop_id.clone()].into_iter().find(|text| !text.is_empty()).unwrap_or_default().trim().to_owned();
         let name = application.display_name().to_string().trim().to_owned();
@@ -320,6 +321,7 @@ impl PageBuilder<'_> {
 }
 
 impl MainWindow {
+    #[must_use]
     pub fn new(application: &adw::Application, services: Rc<Services>) -> Rc<MainWindow> {
         install_css(&services.resource_dir);
         let window = adw::ApplicationWindow::builder().application(application).title("KeySwitch").build();
@@ -1072,7 +1074,7 @@ impl Builder<'_> {
         row
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn combo_row(&self, path: &str, title: &str, subtitle: &str, labels: &[&str], keys: Vec<String>, selected: u32, track: bool) -> adw::ComboRow {
         let row = adw::ComboRow::builder().title(title).subtitle(subtitle).model(&gtk::StringList::new(labels)).build();
         row.set_selected(selected);
@@ -1336,7 +1338,7 @@ impl Builder<'_> {
         status.add_suffix(&add_rule);
         let clear = button("Удалить все");
         clear.add_css_class("destructive-action");
-        clear.connect_clicked(|_| gtk_app::with_window(|window| window.confirm_clear_learning()));
+        clear.connect_clicked(|_| gtk_app::with_window(MainWindow::confirm_clear_learning));
         status.add_suffix(&clear);
         learning.add(&status);
         page.append(&learning);
@@ -1437,10 +1439,10 @@ impl Builder<'_> {
         let picker = group_with("Добавить приложение", "Выберите окно прицелом, найдите установленное приложение в каталоге или укажите WM_CLASS вручную.");
         let active_app_row = action_row("Выбор приложения", &format!("При выборе окна KeySwitch скроется на {} — переключитесь в нужное приложение.", capture_delay()));
         let catalog = button("Из списка…");
-        catalog.connect_clicked(|_| gtk_app::with_window(|window| window.show_application_picker()));
+        catalog.connect_clicked(|_| gtk_app::with_window(MainWindow::show_application_picker));
         let capture = button("Выбрать окно");
         capture.add_css_class("suggested-action");
-        capture.connect_clicked(|_| gtk_app::with_window(|window| window.start_active_application_capture()));
+        capture.connect_clicked(|_| gtk_app::with_window(MainWindow::start_active_application_capture));
         active_app_row.add_suffix(&catalog);
         active_app_row.add_suffix(&capture);
         picker.add(&active_app_row);
@@ -1448,9 +1450,9 @@ impl Builder<'_> {
         let manual_row = action_row("Добавить вручную", "Имя WM_CLASS или executable, например code, firefox или telegram-desktop");
         let manual_entry =
             gtk::Entry::builder().placeholder_text("WM_CLASS").width_chars(MANUAL_APP_ENTRY_WIDTH_CHARACTERS).valign(gtk::Align::Center).build();
-        manual_entry.connect_activate(|_| gtk_app::with_window(|window| window.add_manual_application()));
+        manual_entry.connect_activate(|_| gtk_app::with_window(MainWindow::add_manual_application));
         let manual_button = button("Добавить");
-        manual_button.connect_clicked(|_| gtk_app::with_window(|window| window.add_manual_application()));
+        manual_button.connect_clicked(|_| gtk_app::with_window(MainWindow::add_manual_application));
         manual_row.add_suffix(&manual_entry);
         manual_row.add_suffix(&manual_button);
         picker.add(&manual_row);
@@ -1532,7 +1534,7 @@ impl Builder<'_> {
         let reset_row = action_row("Вернуть настройки по умолчанию", "История исправлений и правила переключения при этом не удаляются");
         let reset = button("Сбросить");
         reset.add_css_class("destructive-action");
-        reset.connect_clicked(|_| gtk_app::with_window(|window| window.confirm_reset()));
+        reset.connect_clicked(|_| gtk_app::with_window(MainWindow::confirm_reset));
         reset_row.add_suffix(&reset);
         maintenance.add(&reset_row);
         page.append(&maintenance);
@@ -1569,10 +1571,10 @@ impl Builder<'_> {
         let action = action_row("GitHub Releases", "Метаданные и SHA-256 загружаются только из официального репозитория");
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, UPDATE_BUTTONS_SPACING_PIXELS);
         let check = gtk::Button::with_label("Проверить сейчас");
-        check.connect_clicked(|_| gtk_app::with_window(|window| window.check_updates()));
+        check.connect_clicked(|_| gtk_app::with_window(MainWindow::check_updates));
         let open = gtk::Button::with_label("Открыть выпуск");
         open.set_sensitive(!snapshot.release_url.is_empty());
-        open.connect_clicked(|_| gtk_app::with_window(|window| window.open_update_release()));
+        open.connect_clicked(|_| gtk_app::with_window(MainWindow::open_update_release));
         buttons.append(&check);
         buttons.append(&open);
         action.add_suffix(&buttons);
@@ -1588,7 +1590,7 @@ impl Builder<'_> {
         styled(&total, "section-heading");
         let clear = gtk::Button::builder().label("Очистить историю").icon_name("user-trash-symbolic").build();
         clear.add_css_class("destructive-action");
-        clear.connect_clicked(|_| gtk_app::with_window(|window| window.confirm_clear_history()));
+        clear.connect_clicked(|_| gtk_app::with_window(MainWindow::confirm_clear_history));
         controls.append(&total);
         controls.append(&clear);
         page.append(&controls);
@@ -1643,14 +1645,14 @@ impl Builder<'_> {
         let open_log = centered(gtk::Button::from_icon_name("folder-symbolic"));
         open_log.set_tooltip_text(Some("Открыть папку журнала"));
         open_log.add_css_class("flat");
-        open_log.connect_clicked(|_| gtk_app::with_window(|window| window.open_log_directory()));
+        open_log.connect_clicked(|_| gtk_app::with_window(MainWindow::open_log_directory));
         log_row.add_suffix(&open_log);
         log_row.set_activatable_widget(Some(&open_log));
         technical.add(&log_row);
         page.append(&technical);
 
         let copy = gtk::Button::builder().label("Скопировать диагностику").icon_name("edit-copy-symbolic").halign(gtk::Align::Start).build();
-        copy.connect_clicked(|_| gtk_app::with_window(|window| window.copy_diagnostics()));
+        copy.connect_clicked(|_| gtk_app::with_window(MainWindow::copy_diagnostics));
         page.append(&copy);
 
         if !probe.available {

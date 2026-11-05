@@ -38,7 +38,7 @@ impl EngineCore {
     /// has to decide the letter; if it went through, the observed text no longer
     /// matches and the wait cancels itself. A token of signs the other layout
     /// types the same (`-`) has nothing to wait for: it stands among the kept
-    /// words instead (keep_for_next_word).
+    /// words instead (`keep_for_next_word`).
     pub(crate) fn start_context_wait(
         &mut self, plan: &PlanRef, decision: &DetectionDecision, boundary: &Stroke, trailing: &[Stroke], head: usize, fallback: bool,
     ) -> bool {
@@ -100,7 +100,7 @@ impl EngineCore {
     ///
     /// `switched` says the early switch converted the next word while it was typed: its keys
     /// are in two layouts, and `decision` is that conversion, from the waiting word's layout.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn resolve_context_wait(
         &mut self, waiting: Option<&WaitingContextWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision,
         application: &str, alternatives: &Alternatives, switched: bool,
@@ -144,12 +144,9 @@ impl EngineCore {
             // word once more after the waiting word's other reading, `еще в`; the
             // pair converts only if it then converts the next word and, below, the
             // waiting word with it.
-            match self.decide_after_waiting_word(waiting, &decision, alternatives, boundary, &previous_boundary.character)? {
-                Some(converted) => decision = converted,
-                None => {
-                    self.log_context_wait("context_wait_cancelled", Some(waiting), "next_word_not_converted", &[]);
-                    return Ok(None);
-                }
+            if let Some(converted) = self.decide_after_waiting_word(waiting, &decision, alternatives, boundary, &previous_boundary.character)? { decision = converted } else {
+                self.log_context_wait("context_wait_cancelled", Some(waiting), "next_word_not_converted", &[]);
+                return Ok(None);
             }
         }
         let original = format!("{}{}{}", previous.original, previous_boundary.character, decision.original);
@@ -279,9 +276,9 @@ impl EngineCore {
     ///
     /// A token the other layout types the same (`+`, `=`, `2`) is no text of either language: typed again in the target
     /// layout it is what it was, so the correction covers it as well, and the layout follows the converted word. With
-    /// the token kept in its own layout (kept_tail), `м + ` became `v + ` and the next letter of the formula came out
+    /// the token kept in its own layout (`kept_tail`), `м + ` became `v + ` and the next letter of the formula came out
     /// Russian again: `v + ы`, and a lone letter there is refused. A word is typed again in its own layout, which stays.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn word_before_kept(
         &self, previous: &PlanRef, strokes: &[Stroke], boundary: &Stroke, group: i64, alternative: &str, following: &str, confidence: f64, application: &str,
     ) -> PlanRef {
@@ -309,10 +306,10 @@ impl EngineCore {
     /// the model kept it at p=0.94. A sign after it is evidence the word itself never had: `м + ` is the formula
     /// `v + ` typed in the Russian layout (field typing, 19.10.2026, which he corrected with Pause). The letter
     /// is asked with the sign after it, the question a waiting letter is asked before its kept neighbour
-    /// (decide_with_kept_neighbour), and only a letter of the class the variable and sign heads answer
-    /// (context_action_features.sign_question): a one-letter word of the Russian layout after a Cyrillic word, no
+    /// (`decide_with_kept_neighbour`), and only a letter of the class the variable and sign heads answer
+    /// (`context_action_features.sign_question)`: a one-letter word of the Russian layout after a Cyrillic word, no
     /// Russian word of one letter, before a token that is no dash alone (a dash tells a minus from the dash of a
-    /// sentence only by what follows it). The model decides; a conversion takes the sign along (word_before_kept).
+    /// sentence only by what follows it). The model decides; a conversion takes the sign along (`word_before_kept`).
     pub(crate) fn decide_letter_before_sign(
         &mut self, kept: &[Arc<KeptWord>], strokes: &[Stroke], boundary: &Stroke, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<PlanRef>> {
@@ -370,7 +367,7 @@ impl EngineCore {
     ///
     /// A correction at a pause leaves the word open, so its space commits the converted reading as a
     /// word of its own, which the model keeps; the conversion at a space is asked again when the next
-    /// word goes back the other way (revert_with_next_word), and this one was not. In the sealed
+    /// word goes back the other way (`revert_with_next_word`), and this one was not. In the sealed
     /// sequences every word pauses before its space: an English message opening with a token whose
     /// sign is a Russian letter's key was converted there, the next English word typed in the Russian
     /// layout went back, and the first word stayed Cyrillic (test v47). The plan is the pause's, ended
@@ -395,7 +392,7 @@ impl EngineCore {
     /// How a word asked again with its converted neighbour names that right context.
     ///
     /// The model is trained on `planned_next_conversion` frames for the words it defers,
-    /// up to PLANNED_CONTEXT_WORD_MAX_CHARACTERS letters, and its features refuse a planned
+    /// up to `PLANNED_CONTEXT_WORD_MAX_CHARACTERS` letters, and its features refuse a planned
     /// frame of a longer word. A longer word that waited (`руку`, then `they`) or that was
     /// converted and is revisited (`ghbdtn`, then `hello`) is asked with the converted
     /// neighbour as the right context the field will hold, the `field` origin it was
@@ -411,7 +408,7 @@ impl EngineCore {
     /// The detector gets that reading as its previous word and the model gets it
     /// in front of the caret, as they would after a word typed in that layout, and
     /// the model is told that the reading is the engine's hypothesis, not text that
-    /// was typed (before_origin): read as typed text, a reading of English letters
+    /// was typed (`before_origin)`: read as typed text, a reading of English letters
     /// before a word that is no word of either layout turned it into its Latin
     /// reading, `тыв` after `tot ` into `nsd` (`еще тыв`, field typing). Nothing
     /// is decided here that the model does not decide.
@@ -439,7 +436,7 @@ impl EngineCore {
     /// Russian. When the engine then converts that word into the language `ns` was
     /// typed in - `vs` and `code` come out as `мы сщву` - the first word is decided
     /// once more with the converted next word after it, exactly as a waiting word
-    /// is (resolve_context_wait). If the model no longer converts it, one
+    /// is (`resolve_context_wait`). If the model no longer converts it, one
     /// correction returns both: `vs code`. The engine only asks; the model decides.
     /// Only a word that opened its text is asked again.
     pub(crate) fn revert_with_next_word(
@@ -544,13 +541,13 @@ impl EngineCore {
         // The model reads keys as the US layout types them, whichever layout typed the token.
         let keys = if script == "en" { plan.original.as_str() } else { plan.replacement.as_str() };
         let shape = shape_of(&plan.original, pystr::strip(before).is_empty());
-        let known = |language: &str, word: &str| self.model(if language == "en" { 0 } else { 1 }).score(word).known;
+        let known = |language: &str, word: &str| self.model(i64::from(language != "en")).score(word).known;
         Some(ortho.score(&OrthoEvidence { keys, shape, source_script: script }, Some(&known)))
     }
 
     /// Whether the orthotactic model reads a token's keys as the language of its other layout.
     ///
-    /// The model of the policy's licence (ContextPolicy._licensed), asked about the whole token,
+    /// The model of the policy's licence (`ContextPolicy`._licensed), asked about the whole token,
     /// signs at its end included: those are the keys of letters (`[` is `х`, `.` is `ю`).
     fn keys_of_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
         let Some(ortho) = &self.context_policy.ortho else {
@@ -587,22 +584,22 @@ impl EngineCore {
     /// a first word. A Russian word typed as intended before a term typed in the other
     /// layout was converted then: `склонируй репо пшерги` would become
     /// `склонируй htgj github`. A short word right after Latin text, which a model with the
-    /// resume head answers (context_action_features.resume_question), is taken along on its
+    /// resume head answers (`context_action_features.resume_question`), is taken along on its
     /// conversion wherever it stands on its line: a person who forgot to switch back to
     /// Russian after a term resumes Russian text there, and with Hunspell, which knows `f`
     /// and `z` as English words, `seek() , f там` and `TSet - z использовал` kept their
     /// first Russian word while the rest converted (the developer-chat development set,
     /// 29.10.2026). So is a Latin letter whose Cyrillic reading is a Russian word of one
     /// letter after Russian text, which a model with the Cyrillic-letter head answers
-    /// (context_action_features.cyrletter_question): `d` stayed in `разрабатывал и d документ`
+    /// (`context_action_features.cyrletter_question)`: `d` stayed in `разрабатывал и d документ`
     /// while `документ` converted (field typing, 30.10.2026). A token whose segmentation the boundary model left open
-    /// (KeptWord.segmentation_open) was decided neither with the words before it nor at
+    /// (`KeptWord.segmentation_open`) was decided neither with the words before it nor at
     /// all, and is taken along wherever it stands on its line, on the model's own
     /// conversion and with the text before it read now: Russian words ending in a letter
     /// the English layout types as a sign stayed in the middle of every sentence
     /// (`в 2 vbkkbjyf[ cdtnjds[` converted only `световых`, though the model, asked,
     /// converts `миллионах` before it at p=1.0). A word the user excluded, or one a rule
-    /// of theirs keeps, is never taken along: the model is not asked about it (decide_word).
+    /// of theirs keeps, is never taken along: the model is not asked about it (`decide_word`).
     pub(crate) fn take_along(
         &mut self, kept: &[Arc<KeptWord>], plan: &PlanRef, first_characters: usize, application: &str, switched: bool,
     ) -> EngineResult<PlanRef> {
@@ -732,12 +729,9 @@ impl EngineCore {
             return Ok(start);
         };
         let plan = settled;
-        let before = match &farthest.field {
-            Some(field) => field.before.clone(),
-            None => {
-                let cut = pystr::len(&plan.original) + pystr::len(&suffix);
-                pystr::slice(&self.context_policy.stream.text, None, Some(-cut.to::<i64>())).to_owned()
-            }
+        let before = if let Some(field) = &farthest.field { field.before.clone() } else {
+            let cut = pystr::len(&plan.original) + pystr::len(&suffix);
+            pystr::slice(&self.context_policy.stream.text, None, Some(-cut.to::<i64>())).to_owned()
         };
         let last_line = pystr::rsplit_sep(&before, "\n", 1).and_then(|parts| parts.last().copied()).unwrap_or(&before);
         if !taken.iter().all(|word| word.segmentation_open || resumed.iter().any(|other| Arc::ptr_eq(other, word))) && any_alpha(last_line) {

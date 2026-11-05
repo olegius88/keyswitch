@@ -143,7 +143,7 @@ fn samples<'a>(frames: &'a [Frame], split: &str) -> Vec<(&'a Frame, &'static str
 }
 
 fn label_of(row: &Frame) -> Result<u8, String> {
-    ACTIONS.iter().position(|action| action.as_str() == row.action).map(|index| index.to::<u8>()).ok_or_else(|| "an unknown action".to_owned())
+    ACTIONS.iter().position(|action| action.as_str() == row.action).map(ks_cast::To::to::<u8>).ok_or_else(|| "an unknown action".to_owned())
 }
 
 fn pack(items: &[(&Frame, &str)], names: &[String], cache: &Cache, importance: &[f64; WIDTH], technical: f64) -> Result<Packed, String> {

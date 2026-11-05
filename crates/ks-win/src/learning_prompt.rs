@@ -22,7 +22,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_KEYDOWN, WM_MOUSEACTIVATE, WM_PAINT, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::constants::*;
+use crate::constants::{LEARNING_PROMPT_CLASS, BASE_DPI, LEARNING_PROMPT_CARD_PADDING_X_PIXELS, LEARNING_PROMPT_CARD_PADDING_Y_PIXELS, LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS, LEARNING_PROMPT_WORD_PADDING_TOP_PIXELS, LEARNING_PROMPT_WORD_PADDING_BOTTOM_PIXELS, LEARNING_PROMPT_ANCHOR_GAP_PIXELS, LEARNING_PROMPT_SCREEN_MARGIN_PIXELS};
 use crate::win32_controls::{self as w32, Fonts, scaled};
 use crate::windows_native::wide;
 use crate::windows_ui_model::{PROMPT_BORDER, PROMPT_CARD, PROMPT_HINT_COLOR, PROMPT_TITLE_COLOR, PROMPT_WORD_COLOR, prompt_position};
@@ -74,7 +74,7 @@ fn register() -> bool {
             lpszMenuName: null(),
             lpszClassName: class.as_ptr(),
         };
-        RegisterClassW(&description) != 0
+        RegisterClassW(&raw const description) != 0
     };
     REGISTERED.with(|flag| *flag.borrow_mut() = registered);
     registered
@@ -85,7 +85,7 @@ fn monitor_dpi(point: POINT) -> i32 {
     // SAFETY: the monitor is looked up by value; the call fills two numbers.
     let result = unsafe {
         let monitor = MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST);
-        GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y)
+        GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &raw mut x, &raw mut y)
     };
     if result == 0 && x > 0 { x.bits::<i32>() } else { BASE_DPI }
 }
@@ -111,7 +111,7 @@ pub fn show(prompt: &LearningPrompt, anchor: Option<ScreenAnchor>, callbacks: Rc
     let anchor = anchor.or_else(|| {
         let mut point = POINT { x: 0, y: 0 };
         // SAFETY: fills the point it is given.
-        unsafe { GetCursorPos(&mut point) };
+        unsafe { GetCursorPos(&raw mut point) };
         Some(ScreenAnchor { x: point.x, y: point.y, window: None })
     });
     let Some(place) = anchor else { return };
@@ -176,10 +176,12 @@ fn destroy_window() -> Option<Shown> {
 }
 
 /// `hide_prompt`: the card goes away, and the window it was shown over gets the keyboard back.
+#[must_use]
 pub fn hide() -> Option<(Option<i64>, Rc<Callbacks>)> {
     destroy_window().map(|shown| (shown.anchor.and_then(|anchor| anchor.window), shown.callbacks))
 }
 
+#[must_use]
 pub fn is_shown() -> bool {
     SHOWN.with(|slot| slot.borrow().is_some())
 }
@@ -203,7 +205,7 @@ fn paint(window: HWND) {
     // SAFETY: PAINTSTRUCT is plain data filled by BeginPaint.
     let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
     // SAFETY: balanced with EndPaint below on the same window.
-    let hdc: HDC = unsafe { BeginPaint(window, &mut paint) };
+    let hdc: HDC = unsafe { BeginPaint(window, &raw mut paint) };
     SHOWN.with(|slot| {
         if let Some(shown) = slot.borrow().as_ref() {
             let client = w32::client_rect(window);
@@ -227,7 +229,7 @@ fn paint(window: HWND) {
         }
     });
     // SAFETY: ends the paint begun above.
-    unsafe { EndPaint(window, &paint) };
+    unsafe { EndPaint(window, &raw const paint) };
 }
 
 unsafe extern "system" fn prompt_proc(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

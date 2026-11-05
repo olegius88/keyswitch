@@ -8,7 +8,7 @@
 //! `@lru_cache` of `score` is not carried over: it is a pure function, cheap here, and the cache held up to 65 536 scores.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{LANGUAGE_MODEL_UNSEEN_GRAM_VOCABULARY, LANGUAGE_MODEL_GRAM_SMOOTHING, LANGUAGE_MODEL_NGRAM_ORDERS, LANGUAGE_MODEL_MIN_WORD_CHARACTERS, PACKED_GRAM_LAST_CODE, LANGUAGE_MODEL_MAX_GRAM_WEIGHT, LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN, LANGUAGE_MODEL_MIN_NGRAM_DEVIATION, LANGUAGE_MODEL_CALIBRATION_WORD_LIMIT, LANGUAGE_MODEL_CALIBRATION_MIN_CHARACTERS, SYNTHETIC_FREQUENCY_FLOOR, SYNTHETIC_FREQUENCY_DIVISOR, ARPA_BIGRAM_SECTION, LANGUAGE_MODEL_TRIGRAM_ORDER, LANGUAGE_MODEL_EMPTY_TOKEN_SCORE, LANGUAGE_MODEL_DELETION_POSITIONS, LANGUAGE_MODEL_DELETION_MIN_CHARACTERS, LANGUAGE_MODEL_NATURALNESS_MIN, LANGUAGE_MODEL_NATURALNESS_MAX, LANGUAGE_MODEL_EXACT_WORD_BASE_SCORE, LANGUAGE_MODEL_POPULARITY_WEIGHT, LANGUAGE_MODEL_SPELL_KNOWN_SCORE, LANGUAGE_MODEL_KNOWN_WORD_NATURALNESS_FLOOR, LANGUAGE_MODEL_NATURALNESS_WEIGHT, LANGUAGE_MODEL_INVALID_RATIO_WEIGHT};
 use crate::pysum::py_sum;
 use crate::spellcheck::{split_path_list, DisabledSpellChecker, SpellChecker};
 use crate::tables::{TableBuilder, WordList, WordTable};
@@ -31,12 +31,14 @@ pub fn model_roots_from(model_path: Option<&str>, resource_dir: &Path) -> Vec<Pa
 }
 
 /// `model_roots()`.
+#[must_use]
 pub fn model_roots(resource_dir: &Path) -> Vec<PathBuf> {
     let value = std::env::var_os("KEYSWITCH_MODEL_PATH").map(|value| value.to_string_lossy().into_owned());
     model_roots_from(value.as_deref(), resource_dir)
 }
 
 /// `LOCALE_FALLBACKS.get(locale, ())`.
+#[must_use]
 pub fn locale_fallbacks(locale: &str) -> &'static [&'static str] {
     match locale {
         "en_US" => &[
@@ -264,18 +266,15 @@ fn universal_lines(text: &str) -> impl Iterator<Item = &str> {
         if rest.is_empty() {
             return None;
         }
-        match rest.find(['\n', '\r']) {
-            Some(end) => {
-                let line = &rest[..end];
-                let skip = if rest[end..].starts_with("\r\n") { 2 } else { 1 };
-                rest = &rest[end + skip..];
-                Some(line)
-            }
-            None => {
-                let line = rest;
-                rest = "";
-                Some(line)
-            }
+        if let Some(end) = rest.find(['\n', '\r']) {
+            let line = &rest[..end];
+            let skip = if rest[end..].starts_with("\r\n") { 2 } else { 1 };
+            rest = &rest[end + skip..];
+            Some(line)
+        } else {
+            let line = rest;
+            rest = "";
+            Some(line)
         }
     })
 }
@@ -393,10 +392,12 @@ impl LanguageModel {
     }
 
     /// The same model without Hunspell: `enable_spellcheck=False`.
+    #[must_use]
     pub fn disabled_speller() -> Box<dyn SpellChecker> {
         Box::new(DisabledSpellChecker)
     }
 
+    #[must_use]
     pub fn normalize(word: &str) -> String {
         pystr::casefold(word).chars().filter(|&c| ucd::isalpha(c) || c == '\'' || c == '-').collect()
     }
@@ -455,32 +456,38 @@ impl LanguageModel {
     }
 
     /// Compatibility helper retained for callers and focused tests.
+    #[must_use]
     pub fn _read_arpa_unigrams(path: &Path) -> WordTable {
         Self::_read_arpa(path).0
     }
 
     /// `self.bigrams.get((left, right), 0)`.
+    #[must_use]
     pub fn bigram(&self, left: &str, right: &str) -> i64 {
         self.bigrams.get_or_zero(&bigram_key(left, right))
     }
 
     /// `len(gram_counts[order])`, `_gram_totals[order]`.
+    #[must_use]
     pub fn gram_size(&self, order: usize) -> (usize, u64) {
         let counter = &self.gram_counts.counters[order_slot(order)];
         (counter.len(), counter.total)
     }
 
     /// `gram_counts[order].get(gram, 0)`; the gram must have `order` characters.
+    #[must_use]
     pub fn gram_count(&self, order: usize, gram: &str) -> u32 {
         let codes: Vec<u32> = gram.chars().map(|c| encode_with(self.gram_counts.alphabet.as_deref(), c)).collect();
         self.gram_counts.counters[order_slot(order)].get(&codes)
     }
 
     /// `gram in self._grams`.
+    #[must_use]
     pub fn has_gram(&self, gram: &str) -> bool {
         pystr::len(gram) == LANGUAGE_MODEL_TRIGRAM_ORDER && self.gram_count(LANGUAGE_MODEL_TRIGRAM_ORDER, gram) != 0
     }
 
+    #[must_use]
     pub fn raw_ngram_score(&self, word: &str) -> f64 {
         let normalized = Self::normalize(word);
         if normalized.is_empty() {
@@ -503,10 +510,12 @@ impl LanguageModel {
         fmean(&order_scores[..scored]).unwrap_or(LANGUAGE_MODEL_EMPTY_TOKEN_SCORE)
     }
 
+    #[must_use]
     pub fn ngram_score(&self, word: &str) -> f64 {
         (self.raw_ngram_score(word) - self.ngram_mean) / self.ngram_deviation
     }
 
+    #[must_use]
     pub fn context_score(&self, previous_word: &str, word: &str) -> f64 {
         let frequency = self.bigram(&Self::normalize(previous_word), &Self::normalize(word));
         if frequency == 0 {
@@ -516,6 +525,7 @@ impl LanguageModel {
     }
 
     /// Return the strongest score after dropping one likely typo character (`limit` at its default: no caller changes it).
+    #[must_use]
     pub fn best_single_deletion(&self, word: &str) -> WordScore {
         let chars: Vec<char> = word.chars().collect();
         let (length, limit) = (chars.len(), LANGUAGE_MODEL_DELETION_POSITIONS);
@@ -535,6 +545,7 @@ impl LanguageModel {
     }
 
     /// Score a token.
+    #[must_use]
     pub fn score(&self, word: &str) -> WordScore {
         let normalized = Self::normalize(word);
         if normalized.is_empty() {

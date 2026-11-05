@@ -1,7 +1,7 @@
 //! Typo correction at a word's boundary: one keyboard slip, undone where a counted word list makes it clear.
 //!
 //! A word is corrected only when nothing reads it as a word: its form never occurs in the counted list of its language
-//! (OpenSubtitles 2018 via FrequencyWords, every form down to one occurrence, so a rare inflected form survives), its
+//! (`OpenSubtitles` 2018 via `FrequencyWords`, every form down to one occurrence, so a rare inflected form survives), its
 //! other layout's reading occurs in neither list, and the engine knows it from nowhere else (its lexicons, the term
 //! tables, the identifier index, the user's exclusions). The candidates are the words one slip away: two neighbouring
 //! letters swapped, a letter left out, a letter typed in excess, a letter typed with a neighbouring key. Each is scored as
@@ -10,7 +10,7 @@
 //! spell checker), so it is the same on every system.
 //!
 //! The correction types keys, not text: a swap or a deletion reuses the keys the user typed, with their Shift and Caps
-//! Lock, and a letter not pressed in the word takes the key of the last press that typed it (KeyTemplates). A letter no
+//! Lock, and a letter not pressed in the word takes the key of the last press that typed it (`KeyTemplates`). A letter no
 //! key has typed yet cannot be typed, and its candidate is not made.
 
 use ks_cast::To as _;
@@ -34,12 +34,13 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// What both settings windows say of detection.correct_typos.
+/// What both settings windows say of `detection.correct_typos`.
 pub const CORRECT_TYPOS_TITLE: &str = "Исправлять опечатки";
 pub const CORRECT_TYPOS_ENGLISH_TITLE: &str = "Исправлять опечатки и в английских словах";
 pub const CORRECT_TYPOS_ENGLISH_DESCRIPTION: &str = "По умолчанию исправляются только русские слова: в технических текстах и коде незнакомое английское слово чаще оказывается именем переменной или термином, чем опечаткой";
 
 /// `CORRECT_TYPOS_DESCRIPTION`.
+#[must_use]
 pub fn correct_typos_description() -> String {
     format!(
         "Исправлять в слове одну опечатку: переставленные буквы, лишнюю, пропущенную или соседнюю клавишу. Только если ни один словарь не знает слово, а одно частое слово намного вероятнее других; слова, в которых меньше {}, и имена в середине предложения не трогаются. Pause или сочетание отмены сразу после исправления возвращает слово как набрано, и больше оно не исправляется; не исправляется и слово, которое не раз оставлено как набрано. Такие слова хранятся только как хеши и только при включённой истории",
@@ -47,7 +48,8 @@ pub fn correct_typos_description() -> String {
     )
 }
 
-/// The physical keys each locale's letters are typed with, in the order of layouts.US_KEYS.
+/// The physical keys each locale's letters are typed with, in the order of `layouts.US_KEYS`.
+#[must_use]
 pub fn locale_keys(locale: &str) -> Option<&'static str> {
     match locale {
         "en_US" => Some(US_KEYS),
@@ -71,6 +73,7 @@ pub enum Operation {
 pub const OPERATIONS: [Operation; 4] = [Operation::Transposition, Operation::Deletion, Operation::Insertion, Operation::Substitution];
 
 impl Operation {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Operation::Transposition => "transposition",
@@ -106,6 +109,7 @@ impl Default for TypoPolicy {
 
 impl TypoPolicy {
     /// The stored weight of `candidate_min_count`, the least a corrected word may have.
+    #[must_use]
     pub fn minimum_weight(&self) -> i64 {
         let scaled = ks_text::log(self.candidate_min_count.to::<f64>()).expect("a positive count") * TYPO_COUNT_LOG_SCALE.to::<f64>();
         ks_text::py_round_to_int(scaled).expect("a finite weight").to::<i64>()
@@ -117,11 +121,12 @@ impl TypoPolicy {
 }
 
 /// `typo_resource_path(locale)`.
+#[must_use]
 pub fn typo_resource_path(resource_dir: &Path, locale: &str) -> PathBuf {
     resource_dir.join(format!("typo-frequency-{locale}.bin"))
 }
 
-/// The letters of the keys around each letter's key, in a layout whose keys `keys` lists (layouts.US_KEYS order).
+/// The letters of the keys around each letter's key, in a layout whose keys `keys` lists (`layouts.US_KEYS` order).
 ///
 /// Keys of one row touch their left and right neighbours. A lower row sits half a key to the right of the row above it,
 /// so a key touches the key right above it and the one after that, and the key right below it and the one before that. The
@@ -169,7 +174,7 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
 /// A counted word list of one language: forms with their counts, and a membership filter for the rarer forms.
 ///
 /// `forms` holds the stored forms sorted, each coded one byte per letter (its place in `alphabet`, from one up) and ended
-/// by TYPO_FORM_SEPARATOR; `starts` the offset of each, with one more for the end; `weights` each form's count as
+/// by `TYPO_FORM_SEPARATOR`; `starts` the offset of each, with one more for the end; `weights` each form's count as
 /// `round(ln(count) * TYPO_COUNT_LOG_SCALE)`. `seen` is a Bloom filter of `seen_bits` bits and `seen_hashes` positions over
 /// the forms too rare to be stored: it may hold a form it was not given, never miss one it was.
 pub struct TypoLexicon {
@@ -201,6 +206,7 @@ fn equals_int(value: Option<&Value>, wanted: i64) -> bool {
 }
 
 impl TypoLexicon {
+    #[must_use]
     pub fn size(&self) -> usize {
         self.weights.len()
     }
@@ -223,11 +229,12 @@ impl TypoLexicon {
     }
 
     /// The stored count of a lowercase form as its scaled logarithm, or None when it is not stored.
+    #[must_use]
     pub fn weight(&self, form: &str) -> Option<i64> {
         let coded = self.coded(form)?;
         let (mut low, mut high) = (0, self.size());
         while low < high {
-            let middle = (low + high) >> 1;
+            let middle = usize::midpoint(low, high);
             let stored = &self.forms[self.starts[middle].to::<usize>()..(self.starts[middle + 1]).to::<usize>() - 1];
             match stored.cmp(coded.as_slice()) {
                 std::cmp::Ordering::Equal => return Some(i64::from(self.weights[middle])),
@@ -239,6 +246,7 @@ impl TypoLexicon {
     }
 
     /// Whether a lowercase form occurs in the list at all, written with `ё` or with `е`.
+    #[must_use]
     pub fn occurs(&self, form: &str) -> bool {
         let plain: String = form.chars().map(|c| if c == YO { YE } else { c }).collect();
         self.occurs_spelling(form) || (plain != form && self.occurs_spelling(&plain))
@@ -328,6 +336,7 @@ pub fn occurrence_positions(form: &str, bits: u64, hashes: u64) -> impl Iterator
 }
 
 /// `packaged_lexicon(locale)`: the shipped list of a locale; None when none is shipped or it does not load.
+#[must_use]
 pub fn packaged_lexicon(resource_dir: &Path, locale: &str) -> Option<TypoLexicon> {
     let path = typo_resource_path(resource_dir, locale);
     if !TYPO_ALPHABETS.iter().any(|entry| entry.0 == locale) || !path.is_file() {
@@ -345,6 +354,7 @@ pub struct Edit {
 }
 
 impl Edit {
+    #[must_use]
     pub fn apply(&self, word: &str) -> String {
         let chars: Vec<char> = word.chars().collect();
         let position = self.position;
@@ -439,6 +449,7 @@ pub enum Reason {
 }
 
 impl Reason {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Reason::Shape => "shape",
@@ -480,6 +491,7 @@ impl TypoJudgement {
     }
 
     /// The decimal order of magnitude of the chosen candidate's count, for the log; -1 without one.
+    #[must_use]
     pub fn count_order(&self) -> i64 {
         match &self.choice {
             None => -1,
@@ -488,7 +500,8 @@ impl TypoJudgement {
     }
 }
 
-/// Letters of the alphabet only, at least TYPO_MIN_LETTERS of them, lowercase or with one leading capital.
+/// Letters of the alphabet only, at least `TYPO_MIN_LETTERS` of them, lowercase or with one leading capital.
+#[must_use]
 pub fn word_shape(word: &str, alphabet: &str) -> bool {
     let lower = pystr::casefold(word);
     pystr::len(word) >= TYPO_MIN_LETTERS
@@ -521,10 +534,12 @@ impl TypoCorrector {
     }
 
     /// The keys beside each key of a locale's layout.
+    #[must_use]
     pub fn neighbours_of(&self, locale: &str) -> &HashMap<char, String> {
         &self.neighbours.iter().find(|entry| entry.0 == locale).expect("neighbours of every list").1
     }
 
+    #[must_use]
     pub fn lexicon(&self, locale: &str) -> Option<&TypoLexicon> {
         self.lexicons.iter().find(|entry| entry.0 == locale).map(|entry| &entry.1)
     }
@@ -560,6 +575,7 @@ impl TypoCorrector {
     /// The stored words one slip away from a lowercase word, each with every slip that leads to it.
     ///
     /// They do not depend on the policy, so the measurement tool scores one list under many policies.
+    #[must_use]
     pub fn candidates(&self, lower: &str, locale: &str) -> Vec<Candidate> {
         let lexicon = self.lexicon(locale).expect("a locale the corrector has a list for");
         let neighbours = &self.neighbours.iter().find(|entry| entry.0 == locale).expect("neighbours of every list").1;
@@ -567,13 +583,10 @@ impl TypoCorrector {
         let mut looked: IndexMap<String, Option<i64>> = IndexMap::new();
         for edit in edits(lower, &lexicon.alphabet, neighbours) {
             let candidate = edit.apply(lower);
-            let weight = match looked.get(&candidate) {
-                Some(&weight) => weight,
-                None => {
-                    let weight = lexicon.weight(&candidate);
-                    looked.insert(candidate.clone(), weight);
-                    weight
-                }
+            let weight = if let Some(&weight) = looked.get(&candidate) { weight } else {
+                let weight = lexicon.weight(&candidate);
+                looked.insert(candidate.clone(), weight);
+                weight
             };
             if weight.is_some() {
                 found.entry(candidate).or_default().push(edit);
@@ -587,12 +600,14 @@ impl TypoCorrector {
 
     /// The noisy-channel choice among the candidates: each scores the logarithm of its count plus that of the sum of its
     /// slips' probabilities; the best is taken when it is frequent enough and clear enough of the rest.
+    #[must_use]
     pub fn decide(&self, candidates: &[Candidate], capital: bool) -> TypoJudgement {
         decide_under(&self.policy, candidates, capital)
     }
 }
 
 /// `TypoCorrector.decide` under any policy: the candidates do not depend on it, so the measurement tool scores one list under many.
+#[must_use]
 pub fn decide_under(policy: &TypoPolicy, candidates: &[Candidate], capital: bool) -> TypoJudgement {
     if candidates.is_empty() {
         return TypoJudgement::bare(Reason::NoCandidate);
@@ -659,6 +674,7 @@ pub struct KeyTemplates {
 }
 
 impl KeyTemplates {
+    #[must_use]
     pub fn new() -> Self {
         KeyTemplates::default()
     }
@@ -678,6 +694,7 @@ impl KeyTemplates {
     }
 
     /// A press of the key that types `character` in `group`, as if typed in `typed_group` like the word's keys.
+    #[must_use]
     pub fn key(&self, group: i32, character: char, typed_group: i32) -> Option<KeyEvent> {
         let template = self.keys.get(&(group, character))?;
         let mut key = template.clone();
@@ -694,6 +711,7 @@ impl KeyTemplates {
 /// The keys that type `choice.word` in `group`, from the keys typed: each letter the user typed is reused as it was pressed
 /// when it still types the right letter (case included), and any other letter takes a template; None when a letter has
 /// none.
+#[must_use]
 pub fn corrected_keys(typed: &[KeyEvent], group: i32, choice: &TypoChoice, templates: &KeyTemplates) -> Option<Vec<KeyEvent>> {
     let mut keys = Vec::new();
     let typed_group = typed.first().map_or(group, |first| first.group);

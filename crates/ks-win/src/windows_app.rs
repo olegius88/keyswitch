@@ -37,6 +37,7 @@ fn error(message: &str) -> Parsed {
 }
 
 /// `build_parser().parse_args(argv)`: long options may be shortened to any unambiguous prefix, as argparse allows.
+#[must_use]
 pub fn parse_arguments(arguments: &[String]) -> Parsed {
     let mut parsed = Arguments::default();
     let mut unrecognized = Vec::new();
@@ -83,6 +84,7 @@ pub fn parse_arguments(arguments: &[String]) -> Parsed {
 }
 
 /// The resources folder beside the executable.
+#[must_use]
 pub fn resource_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     exe.parent().map_or_else(|| PathBuf::from("resources"), |dir| dir.join("resources"))
@@ -131,6 +133,7 @@ fn field_access() -> Value {
 }
 
 /// The report `--diagnose` prints, and whether the keyboard backend is available.
+#[must_use]
 pub fn diagnostics(resource_dir: &Path) -> (String, bool) {
     let resources = ks_lang::Resources::new(resource_dir);
     let models = resource_dir.join("models");
@@ -168,6 +171,7 @@ pub fn diagnostics(resource_dir: &Path) -> (String, bool) {
 }
 
 /// `main(argv)`: the status the process ends with.
+#[must_use]
 pub fn main(arguments: &[String]) -> i32 {
     let parsed = match parse_arguments(arguments) {
         Parsed::Exit { code, stdout, stderr } => {
@@ -186,7 +190,7 @@ pub fn main(arguments: &[String]) -> i32 {
     if parsed.diagnose {
         let (text, available) = diagnostics(&resource_dir());
         write_standard(false, &text);
-        return if available { 0 } else { 1 };
+        return i32::from(!available);
     }
     run(parsed)
 }
@@ -232,7 +236,7 @@ mod tests {
     use super::*;
 
     fn parse(arguments: &[&str]) -> Parsed {
-        parse_arguments(&arguments.iter().map(|argument| argument.to_string()).collect::<Vec<_>>())
+        parse_arguments(&arguments.iter().map(std::string::ToString::to_string).collect::<Vec<_>>())
     }
 
     #[test]

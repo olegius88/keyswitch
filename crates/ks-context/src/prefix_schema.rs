@@ -52,6 +52,7 @@ pub struct VersionedPrefixModel {
 }
 
 impl VersionedPrefixModel {
+    #[must_use]
     pub fn version(&self) -> &str {
         &self.model.version
     }
@@ -83,6 +84,7 @@ impl VersionedPrefixModel {
     }
 
     /// `VersionedPrefixModel.default()`: the installed prefix artifact in whichever schema it was accepted, or none.
+    #[must_use]
     pub fn default_model(models_dir: &Path) -> Option<VersionedPrefixModel> {
         VersionedPrefixModel::load(&models_dir.join(ARTIFACT_FILE)).ok()
     }
@@ -90,6 +92,7 @@ impl VersionedPrefixModel {
 
 /// The installed prefix model for a support report: the third model, beside the intent model of the baseline and the
 /// context model, the one that switches the layout while a word is typed. Whether it is available, and its version.
+#[must_use]
 pub fn prefix_diagnostics(models_dir: &Path) -> (bool, String) {
     match VersionedPrefixModel::default_model(models_dir) {
         Some(model) => (true, model.version().to_string()),

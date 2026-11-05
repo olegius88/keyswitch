@@ -211,7 +211,7 @@ fn stroke(keycode: u32, group: i32, state: u32) -> KeyEvent {
     }
 }
 
-fn injection<'a>(strokes: &'a [KeyEvent], target_group: i32) -> Injection<'a> {
+fn injection(strokes: &[KeyEvent], target_group: i32) -> Injection<'_> {
     Injection { strokes, target_group, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None }
 }
 

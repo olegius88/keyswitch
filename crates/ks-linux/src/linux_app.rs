@@ -69,6 +69,7 @@ fn error(message: &str) -> Parsed {
 }
 
 /// `build_parser().parse_args(argv)`: long options may be shortened to any unambiguous prefix, as argparse allows.
+#[must_use]
 pub fn parse_arguments(arguments: &[String]) -> Parsed {
     let mut parsed = Arguments::default();
     let mut unrecognized = Vec::new();
@@ -163,6 +164,7 @@ pub fn new_backend() -> Arc<X11Backend> {
 }
 
 /// The report `--diagnose` prints, and whether the keyboard backend is available.
+#[must_use]
 pub fn diagnostics(resource_dir: &Path) -> (String, bool) {
     let resources = ks_lang::Resources::new(resource_dir);
     let models = resource_dir.join("models");
@@ -218,6 +220,7 @@ fn write_standard(error: bool, text: &str) {
 }
 
 /// `main(argv)`: the status the process ends with.
+#[must_use]
 pub fn main(arguments: &[String]) -> i32 {
     let parsed = match parse_arguments(arguments) {
         Parsed::Exit { code, stdout, stderr } => {
@@ -245,7 +248,7 @@ pub fn main(arguments: &[String]) -> i32 {
     if parsed.diagnose {
         let (text, available) = diagnostics(&resource_dir());
         write_standard(false, &text);
-        return if available { 0 } else { 1 };
+        return i32::from(!available);
     }
     if parsed.headless {
         return crate::platform::run_headless(parsed.no_engine);
@@ -254,6 +257,7 @@ pub fn main(arguments: &[String]) -> i32 {
 }
 
 /// Python's truthiness of a setting's value.
+#[must_use]
 pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,
@@ -274,6 +278,7 @@ fn trim_zeros(text: &str) -> String {
 }
 
 /// `format(value, "g")`: six significant digits, no trailing zeros.
+#[must_use]
 pub fn python_float(value: f64) -> String {
     if value.is_nan() {
         return "nan".to_owned();
@@ -377,7 +382,7 @@ mod tests {
     use super::*;
 
     fn parse(arguments: &[&str]) -> Parsed {
-        parse_arguments(&arguments.iter().map(|argument| argument.to_string()).collect::<Vec<_>>())
+        parse_arguments(&arguments.iter().map(std::string::ToString::to_string).collect::<Vec<_>>())
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! The Windows platform of KeySwitch: the keyboard hook, typing, layouts, the clipboard, UI Automation, the registry.
+//! The Windows platform of `KeySwitch`: the keyboard hook, typing, layouts, the clipboard, UI Automation, the registry.
 //!
 //! One file per module of the Python it comes from, under the same name. `windows_backend`, `windows_system` and the
 //! logic of `windows_instance` compile everywhere and are tested through fakes of their small native interfaces; what

@@ -1,4 +1,4 @@
-//! `unicodedata.category`, Unicode 16.0 as in CPython 3.14: one packed run per change of category (start << 5 | index).
+//! `unicodedata.category`, Unicode 16.0 as in `CPython` 3.14: one packed run per change of category (start << 5 | index).
 
 use ks_cast::To as _;
 const NAMES: [&str; 30] = ["Cc", "Cf", "Cn", "Co", "Cs", "Ll", "Lm", "Lo", "Lt", "Lu", "Mc", "Me", "Mn", "Nd", "Nl", "No", "Pc", "Pd", "Pe", "Pf", "Pi", "Po", "Ps", "Sc", "Sk", "Sm", "So", "Zl", "Zp", "Zs"];
@@ -350,6 +350,7 @@ static RUNS: [u32; 4099] = [
 ];
 
 /// `unicodedata.category(character)`.
+#[must_use]
 pub fn category(character: char) -> &'static str {
     let cp = character.to::<u32>();
     let run = RUNS.partition_point(|&run| run >> 5 <= cp) - 1;

@@ -32,6 +32,7 @@ pub fn data_dir_from(windows: bool, home: &Path, env: &dyn Fn(&str) -> Option<St
     base.join("keyswitch")
 }
 
+#[must_use]
 pub fn data_dir() -> PathBuf {
     data_dir_from(cfg!(windows), &home_dir(), &|name| std::env::var(name).ok())
 }
@@ -47,6 +48,7 @@ pub struct HistoryEntry {
 }
 
 /// `datetime.now(timezone.utc).isoformat(timespec="seconds")`: `2026-11-04T12:00:00+00:00`.
+#[must_use]
 pub fn utc_timestamp_now() -> String {
     let t = utc_now();
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}+00:00", t.year, t.month, t.day, t.hour, t.minute, t.second)
@@ -54,11 +56,13 @@ pub fn utc_timestamp_now() -> String {
 
 impl HistoryEntry {
     /// `HistoryEntry.create`: stamped now (UTC), the confidence rounded to two places (halves to even, as `round`).
+    #[must_use]
     pub fn create(original: &str, replacement: &str, application: &str, confidence: f64) -> HistoryEntry {
         HistoryEntry::with_timestamp(utc_timestamp_now(), original, replacement, application, confidence)
     }
 
     /// `create` with the time given.
+    #[must_use]
     pub fn with_timestamp(
         timestamp: String,
         original: &str,
@@ -81,7 +85,7 @@ impl HistoryEntry {
             Value::String(self.original.clone()),
             Value::String(self.replacement.clone()),
             Value::String(self.application.clone()),
-            Number::from_f64(self.confidence).map(Value::Number).unwrap_or(Value::Null),
+            Number::from_f64(self.confidence).map_or(Value::Null, Value::Number),
         ])
     }
 }
@@ -90,6 +94,7 @@ impl HistoryEntry {
 ///
 /// The settings file can be edited by hand; a value that is not a number falls back to the default instead of
 /// stopping the application at start. A count beyond 64 bits is kept at the largest one.
+#[must_use]
 pub fn history_limit(value: &Value) -> i64 {
     let parsed: Option<i128> = match value {
         Value::Number(n) => match n.as_i64() {
@@ -152,7 +157,7 @@ impl Row {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub type HistoryCallback = Arc<dyn Fn() + Send + Sync>;
@@ -166,6 +171,7 @@ pub struct HistoryStore {
 
 impl HistoryStore {
     /// `HistoryStore(path, limit)`: at least one entry is kept.
+    #[must_use]
     pub fn new(path: Option<PathBuf>, limit: i64) -> HistoryStore {
         HistoryStore {
             path: path.unwrap_or_else(|| data_dir().join("history.jsonl")),

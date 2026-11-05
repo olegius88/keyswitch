@@ -26,6 +26,7 @@ pub const SEARCH_FIELD_SUBROLE: &str = "AXSearchField";
 pub const SELECTED_TEXT_ATTRIBUTE: &str = "AXSelectedText";
 
 /// What the engine calls the kind of field it is correcting in, for the roles the reader reads at all.
+#[must_use]
 pub fn field_role(role: &str) -> Option<FieldRole> {
     match role {
         TEXT_FIELD_ROLE | TEXT_AREA_ROLE | COMBO_BOX_ROLE => Some(FieldRole::Text),
@@ -50,9 +51,10 @@ pub trait SelectionAccessibilityAPI: AccessibilityAPI {
 
 /// Where in `text` an offset counted in UTF-16 code units falls, in characters.
 ///
-/// AXSelectedTextRange counts as NSString does: an emoji or another character outside the basic plane is two units.
+/// `AXSelectedTextRange` counts as `NSString` does: an emoji or another character outside the basic plane is two units.
 /// Slicing the string with that number would move the caret one character right for each such character before it. None
 /// when the offset lies past the text or inside such a character.
+#[must_use]
 pub fn character_index(text: &str, units: i64) -> Option<usize> {
     let units = usize::try_from(units).ok()?;
     let mut counted = 0;
@@ -157,7 +159,8 @@ pub enum SelectionAfter {
 }
 
 /// Where the selection stands once `replacement` took the place of the one at `before`: still over it, a caret right after
-/// it, or somewhere this cannot tell. The ranges count UTF-16 units, as AXSelectedTextRange does.
+/// it, or somewhere this cannot tell. The ranges count UTF-16 units, as `AXSelectedTextRange` does.
+#[must_use]
 pub fn selection_after(before: Option<(i64, i64)>, after: Option<(i64, i64)>, replacement: &str) -> SelectionAfter {
     let units = replacement.encode_utf16().count().to::<i64>();
     let (Some(before), Some(after)) = (before, after) else {
@@ -183,7 +186,7 @@ fn refused(reason: RefusalReason) -> SelectionError {
 /// settable, before anything is written, and the backend pastes instead.
 pub trait SelectionAccess: Send + Sync {
     fn read(&self) -> Result<SelectedText, SelectionError>;
-    /// The range of the selection, if the focused field still shows `selected` selected (else focus_changed).
+    /// The range of the selection, if the focused field still shows `selected` selected (else `focus_changed`).
     fn selected_range(&self, selected: &str) -> Result<Option<(i64, i64)>, SelectionError>;
     /// The selected range of the focused field now, or None where none is told.
     fn caret_range(&self) -> Option<(i64, i64)>;

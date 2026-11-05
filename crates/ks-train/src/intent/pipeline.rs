@@ -32,6 +32,7 @@ pub struct SafetyAudit {
 
 impl SafetyAudit {
     /// `audit_guarded_safety_corpus`: the safety rows against the production guards that stop them before the model.
+    #[must_use]
     pub fn of(examples: &[LexicalExample], protected: &ProtectedTokens) -> SafetyAudit {
         let (mut observed, mut guarded, mut colliding): (BTreeSet<&str>, BTreeSet<&str>, BTreeSet<&str>) = Default::default();
         let (mut protected_samples, mut collision_samples) = (0, 0);
@@ -71,17 +72,20 @@ impl SafetyAudit {
         SafetyAudit { samples: examples.len(), protected_samples, collision_samples, triggers: in_order(&observed), protected_triggers: in_order(&guarded), collision_triggers: in_order(&colliding), failures }
     }
 
+    #[must_use]
     pub fn passes(&self, maximum: i64) -> bool {
         let expected: Vec<&str> = TRIGGERS.iter().map(|trigger| trigger.as_str()).collect();
         maximum >= 0 && self.samples > 0 && self.protected_samples > 0 && self.collision_samples > 0 && self.triggers == expected && self.protected_triggers == expected && self.collision_triggers == expected && self.failures.len().to::<i64>() <= maximum
     }
 
+    #[must_use]
     pub fn payload(&self) -> Value {
         json!({"samples": self.samples, "protected_samples": self.protected_samples, "lexical_collision_samples": self.collision_samples, "triggers": self.triggers, "protected_triggers": self.protected_triggers, "lexical_collision_triggers": self.collision_triggers, "failures": self.failures})
     }
 }
 
 /// `gate_policy_payload`: the complete, self-contained release policy.
+#[must_use]
 pub fn gate_policy(raw: &Value, config: &FitConfig) -> Value {
     let external = &raw["external_evaluation"];
     let profiles: Vec<Value> = fit::STRESS_PROFILES.iter().map(|(name, delta, selector)| json!({"name": name, "delta": delta, "group_selector": selector})).collect();
@@ -121,6 +125,7 @@ fn thresholds_payload(selections: &Selections) -> Value {
     }).collect())
 }
 
+#[must_use]
 pub fn by_trigger(metrics: &BTreeMap<&'static str, Confusion>) -> Value {
     Value::Object(TRIGGERS.iter().map(|trigger| (trigger.as_str().to_owned(), metrics_payload(&metrics[trigger.as_str()]))).collect())
 }
@@ -137,6 +142,7 @@ fn pause_or(trigger: CorrectionTrigger, pause: f64, other: f64) -> f64 {
 }
 
 /// `training_quality_gate_breakdown`.
+#[must_use]
 pub fn quality_gate(config: &FitConfig, test: &BTreeMap<&'static str, Confusion>, typos: &BTreeMap<&'static str, Confusion>, audit: &SafetyAudit, veto: &Veto, test_veto: &Veto) -> Value {
     let (mut sealed, mut typo_gates) = (Map::new(), Map::new());
     let (mut sealed_passed, mut typo_passed) = (true, true);
@@ -169,6 +175,7 @@ pub fn quality_gate(config: &FitConfig, test: &BTreeMap<&'static str, Confusion>
 }
 
 /// `quantized_model_payload_sha256` and the bytes it hashes.
+#[must_use]
 pub fn model_payload(quantized: &Quantized, fingerprints: &BTreeSet<u64>) -> Vec<u8> {
     let mut payload = Vec::with_capacity(quantized.values.len() * 2 + fingerprints.len() * 8);
     for value in &quantized.values {
@@ -198,7 +205,7 @@ pub fn onboard_lexicon(root: &Path, raw_config: &Value, dataset_config: &Dataset
 /// `dataset` of the config.
 pub fn dataset_config(raw_config: &Value) -> Result<DatasetConfig, String> {
     let shape = &raw_config["dataset"];
-    let number = |name: &str| shape[name].as_u64().map(|value| value.to::<usize>()).ok_or_else(|| format!("dataset.{name}"));
+    let number = |name: &str| shape[name].as_u64().map(ks_cast::To::to::<usize>).ok_or_else(|| format!("dataset.{name}"));
     Ok(DatasetConfig { minimum_word_length: number("minimum_word_length")?, maximum_word_length: number("maximum_word_length")?, typo_augmentations: number("typo_augmentations")? })
 }
 
@@ -228,7 +235,7 @@ pub fn presealed_dataset(root: &Path) -> Result<Presealed, String> {
     Ok(Presealed { raw_config, dataset_config, words, prepared, base, dataset: built, hard })
 }
 
-fn references<'a>(rows: &'a [LexicalExample]) -> Vec<&'a LexicalExample> {
+fn references(rows: &[LexicalExample]) -> Vec<&LexicalExample> {
     rows.iter().collect()
 }
 
@@ -350,12 +357,14 @@ pub struct Candidate {
 
 impl Candidate {
     /// `presealed_candidate_counts`: only what can be counted before the held-out split is built.
+    #[must_use]
     pub fn counts(&self) -> Value {
         let examples: Map<String, Value> = Split::PRESEALED.iter().map(|split| (split.as_str().to_owned(), json!(self.dataset.split(*split).len()))).collect();
         json!({"examples": examples, "safety_examples": self.dataset.safety.len(), "quarantined_variant_occurrences": self.dataset.variant_quarantine.occurrences.len(), "quarantined_physical_signatures": self.dataset.variant_quarantine.signature_count()})
     }
 
     /// `presealed_candidate_metadata_projection`.
+    #[must_use]
     pub fn metadata(&self, config_sha256: &str, toolchain: &Value) -> Value {
         let section = |name: &str| &self.sections[name];
         seal::metadata_projection(config_sha256, dataset::SPLIT_NAMESPACE, toolchain, section("source_package"), section("sources"), &self.counts(), &self.dataset.variant_quarantine.sha256, section("training_language_scorer"), section("gate_policy"), section("training"), section("quantization"), section("calibration"), &self.veto.payload(), section("thresholds"), section("threshold_selection_gate_breakdown"), &self.audit.payload(), &self.parameters)
@@ -363,6 +372,7 @@ impl Candidate {
 }
 
 /// `sources` of the manifest: each frozen language source and what declares its license.
+#[must_use]
 pub fn source_rows(raw_config: &Value) -> Value {
     let sources = &raw_config["sources"];
     let row = |locale: &str| { let language = &sources["languages"][locale]; json!({"locale": locale, "group": language["group"], "path": language["path"], "sha256": language["sha256"], "bytes": language["bytes"], "license_declaration": sources["license_declaration"], "license_evidence": sources["license_evidence"]["path"]}) };

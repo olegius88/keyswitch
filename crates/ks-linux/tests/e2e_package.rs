@@ -13,7 +13,7 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_linux::tray::{ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH};
 use serde_json::json;
-use support::*;
+use support::{Case, IDLE_PAUSE, CONTEXT_RESOLUTION, dbus_call, Watcher, Typer, pump_until, pump, judge, INTER_CASE, GRACE, PAUSE_KEYSYM, SETTLE, RETURN_KEYSYM, LEARNING_CONFIRMATION, entry_window};
 
 const TRAY_READY_TO_TYPING: u64 = 300;
 const WARMUP_DEADLINE: u64 = 6000;
@@ -227,11 +227,10 @@ fn run(binary: &Path) -> Result<(), String> {
     let outcome = scenario(&root, &mut child, &watcher, &entry, &window, &typer);
     let _ = typer.switch_group(original);
     let code = stop(&mut child);
-    if outcome.is_err() {
-        if let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
+    if outcome.is_err()
+        && let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {
             println!("native log: {}", log.trim());
         }
-    }
     window.destroy();
     pump(ONE_SECOND / 10);
     let _ = std::fs::remove_dir_all(&root);

@@ -18,11 +18,13 @@ impl Default for WordList {
 }
 
 impl WordList {
+    #[must_use]
     pub fn new() -> Self {
         WordList { arena: String::new(), offsets: vec![0] }
     }
 
     /// Room for `words` strings of `bytes` bytes together, so that the list is built without reallocating.
+    #[must_use]
     pub fn with_capacity(words: usize, bytes: usize) -> Self {
         let mut offsets = Vec::with_capacity(words + 1);
         offsets.push(0);
@@ -34,19 +36,23 @@ impl WordList {
         self.offsets.push(u32::try_from(self.arena.len()).expect("a word list stays under 4 GiB"));
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.offsets.len() - 1
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// The bytes of the arena, for the record of what a table costs.
+    #[must_use]
     pub fn arena_bytes(&self) -> usize {
         self.arena.len()
     }
 
+    #[must_use]
     pub fn get(&self, index: usize) -> &str {
         &self.arena[self.offsets[index].to::<usize>()..(self.offsets[index + 1]).to::<usize>()]
     }
@@ -56,6 +62,7 @@ impl WordList {
     }
 
     /// `bisect_left` over a sorted list.
+    #[must_use]
     pub fn lower_bound(&self, word: &str) -> usize {
         let (mut low, mut high) = (0, self.len());
         while low < high {
@@ -70,17 +77,20 @@ impl WordList {
     }
 
     /// Whether a sorted list holds the word.
+    #[must_use]
     pub fn contains_sorted(&self, word: &str) -> bool {
         let index = self.lower_bound(word);
         index < self.len() && self.get(index) == word
     }
 
     /// Whether every string is greater than the one before: `words == sorted(set(words))`.
+    #[must_use]
     pub fn is_sorted_set(&self) -> bool {
         (1..self.len()).all(|index| self.get(index - 1) < self.get(index))
     }
 
     /// The same strings sorted, without repeats: `sorted(set(words))`.
+    #[must_use]
     pub fn sorted_unique(self) -> WordList {
         if self.is_sorted_set() {
             return self.shrunk();
@@ -97,6 +107,7 @@ impl WordList {
         result.shrunk()
     }
 
+    #[must_use]
     pub fn shrunk(mut self) -> WordList {
         self.arena.shrink_to_fit();
         self.offsets.shrink_to_fit();
@@ -104,6 +115,7 @@ impl WordList {
     }
 
     /// `sorted(set(a) | set(b))` of two sorted sets.
+    #[must_use]
     pub fn merged(&self, other: &WordList) -> WordList {
         let mut result = WordList::with_capacity(self.len() + other.len(), self.arena.len() + other.arena.len());
         let (mut i, mut j) = (0, 0);
@@ -133,7 +145,7 @@ enum Values {
 impl Values {
     fn new(values: Vec<i64>) -> Self {
         if values.iter().all(|&value| i32::try_from(value).is_ok()) {
-            Values::Narrow(values.into_iter().map(|value| value.to::<i32>()).collect())
+            Values::Narrow(values.into_iter().map(ks_cast::To::to::<i32>).collect())
         } else {
             let mut values = values;
             values.shrink_to_fit();
@@ -172,31 +184,37 @@ impl WordTable {
         builder.finish(|_earlier, later| later)
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.words.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.words.is_empty()
     }
 
     /// `word in table and table[word]`.
+    #[must_use]
     pub fn get(&self, word: &str) -> Option<i64> {
         let index = self.words.lower_bound(word);
         (index < self.len() && self.words.get(index) == word).then(|| self.values.get(index))
     }
 
     /// `table.get(word, 0)`.
+    #[must_use]
     pub fn get_or_zero(&self, word: &str) -> i64 {
         self.get(word).unwrap_or(0)
     }
 
     /// `word in table`.
+    #[must_use]
     pub fn contains(&self, word: &str) -> bool {
         self.get(word).is_some()
     }
 
     /// `max(table.values(), default=None)`.
+    #[must_use]
     pub fn max_value(&self) -> Option<i64> {
         (0..self.len()).map(|index| self.values.get(index)).max()
     }
@@ -207,16 +225,19 @@ impl WordTable {
     }
 
     /// The keys, sorted.
+    #[must_use]
     pub fn words(&self) -> &WordList {
         &self.words
     }
 
     /// The value of the `index`-th key in sorted order.
+    #[must_use]
     pub fn value_at(&self, index: usize) -> i64 {
         self.values.get(index)
     }
 
     /// Every key of `extras` (a sorted set) set to `max(table.get(key, 0), value)`.
+    #[must_use]
     pub fn with_floor(&self, extras: &WordList, value: i64) -> WordTable {
         let mut words = WordList::with_capacity(self.len() + extras.len(), self.words.arena_bytes() + extras.arena_bytes());
         let mut values = Vec::with_capacity(self.len() + extras.len());
@@ -249,6 +270,7 @@ pub struct TableBuilder {
 }
 
 impl TableBuilder {
+    #[must_use]
     pub fn new() -> Self {
         TableBuilder::default()
     }

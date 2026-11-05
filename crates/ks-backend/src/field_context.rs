@@ -17,6 +17,7 @@ pub enum FieldRole {
 }
 
 impl FieldRole {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             FieldRole::Unknown => "unknown",
@@ -55,6 +56,7 @@ impl FieldContext {
         }
     }
 
+    #[must_use]
     pub fn bounded(&self) -> FieldContext {
         let private = self.sensitive || self.role == FieldRole::Password;
         FieldContext {
@@ -87,6 +89,7 @@ impl FieldContext {
     /// letter, and the word stays refused there. A word as short as the buffer is told apart by
     /// its letters: a read that does not hold it is the buffer (`b` in `vscode b` read as the space
     /// in flight was refused), and a read that does is the text.
+    #[must_use]
     pub fn input_buffer_only(&self, typed: &str) -> bool {
         let shown = format!("{}{}", self.before, self.after);
         shown.chars().count() <= FIELD_INPUT_BUFFER_MAX_CHARACTERS && !shown.contains(typed)

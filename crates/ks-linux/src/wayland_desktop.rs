@@ -1,6 +1,6 @@
 //! Pure protocol framing and state parsers for Wayland desktop compositors (the Python's `wayland_desktop.py`).
 //!
-//! Every function here is free of live sockets and D-Bus connections so GNOME Shell, KDE Plasma 6 (KWin) and sway wire
+//! Every function here is free of live sockets and D-Bus connections so GNOME Shell, KDE Plasma 6 (`KWin`) and sway wire
 //! formats are verified deterministically.
 
 use ks_cast::To as _;
@@ -51,6 +51,7 @@ pub struct DesktopWindowInfo {
 }
 
 impl DesktopWindowInfo {
+    #[must_use]
     pub fn center(&self) -> Option<(i64, i64)> {
         if self.width <= 0 || self.height <= 0 {
             return None;
@@ -73,19 +74,20 @@ pub struct DesktopSnapshot {
 /// Whether the current Linux session runs on Wayland rather than X11, from the given environment.
 pub fn wayland_session_active_in(environment: &dyn Fn(&str) -> Option<String>) -> bool {
     let get = |name: &str| environment(name).unwrap_or_default();
-    let backend = ks_text::pystr::casefold(ks_text::pystr::strip(&get("GDK_BACKEND")));
+    let backend = pystr::casefold(pystr::strip(&get("GDK_BACKEND")));
     if backend == "x11" {
         return false;
     }
     if backend == "wayland" {
         return true;
     }
-    if !ks_text::pystr::strip(&get("WAYLAND_DISPLAY")).is_empty() {
+    if !pystr::strip(&get("WAYLAND_DISPLAY")).is_empty() {
         return true;
     }
-    ks_text::pystr::casefold(ks_text::pystr::strip(&get("XDG_SESSION_TYPE"))) == "wayland" && ks_text::pystr::strip(&get("DISPLAY")).is_empty()
+    pystr::casefold(pystr::strip(&get("XDG_SESSION_TYPE"))) == "wayland" && pystr::strip(&get("DISPLAY")).is_empty()
 }
 
+#[must_use]
 pub fn wayland_session_active() -> bool {
     wayland_session_active_in(&|name| std::env::var(name).ok())
 }
@@ -128,6 +130,7 @@ pub fn detect_desktop_kind(environment: &dyn Fn(&str) -> Option<String>, has_gno
 }
 
 /// Clean desktop identifiers (strip `.desktop` and Mutter's untracked `window:N`).
+#[must_use]
 pub fn normalize_application_id(raw: &str) -> String {
     let cleaned = pystr::strip(raw);
     if cleaned.is_empty() || cleaned.starts_with("window:") {
@@ -144,7 +147,7 @@ pub fn normalize_application_id(raw: &str) -> String {
 /// `int(value)` of a JSON number; `default` for anything else (a bool is not a number here).
 fn int_field(mapping: &Value, key: &str, default: i64) -> i64 {
     match mapping.get(key) {
-        Some(Value::Number(number)) => number.as_i64().or_else(|| number.as_f64().map(|float| float.to::<i64>())).unwrap_or(default),
+        Some(Value::Number(number)) => number.as_i64().or_else(|| number.as_f64().map(ks_cast::To::to::<i64>)).unwrap_or(default),
         _ => default,
     }
 }
@@ -154,6 +157,7 @@ fn str_field<'a>(mapping: &'a Value, key: &str) -> &'a str {
 }
 
 /// Pack one `i3-ipc` request frame.
+#[must_use]
 pub fn encode_sway_ipc(message_type: u32, payload: &str) -> Vec<u8> {
     let body = payload.as_bytes();
     let mut frame = Vec::with_capacity(SWAY_IPC_HEADER_BYTES.to::<usize>() + body.len());
@@ -215,6 +219,7 @@ fn push_sway_children<'a>(node: &'a Value, stack: &mut Vec<&'a Value>) {
 }
 
 /// Find the focused container in sway `GET_TREE`.
+#[must_use]
 pub fn parse_sway_focused_window(tree: &Value) -> Option<DesktopWindowInfo> {
     if !tree.is_object() {
         return None;
@@ -262,6 +267,7 @@ pub fn parse_sway_focused_window(tree: &Value) -> Option<DesktopWindowInfo> {
 }
 
 /// Locate a sway container `con_id` owned by `pid` (and optional `title`).
+#[must_use]
 pub fn find_sway_window_by_pid(tree: &Value, pid: i64, title: &str) -> Option<i64> {
     if !tree.is_object() || pid <= 0 {
         return None;
@@ -285,14 +291,17 @@ pub fn find_sway_window_by_pid(tree: &Value, pid: i64, title: &str) -> Option<i6
     fallback
 }
 
+#[must_use]
 pub fn sway_popup_move_command(con_id: i64, x: i64, y: i64) -> String {
     format!("[con_id={con_id}] floating enable, border none, move position {x} {y}")
 }
 
+#[must_use]
 pub fn sway_focus_command(con_id: i64) -> String {
     format!("[con_id={con_id}] focus")
 }
 
+#[must_use]
 pub fn sway_switch_layout_command(index: i64) -> String {
     format!("input type:keyboard xkb_switch_layout {index}")
 }
@@ -355,7 +364,7 @@ fn point_of(object: Option<&Value>) -> Option<(i64, i64)> {
     }
 }
 
-/// Bounded bidirectional mapping between KWin `internalId` UUIDs and integer handles.
+/// Bounded bidirectional mapping between `KWin` `internalId` UUIDs and integer handles.
 #[derive(Debug)]
 pub struct KdeWindowIdMap {
     limit: usize,
@@ -372,6 +381,7 @@ impl Default for KdeWindowIdMap {
 }
 
 impl KdeWindowIdMap {
+    #[must_use]
     pub fn new(limit: usize) -> KdeWindowIdMap {
         KdeWindowIdMap { limit, next_id: i64::from(KDE_WINDOW_ID_START), by_uuid: VecDeque::new(), by_handle: HashMap::new() }
     }
@@ -402,12 +412,14 @@ impl KdeWindowIdMap {
         handle
     }
 
+    #[must_use]
     pub fn resolve(&self, handle: i64) -> String {
         self.by_handle.get(&handle).cloned().unwrap_or_default()
     }
 }
 
 /// Convert `org.kde.KeyboardLayouts.getLayoutsList` `(layout, variant, label)` tuples.
+#[must_use]
 pub fn parse_kde_layouts(items: &[(String, String, String)]) -> Vec<String> {
     let mut result = Vec::new();
     for (layout, variant, _label) in items {
@@ -421,10 +433,10 @@ pub fn parse_kde_layouts(items: &[(String, String, String)]) -> Vec<String> {
     result
 }
 
-/// The window and the pointer a KWin report carries.
+/// The window and the pointer a `KWin` report carries.
 pub type KwinReport = (Option<DesktopWindowInfo>, Option<(i64, i64)>);
 
-/// Decode a focus/pointer JSON report pushed by the KWin 6 helper script.
+/// Decode a focus/pointer JSON report pushed by the `KWin` 6 helper script.
 pub fn parse_kwin_report(raw_json: &str, id_map: &mut KdeWindowIdMap) -> Result<KwinReport, DesktopParseError> {
     let data: Value = serde_json::from_str(raw_json).map_err(|error| DesktopParseError(error.to_string()))?;
     if !data.is_object() {
@@ -461,7 +473,8 @@ fn js_string(text: &str) -> String {
     json_dumps(&Value::String(text.to_owned()), &JsonOptions::default())
 }
 
-/// Generate the KWin 6 JavaScript listener that pushes active-window updates.
+/// Generate the `KWin` 6 JavaScript listener that pushes active-window updates.
+#[must_use]
 pub fn build_kwin_watcher_script(bus_name: &str, object_path: &str, interface: &str) -> String {
     let (dest, path, iface) = (js_string(bus_name), js_string(object_path), js_string(interface));
     let mut script = String::new();
@@ -495,7 +508,7 @@ pub fn build_kwin_watcher_script(bus_name: &str, object_path: &str, interface: &
     script
 }
 
-/// What a one-shot KWin 6 script does: position a popup, restore focus, or query the cursor.
+/// What a one-shot `KWin` 6 script does: position a popup, restore focus, or query the cursor.
 #[derive(Clone, Debug, Default)]
 pub struct KwinAction<'a> {
     pub move_pid: i64,
@@ -506,6 +519,7 @@ pub struct KwinAction<'a> {
     pub report_target: Option<(&'a str, &'a str, &'a str)>,
 }
 
+#[must_use]
 pub fn build_kwin_action_script(action: &KwinAction<'_>) -> String {
     let mut lines: Vec<String> = vec!["var list = workspace.windowList();".to_owned()];
     if action.move_pid > 0 {

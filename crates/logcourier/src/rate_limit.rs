@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::constants::*;
+use crate::constants::{WAIT_POLL_SECONDS, BOT_INTERVAL_SECONDS, TELEGRAM_RATE_LIMIT_STATUS, DEFAULT_RETRY_AFTER_SECONDS, GROUP_INTERVAL};
 use crate::error::{Error, Result};
 use crate::store::Store;
 use crate::telegram::Client;

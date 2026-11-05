@@ -1,4 +1,4 @@
-//! The few Objective-C runtime calls the macOS layers share. AppKit has no C interface, so reaching it means sending
+//! The few Objective-C runtime calls the macOS layers share. `AppKit` has no C interface, so reaching it means sending
 //! messages, and those are written once here.
 use std::ffi::{CStr, CString, c_char};
 
@@ -7,14 +7,14 @@ use objc2::{class, msg_send};
 
 pub type Id = *mut AnyObject;
 
-/// An autoreleased NSString.
+/// An autoreleased `NSString`.
 pub fn string(text: &str) -> Id {
     let text = CString::new(text.replace('\0', "")).unwrap_or_default();
     // SAFETY: the C string outlives the message, which copies it.
     unsafe { msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()] }
 }
 
-/// The characters of an NSString.
+/// The characters of an `NSString`.
 pub fn text_of(reference: Id) -> String {
     if reference.is_null() {
         return String::new();
@@ -28,6 +28,7 @@ pub fn text_of(reference: Id) -> String {
 
 /// The process the user is working in, and its name. `NSWorkspace` answers directly; the accessibility tree answers
 /// only once its connection is established, which it is not when a program has just started.
+#[must_use]
 pub fn frontmost_application() -> (i32, String) {
     objc2::rc::autoreleasepool(|_| {
         // SAFETY: plain messages to shared objects of AppKit.
@@ -55,7 +56,8 @@ pub fn beep() {
     unsafe { NSBeep() };
 }
 
-/// The global AppleInterfaceStyle default: `Dark` in the dark appearance, empty when it is not set.
+/// The global `AppleInterfaceStyle` default: `Dark` in the dark appearance, empty when it is not set.
+#[must_use]
 pub fn interface_style() -> String {
     objc2::rc::autoreleasepool(|_| {
         // SAFETY: plain messages to the shared defaults object.
@@ -68,6 +70,7 @@ pub fn interface_style() -> String {
 }
 
 /// Show a file or a folder in the Finder.
+#[must_use]
 pub fn open_path(path: &str) -> bool {
     objc2::rc::autoreleasepool(|_| {
         // SAFETY: plain messages to shared objects of AppKit with autoreleased arguments.

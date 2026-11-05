@@ -1,5 +1,6 @@
 //! The Python's `test_wayland_backend.py` on a fake of the compositor and the helper.
 
+use crate::wayland_constants::{EVDEV_KEY_A, EVDEV_KEY_Z};
 use super::*;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
@@ -155,7 +156,7 @@ impl WaylandApi for FakeApi {
     fn input_anchor(&self) -> Option<ScreenAnchor> {
         Some(ScreenAnchor { x: 10, y: 20, window: Some(WINDOW) })
     }
-    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
+    fn position_window(&self, _window: i64, _x: i64, _y: i64) -> bool {
         true
     }
     fn activate_window(&self, _window: i64) -> bool {

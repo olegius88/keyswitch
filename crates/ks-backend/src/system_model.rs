@@ -1,6 +1,6 @@
 //! What every platform reports about installed programs and about autostart.
 //!
-//! The shapes are the same everywhere - a program the user can exclude, and the answer to "will KeySwitch start with
+//! The shapes are the same everywhere - a program the user can exclude, and the answer to "will `KeySwitch` start with
 //! the session" - so they are defined once and each platform fills them in its own way.
 
 /// A program as the exclusion list names it.
@@ -25,6 +25,7 @@ pub struct AutostartStatus {
 }
 
 impl AutostartStatus {
+    #[must_use]
     pub fn effective(&self) -> bool {
         self.command.as_deref().is_some_and(|command| !command.is_empty()) && !self.blocked_by_windows && !self.target_missing
     }

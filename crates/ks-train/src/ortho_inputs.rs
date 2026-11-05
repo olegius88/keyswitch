@@ -152,6 +152,7 @@ fn phrase_groups(phrases: &[Phrase]) -> BTreeMap<usize, Vec<&Phrase>> {
 }
 
 /// `assign`: each group capped, by a hash, at a few phrases.
+#[must_use]
 pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
     let mut output = Vec::new();
     for (_, mut members) in phrase_groups(phrases) {
@@ -178,7 +179,7 @@ fn phrase_split(group: &str) -> &'static str {
 }
 
 /// The receipt of the phrase split: what was kept of the snapshot and how it fell, without reading any model.
-pub fn assignment_report(phrases: &[Phrase]) -> serde_json::Map<String, Value> {
+pub fn assignment_report(phrases: &[Phrase]) -> Map<String, Value> {
     let assigned = assign(phrases);
     let eligible = phrases.iter().filter(|item| phrase_is_eligible(item)).count();
     let groups = phrase_groups(phrases);
@@ -787,7 +788,7 @@ fn sql_field(line: &[u8], mut index: usize) -> (SqlValue, usize) {
     (SqlValue::Text(chunk), index + 1)
 }
 
-/// `sql_rows`: the rows of a MediaWiki SQL dump of a table, by the column names of its CREATE TABLE statement.
+/// `sql_rows`: the rows of a `MediaWiki` SQL dump of a table, by the column names of its CREATE TABLE statement.
 fn sql_rows(path: &Path, table: &str, wanted: &[&str], mut each: impl FnMut(&[SqlValue])) -> Result<(), String> {
     use std::io::BufRead;
     let (create, start) = (format!("CREATE TABLE `{table}` (").into_bytes(), format!("INSERT INTO `{table}` VALUES ").into_bytes());
@@ -803,7 +804,7 @@ fn sql_rows(path: &Path, table: &str, wanted: &[&str], mut each: impl FnMut(&[Sq
         }
         if line.starts_with(&create) {
             declaring = true;
-        } else if declaring && line.first().is_some_and(|byte| byte.is_ascii_whitespace()) && line.iter().any(|byte| *byte == b'`') && String::from_utf8_lossy(&line).trim_start().starts_with('`') {
+        } else if declaring && line.first().is_some_and(u8::is_ascii_whitespace) && line.contains(&b'`') && String::from_utf8_lossy(&line).trim_start().starts_with('`') {
             let text = String::from_utf8_lossy(&line);
             if let Some(name) = text.trim_start().strip_prefix('`').and_then(|rest| rest.split('`').next()) {
                 columns.push(name.to_owned());
@@ -870,11 +871,10 @@ fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, S
                     body.push_str(&line[..end]);
                     let content = xml_text(&std::mem::take(body));
                     text = None;
-                    if let (Some(id), Some(number)) = (page, revision) {
-                        if wanted.contains(&id) {
+                    if let (Some(id), Some(number)) = (page, revision)
+                        && wanted.contains(&id) {
                             each(id, number, content);
                         }
-                    }
                 }
                 None => body.push_str(&line),
             }
@@ -891,22 +891,20 @@ fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, S
             revision = value(&line, "id");
         } else if trimmed.starts_with("<text") {
             if trimmed.ends_with("/>") {
-                if let (Some(id), Some(number)) = (page, revision) {
-                    if wanted.contains(&id) {
+                if let (Some(id), Some(number)) = (page, revision)
+                    && wanted.contains(&id) {
                         each(id, number, String::new());
                     }
-                }
                 continue;
             }
             let start = line.find('>').map_or(0, |place| place + 1);
             match line[start..].find("</text>") {
                 Some(end) => {
                     let content = xml_text(&line[start..start + end]);
-                    if let (Some(id), Some(number)) = (page, revision) {
-                        if wanted.contains(&id) {
+                    if let (Some(id), Some(number)) = (page, revision)
+                        && wanted.contains(&id) {
                             each(id, number, content);
                         }
-                    }
                 }
                 None => text = Some(line[start..].to_owned()),
             }
@@ -1035,7 +1033,7 @@ pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), 
             }
         }
     }
-    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = (ks_text::py_round(count.to::<f64>() * WORDS_SCALE / words.to::<f64>())).to::<i64>(); let bits = i64::BITS - rounded.leading_zeros(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
+    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = (ks_text::py_round(count.to::<f64>() * WORDS_SCALE / words.to::<f64>())).to::<i64>(); let bits = rounded.cast_unsigned().bit_width(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
     let listed: String = pages.iter().map(|(title, (revision, _))| format!("{title}\t{revision}\n")).collect();
     let author_years: BTreeMap<String, i64> = authors.values().collect::<BTreeSet<_>>().into_iter().map(|author| (author.replace('_', " "), died[author])).collect();
     Ok((table, json!({"authors": author_years, "pages": pages.len(), "pages_sha256": hex_digest(&listed), "left_out": dropped, "words": words})))

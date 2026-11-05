@@ -30,7 +30,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_VISIBLE,
 };
 
-use crate::constants::*;
+use crate::constants::{RULE_EDITOR_CLASS, SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS, STANDARD_GAP_PIXELS, GROUP_GAP_PIXELS, RULE_EDITOR_TEXT_WRAP_PIXELS, ROW_HEIGHT_PIXELS, BUTTON_HEIGHT_PIXELS};
 use crate::win32_controls::{self as w32, Brushes, Fonts, Themed, scaled};
 use crate::windows_native::wide;
 use crate::windows_ui_model::Palette;
@@ -113,12 +113,13 @@ fn register() -> bool {
             lpszMenuName: null(),
             lpszClassName: class.as_ptr(),
         };
-        RegisterClassW(&description) != 0
+        RegisterClassW(&raw const description) != 0
     };
     REGISTERED.with(|flag| *flag.borrow_mut() = registered);
     registered
 }
 
+#[must_use]
 pub fn is_open() -> bool {
     DIALOG.with(|slot| slot.borrow().is_some())
 }
@@ -134,6 +135,7 @@ pub fn lift() {
     }
 }
 
+#[must_use]
 pub fn is_dialog_message(message: &MSG) -> bool {
     let Some(window) = DIALOG.with(|slot| slot.borrow().as_ref().map(|dialog| dialog.window)) else { return false };
     // SAFETY: the window is ours and the message is the one the loop just read.
@@ -239,7 +241,7 @@ fn outer_size(window: HWND) -> (i32, i32) {
     });
     let mut rect = client;
     // SAFETY: fills the rectangle it is given.
-    unsafe { AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>()) };
+    unsafe { AdjustWindowRectExForDpi(&raw mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>()) };
     let _ = window;
     (rect.right - rect.left, rect.bottom - rect.top)
 }
@@ -358,7 +360,7 @@ fn layout() {
     let mut rect = RECT { left: 0, top: 0, right: width, bottom: height };
     // SAFETY: fills the rectangle; the window is ours.
     unsafe {
-        AdjustWindowRectExForDpi(&mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>());
+        AdjustWindowRectExForDpi(&raw mut rect, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, 0, WS_EX_TOPMOST, dpi.bits::<u32>());
         SetWindowPos(window, null_mut(), 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE | windows_sys::Win32::UI::WindowsAndMessaging::SWP_NOMOVE);
     }
     w32::invalidate(window);
@@ -424,7 +426,7 @@ fn paint(window: HWND) {
     // SAFETY: PAINTSTRUCT is plain data filled by BeginPaint.
     let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
     // SAFETY: balanced with EndPaint below on the same window.
-    let hdc: HDC = unsafe { BeginPaint(window, &mut paint) };
+    let hdc: HDC = unsafe { BeginPaint(window, &raw mut paint) };
     DIALOG.with(|slot| {
         if let Some(dialog) = slot.borrow().as_ref() {
             let palette = dialog.brushes.palette;
@@ -441,7 +443,7 @@ fn paint(window: HWND) {
         }
     });
     // SAFETY: ends the paint begun above.
-    unsafe { EndPaint(window, &paint) };
+    unsafe { EndPaint(window, &raw const paint) };
 }
 
 unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {

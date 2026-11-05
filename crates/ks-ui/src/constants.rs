@@ -1,4 +1,4 @@
-//! The numbers the shared window model uses (constants/settings_defaults.py, constants/updates.py).
+//! The numbers the shared window model uses (`constants/settings_defaults.py`, constants/updates.py).
 pub const NUMBER_DISPLAY_DECIMAL_PLACES: i32 = 2;
 pub const APPLICATION_CAPTURE_DELAY_MS: u32 = 3000;
 /// The interval between automatic update checks.

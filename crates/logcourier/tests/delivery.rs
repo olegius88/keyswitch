@@ -250,7 +250,7 @@ fn clearing_the_group_reports_what_telegram_kept_and_starts_over() {
     let text = reset_group(&store, &config, &group, true, &never(), &|_| {}).unwrap();
     assert!(text.starts_with("Группа очищена: удалены все сообщения до №151"), "{text}");
     assert!(group.pinned.borrow().is_none());
-    assert!(!store.get(&format!("catalog_digest:{}", config.destination())).is_some());
+    assert!(store.get(&format!("catalog_digest:{}", config.destination())).is_none());
     let text = reset_group(&store, &config, &group, false, &never(), &|_| {});
     assert!(text.is_ok(), "the collector has written here, so a restart without deleting is allowed");
 }

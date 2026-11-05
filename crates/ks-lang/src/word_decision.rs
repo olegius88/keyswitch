@@ -1,6 +1,6 @@
 //! The automatic baseline shared by the event engine and action training.
 
-use crate::constants::*;
+use crate::constants::OPENING_LETTER_FOLLOWING_SIGNS;
 use crate::detector::{DecideOptions, DetectionDecision, DetectorError, GroupTexts, LanguageDetector};
 use crate::language_model::LanguageModel;
 use crate::short_words::{natural_short_source_veto, trusted_short_word_decision, ISOLATED_SHORT_WORD_REASON, SINGLE_LETTER_CONFIDENCE, TRUSTED_SINGLE_LETTER_WORDS};
@@ -80,9 +80,9 @@ pub fn automatic_word_decision(
 /// show that English does open with a letter followed by a sign: an initial, a list or a name (`J. Smith said`,
 /// `C, D and E`, `C# rocks`), which the rule turned into `О. Smith said`, `С, В and E` and `С№ rocks` (0.38-0.42). The
 /// rule therefore reads the letter as a word only when the target layout prints a space, nothing or a clause sign
-/// right after it (OPENING_LETTER_FOLLOWING_SIGNS): `f?` is `а,` and `f& xnj` is `а? что`, while `J.` is `Ою` and `C#`
+/// right after it (`OPENING_LETTER_FOLLOWING_SIGNS)`: `f?` is `а,` and `f& xnj` is `а? что`, while `J.` is `Ою` and `C#`
 /// is `С№` in the Russian layout, no word a message opens with.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn opening_letter_decision(
     detector: &LanguageDetector,
     original: &str,
@@ -143,6 +143,7 @@ pub const NOT_A_WORD_REASON: &str = "другая раскладка пишет 
 /// into a bracket. The engine is asked about a word, and the keys it would type instead must spell one too; nothing is
 /// vetoed in the opposite direction, where `[jhjij` becomes the ordinary `хорошо`, nor for a source that already
 /// carries a hyphen or an apostrophe.
+#[must_use]
 pub fn word_shape_veto(decision: DetectionDecision) -> DetectionDecision {
     if !decision.should_convert || !pystr::isalpha(&decision.original) {
         return decision;

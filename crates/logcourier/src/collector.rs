@@ -8,7 +8,7 @@ use serde_json::json;
 use sqlite::{OptionalExtension, params};
 
 use crate::config::{Config, Source};
-use crate::constants::*;
+use crate::constants::{FINGERPRINT_WINDOW_BYTES, JSON_INDENT_SPACES, CHUNK_BYTES, DEFAULT_MAX_CHUNKS_PER_SCAN, HEADER_BYTES, ARCHIVE_LIMIT};
 use crate::error::{Error, Result, not_found};
 use crate::store::Store;
 use crate::timeutil::{iso_at, new_id, now_seconds, sha256_hex, stamp_at};
@@ -65,6 +65,7 @@ fn identity_of(file: &File) -> Result<String> {
     }
 }
 
+#[must_use]
 pub fn make_archive(data: &[u8], metadata: &serde_json::Value) -> Vec<u8> {
     let options = ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(JSON_INDENT_SPACES)), ..ks_text::JsonOptions::default() };
     let mut archive = ZipWriter::new();
@@ -189,11 +190,10 @@ impl<'a> Collector<'a> {
                     break;
                 }
                 // Prefer line boundaries; huge individual lines remain byte-exact fragments.
-                if let Some(newline) = data.iter().rposition(|byte| *byte == b'\n') {
-                    if newline < data.len() - 1 {
+                if let Some(newline) = data.iter().rposition(|byte| *byte == b'\n')
+                    && newline < data.len() - 1 {
                         data.truncate(newline + 1);
                     }
-                }
                 stream.seek(SeekFrom::Start(offset + data.len().to::<u64>()))?;
                 let mut lookahead = Vec::new();
                 stream.by_ref().take(HEADER_BYTES.to::<u64>()).read_to_end(&mut lookahead)?;

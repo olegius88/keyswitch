@@ -22,6 +22,7 @@ const TERM_COUNT_DROPOUT_FAMILIES: usize = 3;
 static BLIND_IDENTIFIERS: LazyLock<IdentifierLexicon> =
     LazyLock::new(|| IdentifierLexicon { identifiers: WordList::new(), name: "none".to_owned(), version: "identifiers-none".to_owned() });
 
+#[must_use]
 pub fn trigger_of(name: &str) -> CorrectionTrigger {
     ks_lang::intent_model::TRIGGERS.iter().copied().find(|trigger| trigger.as_str() == name).unwrap_or_else(|| panic!("no trigger {name}"))
 }
@@ -58,11 +59,10 @@ pub fn evidence(tools: &Tools, row: &ActionRow, detector: &LanguageDetector, ort
         previous = vec![(1 - row.group, word.to_owned())];
         context_group = Some(1 - row.group);
     }
-    if row.before_origin == BeforeOrigin::PlannedPreviousReading {
-        if let Some(group) = context_group {
+    if row.before_origin == BeforeOrigin::PlannedPreviousReading
+        && let Some(group) = context_group {
             previous.retain(|entry| entry.0 == group);
         }
-    }
     let alternatives = [(1 - row.group, alternative.clone())];
     let following = [(1 - row.group, following_reading(row))];
     let options = AutomaticOptions {

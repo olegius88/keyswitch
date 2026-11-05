@@ -2,7 +2,7 @@
 
 use super::decide::WordOptions;
 use super::logging::{technical_event, WordEvaluation};
-use super::*;
+use super::{Stroke, EngineCore, EngineResult, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, InputBackend, KeyEvent, ms, sorted_keycodes, text_for_group, Strokes, InsertionPoint, pystr, PlanRef, DetectionDecision, Arc, KeptWord, Update};
 use ks_context::context_policy::DecideOptions as PolicyOptions;
 use ks_lang::intent_model::CorrectionTrigger;
 
@@ -50,7 +50,7 @@ impl EngineCore {
         if !self.pressed.is_empty() || !self.modifier_keycodes.is_empty() {
             if self.wait_deferral_logged != waiting.diagnostic_id {
                 self.wait_deferral_logged = waiting.diagnostic_id;
-                let reason = if !self.modifier_keycodes.is_empty() { "modifiers_pressed" } else { "keys_pressed" };
+                let reason = if self.modifier_keycodes.is_empty() { "keys_pressed" } else { "modifiers_pressed" };
                 self.log_context_wait("context_wait_deferred", Some(&waiting), reason, &[]);
             }
             return Ok(());
@@ -86,7 +86,7 @@ impl EngineCore {
     /// Enter or Tab arrived while a word waits for its next word: no next word is coming.
     ///
     /// The word is asked once more with the action's trigger, the question it would have been asked had the action
-    /// followed it without the space, and a conversion is made before the action goes through (maybe_execute_pending).
+    /// followed it without the space, and a conversion is made before the action goes through (`maybe_execute_pending`).
     /// The action used to end the wait in silence: `jr`, a space and Enter sent `jr` alone in Telegram where `ок` was
     /// meant, while `jr` and Enter at once was asked at Enter (the laptop, 02.11.2026). A suggestion is asked again too:
     /// a pause brings no new context, but the end of the message is the action's own question. A word already
@@ -262,17 +262,14 @@ impl EngineCore {
         } else {
             self.decide_inside_word(&strokes, source_group, &alternatives, &application, CorrectionTrigger::Pause, None)?
         };
-        let mut decision = match inside.clone() {
-            Some(inside) => inside,
-            None => {
-                let closing: Strokes = trailing.iter().chain(signs.iter()).cloned().collect();
-                let following = alternatives.iter().map(|(group, _)| (*group, text_for_group(&closing, *group))).collect();
-                self.decide_word(&original, &alternatives, source_group, &application, CorrectionTrigger::Pause, WordOptions {
-                    literal_tail: characters_of(&[&trailing, &signs]),
-                    following: Some(following),
-                    ..WordOptions::default()
-                })?
-            }
+        let mut decision = if let Some(inside) = inside.clone() { inside } else {
+            let closing: Strokes = trailing.iter().chain(signs.iter()).cloned().collect();
+            let following = alternatives.iter().map(|(group, _)| (*group, text_for_group(&closing, *group))).collect();
+            self.decide_word(&original, &alternatives, source_group, &application, CorrectionTrigger::Pause, WordOptions {
+                literal_tail: characters_of(&[&trailing, &signs]),
+                following: Some(following),
+                ..WordOptions::default()
+            })?
         };
         let stem = strokes.clone();
         let stem_signs = signs.clone();
@@ -387,30 +384,27 @@ impl EngineCore {
                 }
             }
         }
-        let plan = match joint {
-            Some((plan, _)) => plan,
-            None => {
-                let mention = self.mention_head(&application);
-                let closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, None));
-                let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
-                let base = base.replaced_with(|plan| {
-                    plan.trailing = trailing.clone();
-                    plan.head = if !mention.is_empty() && closed { Vec::new() } else { mention.clone() };
-                });
-                let mut plan = self.with_signs(&base, &signs);
-                if inside.is_none()
-                    && trailing.is_empty()
-                    && head == 0
-                    && signs.is_empty()
-                    && mention.is_empty()
-                    && let Some(baseline) = self.last_baseline.clone()
-                {
-                    // Asked again if the next word goes back the other way (provisional_after_pause).
-                    let field = self.context_result.as_ref().and_then(|result| result.field.clone());
-                    plan = plan.replaced_with(|plan| plan.revisit = Some(Arc::new((baseline, field))));
-                }
-                plan
+        let plan = if let Some((plan, _)) = joint { plan } else {
+            let mention = self.mention_head(&application);
+            let closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, None));
+            let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
+            let base = base.replaced_with(|plan| {
+                plan.trailing = trailing.clone();
+                plan.head = if !mention.is_empty() && closed { Vec::new() } else { mention.clone() };
+            });
+            let mut plan = self.with_signs(&base, &signs);
+            if inside.is_none()
+                && trailing.is_empty()
+                && head == 0
+                && signs.is_empty()
+                && mention.is_empty()
+                && let Some(baseline) = self.last_baseline.clone()
+            {
+                // Asked again if the next word goes back the other way (provisional_after_pause).
+                let field = self.context_result.as_ref().and_then(|result| result.field.clone());
+                plan = plan.replaced_with(|plan| plan.revisit = Some(Arc::new((baseline, field))));
             }
+            plan
         };
         self.strokes = Vec::new();
         self.insertion = None;

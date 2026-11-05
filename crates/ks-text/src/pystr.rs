@@ -2,7 +2,7 @@
 //! whole-string predicates, and code point indexing with Python's negative-index and clamping rules.
 //!
 //! Python counts, indexes and slices by code point; Rust's `str` by byte. Everything here counts code points.
-//! Case mapping follows CPython's `unicodeobject.c`: `lower` and the lowering inside `title`, `capitalize` and
+//! Case mapping follows `CPython`'s `unicodeobject.c`: `lower` and the lowering inside `title`, `capitalize` and
 //! `swapcase` apply the final sigma rule, `upper`/`casefold` map every character independently.
 
 use ks_cast::To as _;
@@ -54,7 +54,7 @@ fn push_fold(out: &mut String, c: char) {
     push_mapped(out, c, &t::FOLD_RUNS, &t::FOLD_MULTI_CP, &t::FOLD_MULTI);
 }
 
-/// Lowercase of `chars[i]` with the context rule for the capital sigma (CPython `lower_ucs4`).
+/// Lowercase of `chars[i]` with the context rule for the capital sigma (`CPython` `lower_ucs4`).
 fn push_lower(out: &mut String, chars: &[char], i: usize) {
     let c = chars[i];
     if c != '\u{3A3}' {
@@ -79,6 +79,7 @@ fn push_lower(out: &mut String, chars: &[char], i: usize) {
 }
 
 /// `str.lower()`.
+#[must_use]
 pub fn lower(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_lowercase();
@@ -92,6 +93,7 @@ pub fn lower(s: &str) -> String {
 }
 
 /// `str.upper()`.
+#[must_use]
 pub fn upper(s: &str) -> String {
     if s.is_ascii() {
         return s.to_ascii_uppercase();
@@ -104,6 +106,7 @@ pub fn upper(s: &str) -> String {
 }
 
 /// `str.casefold()`.
+#[must_use]
 pub fn casefold(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -117,6 +120,7 @@ pub fn casefold(s: &str) -> String {
 }
 
 /// `str.capitalize()`: the first character titlecased, the rest lowercased.
+#[must_use]
 pub fn capitalize(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -131,6 +135,7 @@ pub fn capitalize(s: &str) -> String {
 }
 
 /// `str.title()`: a cased character after an uncased one is titlecased, after a cased one lowercased.
+#[must_use]
 pub fn title(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -147,6 +152,7 @@ pub fn title(s: &str) -> String {
 }
 
 /// `str.swapcase()`.
+#[must_use]
 pub fn swapcase(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len());
@@ -170,39 +176,48 @@ fn all_nonempty(s: &str, mask: u16) -> bool {
 }
 
 /// `str.isalpha()`: not empty and every character is a letter.
+#[must_use]
 pub fn isalpha(s: &str) -> bool {
     all_nonempty(s, t::ALPHA)
 }
 /// `str.isalnum()`.
+#[must_use]
 pub fn isalnum(s: &str) -> bool {
     all_nonempty(s, t::ALPHA | t::DECIMAL | t::DIGIT | t::NUMERIC)
 }
 /// `str.isdecimal()`.
+#[must_use]
 pub fn isdecimal(s: &str) -> bool {
     all_nonempty(s, t::DECIMAL)
 }
 /// `str.isdigit()`.
+#[must_use]
 pub fn isdigit(s: &str) -> bool {
     all_nonempty(s, t::DIGIT)
 }
 /// `str.isnumeric()`.
+#[must_use]
 pub fn isnumeric(s: &str) -> bool {
     all_nonempty(s, t::NUMERIC)
 }
 /// `str.isspace()`: not empty and every character is whitespace.
+#[must_use]
 pub fn isspace(s: &str) -> bool {
     all_nonempty(s, t::SPACE)
 }
 /// `str.isprintable()`: True for the empty string.
+#[must_use]
 pub fn isprintable(s: &str) -> bool {
     s.chars().all(|c| flags(c.to::<u32>()) & t::PRINTABLE != 0)
 }
 /// `str.isascii()`.
+#[must_use]
 pub fn isascii(s: &str) -> bool {
     s.is_ascii()
 }
 
 /// `str.isupper()`: at least one cased character, and no lowercase or titlecase one.
+#[must_use]
 pub fn isupper(s: &str) -> bool {
     let mut cased = false;
     for c in s.chars() {
@@ -218,6 +233,7 @@ pub fn isupper(s: &str) -> bool {
 }
 
 /// `str.islower()`: at least one cased character, and no uppercase or titlecase one.
+#[must_use]
 pub fn islower(s: &str) -> bool {
     let mut cased = false;
     for c in s.chars() {
@@ -233,6 +249,7 @@ pub fn islower(s: &str) -> bool {
 }
 
 /// `str.istitle()`: uppercase and titlecase characters only follow uncased ones, lowercase only cased ones.
+#[must_use]
 pub fn istitle(s: &str) -> bool {
     let mut cased = false;
     let mut previous_is_cased = false;
@@ -276,14 +293,17 @@ pub fn rstrip(s: &str) -> &str {
     s.trim_end_matches(is_ws)
 }
 /// `str.strip(chars)`: `chars` is a set of code points.
+#[must_use]
 pub fn strip_chars<'a>(s: &'a str, chars: &str) -> &'a str {
     s.trim_matches(|c| chars.contains(c))
 }
 /// `str.lstrip(chars)`.
+#[must_use]
 pub fn lstrip_chars<'a>(s: &'a str, chars: &str) -> &'a str {
     s.trim_start_matches(|c| chars.contains(c))
 }
 /// `str.rstrip(chars)`.
+#[must_use]
 pub fn rstrip_chars<'a>(s: &'a str, chars: &str) -> &'a str {
     s.trim_end_matches(|c| chars.contains(c))
 }
@@ -291,6 +311,7 @@ pub fn rstrip_chars<'a>(s: &'a str, chars: &str) -> &'a str {
 // ---------------------------------------------------------------- split
 
 /// `str.split()`: runs of Python whitespace separate, empty parts are dropped.
+#[must_use]
 pub fn split(s: &str) -> Vec<&str> {
     split_max(s, -1)
 }
@@ -310,22 +331,20 @@ pub fn split_max(s: &str, maxsplit: i64) -> Vec<&str> {
             parts.push(rest);
             break;
         }
-        match rest.find(is_ws) {
-            Some(i) => {
-                parts.push(&rest[..i]);
-                rest = &rest[i..];
-                left -= 1;
-            }
-            None => {
-                parts.push(rest);
-                break;
-            }
+        if let Some(i) = rest.find(is_ws) {
+            parts.push(&rest[..i]);
+            rest = &rest[i..];
+            left -= 1;
+        } else {
+            parts.push(rest);
+            break;
         }
     }
     parts
 }
 
-/// `str.split(sep, maxsplit)`; `None` for an empty separator (Python raises ValueError).
+/// `str.split(sep, maxsplit)`; `None` for an empty separator (Python raises `ValueError`).
+#[must_use]
 pub fn split_sep<'a>(s: &'a str, sep: &str, maxsplit: i64) -> Option<Vec<&'a str>> {
     if sep.is_empty() {
         return None;
@@ -338,6 +357,7 @@ pub fn split_sep<'a>(s: &'a str, sep: &str, maxsplit: i64) -> Option<Vec<&'a str
 }
 
 /// `str.rsplit(sep, maxsplit)`; `None` for an empty separator.
+#[must_use]
 pub fn rsplit_sep<'a>(s: &'a str, sep: &str, maxsplit: i64) -> Option<Vec<&'a str>> {
     if sep.is_empty() {
         return None;
@@ -352,6 +372,7 @@ pub fn rsplit_sep<'a>(s: &'a str, sep: &str, maxsplit: i64) -> Option<Vec<&'a st
 }
 
 /// `str.splitlines(keepends)`: line boundaries are `\n \r \r\n \v \f \x1c \x1d \x1e \x85    `.
+#[must_use]
 pub fn splitlines(s: &str, keepends: bool) -> Vec<&str> {
     let mut lines = Vec::new();
     let bytes = s.as_bytes();
@@ -379,18 +400,22 @@ pub fn splitlines(s: &str, keepends: bool) -> Vec<&str> {
 // ---------------------------------------------------------------- prefixes
 
 /// `s.startswith(prefix)`.
+#[must_use]
 pub fn startswith(s: &str, prefix: &str) -> bool {
     s.starts_with(prefix)
 }
 /// `s.endswith(suffix)`.
+#[must_use]
 pub fn endswith(s: &str, suffix: &str) -> bool {
     s.ends_with(suffix)
 }
 /// `s.startswith((a, b, ...))`.
+#[must_use]
 pub fn startswith_any(s: &str, prefixes: &[&str]) -> bool {
     prefixes.iter().any(|p| s.starts_with(p))
 }
 /// `s.endswith((a, b, ...))`.
+#[must_use]
 pub fn endswith_any(s: &str, suffixes: &[&str]) -> bool {
     suffixes.iter().any(|p| s.ends_with(p))
 }
@@ -398,12 +423,14 @@ pub fn endswith_any(s: &str, suffixes: &[&str]) -> bool {
 // ---------------------------------------------------------------- code point indexing
 
 /// `len(s)`: the number of code points.
+#[must_use]
 pub fn len(s: &str) -> usize {
     if s.is_ascii() { s.len() } else { s.chars().count() }
 }
 
 /// Python's clamping of a slice or search bound against a length: negative values count from the end,
 /// the result lies in `0..=len`.
+#[must_use]
 pub fn clamp_index(index: i64, len: usize) -> usize {
     let len = len.to::<i64>();
     let adjusted = if index < 0 { index.saturating_add(len) } else { index };
@@ -419,7 +446,8 @@ fn byte_offset(s: &str, n: usize) -> usize {
     }
 }
 
-/// `s[i]`: negative indexes count from the end; `None` where Python raises IndexError.
+/// `s[i]`: negative indexes count from the end; `None` where Python raises `IndexError`.
+#[must_use]
 pub fn char_at(s: &str, index: i64) -> Option<char> {
     let n = len(s).to::<i64>();
     let i = if index < 0 { index + n } else { index };
@@ -430,6 +458,7 @@ pub fn char_at(s: &str, index: i64) -> Option<char> {
 }
 
 /// `s[start:stop]`: bounds are optional, may be negative, and are clamped.
+#[must_use]
 pub fn slice(s: &str, start: Option<i64>, stop: Option<i64>) -> &str {
     let n = len(s);
     let a = start.map_or(0, |v| clamp_index(v, n));
@@ -442,7 +471,8 @@ pub fn slice(s: &str, start: Option<i64>, stop: Option<i64>) -> &str {
     &s[from..to]
 }
 
-/// `s[start:stop:step]` with any non-zero step; `None` for a zero step (Python raises ValueError).
+/// `s[start:stop:step]` with any non-zero step; `None` for a zero step (Python raises `ValueError`).
+#[must_use]
 pub fn slice_step(s: &str, start: Option<i64>, stop: Option<i64>, step: i64) -> Option<String> {
     if step == 0 {
         return None;
@@ -490,6 +520,7 @@ fn search_window(s: &str, start: Option<i64>, end: Option<i64>) -> (usize, usize
 }
 
 /// `s.find(sub, start, end)`: the code point index, or -1.
+#[must_use]
 pub fn find(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
     let (a, b) = search_window(s, start, end);
     if a > b || b - a < len(sub) {
@@ -504,6 +535,7 @@ pub fn find(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
 }
 
 /// `s.rfind(sub, start, end)`.
+#[must_use]
 pub fn rfind(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
     let (a, b) = search_window(s, start, end);
     if a > b || b - a < len(sub) {
@@ -518,6 +550,7 @@ pub fn rfind(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> i64 {
 }
 
 /// `s.count(sub, start, end)`: non-overlapping occurrences; an empty `sub` counts the gaps.
+#[must_use]
 pub fn count(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> usize {
     let (a, b) = search_window(s, start, end);
     if a > b || b - a < len(sub) {
@@ -532,6 +565,7 @@ pub fn count(s: &str, sub: &str, start: Option<i64>, end: Option<i64>) -> usize 
 // ---------------------------------------------------------------- padding
 
 /// `s.ljust(width, fill)`.
+#[must_use]
 pub fn ljust(s: &str, width: usize, fill: char) -> String {
     let n = len(s);
     let mut out = s.to_string();
@@ -540,6 +574,7 @@ pub fn ljust(s: &str, width: usize, fill: char) -> String {
 }
 
 /// `s.rjust(width, fill)`.
+#[must_use]
 pub fn rjust(s: &str, width: usize, fill: char) -> String {
     let n = len(s);
     let mut out: String = std::iter::repeat_n(fill, width.saturating_sub(n)).collect();
@@ -547,7 +582,8 @@ pub fn rjust(s: &str, width: usize, fill: char) -> String {
     out
 }
 
-/// `s.center(width, fill)`: the odd extra fill goes left when `width` is odd, as CPython does.
+/// `s.center(width, fill)`: the odd extra fill goes left when `width` is odd, as `CPython` does.
+#[must_use]
 pub fn center(s: &str, width: usize, fill: char) -> String {
     let n = len(s);
     if width <= n {
@@ -562,6 +598,7 @@ pub fn center(s: &str, width: usize, fill: char) -> String {
 }
 
 /// `s.zfill(width)`: zeros after a leading sign.
+#[must_use]
 pub fn zfill(s: &str, width: usize) -> String {
     let n = len(s);
     if width <= n {
@@ -580,6 +617,7 @@ pub fn zfill(s: &str, width: usize) -> String {
 }
 
 /// Python orders strings by code point; Rust's `str` order by UTF-8 bytes is the same order.
+#[must_use]
 pub fn cmp(a: &str, b: &str) -> std::cmp::Ordering {
     a.cmp(b)
 }

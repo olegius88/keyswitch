@@ -160,12 +160,9 @@ impl DeferredEngine {
     pub fn when_built(&self, subscription: Subscription) {
         let engine = {
             let mut state = self.lock();
-            match state.engine.clone() {
-                Some(engine) => engine,
-                None => {
-                    state.subscriptions.push(subscription);
-                    return;
-                }
+            if let Some(engine) = state.engine.clone() { engine } else {
+                state.subscriptions.push(subscription);
+                return;
             }
         };
         subscription(&engine);
@@ -175,16 +172,13 @@ impl DeferredEngine {
     pub fn start(self: &Arc<Self>, failed: StartFailed) -> Result<(), BackendError> {
         let engine = {
             let mut state = self.lock();
-            match state.engine.clone() {
-                Some(engine) => engine,
-                None => {
-                    state.start_failed = Some(failed);
-                    if state.error.is_some() {
-                        let this = self.clone();
-                        (self.post)(Box::new(move || this.report_error()));
-                    }
-                    return Ok(());
+            if let Some(engine) = state.engine.clone() { engine } else {
+                state.start_failed = Some(failed);
+                if state.error.is_some() {
+                    let this = self.clone();
+                    (self.post)(Box::new(move || this.report_error()));
                 }
+                return Ok(());
             }
         };
         if let Err(error) = engine.start() {

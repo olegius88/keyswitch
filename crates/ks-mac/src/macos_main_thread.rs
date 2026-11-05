@@ -1,9 +1,9 @@
 //! Calls macOS answers only on the main thread, made from any thread.
 //!
-//! HIToolbox requires the Text Input Sources functions to run on the main dispatch queue and stops the process with
-//! SIGILL when one runs elsewhere (`dispatch_assert_queue` under `TISCopyCurrentKeyboardInputSource`). KeySwitch asks
+//! `HIToolbox` requires the Text Input Sources functions to run on the main dispatch queue and stops the process with
+//! SIGILL when one runs elsewhere (`dispatch_assert_queue` under `TISCopyCurrentKeyboardInputSource`). `KeySwitch` asks
 //! for the current layout from the engine's worker every half second and from the event tap's thread on every key: on a
-//! MacBook Pro with macOS 13.7.8 every start ended that way within seconds.
+//! `MacBook` Pro with macOS 13.7.8 every start ended that way within seconds.
 //!
 //! `MainThreadRunner` hands such a call to the main thread and waits for it with a time limit. A call the main thread
 //! does not begin in time is withdrawn, so it never runs late behind the caller's back, and the caller keeps its
@@ -63,7 +63,9 @@ impl MainThreadRunner {
             .finished
             .wait_timeout_while(state, Duration::from_secs_f64(timeout), |state| !state.done)
             .unwrap_or_else(PoisonError::into_inner);
-        if !state.done {
+        if state.done {
+            drop(state);
+        } else {
             drop(state);
             // The jobs lock first and the job's state under it, in the order `run` takes them.
             let mut jobs = lock(&self.jobs);
@@ -76,8 +78,6 @@ impl MainThreadRunner {
             // The main thread began it just now; the system call it makes is short.
             let state = lock(&job.state);
             drop(job.finished.wait_while(state, |state| !state.done).unwrap_or_else(PoisonError::into_inner));
-        } else {
-            drop(state);
         }
         let result = lock(&answer).take();
         result.unwrap_or(fallback)

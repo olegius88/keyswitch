@@ -1,4 +1,4 @@
-//! KeySwitch on Linux: the X11 backend, the field reader, the speller binding and the system helpers.
+//! `KeySwitch` on Linux: the X11 backend, the field reader, the speller binding and the system helpers.
 //!
 //! `unsafe` lives in this crate only, each block with the reason it is sound.
 

@@ -1,8 +1,8 @@
 //! Read a bounded caret range through Windows UI Automation.
 //!
-//! Called on the engine worker, never on the keyboard hook's thread. IUIAutomation2 timeouts bound provider calls.
-//! Password and selected fields are identified before any GetText call. See Microsoft UI Automation TextPattern Overview /
-//! IUIAutomation2.
+//! Called on the engine worker, never on the keyboard hook's thread. `IUIAutomation2` timeouts bound provider calls.
+//! Password and selected fields are identified before any `GetText` call. See Microsoft UI Automation `TextPattern` Overview /
+//! `IUIAutomation2`.
 //!
 //! The COM calls go through the vtables directly, with only `windows-sys` beneath them. Each slot number below is the
 //! position of the method in its interface, the base interface's methods counted; they and the signatures were compared
@@ -86,17 +86,17 @@ fn com_error(code: HRESULT) -> ReaderFailure {
     ReaderFailure { failure_type: "provider_error", failure_name: "COMError", failure_code: Some(i64::from(code)), permanent: false }
 }
 
-/// comtypes raises ValueError at the first use of an interface a call answered S_OK and null with.
+/// comtypes raises `ValueError` at the first use of an interface a call answered `S_OK` and null with.
 fn value_error() -> ReaderFailure {
     ReaderFailure { failure_type: "provider_error", failure_name: "ValueError", failure_code: None, permanent: false }
 }
 
-/// AttributeError: the Python calls a string method on the None a null BSTR becomes.
+/// `AttributeError`: the Python calls a string method on the None a null BSTR becomes.
 fn attribute_error() -> ReaderFailure {
     ReaderFailure { failure_type: "provider_error", failure_name: "AttributeError", failure_code: None, permanent: false }
 }
 
-/// comtypes' CoInitializeEx and CoCreateInstance raise OSError, which carries no `hresult` for the log.
+/// comtypes' `CoInitializeEx` and `CoCreateInstance` raise `OSError`, which carries no `hresult` for the log.
 fn os_error() -> ReaderFailure {
     ReaderFailure { failure_type: "os_error", failure_name: "OSError", failure_code: None, permanent: false }
 }
@@ -132,7 +132,7 @@ impl ComPtr {
     fn get(&self, slot: usize) -> Result<Option<ComPtr>, ReaderFailure> {
         let mut out = null_mut();
         // SAFETY: every caller names a slot of this interface with the signature of `Getter`, and `out` is a valid place.
-        check(unsafe { method::<Getter>(self.raw(), slot)(self.raw(), &mut out) })?;
+        check(unsafe { method::<Getter>(self.raw(), slot)(self.raw(), &raw mut out) })?;
         Ok(NonNull::new(out).map(ComPtr))
     }
 
@@ -144,14 +144,14 @@ impl ComPtr {
     fn get_indexed(&self, slot: usize, index: i32) -> Result<Option<ComPtr>, ReaderFailure> {
         let mut out = null_mut();
         // SAFETY: every caller names a slot of this interface with the signature of `IndexedGetter`, and `out` is valid.
-        check(unsafe { method::<IndexedGetter>(self.raw(), slot)(self.raw(), index, &mut out) })?;
+        check(unsafe { method::<IndexedGetter>(self.raw(), slot)(self.raw(), index, &raw mut out) })?;
         Ok(NonNull::new(out).map(ComPtr))
     }
 
     fn get_number(&self, slot: usize) -> Result<i32, ReaderFailure> {
         let mut value = 0;
         // SAFETY: every caller names a slot of this interface with the signature of `NumberGetter`, and `value` is valid.
-        check(unsafe { method::<NumberGetter>(self.raw(), slot)(self.raw(), &mut value) })?;
+        check(unsafe { method::<NumberGetter>(self.raw(), slot)(self.raw(), &raw mut value) })?;
         Ok(value)
     }
 
@@ -160,7 +160,7 @@ impl ComPtr {
         type QueryInterface = unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT;
         let mut out = null_mut();
         // SAFETY: every COM interface starts with IUnknown, whose first slot has this signature; `out` is valid.
-        check(unsafe { method::<QueryInterface>(self.raw(), QUERY_INTERFACE)(self.raw(), interface, &mut out) })?;
+        check(unsafe { method::<QueryInterface>(self.raw(), QUERY_INTERFACE)(self.raw(), interface, &raw mut out) })?;
         NonNull::new(out).map(ComPtr).ok_or_else(value_error)
     }
 }
@@ -192,7 +192,7 @@ fn get_string(object: &ComPtr, slot: usize) -> Result<Option<String>, ReaderFail
     type StringGetter = unsafe extern "system" fn(*mut c_void, *mut BSTR) -> HRESULT;
     let mut value: BSTR = null();
     // SAFETY: every caller names a slot of this interface with this signature, and `value` is a valid place.
-    check(unsafe { method::<StringGetter>(object.raw(), slot)(object.raw(), &mut value) })?;
+    check(unsafe { method::<StringGetter>(object.raw(), slot)(object.raw(), &raw mut value) })?;
     Ok(take_bstr(value))
 }
 
@@ -213,7 +213,7 @@ fn runtime_id(element: &ComPtr) -> Result<Vec<i32>, ReaderFailure> {
     type GetRuntimeId = unsafe extern "system" fn(*mut c_void, *mut *mut SAFEARRAY) -> HRESULT;
     let mut array = null_mut();
     // SAFETY: the slot has this signature, and `array` is a valid place.
-    check(unsafe { method::<GetRuntimeId>(element.raw(), ELEMENT_GET_RUNTIME_ID)(element.raw(), &mut array) })?;
+    check(unsafe { method::<GetRuntimeId>(element.raw(), ELEMENT_GET_RUNTIME_ID)(element.raw(), &raw mut array) })?;
     if array.is_null() {
         return Ok(Vec::new());
     }
@@ -224,9 +224,9 @@ fn runtime_id(element: &ComPtr) -> Result<Vec<i32>, ReaderFailure> {
         if SafeArrayGetDim(array) == 1 {
             let (mut lower, mut upper) = (0, 0);
             let mut data = null_mut();
-            if SafeArrayGetLBound(array, 1, &mut lower) >= 0
-                && SafeArrayGetUBound(array, 1, &mut upper) >= 0
-                && SafeArrayAccessData(array, &mut data) >= 0
+            if SafeArrayGetLBound(array, 1, &raw mut lower) >= 0
+                && SafeArrayGetUBound(array, 1, &raw mut upper) >= 0
+                && SafeArrayAccessData(array, &raw mut data) >= 0
             {
                 let count = usize::try_from(i64::from(upper) + 1 - i64::from(lower)).unwrap_or(0);
                 // An empty array may have no data at all.
@@ -250,7 +250,7 @@ fn compare_endpoints(range: &ComPtr, endpoint: i32, other: &ComPtr, other_endpoi
     let mut order = 0;
     // SAFETY: the slot has this signature, `other` is a live range, and `order` is a valid place.
     check(unsafe {
-        method::<CompareEndpoints>(range.raw(), RANGE_COMPARE_ENDPOINTS)(range.raw(), endpoint, other.raw(), other_endpoint, &mut order)
+        method::<CompareEndpoints>(range.raw(), RANGE_COMPARE_ENDPOINTS)(range.raw(), endpoint, other.raw(), other_endpoint, &raw mut order)
     })?;
     Ok(order)
 }
@@ -260,7 +260,7 @@ fn move_endpoint_by_unit(range: &ComPtr, endpoint: i32, count: i32) -> Result<()
     let mut moved = 0;
     // SAFETY: the slot has this signature, and `moved` is a valid place.
     check(unsafe {
-        method::<MoveEndpointByUnit>(range.raw(), RANGE_MOVE_ENDPOINT_BY_UNIT)(range.raw(), endpoint, UNIT_CHARACTER, count, &mut moved)
+        method::<MoveEndpointByUnit>(range.raw(), RANGE_MOVE_ENDPOINT_BY_UNIT)(range.raw(), endpoint, UNIT_CHARACTER, count, &raw mut moved)
     })
 }
 
@@ -276,7 +276,7 @@ fn get_text(range: &ComPtr, maximum: i32) -> Result<Option<String>, ReaderFailur
     type GetText = unsafe extern "system" fn(*mut c_void, i32, *mut BSTR) -> HRESULT;
     let mut value: BSTR = null();
     // SAFETY: the slot has this signature, and `value` is a valid place.
-    check(unsafe { method::<GetText>(range.raw(), RANGE_GET_TEXT)(range.raw(), maximum, &mut value) })?;
+    check(unsafe { method::<GetText>(range.raw(), RANGE_GET_TEXT)(range.raw(), maximum, &raw mut value) })?;
     Ok(take_bstr(value))
 }
 
@@ -286,8 +286,8 @@ fn text_without_placeholder(range: &ComPtr, maximum: i32) -> Result<String, Read
     Ok(text.replace(UIA_EMBEDDED_OBJECT_CHARACTER, ""))
 }
 
-/// Whether the selection says it is read-only: VT_BOOL comes back as a bool. A selection partly read-only answers with the
-/// mixed-attribute token (IUIAutomation::ReservedMixedAttributeValue), and a provider without the attribute with another
+/// Whether the selection says it is read-only: `VT_BOOL` comes back as a bool. A selection partly read-only answers with the
+/// mixed-attribute token (`IUIAutomation::ReservedMixedAttributeValue`), and a provider without the attribute with another
 /// token. comtypes compares the tokens by their pointers.
 fn selection_is_read_only(automation: &ComPtr, selection: &ComPtr) -> Result<bool, ReaderFailure> {
     type GetAttributeValue = unsafe extern "system" fn(*mut c_void, i32, *mut VARIANT) -> HRESULT;
@@ -295,7 +295,7 @@ fn selection_is_read_only(automation: &ComPtr, selection: &ComPtr) -> Result<boo
     let mut value: VARIANT = unsafe { zeroed() };
     // SAFETY: the slot has this signature, and `value` is a valid, empty VARIANT.
     check(unsafe {
-        method::<GetAttributeValue>(selection.raw(), RANGE_GET_ATTRIBUTE_VALUE)(selection.raw(), UIA_IS_READ_ONLY_ATTRIBUTE_ID, &mut value)
+        method::<GetAttributeValue>(selection.raw(), RANGE_GET_ATTRIBUTE_VALUE)(selection.raw(), UIA_IS_READ_ONLY_ATTRIBUTE_ID, &raw mut value)
     })?;
     // SAFETY: the call filled the VARIANT: `vt` says which member of the union holds the value, and only that one is read.
     let (kind, flag, token): (VARENUM, bool, *mut c_void) = unsafe {
@@ -315,14 +315,14 @@ fn selection_is_read_only(automation: &ComPtr, selection: &ComPtr) -> Result<boo
             .map(|mixed| !token.is_null() && mixed.is_some_and(|mixed| mixed.raw() == token))
     };
     // SAFETY: `value` was filled by the call above and is cleared once.
-    unsafe { VariantClear(&mut value) };
+    unsafe { VariantClear(&raw mut value) };
     answer
 }
 
 fn process_for_window(window: i64) -> i64 {
     let mut pid = 0u32;
     // SAFETY: `pid` is a valid place; a stale window leaves it 0.
-    unsafe { GetWindowThreadProcessId(window.to::<isize>().pointer_mut::<c_void>(), &mut pid) };
+    unsafe { GetWindowThreadProcessId(window.to::<isize>().pointer_mut::<c_void>(), &raw mut pid) };
     i64::from(pid)
 }
 
@@ -342,7 +342,7 @@ fn password_field(application: &str, field_id: String) -> FieldContext {
 pub struct WindowsFieldReader {
     automation: Option<ComPtr>,
     thread: ThreadId,
-    /// This thread entered the apartment and owes it one CoUninitialize.
+    /// This thread entered the apartment and owes it one `CoUninitialize`.
     com: bool,
 }
 
@@ -363,7 +363,7 @@ impl WindowsFieldReader {
         let mut out = null_mut();
         // SAFETY: both GUIDs are valid for the call, no outer object is passed, and `out` is a valid place.
         let created =
-            unsafe { CoCreateInstance(&CUIAutomation8, null_mut(), CLSCTX_SERVER, &IID_IUIAUTOMATION2, &mut out) };
+            unsafe { CoCreateInstance(&CUIAutomation8, null_mut(), CLSCTX_SERVER, &IID_IUIAUTOMATION2, &raw mut out) };
         if created < 0 {
             return Err(os_error());
         }
@@ -461,7 +461,7 @@ impl WindowsFieldReader {
     /// The text selected in the focused field of `window`.
     ///
     /// None where UI Automation cannot say (no text pattern, another process in focus): the clipboard is asked then.
-    /// SelectionRefused where it can and the selection is not one to type over: a password field, no selection or several,
+    /// `SelectionRefused` where it can and the selection is not one to type over: a password field, no selection or several,
     /// text that says it is read-only, or an embedded object (a picture in a rich editor) that typing would delete. One
     /// character past the hotkeys' bound is read, so that a longer selection is told apart.
     pub fn read_selection(&self, window: i64) -> Result<Option<SelectedText>, SelectionFailure> {
@@ -585,7 +585,7 @@ pub struct UiaProbe {
 
 /// Explicit diagnostic readiness probe; no field text is read.
 ///
-/// Besides building the bridge it asks the focused element whether it offers TextPattern at all and how long that answer
+/// Besides building the bridge it asks the focused element whether it offers `TextPattern` at all and how long that answer
 /// took. Both are facts about the provider, not about what the user typed: no range is ever read here.
 pub fn probe_uia() -> UiaProbe {
     let mut reader = match WindowsFieldReader::new() {

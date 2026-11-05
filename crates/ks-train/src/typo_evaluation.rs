@@ -210,7 +210,7 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
                     continue;
                 }
                 let seed = draw(&["typo", name, &qid, &index.to_string()]);
-                if seed % SAMPLE_MODULUS != 0 {
+                if !seed.is_multiple_of(SAMPLE_MODULUS) {
                     continue;
                 }
                 let lexicon = corrector.lexicon(locale).ok_or("a locale without a list")?;
@@ -505,7 +505,7 @@ pub struct VocabularyInputs {
 fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> Result<Value, String> {
     let read_gz = |path: &Path| -> Result<String, String> {
         let mut text = String::new();
-        flate2::read::MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_string(&mut text).map_err(|error| error.to_string())?;
+        MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_string(&mut text).map_err(|error| error.to_string())?;
         Ok(text)
     };
     let counts = crate::typo_frequency::vocabulary_counts(&read_gz(&inputs.train_messages)?, &read_gz(&inputs.train_code)?)?;
@@ -549,7 +549,7 @@ fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> 
                 let seed = draw(&["typo", name, &qid, &index.to_string()]);
                 let lexicon = corrector.lexicon(locale).ok_or("a locale without a list")?;
                 let Some(weight) = lexicon.weight(&lower) else { continue };
-                if seed % SAMPLE_MODULUS != 0 || weight < corrector.policy.minimum_weight() {
+                if !seed.is_multiple_of(SAMPLE_MODULUS) || weight < corrector.policy.minimum_weight() {
                     continue;
                 }
                 let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len().to::<u64>()).to::<usize>()];

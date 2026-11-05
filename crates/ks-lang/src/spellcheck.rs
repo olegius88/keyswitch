@@ -30,7 +30,7 @@ impl SpellChecker for DisabledSpellChecker {
     fn available(&self) -> bool {
         false
     }
-    fn source(&self) -> &str {
+    fn source(&self) -> &'static str {
         ""
     }
     fn check(&self, _word: &str) -> bool {
@@ -63,6 +63,7 @@ impl<F: Fn(&str) -> bool + Send + Sync> SpellChecker for FnSpellChecker<F> {
 }
 
 /// The word `HunspellDictionary.check` hands to the library: stripped; `None` when it answers False without asking.
+#[must_use]
 pub fn check_argument(word: &str) -> Option<&str> {
     let normalized = pystr::strip(word);
     (!normalized.is_empty() && pystr::len(normalized) <= HUNSPELL_MAX_CHECK_CHARACTERS).then_some(normalized)
@@ -86,6 +87,7 @@ pub fn dictionary_roots_from(hunspell_path: Option<&str>, xdg_data_home: Option<
 }
 
 /// `HunspellDictionary._dictionary_roots`.
+#[must_use]
 pub fn dictionary_roots(data_dir: &Path) -> Vec<PathBuf> {
     let override_path = std::env::var_os("KEYSWITCH_HUNSPELL_PATH").map(|value| value.to_string_lossy().into_owned());
     let xdg = std::env::var_os("XDG_DATA_HOME").map(|value| value.to_string_lossy().into_owned());
@@ -93,6 +95,7 @@ pub fn dictionary_roots(data_dir: &Path) -> Vec<PathBuf> {
 }
 
 /// `HunspellDictionary._find_dictionary` over given roots: the affix and dictionary paths of the first variant found.
+#[must_use]
 pub fn find_dictionary_in(locale: &str, roots: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
     let replaced = locale.replace('-', "_");
     let language = locale.split_once('_').map_or(locale, |(language, _)| language);
@@ -115,6 +118,7 @@ pub fn find_dictionary_in(locale: &str, roots: &[PathBuf]) -> Option<(PathBuf, P
 }
 
 /// `HunspellDictionary._find_dictionary`.
+#[must_use]
 pub fn find_dictionary(locale: &str, data_dir: &Path) -> Option<(PathBuf, PathBuf)> {
     find_dictionary_in(locale, &dictionary_roots(data_dir))
 }

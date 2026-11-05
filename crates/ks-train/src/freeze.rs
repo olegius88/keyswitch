@@ -53,7 +53,7 @@ const PINS: [(&str, &str); 12] = [
     ("UD_English-Atis", "dce409dd1b526745ab0980360ed2b9f803e93531"),
 ];
 const SID_CONTENTS_URL: &str = "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz";
-/// Debian-style Contents indexes the freezer accepts: (Contents URL, InRelease URL, path in InRelease, source, document prefix, description).
+/// Debian-style Contents indexes the freezer accepts: (Contents URL, `InRelease` URL, path in `InRelease`, source, document prefix, description).
 const DEB_SOURCES: [(&str, &str, &str, &str, &str, &str); 2] = [
     (SID_CONTENTS_URL, "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "Debian-sid-main-amd64", "debian-package-component:", "Debian sid main amd64 Contents"),
     ("https://archive.ubuntu.com/ubuntu/dists/noble/Contents-amd64.gz", "https://archive.ubuntu.com/ubuntu/dists/noble/InRelease", "Contents-amd64.gz", "Ubuntu-noble-amd64", "ubuntu-package-component:", "Ubuntu noble amd64 Contents, all components"),
@@ -138,7 +138,7 @@ pub(crate) fn family_aliases(token: &SurfaceToken, identifier: &str) -> Vec<Stri
 
 fn misc_value<'a>(misc: &'a str, name: &str) -> Option<&'a str> {
     // `dict(part.split("=", 1) ...)`: the last of equal names.
-    misc.split('|').filter_map(|part| part.split_once('=')).filter(|pair| pair.0 == name).next_back().map(|pair| pair.1)
+    misc.split('|').filter_map(|part| part.split_once('=')).rfind(|pair| pair.0 == name).map(|pair| pair.1)
 }
 
 fn unescape_space(value: &str) -> String {
@@ -187,7 +187,7 @@ fn surface_tokens(lines: &[Vec<String>]) -> Result<Vec<SurfaceToken>, String> {
                 return Err("invalid or overlapping CoNLL-U multiword token".to_owned());
             }
             covered.extend(begin..=end);
-            (begin..=end).map(|index| if members[&index][2] != "_" { members[&index][2].clone() } else { members[&index][1].clone() }).collect()
+            (begin..=end).map(|index| if members[&index][2] == "_" { members[&index][1].clone() } else { members[&index][2].clone() }).collect()
         } else if covered.contains(&identifier.parse::<i64>().map_err(|error| error.to_string())?) {
             continue;
         } else if parts[2] != "_" {
@@ -505,7 +505,7 @@ fn letter_runs(text: &str) -> Vec<&str> {
 /// `lookalike_typo`: a sentence whose text no writer types: a word in look-alike letters of the other script.
 fn lookalike_typo(sentence: &Sentence) -> bool {
     let is_alpha = |character: &char| crate::rows::is_alpha(*character);
-    let words: Vec<&str> = sentence.tokens.iter().map(|token| token.form.as_str()).filter(|form| form.chars().any(|character| crate::rows::is_alpha(character))).collect();
+    let words: Vec<&str> = sentence.tokens.iter().map(|token| token.form.as_str()).filter(|form| form.chars().any(crate::rows::is_alpha)).collect();
     let mut scripts = Vec::new();
     for form in &words {
         for run in letter_runs(form) {
@@ -671,11 +671,10 @@ pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(H
             Value::Object(table) => {
                 for (key, child) in table {
                     if key.starts_with('[') {
-                        if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(key) {
-                            if let Some(text) = parts.get(1).and_then(Value::as_str) {
+                        if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(key)
+                            && let Some(text) = parts.get(1).and_then(Value::as_str) {
                                 add(text, expand, exposed);
                             }
-                        }
                     } else if matches!(key.as_str(), "word" | "original" | "alternative" | "text" | "before" | "after" | "expected") || child.is_array() || child.is_object() {
                         walk(child, expand, exposed);
                     }
@@ -1131,7 +1130,7 @@ struct Technical {
     metadata: Value,
 }
 
-/// `verified_sid_source`: a Contents index named by a TLS receipt, its checksum in the downloaded InRelease.
+/// `verified_sid_source`: a Contents index named by a TLS receipt, its checksum in the downloaded `InRelease`.
 fn sid_source(directory: &Path) -> Result<Technical, String> {
     let receipt_path = directory.join("source-receipt.json");
     let receipt = read_json(&receipt_path)?;
@@ -1556,7 +1555,7 @@ fn fitting_split(namespace: &str, family: &str) -> &'static str {
 }
 
 /// `freeze_context_action_fitting.main`: fitting splits extended with short utterances, the test left alone.
-#[allow(clippy::too_many_lines)]
+#[expect(clippy::too_many_lines)]
 pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
     let output = request.output.ok_or("a fitting freeze needs an output")?;
     let exclusions = load_exclusions(request.root, request.base, request.ud_origin, request.technical_origin, request.prefix_inventory, request.lexicon, &request.extra_exposure, request.ledger)?;

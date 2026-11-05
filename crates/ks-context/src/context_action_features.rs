@@ -4,7 +4,7 @@
 //! name set twice keeps its first place, as in a Python `dict`. `FeatureMap` is an `IndexMap` for that.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX};
 use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, TERM_EDGE_SIGNS};
 use indexmap::IndexMap;
 use ks_text::layouts::LayoutPair;
@@ -124,6 +124,7 @@ fn english_letter(c: char) -> bool {
 }
 
 /// The words of `_WORDS = [^\W\d_]+(?:['’\-][^\W\d_]+)*`.
+#[must_use]
 pub fn words_of(text: &str) -> Vec<&str> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut words = Vec::new();
@@ -275,9 +276,9 @@ fn word_score(features: &mut FeatureMap, label: &str, score: Option<&ks_lang::Wo
     Ok(())
 }
 
-/// How often a reading of the decided token occurs in one term table (context_model.term_bucket).
+/// How often a reading of the decided token occurs in one term table (`context_model.term_bucket`).
 ///
-/// A training frame drawn with its counts dropped (ContextEvidence.term_counts_dropped) reads as uncounted: a term no
+/// A training frame drawn with its counts dropped (`ContextEvidence.term_counts_dropped`) reads as uncounted: a term no
 /// table holds (`webjs`) is what such a frame stands for, and its shape and context must decide it. The counts of the
 /// words around the token are never dropped.
 pub fn own_bucket(item: &ContextEvidence, text: &str, alphabet: &str, tables: &TermTables) -> &'static str {
@@ -286,6 +287,7 @@ pub fn own_bucket(item: &ContextEvidence, text: &str, alphabet: &str, tables: &T
 }
 
 /// The words of a token of letters joined by hyphens, its edge signs aside (`ку-ку`, `pre-order`); None otherwise.
+#[must_use]
 pub fn joined_parts(text: &str) -> Option<Vec<&str>> {
     let parts: Vec<&str> = pystr::strip_chars(text, TERM_EDGE_SIGNS).split('-').collect();
     (parts.len() > 1 && parts.iter().all(|part| pystr::isalpha(part))).then_some(parts)
@@ -293,7 +295,7 @@ pub fn joined_parts(text: &str) -> Option<Vec<&str>> {
 
 /// Where the word stands on its line, whether a reading opens sentences, how often each occurs.
 ///
-/// context-v1 schema 7 decided by this evidence (context_model.extract_context_features), and the action scheme had
+/// context-v1 schema 7 decided by this evidence (`context_model.extract_context_features`), and the action scheme had
 /// none of it. Replayed through the engine, the owner's own typing (field logs of 0.26-0.36.3) showed what that cost:
 /// 0.37.0 left words in the other layout about twice as often as 0.36.3, and nearly all of them were what the term
 /// tables tell apart - an English term typed in the Russian layout amid Russian prose (`зк` is never seen inside Russian
@@ -345,7 +347,7 @@ fn term_features(features: &mut FeatureMap, item: &ContextEvidence, direction: &
 /// A token of letters only, all capitals, three or more: whether its Cyrillic reading is a known word, how often
 /// Russian text uses it, and the script of the text before it.
 ///
-/// `WBC` after Russian prose reads `ЦИС`, which the lexicon knows (the OpenSubtitles supplement) and Russian text never
+/// `WBC` after Russian prose reads `ЦИС`, which the lexicon knows (the `OpenSubtitles` supplement) and Russian text never
 /// uses; `CIF` reads `США`, which Russian text uses all the time. Without a feature of their own, the frames teaching
 /// that such a citation stays moved the weights every Latin token after Russian text shares, and short Latin keys of
 /// Russian words (`f` for `а`) stayed with them.
@@ -366,7 +368,7 @@ fn capitals_features(features: &mut FeatureMap, item: &ContextEvidence, directio
 /// in both readings has no entry in either, and as one shared bucket such tokens all read like the Latin ones with
 /// digits the corpus restores (`зь2` is `pm2`): `1С`, `2фа` and `а1` in Russian prose became `1C`, `2af` and `f1`. An
 /// absent count is no evidence.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn frequency_features(
     features: &mut FeatureMap, item: &ContextEvidence, direction: &str, surroundings: (&str, &str, &str), readings: (&str, &str),
     buckets: (&str, &str), cyrillic_known: bool, tables: &TermTables,
@@ -401,7 +403,7 @@ fn frequency_features(
 }
 
 /// Whether a word can be asked again beside a next word kept as typed: a short word ended by a space, and a next word
-/// of at most PLANNED_CONTEXT_AFTER_MAX_CHARACTERS with no space in it.
+/// of at most `PLANNED_CONTEXT_AFTER_MAX_CHARACTERS` with no space in it.
 pub fn kept_context_reachable(original: &str, trigger: &str, boundary_text: &str, after: &str) -> bool {
     let length = count(original);
     0 < length
@@ -815,9 +817,9 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
     Ok(result)
 }
 
-/// An attested Cyrillic abbreviation (attested_abbreviation) whose Latin reading is letters too, after text with more
+/// An attested Cyrillic abbreviation (`attested_abbreviation`) whose Latin reading is letters too, after text with more
 /// Cyrillic letters than Latin ones: the abbreviation as written (`страны ЕС`) or a Latin one typed in the Russian
-/// layout whose keys spell it (`TC`). After Latin text the capitals head answers the same shape (capitals_question); an
+/// layout whose keys spell it (`TC`). After Latin text the capitals head answers the same shape (`capitals_question`); an
 /// abbreviation Russian text does not use is the frozen model's.
 pub fn abbreviation_question(original: &str, alternative: &str, before: &str, tables: &TermTables) -> bool {
     attested_abbreviation(original, tables)
@@ -825,7 +827,7 @@ pub fn abbreviation_question(original: &str, alternative: &str, before: &str, ta
         && dominant(&pystr::casefold(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS))) == "ru"
 }
 
-/// A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS, in Cyrillic, that
+/// A token of letters only, all capitals, of `CAPITALS_HEAD_MIN_LETTERS` to `CAPITALS_HEAD_MAX_LETTERS`, in Cyrillic, that
 /// Russian technical text uses and the lexicon does not hold: counted among the Cyrillic words of Russian technical
 /// text, which the term table keeps for words outside the lexicon (`ЕС`, `ТЗ`, `ИД`). A lexicon word in capitals
 /// (`ЛУНЫ`) is a word typed with Caps Lock, which the frozen model keeps.
@@ -849,7 +851,7 @@ pub fn attested_abbreviation(original: &str, tables: &TermTables) -> bool {
 /// magnitude of how often the Latin reading occurs among the Latin words of Russian technical text and in English prose,
 /// and the Cyrillic one in Russian prose and among the Cyrillic words of Russian technical text, and of their ratio;
 /// whether the lexicons and the identifier index know each reading; the length; whether the Cyrillic reading has a
-/// letter no Russian word starts with (ABBREVIATION_NON_INITIAL_LETTERS), which no abbreviation of Russian words has;
+/// letter no Russian word starts with (`ABBREVIATION_NON_INITIAL_LETTERS`), which no abbreviation of Russian words has;
 /// the boundary. No letter of its own: a head reading them learned the corpus's kinds of abbreviation and turned `ДТП`
 /// into `LNG`.
 fn abbreviation_names(item: &ContextEvidence, tables: &TermTables) -> Vec<String> {
@@ -876,7 +878,7 @@ fn abbreviation_names(item: &ContextEvidence, tables: &TermTables) -> Vec<String
     names
 }
 
-/// An attested Cyrillic abbreviation (attested_abbreviation) whose Latin reading is letters too, after text with more
+/// An attested Cyrillic abbreviation (`attested_abbreviation`) whose Latin reading is letters too, after text with more
 /// Latin letters than Cyrillic ones: `ТЗ` after `/designv2 `, or `US` after English prose typed in the Russian layout
 /// (`ГЫ`). The capitals head answers the same shape with a copy of the shared features, and both turned abbreviations
 /// the Latin reading of which nobody writes into it (`ТЗ` into `NP`, `НГ` into `YU`).
@@ -886,9 +888,9 @@ pub fn latin_abbreviation_question(original: &str, alternative: &str, before: &s
         && dominant(&pystr::casefold(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS))) == "en"
 }
 
-/// The Latin-context abbreviation head's evidence: the abbreviation head's (abbreviation_names), and the binary order of
+/// The Latin-context abbreviation head's evidence: the abbreviation head's (`abbreviation_names`), and the binary order of
 /// magnitude of how often the word before it occurs in English prose and among the Latin words of Russian technical text
-/// (neighbour_names).
+/// (`neighbour_names`).
 fn latin_abbreviation_evidence(item: &ContextEvidence, direction: &str, tables: &TermTables) -> Pairs {
     let words = pystr::split(&item.field.before);
     let mut names = abbreviation_names(item, tables);
@@ -896,10 +898,11 @@ fn latin_abbreviation_evidence(item: &ContextEvidence, direction: &str, tables: 
     head_pairs(LATIN_ABBREVIATION_FEATURE_PREFIX, &names, &format!(":direction:{direction}"))
 }
 
-/// A token of ALONE_HEAD_LETTERS letters, letters in both layouts, with no letter before or after it in the field, at a
+/// A token of `ALONE_HEAD_LETTERS` letters, letters in both layouts, with no letter before or after it in the field, at a
 /// boundary that ends it for good: a message of one such word (`гш` for `ui`) sent, or left at a pause. At a space the
 /// next word may still come and decide it with its neighbour, so the frozen model's wait stands there. `хз` is no member:
 /// its Latin keys `[p` are no word.
+#[must_use]
 pub fn alone_question(original: &str, alternative: &str, before: &str, after: &str, trigger: &str) -> bool {
     count(original) == ALONE_HEAD_LETTERS
         && pystr::isalpha(original)
@@ -922,16 +925,17 @@ fn alone_counts(item: &ContextEvidence, direction: &str, tables: &TermTables) ->
     head_pairs(ALONE_FEATURE_PREFIX, &names, &format!(":direction:{direction}"))
 }
 
-/// A word of at least START_HEAD_MIN_LETTERS letters, letters in both layouts, with no letter before or after it in the
-/// field: the first word of a message, at any boundary. Two letters are the lone-word head's (alone_question) or wait for
+/// A word of at least `START_HEAD_MIN_LETTERS` letters, letters in both layouts, with no letter before or after it in the
+/// field: the first word of a message, at any boundary. Two letters are the lone-word head's (`alone_question`) or wait for
 /// the next word; a word whose other reading has signs (`J,thyed`) is no member.
+#[must_use]
 pub fn start_question(original: &str, alternative: &str, before: &str, after: &str) -> bool {
     count(original) >= START_HEAD_MIN_LETTERS && pystr::isalpha(original) && pystr::isalpha(alternative) && !has_alpha(before) && !has_alpha(after)
 }
 
 /// The message-start head's own evidence: the binary order of magnitude of how often the Latin reading occurs in English
 /// prose and the Cyrillic one in Russian prose, and of their ratio; and the band of the detector's score delta
-/// (START_DELTA_BAND_WIDTH wide, START_DELTA_BANDS either way).
+/// (`START_DELTA_BAND_WIDTH` wide, `START_DELTA_BANDS` either way).
 fn start_evidence(item: &ContextEvidence, direction: &str, tables: &TermTables) -> Pairs {
     let (latin, cyrillic) = if item.source_group == 0 { (&item.original, &item.alternative) } else { (&item.alternative, &item.original) };
     let magnitudes = (bit_length(tables.term("english").count(&pystr::casefold(latin))), bit_length(tables.term("russian").count(&pystr::casefold(cyrillic))));
@@ -947,14 +951,15 @@ fn start_evidence(item: &ContextEvidence, direction: &str, tables: &TermTables) 
     head_pairs(START_FEATURE_PREFIX, &names, &format!(":direction:{direction}"))
 }
 
-/// A short word right after Latin text asked again once the word after it is planned for conversion (after_origin
-/// planned_next_conversion): the nearest letter before it is Latin, a word follows it, and in either reading it has at
-/// most OPENING_SHORT_MAX_LETTERS letters once one leading sign of RESUME_LEADING_SIGNS is set aside (`f`/`а` in
+/// A short word right after Latin text asked again once the word after it is planned for conversion (`after_origin`
+/// `planned_next_conversion)`: the nearest letter before it is Latin, a word follows it, and in either reading it has at
+/// most `OPENING_SHORT_MAX_LETTERS` letters once one leading sign of `RESUME_LEADING_SIGNS` is set aside (`f`/`а` in
 /// `seek() , f там`, `ds`/`вы` in `Shift+Tab ds`, `(b`/`(и`). That is where a person who forgot to switch back to Russian
 /// after a Latin token resumes Russian text, and where a Latin token is followed by Russian text typed in the English
-/// layout. A word of one letter right after a Latin word and a space is the single-letter head's (letter_question). The
+/// layout. A word of one letter right after a Latin word and a space is the single-letter head's (`letter_question`). The
 /// question reads only the token, the text around it and the origin, as the trainer and the GPU path route frames by
 /// them.
+#[must_use]
 pub fn resume_question(original: &str, alternative: &str, before: &str, after: &str, origin: AfterOrigin) -> bool {
     let nearest = last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS).chars().rev().find(|&c| ucd::isalpha(c));
     origin == AfterOrigin::PlannedNextConversion
@@ -1019,6 +1024,7 @@ fn resume_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMa
 /// (`nats и redis`), `f` after `lid ` (`lid а номер`), `a` after `use `. The engine asks it at the letter's boundary and
 /// again beside the next word, converted or kept as typed. After Cyrillic, after a sign or with nothing before it the
 /// frozen model decides alone.
+#[must_use]
 pub fn letter_question(original: &str, alternative: &str, before: &str) -> bool {
     if count(original) != 1 || !pystr::isalpha(original) || !pystr::isalpha(alternative) || !pystr::isspace(last(before, 1)) {
         return false;
@@ -1054,12 +1060,13 @@ fn neighbour_names(side: &str, text: &str, tables: &TermTables) -> Vec<String> {
     vec![format!("{side}:russian:{}", bit_length(tables.term("russian").count(&word)))]
 }
 
-/// A token of letters only, all capitals, of CAPITALS_HEAD_MIN_LETTERS to CAPITALS_HEAD_MAX_LETTERS, after text with more
+/// A token of letters only, all capitals, of `CAPITALS_HEAD_MIN_LETTERS` to `CAPITALS_HEAD_MAX_LETTERS`, after text with more
 /// Latin letters than Cyrillic ones (`according to the BP`).
 ///
 /// After Russian prose the same shape is as often a word typed with Caps Lock (`я YT` for `я НЕ`) as a cited
 /// abbreviation (`по версии WBC`), and a head fitted there kept 54 of 72 such words the corpus v26 pair converts, or
 /// converted the abbreviations; there the frozen model decides alone.
+#[must_use]
 pub fn capitals_question(original: &str, before: &str) -> bool {
     (CAPITALS_HEAD_MIN_LETTERS..=CAPITALS_HEAD_MAX_LETTERS).contains(&count(original))
         && pystr::isalpha(original)
@@ -1067,10 +1074,11 @@ pub fn capitals_question(original: &str, before: &str) -> bool {
         && dominant(&pystr::casefold(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS))) == "en"
 }
 
-/// A token the unknown-token head's class may hold (unknown_question): UNKNOWN_HEAD_MIN_CHARACTERS long or more, not all
+/// A token the unknown-token head's class may hold (`unknown_question)`: `UNKNOWN_HEAD_MIN_CHARACTERS` long or more, not all
 /// capitals, of digits and of letters of one script - Russian letters whose keys are letters too, or Latin ones. Capitals
-/// are the abbreviation heads' shapes; a Russian letter whose key is a sign (UNKNOWN_HEAD_SIGN_KEY_LETTERS) makes the Latin
+/// are the abbreviation heads' shapes; a Russian letter whose key is a sign (`UNKNOWN_HEAD_SIGN_KEY_LETTERS`) makes the Latin
 /// reading no term (`фолбек` is `ajk,tr`), and a Latin token's keys are such letters in no case.
+#[must_use]
 pub fn unknown_shape(original: &str) -> bool {
     if count(original) < UNKNOWN_HEAD_MIN_CHARACTERS || !pystr::isalnum(original) || pystr::isupper(original) {
         return false;
@@ -1088,6 +1096,7 @@ pub fn unknown_shape(original: &str) -> bool {
 }
 
 /// The Cyrillic reading of a token of the head's shape: the token itself, or the Russian letters of its keys.
+#[must_use]
 pub fn unknown_cyrillic(original: &str) -> String {
     if original.chars().any(|c| fold_between(c, "а", "я")) { original.to_string() } else { translate(original, "us", "ru") }
 }
@@ -1097,11 +1106,11 @@ fn earlier_words(before: &str) -> HashSet<String> {
     alnum_tokens(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS)).into_iter().map(pystr::casefold).collect()
 }
 
-/// A token of the unknown-token head's shape (unknown_shape) whose Cyrillic reading Russian prose does not use, after text
+/// A token of the unknown-token head's shape (`unknown_shape`) whose Cyrillic reading Russian prose does not use, after text
 /// with more Cyrillic letters than Latin ones: Latin letters typed in either layout (a Russian word no table counts typed
 /// in the English layout, which test v56 found kept, or a Latin term typed as meant), or Russian letters whose Latin
 /// reading the text before already holds as a word (`цуиоы` after `webjs` typed right earlier in the same message). With
-/// its typed reading no lexicon word of its layout it is the head's class (extract_action_features). Russian letters
+/// its typed reading no lexicon word of its layout it is the head's class (`extract_action_features`). Russian letters
 /// without that echo stay with the frozen model: there the class is Russian slang, truncations and brands in Cyrillic as
 /// often as terms, and the head fitted on them converted `пукты` and `иишку` in the owner's typing. The question reads only
 /// the typed token, the text before it and the packaged term table, as the trainer and the GPU path route frames by them.
@@ -1133,10 +1142,11 @@ fn unknown_evidence(item: &ContextEvidence) -> Pairs {
     head_pairs(UNKNOWN_FEATURE_PREFIX, &names, &format!(":direction:{}", item.source_group))
 }
 
-/// A token one of whose readings is words joined by hyphens (joined_parts): the joined-token head's class.
+/// A token one of whose readings is words joined by hyphens (`joined_parts)`: the joined-token head's class.
 ///
 /// The other reading is the same keys in the other layout: `j,sxyj-nfr` is `обычно-так`. The question reads only the typed
-/// token, as the trainer and the GPU path route frames by it (head_question, context_action_cuda.heads_question).
+/// token, as the trainer and the GPU path route frames by it (`head_question`, `context_action_cuda.heads_question`).
+#[must_use]
 pub fn joined_question(original: &str) -> bool {
     if joined_parts(original).is_some() {
         return true;
@@ -1190,13 +1200,13 @@ fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs
     Ok(head_pairs(JOINED_FEATURE_PREFIX, &all, &format!(":direction:{}", item.source_group)))
 }
 
-/// A token of Russian letters whose Latin reading is Latin letters, a trailing sign (TERM_HEAD_TRAILING_SIGNS) and the
-/// leading dot of an extension aside, that Russian technical text uses at least in bucket TERM_HEAD_MIN_LATIN_BUCKET of
+/// A token of Russian letters whose Latin reading is Latin letters, a trailing sign (`TERM_HEAD_TRAILING_SIGNS`) and the
+/// leading dot of an extension aside, that Russian technical text uses at least in bucket `TERM_HEAD_MIN_LATIN_BUCKET` of
 /// the term table, while its Cyrillic reading occurs in no Russian text the tables count (`сымю` is `csv.`, `сш` is `ci`,
 /// `рвьш` is `hdmi`): the term head's class. A token the unknown-token head answers (a term typed right earlier in the
 /// text) is that head's, words joined by hyphens are the joined-token head's, and an attested abbreviation is counted
 /// among Cyrillic words. The question reads only the typed token, the text before it and the packaged term table, as the
-/// trainer and the GPU path route frames by them (head_question, context_action_cuda.heads_question).
+/// trainer and the GPU path route frames by them (`head_question`, `context_action_cuda.heads_question`).
 pub fn term_question(original: &str, before: &str, tables: &TermTables) -> bool {
     if count(original) < TERM_HEAD_MIN_LETTERS || !all_cyrillic(original) {
         return false;
@@ -1216,13 +1226,13 @@ pub fn term_question(original: &str, before: &str, tables: &TermTables) -> bool 
 
 /// The term head's evidence, all it reads (it has no copy of the shared features): how often Russian technical text and
 /// English text use the Latin reading, whether it ends in a sign typed on a Russian letter's key (`сымю` is `csv.`) or
-/// opens with the dot of an extension (`юучу` is `.exe`), how many Russian words end with it (russian_ending_bucket) with
+/// opens with the dot of an extension (`юучу` is `.exe`), how many Russian words end with it (`russian_ending_bucket`) with
 /// the token's length, which script the text before it is in, the band of the detector's score delta (as the message-start
 /// head reads it), how the text after it was given (asked again with its converted neighbour after it, or not) and, for a
 /// token alone in the field, whether a space or an end (Enter, a pause, a sign) ended it, with its letters: a term of two
 /// letters alone at a space waits, a longer one converts, and read without the letters the wait pulled the longer ones and
 /// the convert the shorter (`гш` became a suggestion, experiment E9f). A term of up to three letters alone in a field a
-/// reader read empty is the first-term head's (first_question), not this head's.
+/// reader read empty is the first-term head's (`first_question`), not this head's.
 /// Without the endings the head could tell the tail of a Russian word an edit left (`ев`) from a term's keys (`зк`) by the
 /// length alone, and it kept short terms; the length is read with the ending only, for the same reason. Alone at a space
 /// the frozen model waits, and a wait stands until a pause of one and a half seconds settles it: the head converts there
@@ -1266,7 +1276,7 @@ fn term_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
 }
 
 /// How many words of Russian prose end with the token, as the binary order of magnitude of their number
-/// (TERM_HEAD_ENDING_BUCKET_MAX at most); `na` for a token of another length than TERM_HEAD_ENDING_LETTERS.
+/// (`TERM_HEAD_ENDING_BUCKET_MAX` at most); `na` for a token of another length than `TERM_HEAD_ENDING_LETTERS`.
 pub fn russian_ending_bucket(token: &str, tables: &TermTables) -> String {
     let word = pystr::casefold(token);
     if !TERM_HEAD_ENDING_LETTERS.contains(&count(&word)) {
@@ -1276,7 +1286,7 @@ pub fn russian_ending_bucket(token: &str, tables: &TermTables) -> String {
 }
 
 /// How many words of Russian prose begin with the token, as the binary order of magnitude of their number
-/// (TERM_HEAD_ENDING_BUCKET_MAX at most); `na` for a token of another length than TERM_HEAD_ENDING_LETTERS.
+/// (`TERM_HEAD_ENDING_BUCKET_MAX` at most); `na` for a token of another length than `TERM_HEAD_ENDING_LETTERS`.
 pub fn russian_start_bucket(token: &str, tables: &TermTables) -> String {
     let word = pystr::casefold(token);
     if !TERM_HEAD_ENDING_LETTERS.contains(&count(&word)) {
@@ -1285,14 +1295,14 @@ pub fn russian_start_bucket(token: &str, tables: &TermTables) -> String {
     bit_length(tables.russian_starts().get(&word)).min(TERM_HEAD_ENDING_BUCKET_MAX.to::<i64>()).to_string()
 }
 
-/// Whether a token ends as many Russian words as a tail the term head keeps does (TERM_FRAGMENT_MIN_ENDING_BUCKET).
+/// Whether a token ends as many Russian words as a tail the term head keeps does (`TERM_FRAGMENT_MIN_ENDING_BUCKET`).
 fn tail_like(token: &str, tables: &TermTables) -> bool {
     let ending = russian_ending_bucket(token, tables);
     ending != "na" && ending.parse::<usize>().is_ok_and(|bucket| bucket >= TERM_FRAGMENT_MIN_ENDING_BUCKET)
 }
 
-/// A token of the term head's class (term_question) of up to three letters, the most a term's ending is read for
-/// (TERM_HEAD_ENDING_LETTERS), with no letter before it in the field: the first-term head's class when a field reader read
+/// A token of the term head's class (`term_question`) of up to three letters, the most a term's ending is read for
+/// (`TERM_HEAD_ENDING_LETTERS`), with no letter before it in the field: the first-term head's class when a field reader read
 /// the field (the role, which the trainer's and the GPU path's routing do not see, is checked where the features are
 /// made). The word after it is the one the engine asks it again with: a term converted there once a Russian word followed,
 /// a token that waited once its next word was converted. The question reads only the typed token and the text before it.
@@ -1315,15 +1325,15 @@ fn first_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let ending = format!("ending:{}", russian_ending_bucket(&item.original, tables));
     let start = format!("start:{}", russian_start_bucket(&item.original, tables));
     let after = format!("after:{}", item.after_origin.as_str());
-    let names = ["".to_string(), letters.clone(), counts.clone(), format!("{ending}:{letters}"), start.clone(), format!("{start}:{letters}"), after.clone(), format!("{after}:{letters}"), format!("{after}:{counts}")];
+    let names = [String::new(), letters.clone(), counts.clone(), format!("{ending}:{letters}"), start.clone(), format!("{start}:{letters}"), after.clone(), format!("{after}:{letters}"), format!("{after}:{counts}")];
     names.iter().map(|name| (format!("{FIRST_FEATURE_PREFIX}{boundary}{}{name}", if name.is_empty() { "" } else { ":" }), 1.0)).collect()
 }
 
-/// One letter typed in the Russian layout that is no Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS),
+/// One letter typed in the Russian layout that is no Russian word of one letter (`short_words.TRUSTED_SINGLE_LETTER_WORDS`),
 /// whose Latin reading is a letter too, right after a word of Cyrillic letters and a space, ended by a space or a sign
-/// (VARIABLE_HEAD_TRIGGERS): a Latin variable typed in the Russian layout in technical prose (`т` for `n` in `результат n -
+/// (`VARIABLE_HEAD_TRIGGERS)`: a Latin variable typed in the Russian layout in technical prose (`т` for `n` in `результат n -
 /// 1`, `ч` for `x`), or a letter meant as written (`т.` of `и т. д.`, a word broken off in chat). After a word of Latin
-/// letters the single-letter head answers (letter_question); with no word before it, or at a pause, the frozen model.
+/// letters the single-letter head answers (`letter_question`); with no word before it, or at a pause, the frozen model.
 pub fn variable_question(original: &str, alternative: &str, before: &str, trigger: &str) -> bool {
     let trusted = ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
     if count(original) != 1
@@ -1341,7 +1351,7 @@ pub fn variable_question(original: &str, alternative: &str, before: &str, trigge
 
 /// The variable head's evidence: the letter and its case, the boundary (a space, or the sign that ended it), the word
 /// before it and how often Russian prose uses that word, whether the text before holds signs of code
-/// (VARIABLE_CODE_SIGNS), Latin letters or digits, and how the word after it was given; the letter and the boundary are
+/// (`VARIABLE_CODE_SIGNS`), Latin letters or digits, and how the word after it was given; the letter and the boundary are
 /// each read with the rest. In chat such a letter is meant as written (`да я про то ч`), in a question about code it is a
 /// variable (`для ч = 0.3`).
 fn variable_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
@@ -1372,8 +1382,8 @@ fn punctuation_boundary(item: &ContextEvidence) -> String {
     format!("boundary:{}:{}", item.trigger, if item.trigger == "punctuation" { pystr::strip(&item.boundary_text) } else { "" })
 }
 
-/// One Latin letter whose Cyrillic reading is a Russian word of one letter (short_words.TRUSTED_SINGLE_LETTER_WORDS,
-/// either case), the nearest letter before it Cyrillic, ended by a space or a sign (CYRLETTER_HEAD_TRIGGERS): `в` typed `d`
+/// One Latin letter whose Cyrillic reading is a Russian word of one letter (`short_words.TRUSTED_SINGLE_LETTER_WORDS`,
+/// either case), the nearest letter before it Cyrillic, ended by a space or a sign (`CYRLETTER_HEAD_TRIGGERS)`: `в` typed `d`
 /// in `разрабатывал и d документ` and `и` typed `b` in `посмотри b добавь`, where the English layout came on in the middle
 /// of Russian text, and a Latin letter meant as written after Russian text (`язык C`, `витамин D`, `функция f`). The mirror
 /// of the variable head's class. Any origin of the next word: the engine asks the letter at its own boundary, again beside
@@ -1396,7 +1406,7 @@ pub fn cyrletter_question(original: &str, alternative: &str, before: &str, trigg
 /// The Cyrillic-letter head's evidence: the features it is asked with once more under its own names, so that it weighs the
 /// lexicons' and Hunspell's verdicts in its class apart, and evidence of its own: the letter and its case, the boundary (a
 /// space, or the sign that ended it), how often the word before it and the word after it occur, how the word after it was
-/// given, whether the text before holds signs of code (VARIABLE_CODE_SIGNS), Latin letters or digits, and whether Hunspell
+/// given, whether the text before holds signs of code (`VARIABLE_CODE_SIGNS`), Latin letters or digits, and whether Hunspell
 /// knows each reading; the letter, its case and the next word's origin are each read with the rest. In Russian prose the
 /// letter is a word of it typed in the English layout (`и d документ`); in technical prose a Latin letter is meant as
 /// written (`язык C`, `от a до b`).
@@ -1440,9 +1450,10 @@ fn cyrletter_evidence(item: &ContextEvidence, direction: &str, features: &Featur
     pairs
 }
 
-/// Digits, then `ю` typed in the Russian layout (DIGIT_DOT_SIGN_LETTERS), digits after it allowed, whose other reading has
-/// the dot there (DIGIT_DOT_SIGNS), at a space (DIGIT_DOT_HEAD_TRIGGERS): `2ю` for `2.` and `5ю2` for `5.2` where a person
+/// Digits, then `ю` typed in the Russian layout (`DIGIT_DOT_SIGN_LETTERS`), digits after it allowed, whose other reading has
+/// the dot there (`DIGIT_DOT_SIGNS`), at a space (`DIGIT_DOT_HEAD_TRIGGERS)`: `2ю` for `2.` and `5ю2` for `5.2` where a person
 /// used to the English layout pressed its dot key in Russian text.
+#[must_use]
 pub fn digit_dot_question(original: &str, alternative: &str, trigger: &str) -> bool {
     if !DIGIT_DOT_HEAD_TRIGGERS.contains(&trigger) || count(original) != count(alternative) {
         return false;
@@ -1491,9 +1502,10 @@ fn digit_dot_evidence(item: &ContextEvidence, direction: &str, features: &Featur
     pairs
 }
 
-/// A token of one sign of QUOTE_HEAD_SIGNS and letters of one script whose other reading is the other sign and letters, at
-/// a space or a sign (QUOTE_HEAD_TRIGGERS): `@Z` typed for `"Я` where a Russian message was begun in the English layout with
+/// A token of one sign of `QUOTE_HEAD_SIGNS` and letters of one script whose other reading is the other sign and letters, at
+/// a space or a sign (`QUOTE_HEAD_TRIGGERS)`: `@Z` typed for `"Я` where a Russian message was begun in the English layout with
 /// a quotation mark, and `@media`, `@property`, a mention or `"Я` meant as typed.
+#[must_use]
 pub fn quote_question(original: &str, alternative: &str, trigger: &str) -> bool {
     if !QUOTE_HEAD_TRIGGERS.contains(&trigger) || original.is_empty() || count(original) != count(alternative) {
         return false;
@@ -1545,9 +1557,10 @@ fn quote_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap
     pairs
 }
 
-/// One or two leading dashes (DASH_HEAD_MAX_DASHES) and letters of one script, digits after them allowed, in either
-/// reading, at a space, a sign or the end of a line (DASH_HEAD_TRIGGERS): a command-line flag typed in either layout, `-v`
+/// One or two leading dashes (`DASH_HEAD_MAX_DASHES`) and letters of one script, digits after them allowed, in either
+/// reading, at a space, a sign or the end of a line (`DASH_HEAD_TRIGGERS)`: a command-line flag typed in either layout, `-v`
 /// meant as typed after `git` and `-м` typed for it with the Russian layout on, `--force`, `-v2`, `-цфеср` for `-watch`.
+#[must_use]
 pub fn dash_question(original: &str, alternative: &str, trigger: &str) -> bool {
     DASH_HEAD_TRIGGERS.contains(&trigger) && dash_shape(original) && dash_shape(alternative)
 }
@@ -1573,7 +1586,7 @@ fn letters_of_flag(rest: &str) -> &str {
 /// The dash head's evidence: the features it is asked with once more under its own names, and evidence of its own: the
 /// number of dashes and of letters, their case, whether digits follow them, how often the letters occur as a Latin word in
 /// English prose and among the Latin words of Russian technical text and as a Cyrillic one in Russian prose, how often the
-/// word before the flag occurs, and whether the text before holds signs of code (VARIABLE_CODE_SIGNS). A flag follows a
+/// word before the flag occurs, and whether the text before holds signs of code (`VARIABLE_CODE_SIGNS`). A flag follows a
 /// command (`git -v`, `npm i --save`); a Russian word after a dash is rarely typed so.
 fn dash_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap, tables: &TermTables) -> Pairs {
     let dashes = count(&item.original) - count(pystr::lstrip_chars(&item.original, "-"));
@@ -1607,18 +1620,20 @@ fn dash_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap,
     pairs
 }
 
-/// A letter of the variable head's class (variable_question) asked once more with the token after it given as kept text
-/// (after_origin kept_next_word), that token holding no letter and no dash alone (sign_token_asked): a sign, signs or
+/// A letter of the variable head's class (`variable_question`) asked once more with the token after it given as kept text
+/// (`after_origin` `kept_next_word`), that token holding no letter and no dash alone (`sign_token_asked)`: a sign, signs or
 /// digits (`ч =`, `м +`, `ч 2`). The engine asks a kept letter so when a token that reads alike in both layouts follows it
-/// (decide_letter_before_sign), and a waiting one before any token kept as typed (decide_with_kept_neighbour). In a
+/// (`decide_letter_before_sign`), and a waiting one before any token kept as typed (`decide_with_kept_neighbour`). In a
 /// question about code the letter is a Latin variable; before a number in Russian prose it is meant as written (`ГОСТ Р
 /// 54960`). The question reads only the letter, the text around it and the origin, as the trainer and the GPU path route
 /// frames by them.
+#[must_use]
 pub fn sign_question(original: &str, alternative: &str, before: &str, after: &str, trigger: &str, origin: AfterOrigin) -> bool {
     origin == AfterOrigin::KeptNextWord && sign_token_asked(first_word(after)) && variable_question(original, alternative, before, trigger)
 }
 
-/// Whether a letter is asked again with this token after it: one holding no letter that is no dash alone (SIGN_DASH).
+/// Whether a letter is asked again with this token after it: one holding no letter that is no dash alone (`SIGN_DASH`).
+#[must_use]
 pub fn sign_token_asked(token: &str) -> bool {
     !pystr::strip_chars(token, SIGN_DASH).is_empty() && !has_alpha(token)
 }
@@ -1640,8 +1655,8 @@ fn sign_kind(after: &str) -> &'static str {
 }
 
 /// The sign head's evidence, all it reads beside the kept-neighbour question's: the token after the letter itself (up to
-/// SIGN_TOKEN_MAX_CHARACTERS signs, or digits, or longer) and its kind (an operator, digits, other), the letter, its case,
-/// how often Russian prose uses the word before it, and whether the text before holds signs of code (VARIABLE_CODE_SIGNS),
+/// `SIGN_TOKEN_MAX_CHARACTERS` signs, or digits, or longer) and its kind (an operator, digits, other), the letter, its case,
+/// how often Russian prose uses the word before it, and whether the text before holds signs of code (`VARIABLE_CODE_SIGNS`),
 /// Latin letters or digits, each also read with the token and with its kind; the letter alone, as the two Russian `м +` of
 /// the Leipzig sentences (`50 кв м + балкон`) outweighed every `м` before a formula sign once read with the sign
 /// (candidate v76 e3). The variable head reads every such token as the same script: `=` after `для ч` went the way of the
@@ -1683,15 +1698,16 @@ fn dotted_reading(text: &str) -> bool {
 }
 
 /// A token typed in the English layout with `/`, the key of the Russian dot, whose Cyrillic reading is two or more groups of
-/// up to DOTTED_PART_MAX_LETTERS letters joined by dots: a Russian abbreviation typed in the wrong layout (`n/r/` for
+/// up to `DOTTED_PART_MAX_LETTERS` letters joined by dots: a Russian abbreviation typed in the wrong layout (`n/r/` for
 /// `т.к.`, `l/,/` for `д.б.`), or a Latin token of short parts meant as typed (`n/a`, `I/O`, `usr/bin`). A reading of one
 /// group (`cv/` for `см.`, `dev/` for `вум.`) is no member: a word with the key of a dot after it is as often a part of a
 /// path as a short Russian word ending a sentence, and the frozen model decides it.
+#[must_use]
 pub fn dotted_question(original: &str, alternative: &str) -> bool {
     original.is_ascii() && original.contains('/') && dotted_reading(alternative)
 }
 
-/// The term-table bucket (term_bucket) of the rarest part of a token in one table; a part that is no word at all (`,` of
+/// The term-table bucket (`term_bucket`) of the rarest part of a token in one table; a part that is no word at all (`,` of
 /// `l/,/`, typed for `д.б.`) is rarer than any word: `na`.
 fn rarest_part(parts: &[&str], alphabet: &str, tables: &TermTables) -> Checked<&'static str> {
     let buckets: Vec<&str> = parts.iter().filter(|part| !part.is_empty()).map(|part| term_bucket(part, alphabet, tables)).collect();
@@ -1704,7 +1720,7 @@ fn rarest_part(parts: &[&str], alphabet: &str, tables: &TermTables) -> Checked<&
 /// The dotted-abbreviation head's evidence: the Cyrillic reading itself (the abbreviations are few: `т.к.`, `т.е.`, `т.д.`,
 /// `т.п.`, `д.б.`), the lengths of its parts and its final dot, its case, the script of the word before and after it, and
 /// how often the parts occur as words: the rarest part of the reading in Russian prose and the rarest part typed among the
-/// Latin words of Russian technical text (term_bucket). Each part of `т.к.` is a Russian word of the table, no part of
+/// Latin words of Russian technical text (`term_bucket`). Each part of `т.к.` is a Russian word of the table, no part of
 /// `гык.ишт` (`usr/bin`) is. The reading, its shape and the two counts are read with each of the rest.
 fn dotted_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
     let reading = pystr::casefold(&item.alternative);
@@ -1738,13 +1754,13 @@ pub fn letters_and_digits(token: &str) -> bool {
         && (token.chars().filter(|&c| ucd::isalpha(c)).all(|c| c.is_ascii()) || token.chars().filter(|&c| ucd::isalpha(c)).all(cyrillic_letter))
 }
 
-/// A token typed in Russian letters and digits, of at most ALNUM_HEAD_MAX_CHARACTERS, whose keys in the English layout are
+/// A token typed in Russian letters and digits, of at most `ALNUM_HEAD_MAX_CHARACTERS`, whose keys in the English layout are
 /// Latin letters and digits, that Russian text is known to write as a whole token one way or the other
 /// (context-alnum-frequency.json counts it as typed or its Latin reading), after text that is Russian or none: a Latin
 /// token typed in the Russian layout in Russian text (`шзм6` for `ipv6`, `зь2` for `pm2`, `ч64` for `x64`, `2аф` for
 /// `2fa`), or a Russian one meant as typed (`1с`, `3д`, `100мс`): the letters-and-digits head's class. A reading with a sign
 /// is none (`2х` reads `2[`), nor a token with a sign inside (`-v2`, `5ю2`): the frozen model decides those, and the
-/// lone-letter refusal (context_policy) a token of one letter. After English text the frozen model decides too, and for a
+/// lone-letter refusal (`context_policy`) a token of one letter. After English text the frozen model decides too, and for a
 /// token typed in Latin letters, whose typed questions label `1c` of Russian prose a conversion to `1с`. A token the table
 /// counts in neither script is the frozen model's as well: fitted on the 2023 dump, where such shapes are Russian (`2х`,
 /// `ГОСТ2012`), the head kept model names typed in the Russian layout in Russian sentences that the frozen model had
@@ -1765,8 +1781,8 @@ pub fn alnum_question(original: &str, alternative: &str, before: &str, tables: &
     Ok(tokens.alphabet("cyrillic").count(&pystr::casefold(original)) > 0 || tokens.alphabet("latin").count(&pystr::casefold(alternative)) > 0)
 }
 
-/// The runs of letters (`L`) and digits (`D`) of a token, each with its length up to ALNUM_RUN_LENGTH_MAX: `м67` is `L1D2`,
-/// `ц4и` `L1D1L1`, `100мс` `D3L2`; a token of more than ALNUM_SHAPE_MAX_RUNS runs is `many`.
+/// The runs of letters (`L`) and digits (`D`) of a token, each with its length up to `ALNUM_RUN_LENGTH_MAX`: `м67` is `L1D2`,
+/// `ц4и` `L1D1L1`, `100мс` `D3L2`; a token of more than `ALNUM_SHAPE_MAX_RUNS` runs is `many`.
 fn alnum_shape(token: &str) -> String {
     let mut runs: Vec<(char, usize)> = Vec::new();
     for c in token.chars() {
@@ -1782,7 +1798,7 @@ fn alnum_shape(token: &str) -> String {
     runs.iter().map(|(kind, size)| format!("{kind}{}", (*size).min(ALNUM_RUN_LENGTH_MAX))).collect()
 }
 
-/// The binary order of magnitude by which a Cyrillic count outnumbers a Latin one, ALNUM_RATIO_BOUND at most either way.
+/// The binary order of magnitude by which a Cyrillic count outnumbers a Latin one, `ALNUM_RATIO_BOUND` at most either way.
 fn ratio_of(cyrillic: u64, latin: u64) -> i64 {
     clamp_int(bit_length(cyrillic) - bit_length(latin), ALNUM_RATIO_BOUND)
 }
@@ -1800,11 +1816,11 @@ fn longest_run(text: &str, wanted: fn(char) -> bool) -> Checked<&str> {
 
 /// The letters-and-digits head's evidence: how often Russian text writes the token as typed and its Latin reading as whole
 /// tokens (context-alnum-frequency.json: `1с` 1 363 times and `1c` 134, `ipv6` 351 and `шзм6` never), each as a bucket of
-/// the term tables' bounds, with the binary order of magnitude by which one outnumbers the other (ALNUM_RATIO_BOUND at most
+/// the term tables' bounds, with the binary order of magnitude by which one outnumbers the other (`ALNUM_RATIO_BOUND` at most
 /// either way); the same order for the longest run of letters of each reading in the term tables (Russian text for the
 /// Cyrillic run, English prose or Russian technical text for the Latin one) and whether either occurs; its shape (runs of
 /// letters and digits), the case of its letters, the script of the text and of the word before it, whether that text holds
-/// signs of code (VARIABLE_CODE_SIGNS) or digits, the boundary and how the word after it was given; the shape and both
+/// signs of code (`VARIABLE_CODE_SIGNS`) or digits, the boundary and how the word after it was given; the shape and both
 /// orders are read with the rest. The shared features read every digit as one class: `1С` became `1C` in Russian prose and
 /// `2фа` `2af`, while `м67` for `v67` stayed a suggestion and `x64` typed in the Russian layout stayed `ч64` (the owner's
 /// typing, ru.stackoverflow messages of 2023).
@@ -1854,12 +1870,13 @@ fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs>
     Ok(head_pairs(ALNUM_FEATURE_PREFIX, &names, ""))
 }
 
-/// A token of BRIEF_HEAD_LETTERS Latin letters with no letter before or after it in the field, whose keys in the Russian
+/// A token of `BRIEF_HEAD_LETTERS` Latin letters with no letter before or after it in the field, whose keys in the Russian
 /// layout are Russian letters: a short message typed in the English layout, `ytn` for `нет`, `jr` for `ок`, `tot` for
 /// `еще`. The message-start head starts at four letters, because at three it turned Russian words typed as meant into Latin
 /// (`чук`, `дес`): this head answers Latin letters alone, and a Russian token stays with the frozen model. The question
-/// reads only the typed token and the text around it, as the trainer and the GPU path route frames by them (head_question,
-/// context_action_cuda.heads_question).
+/// reads only the typed token and the text around it, as the trainer and the GPU path route frames by them (`head_question`,
+/// `context_action_cuda.heads_question`).
+#[must_use]
 pub fn brief_question(original: &str, before: &str, after: &str) -> bool {
     if !(BRIEF_HEAD_LETTERS.contains(&count(original)) && original.is_ascii() && pystr::isalpha(original)) {
         return false;
@@ -1877,9 +1894,9 @@ fn brief_counts(latin: &str, cyrillic: &str, tables: &TermTables) -> (i64, i64) 
 }
 
 /// Whether the counts settle a short Latin token as the keys of a Russian word: its Cyrillic reading counted in Russian
-/// text at least BRIEF_SETTLED_MIN_COUNT times and BRIEF_SETTLED_DOMINANCE times as often as the token in English prose or
-/// Russian technical text, where it occurs fewer than BRIEF_SETTLED_OTHER_MAXIMUM times (`ytn` and `нет`, `gy` and `пн`), as
-/// context_deferral.counted_reading settles the calibration's lone words with the Latin count of English prose added. `ds`
+/// text at least `BRIEF_SETTLED_MIN_COUNT` times and `BRIEF_SETTLED_DOMINANCE` times as often as the token in English prose or
+/// Russian technical text, where it occurs fewer than `BRIEF_SETTLED_OTHER_MAXIMUM` times (`ytn` and `нет`, `gy` and `пн`), as
+/// `context_deferral.counted_reading` settles the calibration's lone words with the Latin count of English prose added. `ds`
 /// (`вы`, 108 Latin counts), `ij` (`шо`, 84 against 29) are not settled.
 pub fn brief_settled(latin: &str, cyrillic: &str, tables: &TermTables) -> bool {
     let (russian, other) = brief_counts(latin, cyrillic, tables);
@@ -1887,7 +1904,7 @@ pub fn brief_settled(latin: &str, cyrillic: &str, tables: &TermTables) -> bool {
 }
 
 /// Whether the counts settle a short Latin token a lexicon knows as the keys of a Russian word all the same: its Cyrillic
-/// reading counted in Russian text at least BRIEF_KNOWN_MIN_COUNT times and BRIEF_KNOWN_DOMINANCE times as often as the
+/// reading counted in Russian text at least `BRIEF_KNOWN_MIN_COUNT` times and `BRIEF_KNOWN_DOMINANCE` times as often as the
 /// token in English prose or Russian technical text. The English lexicon knows `jr` (`Jr`), which English prose uses 13
 /// times and Russian text `ок` 7 180 times; `ha` (28 against 273) stays a word.
 pub fn brief_dominant(latin: &str, cyrillic: &str, tables: &TermTables) -> bool {
@@ -1895,8 +1912,8 @@ pub fn brief_dominant(latin: &str, cyrillic: &str, tables: &TermTables) -> bool 
     russian >= BRIEF_KNOWN_MIN_COUNT && russian >= BRIEF_KNOWN_DOMINANCE * other && other < BRIEF_SETTLED_OTHER_MAXIMUM
 }
 
-/// A short message typed in the English layout (brief_question) whose Russian reading outnumbers its keys by far
-/// (brief_dominant): `ytn` for `нет`, and `jr` for `ок`, which the English lexicon knows as `Jr`. The question reads only
+/// A short message typed in the English layout (`brief_question`) whose Russian reading outnumbers its keys by far
+/// (`brief_dominant)`: `ytn` for `нет`, and `jr` for `ок`, which the English lexicon knows as `Jr`. The question reads only
 /// the typed token and the text around it, as the trainer and the GPU path route frames by them.
 pub fn known_reply_question(original: &str, alternative: &str, before: &str, after: &str, tables: &TermTables) -> bool {
     brief_question(original, before, after) && brief_dominant(original, alternative, tables)
@@ -1923,7 +1940,7 @@ fn short_case(text: &str) -> &'static str {
 }
 
 /// The short-message head's evidence: the binary order of magnitude by which how often Russian prose uses the Cyrillic
-/// reading outnumbers how often English prose or Russian technical text uses the Latin one (BRIEF_RATIO_BOUND at most
+/// reading outnumbers how often English prose or Russian technical text uses the Latin one (`BRIEF_RATIO_BOUND` at most
 /// either way), whether either reading occurs at all, the boundary that ended the token and its case. The orders of each
 /// count on their own told few tokens apart, and the head learnt them by heart: its development loss rose from the second
 /// epoch on, and it turned `ye` sent alone, which the frozen model converted to `ну`, into a suggestion (experiment E9).
@@ -2008,9 +2025,10 @@ fn prose_count(word: &str, language: &str, tables: &TermTables) -> u64 {
 }
 
 /// The question the engine asks about the next word of a waiting word with that word's other reading before it
-/// (engine.decide_after_waiting_word): the hypothesis head's class. Only the question says so (before_origin); the same
+/// (`engine.decide_after_waiting_word)`: the hypothesis head's class. Only the question says so (`before_origin`); the same
 /// text before a word is typed when the layout was switched by hand after a word of the other script, and that word is the
 /// frozen model's.
+#[must_use]
 pub fn hypothesis_question(item: &ContextEvidence) -> bool {
     item.before_origin == BeforeOrigin::PlannedPreviousReading
 }
@@ -2022,7 +2040,7 @@ fn magnitude_ratio(first: u64, second: u64) -> i64 {
 /// The hypothesis head's evidence, all it reads (no copy of the shared features, which read the reading before the word as
 /// typed text: `before:script:en` and the identifier `nsd` turned `тыв` after `tot ` into `nsd`): by how many binary orders
 /// of magnitude the prose of each reading's language uses the word as typed more than the other reading, and the commonest
-/// word one edit from each (nearest_count) more than the other's; whether either reading is a known identifier; by how much
+/// word one edit from each (`nearest_count`) more than the other's; whether either reading is a known identifier; by how much
 /// the waiting word as typed is commoner in its language than the reading put before the word (`еще` against `tot`); the
 /// token's letters, the band of the detector's score delta and the boundary.
 fn hypothesis_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
@@ -2061,15 +2079,15 @@ fn hypothesis_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     head_pairs(HYPOTHESIS_FEATURE_PREFIX, &names, &format!(":direction:{}", item.source_group))
 }
 
-/// A token of SHORT_HEAD_LETTERS Russian letters, not all capitals, whose keys are Latin letters, after text with more
-/// Cyrillic letters than Latin ones, that Russian text uses at least in bucket SHORT_HEAD_MIN_RUSSIAN_BUCKET (web and news
+/// A token of `SHORT_HEAD_LETTERS` Russian letters, not all capitals, whose keys are Latin letters, after text with more
+/// Cyrillic letters than Latin ones, that Russian text uses at least in bucket `SHORT_HEAD_MIN_RUSSIAN_BUCKET` (web and news
 /// text, prose or technical text) while English prose and Russian technical text use its Latin reading at most in bucket
-/// SHORT_HEAD_MAX_LATIN_BUCKET: the short-token head's class (the lexicon's own words are left out where the features are
+/// `SHORT_HEAD_MAX_LATIN_BUCKET`: the short-token head's class (the lexicon's own words are left out where the features are
 /// made). `кз` (68 in web and news text, `rp` 23 in technical text) and `дз` are; `ьк` (`mr`), `ин` (`by`), `сс` (`cc`) and
 /// `ср` (`ch`), whose Latin readings are common, are the frozen model's, which converted them as meant, and so is a token
 /// Russian text hardly uses (`ге`, `сщ`). Capitals are the abbreviation head's, a word of one letter the letter heads', a
 /// term of Russian technical text the term head's. The question reads only the typed token, the text before it and the
-/// packaged tables, as the trainer and the GPU path route frames by them (head_question, context_action_cuda.heads_question).
+/// packaged tables, as the trainer and the GPU path route frames by them (`head_question`, `context_action_cuda.heads_question`).
 pub fn short_question(original: &str, before: &str, tables: &TermTables) -> Checked<bool> {
     if !(SHORT_HEAD_LETTERS.contains(&count(original)) && all_cyrillic(original) && !pystr::isupper(original)) {
         return Ok(false);
@@ -2128,13 +2146,13 @@ fn short_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs>
     Ok(head_pairs(SHORT_FEATURE_PREFIX, &names, ""))
 }
 
-/// A token of at least SLIP_HEAD_MIN_LETTERS Latin letters after a line with more Cyrillic letters than Latin ones, whose
-/// Latin reading English prose and Russian technical text use at most in bucket SLIP_HEAD_MAX_LATIN_BUCKET and whose
+/// A token of at least `SLIP_HEAD_MIN_LETTERS` Latin letters after a line with more Cyrillic letters than Latin ones, whose
+/// Latin reading English prose and Russian technical text use at most in bucket `SLIP_HEAD_MAX_LATIN_BUCKET` and whose
 /// Cyrillic reading Russian prose uses: the slip head's class (a word the lexicon knows or the identifier index holds is
 /// left out where the features are made). It is a word of Russian prose typed with the English layout on, the layout having
 /// slipped with no language boundary (`cgtie` for `спешу` after `я `); a term Russian technical text writes in Latin letters
 /// (`gtk`, `env`) stays with the frozen model. The question reads only the typed token, the text before it and the packaged
-/// term table, as the trainer and the GPU path route frames by them (head_question, context_action_cuda.heads_question).
+/// term table, as the trainer and the GPU path route frames by them (`head_question`, `context_action_cuda.heads_question`).
 pub fn slip_question(original: &str, before: &str, tables: &TermTables) -> bool {
     if !(count(original) >= SLIP_HEAD_MIN_LETTERS && original.is_ascii() && pystr::isalpha(original)) {
         return false;
@@ -2151,7 +2169,7 @@ pub fn slip_question(original: &str, before: &str, tables: &TermTables) -> bool 
 /// The slip head's evidence, all it reads (no copy of the shared features, which hold the frozen model's keep weights for
 /// unknown Latin tokens after Russian prose): by how many binary orders of magnitude Russian prose uses the Cyrillic
 /// reading more than English prose or Russian technical text use the Latin one, and the commonest word one edit from each
-/// more than the other's (nearest_count); whether the Russian lexicon knows the Cyrillic reading; the detector's verdict and
+/// more than the other's (`nearest_count`); whether the Russian lexicon knows the Cyrillic reading; the detector's verdict and
 /// the band of its probability; the band of the orthotactic margin; how often Russian prose uses the word before the token
 /// (`я` against a technical word); the token's letters and case, the band of the score delta and how the text after it was
 /// given. Nothing of the boundary: the same word asked at a pause and at its space gets the same answer.

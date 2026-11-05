@@ -10,7 +10,7 @@ use ks_engine::engine::{CorrectionPlan, EngineCore, KeySwitchEngine, LearningPro
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-pub enum Outcome {
+pub(crate) enum Outcome {
     /// What the entry returned or raised, for the comparison; None where the two languages have no common answer.
     Done { returned: Option<Value>, error: Option<String> },
     /// A question of the Python's alone, which leaves nothing behind: its calls are passed over.
@@ -31,13 +31,13 @@ fn answer(value: Value) -> Outcome {
     Outcome::Done { returned: Some(value), error: None }
 }
 
-pub struct Args<'a> {
+pub(crate) struct Args<'a> {
     pub positional: &'a [Value],
     pub named: Option<&'a serde_json::Map<String, Value>>,
 }
 
 impl Args<'_> {
-    pub fn get(&self, index: usize, name: &str) -> Option<&Value> {
+    pub(crate) fn get(&self, index: usize, name: &str) -> Option<&Value> {
         self.positional.get(index).or_else(|| self.named.and_then(|named| named.get(name)))
     }
 
@@ -58,7 +58,7 @@ impl Args<'_> {
     }
 }
 
-pub fn rule_from(value: &Value) -> Option<LearnedRule> {
+pub(crate) fn rule_from(value: &Value) -> Option<LearnedRule> {
     let text = |name: &str| value[name].as_str().map(str::to_owned);
     Some(LearnedRule {
         pattern: text("pattern")?,
@@ -77,7 +77,7 @@ pub fn rule_from(value: &Value) -> Option<LearnedRule> {
     })
 }
 
-pub fn rule_value(rule: &LearnedRule) -> Value {
+pub(crate) fn rule_value(rule: &LearnedRule) -> Value {
     json!({"pattern": rule.pattern, "source_group": rule.source_group, "target_group": rule.target_group,
            "action": rule.action.as_str(), "match": rule.r#match.as_str(), "case_sensitive": rule.case_sensitive})
 }
@@ -89,7 +89,7 @@ fn rule_returned(rule: &LearnedRule) -> Value {
     value
 }
 
-pub fn prompt_from(value: &Value) -> Option<LearningPrompt> {
+pub(crate) fn prompt_from(value: &Value) -> Option<LearningPrompt> {
     value.get("$dc")?;
     let text = |name: &str| value[name].as_str().map(str::to_owned);
     Some(LearningPrompt {
@@ -102,7 +102,7 @@ pub fn prompt_from(value: &Value) -> Option<LearningPrompt> {
     })
 }
 
-pub fn prompt_value(prompt: &LearningPrompt) -> Value {
+pub(crate) fn prompt_value(prompt: &LearningPrompt) -> Value {
     json!({"$dc": "LearningPrompt", "source_group": prompt.source_group, "target_group": prompt.target_group,
            "original": prompt.original, "replacement": prompt.replacement, "application": prompt.application,
            "action": prompt.action.as_str()})
@@ -171,7 +171,7 @@ const QUERIES: &[&str] = &[
     "_insertion_holds", "_mention_head", "_field_reader_status", "_field_reader_details", "_boundary_enabled", "_field_catch_up_seconds", "_layout_letters", "_empty_rule_offer", "_decide_prefix", "_decide_inside_word",
 ];
 
-pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Value) -> Outcome {
+pub(crate) fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Value) -> Outcome {
     let mut guard = engine.core();
     let Some(core) = guard.as_mut() else {
         return Outcome::Unknown("the worker holds the engine".to_owned());
@@ -374,7 +374,7 @@ pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Va
     }
 }
 
-pub fn settings_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
+pub(crate) fn settings_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
     let settings = core.settings.clone();
     let outcome = match name {
         "set" => {
@@ -393,7 +393,7 @@ pub fn settings_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outc
     outcome
 }
 
-pub fn history_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
+pub(crate) fn history_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
     match name {
         "clear" => result_of(core.history.clear()),
         "append" => {
@@ -408,7 +408,7 @@ pub fn history_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outco
     }
 }
 
-pub fn learning_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
+pub(crate) fn learning_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
     let store = core.learning.clone();
     match name {
         "add_rule" => match args.get(0, "rule").and_then(rule_from) {
@@ -437,7 +437,7 @@ pub fn learning_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outc
     }
 }
 
-pub fn personal_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
+pub(crate) fn personal_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
     match name {
         "clear" => {
             core.personal.clear();
@@ -452,7 +452,7 @@ pub fn personal_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outc
     }
 }
 
-pub fn queue_step(core: &mut EngineCore, name: &str, args: &Args<'_>, recorded: &Value) -> Outcome {
+pub(crate) fn queue_step(core: &mut EngineCore, name: &str, args: &Args<'_>, recorded: &Value) -> Outcome {
     match name {
         "put" => {
             let item = match args.get(0, "item") {

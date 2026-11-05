@@ -133,6 +133,7 @@ pub static KEYSYM_TABLE: [(u16, u16); 763] = [
 ];
 
 /// `xkb_keysym_to_utf32`: the character a keysym stands for, 0 for none.
+#[must_use]
 pub fn keysym_to_utf32(keysym: u32) -> u32 {
     match keysym {
         0x20..=0x7e | 0xa0..=0xff => keysym,

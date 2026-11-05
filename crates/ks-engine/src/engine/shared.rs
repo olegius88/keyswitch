@@ -1,8 +1,8 @@
 //! What threads other than the worker touch: atomics the keyboard hook reads, the inbox, and the guarded snapshot.
 
 use super::logging::technical_event;
-use super::types::*;
-use crate::constants::*;
+use super::types::{Stroke, EngineSnapshot, CorrectionPlan, LearningPrompt, Hotkey, is_modifier_key, PROMPT_KEYS, Update};
+use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
 use ks_config::pycompat::truthy;
@@ -52,10 +52,10 @@ struct Inbox {
     commands: VecDeque<Command>,
 }
 
-pub type SnapshotCallback = Arc<dyn Fn(&EngineSnapshot) + Send + Sync>;
-pub type CorrectionCallback = Arc<dyn Fn(&CorrectionPlan) + Send + Sync>;
-pub type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
-pub type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
+pub(super) type SnapshotCallback = Arc<dyn Fn(&EngineSnapshot) + Send + Sync>;
+pub(super) type CorrectionCallback = Arc<dyn Fn(&CorrectionPlan) + Send + Sync>;
+pub(super) type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
+pub(super) type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
 
 /// What the Python's `_lock` guards. It is never held while calling a callback, the backend or the settings.
 struct Guarded {
@@ -128,7 +128,7 @@ impl Shared {
             inbox: Mutex::new(Inbox::default()),
             wake: Condvar::new(),
             guarded: Mutex::new(Guarded {
-                snapshot: snapshot,
+                snapshot,
                 callbacks: Vec::new(),
                 correction_callbacks: Vec::new(),
                 learning_prompt: None,
@@ -241,7 +241,7 @@ impl Shared {
     }
 
     /// `consumes_key`.
-    /// Whether KeySwitch answers this key itself and the window must not.
+    /// Whether `KeySwitch` answers this key itself and the window must not.
     ///
     /// Called from the keyboard hook while the system waits for the answer,
     /// so it only reads plain attributes: taking the engine lock here would
@@ -565,10 +565,10 @@ impl Shared {
 
     /// The test field of the settings window gained or lost the keyboard.
     ///
-    /// The windows of KeySwitch itself are not where the user types (FocusInfo.own): moving to
+    /// The windows of `KeySwitch` itself are not where the user types (FocusInfo.own): moving to
     /// the settings window or the learning prompt is no move to another program, and Windows
     /// keeps a layout per window, so a layout seen there says nothing of the text and is ignored.
-    /// The test field is the exception: it is there to try KeySwitch as in any other program,
+    /// The test field is the exception: it is there to try `KeySwitch` as in any other program,
     /// and a layout picked by hand while it has the keyboard must protect the next word there
     /// too. Only the window knows which of its controls has the keyboard, so it reports it here.
     pub fn set_test_field_focused(&self, focused: bool) {
@@ -627,7 +627,7 @@ impl Shared {
         self.settings.with_value("diagnostics.technical_logging", |value| value.is_some_and(truthy))
     }
 
-    /// The technical record, after its words that look like a password went into stars (log_privacy).
+    /// The technical record, after its words that look like a password went into stars (`log_privacy`).
     pub(crate) fn emit_technical(&self, payload: Map<String, Value>) {
         let record = locked(&self.log_redactor).record(&payload);
         let options = ks_text::JsonOptions {

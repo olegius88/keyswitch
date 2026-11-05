@@ -58,7 +58,7 @@ fn kslm_version(bytes: &[u8]) -> Result<String, String> {
 }
 
 fn is_elf(path: &Path) -> bool {
-    std::fs::File::open(path).ok().is_some_and(|mut file| {
+    std::fs::File::open(path).is_ok_and(|mut file| {
         let mut magic = [0_u8; 4];
         std::io::Read::read_exact(&mut file, &mut magic).is_ok() && &magic == b"\x7fELF"
     })

@@ -69,6 +69,7 @@ impl Frame {
 }
 
 /// `hashlib.sha256(canonical([row.__dict__ for row in frames])).hexdigest()`.
+#[must_use]
 pub fn frames_sha256(frames: &[Frame]) -> String {
     let mut hasher = Sha256::new();
     let mut text = String::new();
@@ -86,13 +87,14 @@ pub fn frames_sha256(frames: &[Frame]) -> String {
 }
 
 /// The deterministic number a frame's choices are taken from.
+#[must_use]
 pub fn draw(key: &str) -> u64 {
     u64::from_str_radix(&hex_digest(key)[..CHOICE_DIGITS], 16).expect("a digest")
 }
 
 /// The focus family belongs to the separate lexical test track.
 fn lexical_holdout(family: &str) -> bool {
-    draw(&format!("focus-holdout:{family}")) % LEXICAL_HOLDOUT_MODULUS == 0
+    draw(&format!("focus-holdout:{family}")).is_multiple_of(LEXICAL_HOLDOUT_MODULUS)
 }
 
 fn attached(character: Option<char>) -> bool {
@@ -183,7 +185,7 @@ pub fn build(phrases: &[Assigned<'_>]) -> Result<Vec<Frame>, String> {
             continue;
         }
         let phrase = item.phrase;
-        let target: i64 = if phrase.locale == "eng" { 0 } else { 1 };
+        let target: i64 = i64::from(phrase.locale != "eng");
         let (own, other) = if target == 0 { ("us", "ru") } else { ("ru", "us") };
         let text: Vec<char> = phrase.text.chars().collect();
         let matches = word_spans(&text, target);
@@ -211,10 +213,10 @@ pub fn build(phrases: &[Assigned<'_>]) -> Result<Vec<Frame>, String> {
             let key = format!("tatoeba:{}:{start}", phrase.identifier);
             let sample = draw(&key);
             let mut before = text_of(&text[start.saturating_sub(BEFORE_MAX)..start]);
-            if sample % WRONG_BEFORE_MODULUS == 0 {
+            if sample.is_multiple_of(WRONG_BEFORE_MODULUS) {
                 before = translate(&before, own, other)?;
             }
-            let text_field = sample % TEXT_FIELD_MODULUS == 0;
+            let text_field = sample.is_multiple_of(TEXT_FIELD_MODULUS);
             let after = if text_field { text_of(&text[end..(end + AFTER_MAX).min(text.len())]) } else { String::new() };
             let trigger = TRIGGERS[(sample % TRIGGERS.len().to::<u64>()).to::<usize>()];
             let application = APPLICATIONS[(sample % APPLICATIONS.len().to::<u64>()).to::<usize>()];
@@ -253,7 +255,7 @@ pub fn build(phrases: &[Assigned<'_>]) -> Result<Vec<Frame>, String> {
             frames.push(base(format!("{key}:convert"), &wrong, &token, 1 - target, desired, &family, REAL_PHRASE));
             // A spelling error is not automatically a layout error. The intended language here is known from the
             // intervention, not inferred from dictionary membership or a teacher's prediction.
-            if split != "lexical_test" && sample % SPELLING_MODULUS == 0 && length >= SPELLING_MIN && pystr::isalpha(&token) {
+            if split != "lexical_test" && sample.is_multiple_of(SPELLING_MODULUS) && length >= SPELLING_MIN && pystr::isalpha(&token) {
                 let position = 1 + (sample % (length - SPELLING_EDGE).to::<u64>()).to::<usize>();
                 let typo: String = token.chars().enumerate().filter(|(index, _)| *index != position).map(|(_, character)| character).collect();
                 let alternate = translate(&typo, own, other)?;

@@ -7,6 +7,7 @@ pub const INDICATOR_STYLES: [&str; 2] = ["letters", "flags"];
 
 /// `normalize_indicator_style(value)`: `str(value)` when it is a known style, "letters" otherwise. Only a string can
 /// read as a style, whatever else `str` would make of the value.
+#[must_use]
 pub fn normalize_indicator_style(value: &Value) -> &'static str {
     match value {
         Value::String(style) => INDICATOR_STYLES.iter().copied().find(|known| known == style).unwrap_or("letters"),
@@ -18,25 +19,29 @@ fn label_of(group: i64) -> Option<&'static str> {
     LAYOUT_LABELS.iter().find(|(key, _)| *key == group).map(|(_, label)| *label)
 }
 
+#[must_use]
 pub fn layout_label(group: i64) -> &'static str {
     label_of(group).unwrap_or("—")
 }
 
 /// Return the other member of the supported EN/RU layout pair.
+#[must_use]
 pub fn alternate_layout_group(group: i64) -> Option<i64> {
     label_of(group).map(|_| 1 - group)
 }
 
+#[must_use]
 pub fn alternate_layout_action_label(group: i64) -> String {
     match alternate_layout_group(group) {
         Some(target) => {
-            let name = LAYOUT_NAMES.iter().find(|(key, _)| *key == target).map(|(_, name)| *name).unwrap_or("");
+            let name = LAYOUT_NAMES.iter().find(|(key, _)| *key == target).map_or("", |(_, name)| *name);
             format!("Переключить на {name}")
         }
         None => "Переключить язык".to_string(),
     }
 }
 
+#[must_use]
 pub fn layout_icon_name(style: &Value, group: i64) -> &'static str {
     match (normalize_indicator_style(style), group) {
         ("letters", 0) => "keyswitch-en",

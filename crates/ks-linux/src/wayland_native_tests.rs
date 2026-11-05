@@ -1,6 +1,7 @@
 //! What is testable of the Linux layer without a compositor: bit maps, the evdev byte layout, the Wayland wire protocol
 //! against a scripted compositor, libxkbcommon where it is installed, and the sway adapter against a scripted sway.
 
+use crate::wayland_constants::{EVDEV_KEY_ENTER, EVDEV_KEY_Q, SYN_REPORT};
 use ks_cast::To as _;
 use super::*;
 
@@ -12,7 +13,7 @@ fn temporary_path(name: &str) -> PathBuf {
 fn capability_bitmaps_are_read_from_bytes_and_from_sysfs_words() {
     assert_eq!(bits_from_bytes(&[0b0000_0101, 0, 0b1000_0000]), HashSet::from([0, 2, 23]));
     // Words are the machine's unsigned long, the most significant first: "1 0" is bit 64.
-    let word_bits = (std::mem::size_of::<libc::c_ulong>() * 8).low::<u32>();
+    let word_bits = (size_of::<libc::c_ulong>() * 8).low::<u32>();
     assert_eq!(bits_from_sysfs("1 0\n"), HashSet::from([word_bits]));
     assert_eq!(bits_from_sysfs("zz 3"), HashSet::from([0, 1]));
     assert!(bits_from_sysfs("  ").is_empty());
@@ -21,7 +22,7 @@ fn capability_bitmaps_are_read_from_bytes_and_from_sysfs_words() {
 #[test]
 fn input_events_keep_the_kernels_layout() {
     let bytes = input_event_bytes(EV_KEY, 30, 1);
-    assert_eq!(bytes.len(), std::mem::size_of::<libc::input_event>());
+    assert_eq!(bytes.len(), size_of::<libc::input_event>());
     let event = decode_input_event(&bytes);
     assert_eq!((event.sec, event.usec, event.ev_type, event.code, event.value), (0, 0, EV_KEY, 30, 1));
     // The same bytes through a pipe, read the way the helper reads a device.
@@ -56,19 +57,19 @@ fn send_with_descriptor(stream: &UnixStream, bytes: &[u8], descriptor: RawFd) {
     let mut io_vector = libc::iovec { iov_base: bytes.as_ptr().cast_mut().cast::<c_void>(), iov_len: bytes.len() };
     // SAFETY: the space is the size the macro computes for one descriptor, and the pointers stay valid for the call.
     unsafe {
-        let space = (libc::CMSG_SPACE((std::mem::size_of::<RawFd>()).low::<u32>())).to::<usize>();
+        let space = (libc::CMSG_SPACE((size_of::<RawFd>()).low::<u32>())).to::<usize>();
         let mut control = vec![0u8; space];
         let mut header: libc::msghdr = std::mem::zeroed();
-        header.msg_iov = &mut io_vector;
+        header.msg_iov = &raw mut io_vector;
         header.msg_iovlen = 1;
         header.msg_control = control.as_mut_ptr().cast::<c_void>();
         header.msg_controllen = space.to::<usize>();
-        let message = libc::CMSG_FIRSTHDR(&header);
+        let message = libc::CMSG_FIRSTHDR(&raw const header);
         (*message).cmsg_level = libc::SOL_SOCKET;
         (*message).cmsg_type = libc::SCM_RIGHTS;
-        (*message).cmsg_len = libc::CMSG_LEN((std::mem::size_of::<RawFd>()).low::<u32>()).to::<usize>();
+        (*message).cmsg_len = libc::CMSG_LEN((size_of::<RawFd>()).low::<u32>()).to::<usize>();
         libc::CMSG_DATA(message).cast::<RawFd>().write_unaligned(descriptor);
-        assert!(libc::sendmsg(stream.as_raw_fd(), &header, 0) >= 0);
+        assert!(libc::sendmsg(stream.as_raw_fd(), &raw const header, 0) >= 0);
     }
 }
 

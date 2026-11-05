@@ -80,7 +80,7 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
     let syntax = line.chars().any(|c| "=;{}()[]$".contains(c));
     let quote = !line.matches('"').count().is_multiple_of(PREFIX_V1_QUOTE_MARKS_PER_PAIR) || !line.matches('\'').count().is_multiple_of(PREFIX_V1_QUOTE_MARKS_PER_PAIR);
     let ru = before.chars().filter(|&c| ('а'..='я').contains(&c) || c == 'ё').count();
-    let en = before.chars().filter(|c| c.is_ascii_lowercase()).count();
+    let en = before.chars().filter(char::is_ascii_lowercase).count();
     let total = ((ru + en).max(1)).to::<f64>();
     let context = [
         ("comment", flag(comment)),
@@ -176,6 +176,7 @@ pub(crate) fn actions_match(payload: &serde_json::Map<String, Value>) -> bool {
 }
 
 impl PrefixModel {
+    #[must_use]
     pub fn predict_features(&self, values: &indexmap::IndexMap<String, f64>) -> ContextPrediction {
         let mut scores = [0.0_f64; ACTION_COUNT];
         for (name, &value) in values {
@@ -195,6 +196,7 @@ impl PrefixModel {
         ContextPrediction { action, probability, probabilities, model_version: self.version.clone(), supported: true }
     }
 
+    #[must_use]
     pub fn predict(&self, item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> ContextPrediction {
         self.predict_features(&features(item, sides))
     }
@@ -215,6 +217,7 @@ impl PrefixModel {
     }
 
     /// `PrefixModel.default()`: the installed artifact, or nothing.
+    #[must_use]
     pub fn default_model(models_dir: &Path) -> Option<PrefixModel> {
         PrefixModel::load(&models_dir.join(ARTIFACT_FILE)).ok()
     }

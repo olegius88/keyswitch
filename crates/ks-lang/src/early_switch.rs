@@ -11,7 +11,7 @@
 //! other language.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_TARGET_COMPLETIONS, EARLY_SWITCH_MIN_TARGET_FREQUENCY, EARLY_SWITCH_DOMINANT_TARGET_FREQUENCY, PREFIX_INDEX_DICTIONARY_MAX_BYTES, PREFIX_INDEX_COMPLETION_SCAN_LIMIT};
 use crate::language_model::{LanguageModel, WordScore};
 use crate::tables::{WordList, WordTable};
 use ks_text::{ucd, pystr};
@@ -39,6 +39,7 @@ pub struct PrefixEvidence {
 }
 
 impl PrefixEvidence {
+    #[must_use]
     pub fn as_dict(&self) -> Value {
         json!({"completions": self.completions, "maximum_frequency": self.maximum_frequency, "known": self.known})
     }
@@ -65,6 +66,7 @@ impl Default for EarlySwitchPolicy {
 }
 
 impl EarlySwitchPolicy {
+    #[must_use]
     pub fn as_dict(&self) -> Value {
         json!({
             "minimum_length": self.minimum_length,
@@ -126,6 +128,7 @@ impl PrefixIndex {
     /// `PrefixIndex.for_language_model` in the Python builds on `LanguageModel.load(locale)`, which holds no supplement,
     /// whatever the model passed: `Resources::prefix_index` does the same. A replay patches that `load` to return the
     /// reference model with the supplement; it passes that model's frequencies here.
+    #[must_use]
     pub fn from_lexicon(frequencies: Arc<WordTable>, source: &str) -> Self {
         let stems = hunspell_dictionary_path(source).map(|path| dictionary_stems(&path, PREFIX_INDEX_DICTIONARY_MAX_BYTES));
         match stems {
@@ -138,20 +141,24 @@ impl PrefixIndex {
         self.words.as_ref().unwrap_or_else(|| self.frequencies.words())
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.words().len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Count words starting with `prefix` and their best frequency.
+    #[must_use]
     pub fn completions(&self, prefix: &str) -> PrefixEvidence {
         self.completions_limit(prefix, PREFIX_INDEX_COMPLETION_SCAN_LIMIT)
     }
 
     /// `completions(prefix, limit=limit)`.
+    #[must_use]
     pub fn completions_limit(&self, prefix: &str, limit: usize) -> PrefixEvidence {
         let normalized = pystr::casefold(prefix);
         if normalized.is_empty() {
@@ -173,6 +180,7 @@ impl PrefixIndex {
     }
 }
 
+#[must_use]
 pub fn hunspell_dictionary_path(source: &str) -> Option<PathBuf> {
     for part in source.split(';') {
         let part = pystr::strip(part);
@@ -187,6 +195,7 @@ pub fn hunspell_dictionary_path(source: &str) -> Option<PathBuf> {
 }
 
 /// Read the alphabetic stems of a Hunspell `.dic` file (bounded), sorted.
+#[must_use]
 pub fn dictionary_stems(path: &Path, limit: usize) -> WordList {
     let Ok(payload) = crate::load_error::read_limited(path, limit) else {
         return WordList::new();

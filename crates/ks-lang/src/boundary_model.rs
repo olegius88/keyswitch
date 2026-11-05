@@ -5,7 +5,7 @@
 //! result must not authorize an automatic rewrite.
 
 use ks_cast::To as _;
-use crate::constants::*;
+use crate::constants::{BOUNDARY_V1_FEATURE_VERSION, BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS, BOUNDARY_FEATURE_LENGTH_SCALE_CHARACTERS, BOUNDARY_FEATURE_FREQUENCY_LOG_DIVISOR, BOUNDARY_FEATURE_NGRAM_SCORE_BOUND, BOUNDARY_THRESHOLD_EXCLUSIVE_MIN};
 use crate::language_model::LanguageModel;
 use crate::load_error::{json_loads, py_equals_int, read_all, LoadError};
 use crate::pysum::py_sum;
@@ -21,6 +21,7 @@ pub const MAX_SUFFIX: i64 = BOUNDARY_MAX_LITERAL_SUFFIX_CHARACTERS;
 pub type Features = IndexMap<String, f64>;
 
 /// `ARTIFACT` under the `resources` folder of the install.
+#[must_use]
 pub fn artifact(resource_dir: &Path) -> PathBuf {
     resource_dir.join("models").join("boundary-v1.json")
 }
@@ -32,6 +33,7 @@ fn clamped(value: f64, low: f64, high: f64) -> f64 {
 }
 
 /// Numeric evidence only: no word IDs, apps or private context memorized.
+#[must_use]
 pub fn features(original: &str, alternative: &str, suffix_length: i64, source: &LanguageModel, target: &LanguageModel) -> Features {
     let end = pystr::len(original).to::<i64>() - suffix_length;
     let scale = BOUNDARY_FEATURE_LENGTH_SCALE_CHARACTERS;
@@ -74,7 +76,8 @@ impl BoundaryModel {
         BoundaryModel { weights, threshold, version: version.into() }
     }
 
-    /// `None` for no candidates, where the Python raises ValueError.
+    /// `None` for no candidates, where the Python raises `ValueError`.
+    #[must_use]
     pub fn probabilities(&self, candidates: &[Features]) -> Option<Vec<f64>> {
         let scores: Vec<f64> =
             candidates.iter().map(|values| py_sum(values.iter().map(|(name, value)| self.weights.get(name).copied().unwrap_or(0.0) * value))).collect();
@@ -84,7 +87,8 @@ impl BoundaryModel {
         Some(exp.iter().map(|value| value / total).collect())
     }
 
-    /// `None` for no candidates, where the Python raises ValueError.
+    /// `None` for no candidates, where the Python raises `ValueError`.
+    #[must_use]
     pub fn predict(&self, candidates: &[Features]) -> Option<BoundaryPrediction> {
         let probabilities = self.probabilities(candidates)?;
         let best = max_by_key_first(0..probabilities.len(), |&index| probabilities[index])?;

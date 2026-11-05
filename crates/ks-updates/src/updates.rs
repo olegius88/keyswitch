@@ -22,7 +22,7 @@ pub const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/olegius88/key
 pub const RELEASE_PAGE_PREFIX: &str = "https://github.com/olegius88/keyswitch/releases/tag/";
 pub const RELEASE_DOWNLOAD_PREFIX: &str = "https://github.com/olegius88/keyswitch/releases/download/";
 pub const GITHUB_API_VERSION: &str = "2026-03-10";
-/// The arguments of the update installer; the last one tells the installer to relaunch KeySwitch afterwards.
+/// The arguments of the update installer; the last one tells the installer to relaunch `KeySwitch` afterwards.
 pub const WINDOWS_INSTALLER_ARGUMENTS: [&str; 7] = [
     "/SP-",
     "/VERYSILENT",
@@ -76,7 +76,7 @@ impl SemanticVersion {
 fn parse_numbers(text: &str) -> Option<SemanticVersion> {
     let mut numbers = [0u64; 3];
     let mut parts = text.split('.');
-    for slot in numbers.iter_mut() {
+    for slot in &mut numbers {
         let part = parts.next()?;
         let valid = !part.is_empty()
             && part.bytes().all(|byte| byte.is_ascii_digit())
@@ -107,6 +107,7 @@ pub enum UpdateTarget {
 }
 
 impl UpdateTarget {
+    #[must_use]
     pub fn value(self) -> &'static str {
         match self {
             Self::WindowsX64 => "windows-x64",
@@ -116,11 +117,13 @@ impl UpdateTarget {
         }
     }
 
-    /// KeySwitch downloads and runs this target's installer itself; APT updates the package.
+    /// `KeySwitch` downloads and runs this target's installer itself; APT updates the package.
+    #[must_use]
     pub fn windows_installer(self) -> bool {
         self != Self::UbuntuAmd64
     }
 
+    #[must_use]
     pub fn asset_name(self, version: SemanticVersion) -> String {
         let architecture = match self {
             Self::UbuntuAmd64 => return format!("keyswitch_{version}_amd64.deb"),
@@ -135,6 +138,7 @@ impl UpdateTarget {
 /// A Windows build updates with the installer of its own architecture, which the build script names after the
 /// platform the program was built for: an x86 build under WOW64 stays x86, an x64 one on an Arm PC stays x64. The
 /// machine is not asked, so builds of two architectures never share an install folder.
+#[must_use]
 pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -> Option<UpdateTarget> {
     let operating_system = system.to_lowercase();
     if operating_system == "windows" {
@@ -153,6 +157,7 @@ pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -
 }
 
 /// The target of this very build.
+#[must_use]
 pub fn detect_build_update_target() -> Option<UpdateTarget> {
     let build_platform = match std::env::consts::ARCH {
         "x86_64" => "win-amd64",
@@ -300,7 +305,7 @@ fn is_digest(value: &str) -> Option<&str> {
     valid.then_some(hex)
 }
 
-/// Whether `name` is exactly the name of a KeySwitch Windows installer.
+/// Whether `name` is exactly the name of a `KeySwitch` Windows installer.
 fn is_windows_installer_name(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("KeySwitch-Setup-").and_then(|rest| rest.strip_suffix(".exe")) else {
         return false;
@@ -484,7 +489,7 @@ impl ReleaseClient for GitHubReleaseClient {
 
 /// Delete the installers of earlier updates; each one is tens of megabytes.
 ///
-/// Only files named exactly as a KeySwitch installer are touched. One that is still open is left for the next
+/// Only files named exactly as a `KeySwitch` installer are touched. One that is still open is left for the next
 /// download to try again.
 pub fn remove_previous_installers(directory: &Path, keep: &str) -> io::Result<()> {
     for entry in fs::read_dir(directory)? {
@@ -517,6 +522,7 @@ pub enum UpdatePhase {
 }
 
 impl UpdatePhase {
+    #[must_use]
     pub fn value(self) -> &'static str {
         match self {
             Self::Idle => "idle",
@@ -631,6 +637,7 @@ impl UpdateManager {
         Self { inner: Arc::new(inner) }
     }
 
+    #[must_use]
     pub fn with_target(self, target: Option<UpdateTarget>) -> Self {
         self.rebuilt(|inner| inner.target = target)
     }
@@ -643,6 +650,7 @@ impl UpdateManager {
         self.rebuilt(|inner| inner.install_request = Some(request))
     }
 
+    #[must_use]
     pub fn target(&self) -> Option<UpdateTarget> {
         self.inner.target
     }
@@ -657,7 +665,7 @@ impl UpdateManager {
 
 impl Inner {
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn notify(observers: &[UpdateObserver], snapshot: &UpdateSnapshot) {
@@ -904,10 +912,10 @@ impl UpdateChecks {
         let spawned = thread::Builder::new().name("keyswitch-update-timer".into()).spawn(move || {
             let wait = |delay: Duration| -> bool {
                 let (flag, condvar) = &*signal;
-                let guard = flag.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let guard = flag.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let (guard, _) = condvar
                     .wait_timeout_while(guard, delay, |cancelled| !*cancelled)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 !*guard
             };
             if !wait(initial_delay) {
@@ -926,7 +934,7 @@ impl UpdateChecks {
 
     pub fn stop(&self) {
         let (flag, condvar) = &*self.cancel;
-        *flag.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = true;
+        *flag.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
         condvar.notify_all();
     }
 }

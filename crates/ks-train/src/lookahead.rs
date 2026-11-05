@@ -160,7 +160,7 @@ fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageD
             ranked.push((*position, rank("seed", &seed.identifier), &seed.identifier, index));
             *position += 1;
         }
-        ranked.sort();
+        ranked.sort_unstable();
         selected.extend(ranked.into_iter().take(seeds_per_family.to::<usize>()).map(|entry| entry.3));
     }
     counts.add_by("selected_families", family_names.len().to::<i64>());
@@ -289,12 +289,9 @@ pub fn legacy_lookahead_rows(tools: &Tools, rows: Vec<ActionRow>, detector: &Lan
     let mut selected: Vec<&ActionRow> = Vec::new();
     for row in &rows {
         if chosen(row) {
-            match places.get(row.identifier.as_str()) {
-                Some(place) => selected[*place] = row,
-                None => {
-                    places.insert(&row.identifier, selected.len());
-                    selected.push(row);
-                }
+            if let Some(place) = places.get(row.identifier.as_str()) { selected[*place] = row } else {
+                places.insert(&row.identifier, selected.len());
+                selected.push(row);
             }
         }
     }
@@ -342,6 +339,7 @@ pub fn legacy_lookahead_rows(tools: &Tools, rows: Vec<ActionRow>, detector: &Lan
 }
 
 /// `natural_anchors`: the first words of a split's own right contexts, one anchor per word and language.
+#[must_use]
 pub fn natural_anchors(source_rows: &[CorpusRow]) -> Vec<Anchor> {
     let mut sorted: Vec<&CorpusRow> = source_rows.iter().collect();
     sorted.sort_by(|a, b| a.identifier.cmp(&b.identifier));
@@ -374,7 +372,7 @@ fn source_identifier(identifier: &str) -> &str {
 }
 
 /// `natural_lookahead_rows`: bounded natural short-space frames replaced with equal-mass original/planned variants.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn natural_lookahead_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows: &[CorpusRow], detector: &LanguageDetector, ortho: Option<&OrthoModel>, maximum_families: i64, seeds_per_family: i64) -> Curriculum {
     let by_identifier: HashMap<&str, &CorpusRow> = source_rows.iter().map(|row| (row.identifier.as_str(), row)).collect();
     let mut places: HashMap<String, usize> = HashMap::new();
@@ -400,12 +398,9 @@ pub fn natural_lookahead_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows: 
         } else {
             continue;
         };
-        match places.get(&row.identifier) {
-            Some(place) => selected[*place] = entry,
-            None => {
-                places.insert(row.identifier.clone(), selected.len());
-                selected.push(entry);
-            }
+        if let Some(place) = places.get(&row.identifier) { selected[*place] = entry } else {
+            places.insert(row.identifier.clone(), selected.len());
+            selected.push(entry);
         }
     }
     let anchors = natural_anchors(source_rows);
@@ -472,7 +467,7 @@ fn lexical_short_pairs(tools: &Tools, models: &Lexicons) -> Result<Vec<(String, 
 }
 
 /// `lexical_short_pair_rows`: a deferred three-letter word taught to follow its converted neighbour.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn lexical_short_pair_rows(tools: &Tools, rows: Vec<ActionRow>, source_rows: &[CorpusRow], detector: &LanguageDetector, ortho: Option<&OrthoModel>, maximum_families: i64, seeds_per_family: i64, models: &Lexicons) -> Result<Curriculum, String> {
     let pairs = lexical_short_pairs(tools, models)?;
     let mut seeds = Vec::new();
@@ -549,11 +544,10 @@ pub fn balance_planned_mass(tools: &Tools, rows: Vec<ActionRow>) -> Curriculum {
     let mut result = rows;
     for row in &mut result {
         let key = (row.group, pystr::len(&row.original));
-        if row.after_origin == AfterOrigin::PlannedNextConversion {
-            if let Some(factor) = scale.get(&key) {
+        if row.after_origin == AfterOrigin::PlannedNextConversion
+            && let Some(factor) = scale.get(&key) {
                 row.sample_weight *= factor;
             }
-        }
     }
     let output_mass = total(&result);
     let report = json!({"policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",

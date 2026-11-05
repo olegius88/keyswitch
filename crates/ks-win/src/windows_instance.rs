@@ -11,7 +11,7 @@ pub trait WindowsInstanceAPI {
 
 #[cfg(windows)]
 fn native_api() -> Result<Box<dyn WindowsInstanceAPI>, WindowsSystemError> {
-    Ok(Box::new(native::NativeWindowsInstanceAPI::new()))
+    Ok(Box::new(NativeWindowsInstanceAPI::new()))
 }
 
 #[cfg(not(windows))]
@@ -74,6 +74,7 @@ mod native {
     }
 
     impl NativeWindowsInstanceAPI {
+        #[must_use]
         pub fn new() -> Self {
             NativeWindowsInstanceAPI { handle: null_mut() }
         }

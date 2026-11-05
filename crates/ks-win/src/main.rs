@@ -1,4 +1,4 @@
-//! KeySwitch for Windows. A windowed program: no console window, whatever started it.
+//! `KeySwitch` for Windows. A windowed program: no console window, whatever started it.
 #![windows_subsystem = "windows"]
 
 fn main() {

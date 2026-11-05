@@ -1,7 +1,7 @@
 //! The selection hotkeys: a command waits for its keys to come up, then reads the selection and types the result.
 
 use super::logging::technical_event;
-use super::*;
+use super::{Value, pystr, EngineCore, MANUAL_RELEASE_TIMEOUT_SECONDS, sorted_keycodes, Update, InputBackend, ms};
 use ks_backend::{RefusalReason, SelectedText, SelectionError, SelectionRefused};
 use ks_config::selection_commands::{checked_selection, command_of_hotkey, plan_selection, refusal_message, PendingSelection, SelectionCommand, SelectionPlan};
 use serde_json::{json, Map};
@@ -47,7 +47,7 @@ impl EngineCore {
 
     /// A selection hotkey whose keys were not seen to come up in time changes nothing.
     ///
-    /// As with expire_manual_correction, a timeout is no proof that the keys are up, so nothing is typed.
+    /// As with `expire_manual_correction`, a timeout is no proof that the keys are up, so nothing is typed.
     pub(crate) fn expire_selection_command(&mut self) {
         let Some(pending) = self.selection_pending else {
             return;
@@ -110,7 +110,7 @@ impl EngineCore {
             plan = plan_selection(command, &text, i64::from(group), &self.layout_names())?;
             if plan.changes(&text) {
                 let read = selected.as_ref().expect("just read");
-                reselected = backend.replace_selection(read, &plan.replacement, plan.target_group.map(|group| group.to::<i32>()))?;
+                reselected = backend.replace_selection(read, &plan.replacement, plan.target_group.map(ks_cast::To::to::<i32>))?;
             }
             Ok(())
         })();

@@ -9,7 +9,7 @@ use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 use ks_linux::tray::{ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, MENU_SETTINGS, MENU_SWITCH_LAYOUT, OBJECT_PATH, StatusNotifierItem, TrayAction};
-use support::*;
+use support::{Watcher, dbus_call};
 
 const REGISTRATION_WAIT: Duration = Duration::from_secs(10);
 const EVENT_WAIT: Duration = Duration::from_secs(5);

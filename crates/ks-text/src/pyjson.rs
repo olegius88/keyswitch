@@ -2,7 +2,7 @@
 //!
 //! The program reads and writes settings, history and rule files that must stay byte compatible with the
 //! Python's: same escapes, same float text (`repr`), same separators, same indentation, same key order.
-//! Reading is serde_json's job (with `float_roundtrip`, so that doubles equal Python's).
+//! Reading is `serde_json`'s job (with `float_roundtrip`, so that doubles equal Python's).
 
 use ks_cast::To as _;
 use crate::pynum::float_repr;
@@ -32,6 +32,7 @@ impl Default for JsonOptions {
 }
 
 /// A JSON string literal as `json.dumps` writes it.
+#[must_use]
 pub fn json_string(s: &str, ensure_ascii: bool) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -49,7 +50,7 @@ pub fn json_string(s: &str, ensure_ascii: bool) -> String {
             c if ensure_ascii && !(' '..='~').contains(&c) => {
                 let mut units = [0u16; 2];
                 for unit in c.encode_utf16(&mut units) {
-                    out.push_str(&format!("\\u{:04x}", unit));
+                    out.push_str(&format!("\\u{unit:04x}"));
                 }
             }
             c => out.push(c),
@@ -60,6 +61,7 @@ pub fn json_string(s: &str, ensure_ascii: bool) -> String {
 }
 
 /// A float as `json.dumps` writes it: `repr`, with `NaN`, `Infinity` and `-Infinity` for the specials.
+#[must_use]
 pub fn json_float(x: f64) -> String {
     if x.is_nan() {
         "NaN".to_string()
@@ -149,6 +151,7 @@ impl Writer<'_> {
 }
 
 /// `json.dumps(value, ensure_ascii=..., indent=..., separators=..., sort_keys=...)`.
+#[must_use]
 pub fn json_dumps(value: &Value, options: &JsonOptions) -> String {
     let (item_sep, key_sep) = match &options.separators {
         Some((i, k)) => (i.clone(), k.clone()),

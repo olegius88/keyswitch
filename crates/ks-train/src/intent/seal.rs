@@ -100,7 +100,8 @@ pub fn verify_toolchain(root: &Path, snapshot: &Value, config_path: &Path, regis
 }
 
 /// Everything known before the sealed test: the exact projection of the manifest `presealed_candidate_metadata_projection` makes.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
+#[must_use]
 pub fn metadata_projection(config_sha256: &str, namespace: &str, toolchain: &Value, source_package: &Value, sources: &Value, candidate_counts: &Value, variant_quarantine_sha256: &str, scorer: &Value, gate_policy: &Value, training: &Value, quantization: &Value, calibration: &Value, veto_selection: &Value, thresholds: &Value, selection_gate: &Value, safety_audit: &Value, parameters: &Value) -> Value {
     json!({
         "schema_version": 1,
@@ -127,6 +128,7 @@ pub fn metadata_projection(config_sha256: &str, namespace: &str, toolchain: &Val
 }
 
 /// `sealed_candidate_sha256`: every candidate input fixed before the sealed test is exposed.
+#[must_use]
 pub fn candidate_sha256(namespace: &str, config_sha256: &str, candidate_dataset_sha256: &str, metadata: &Value) -> String {
     let payload = json!({
         "schema_version": CANDIDATE_RECORD_SCHEMA_VERSION,
@@ -220,6 +222,7 @@ pub struct Receipt {
 }
 
 impl Receipt {
+    #[must_use]
     pub fn payload(&self) -> Value {
         json!({"schema_version": 1, "split_namespace": self.namespace, "candidate_sha256": self.candidate_sha256, "config_sha256": self.config_sha256, "candidate_dataset_sha256": self.candidate_dataset_sha256, "registry_path": self.registry, "registry_sha256": self.registry_sha256})
     }
@@ -252,11 +255,10 @@ pub fn claim_evaluation(root: &Path, registry: &str, namespace: &str, candidate:
     let record = json!({"schema_version": 1, "split_namespace": namespace, "candidate_sha256": candidate, "config_sha256": config_sha256, "candidate_dataset_sha256": candidate_dataset_sha256});
     let expected = canonical(&record);
     let path = root.join(registry);
-    if let Some(existing) = create_once(&path, &expected)? {
-        if existing != expected {
+    if let Some(existing) = create_once(&path, &expected)?
+        && existing != expected {
             return Err(refusal(&existing, &record));
         }
-    }
     let bytes = read_snapshot(&path)?;
     if bytes != expected {
         return Err("sealed evaluation registry changed during claim".to_owned());
@@ -288,6 +290,7 @@ pub fn claim_outcome(root: &Path, registry: &str, namespace: &str, outcome: &str
 }
 
 /// `sealed_evaluation_evidence_is_valid`: a manifest's receipt against the ledger of the tree.
+#[must_use]
 pub fn receipt_is_valid(root: &Path, evidence: &Value, config: &Value, config_sha256: &str, candidate_dataset_sha256: &str, candidate: &str) -> bool {
     let expected_keys = ["schema_version", "split_namespace", "candidate_sha256", "config_sha256", "candidate_dataset_sha256", "registry_path", "registry_sha256"];
     let Some(object) = evidence.as_object() else { return false };
@@ -307,6 +310,7 @@ pub fn receipt_is_valid(root: &Path, evidence: &Value, config: &Value, config_sh
 }
 
 /// `runtime_candidate_model_parameters`: the candidate's identity out of a validated KSLM.
+#[must_use]
 pub fn runtime_parameters(model: &LinearNgramModel) -> Value {
     let directions = |values: [f64; 2]| json!({"0>1": float_hex(values[0]), "1>0": float_hex(values[1])});
     let thresholds: Map<String, Value> = TRIGGERS.iter().enumerate().map(|(index, trigger)| (trigger.as_str().to_owned(), directions(model.threshold_logits[index]))).collect();

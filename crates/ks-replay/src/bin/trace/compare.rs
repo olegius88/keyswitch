@@ -4,12 +4,12 @@ use ks_backend::KeyDisposition;
 use serde_json::Value;
 
 /// Equal JSON, an integer and a float of one value being different things as they are to `json.dumps`.
-pub fn same(left: &Value, right: &Value) -> bool {
+pub(crate) fn same(left: &Value, right: &Value) -> bool {
     first_difference(left, right, "").is_none()
 }
 
 /// `KeyDisposition = bool | Literal["defer"]`.
-pub fn disposition_value(disposition: KeyDisposition) -> Value {
+pub(crate) fn disposition_value(disposition: KeyDisposition) -> Value {
     match disposition {
         KeyDisposition::Pass => Value::Bool(false),
         KeyDisposition::Consume => Value::Bool(true),
@@ -18,7 +18,7 @@ pub fn disposition_value(disposition: KeyDisposition) -> Value {
 }
 
 /// The path of the first place two values differ, with both values.
-pub fn first_difference(left: &Value, right: &Value, path: &str) -> Option<(String, Value, Value)> {
+pub(crate) fn first_difference(left: &Value, right: &Value, path: &str) -> Option<(String, Value, Value)> {
     match (left, right) {
         (Value::Object(a), Value::Object(b)) => {
             for (key, value) in a {

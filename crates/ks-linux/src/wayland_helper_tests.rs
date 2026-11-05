@@ -1,5 +1,6 @@
 //! The Python's `test_wayland_helper.py` on a fake kernel and a fake socket.
 
+use crate::wayland_constants::{EVDEV_KEY_A, EVDEV_KEY_PAUSE, EVDEV_KEY_Q, EVDEV_KEY_Z, WAYLAND_REPEAT_DEFAULT_DELAY_MS};
 use ks_cast::To as _;
 use super::*;
 use std::sync::atomic::AtomicI32;

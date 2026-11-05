@@ -90,11 +90,13 @@ pub struct HunspellDictionary {
 }
 
 impl HunspellDictionary {
+    #[must_use]
     pub fn new(locale: &str, data_dir: &Path) -> HunspellDictionary {
         Self::open(find_dictionary(locale, data_dir))
     }
 
     /// The dictionary of a locale in these folders only: a training tool pins its dictionaries by reading them from one.
+    #[must_use]
     pub fn in_roots(locale: &str, roots: &[std::path::PathBuf]) -> HunspellDictionary {
         Self::open(find_dictionary_in(locale, roots))
     }
@@ -197,7 +199,7 @@ mod tests {
     #[test]
     fn a_latin1_dictionary_cannot_be_asked_about_russian() {
         let dictionary = HunspellDictionary { source: String::new(), encoding: Encoding::Latin1, handle: Mutex::new(None) };
-        assert_eq!(dictionary.encode("café").map(|word| word.into_bytes()), Some(vec![b'c', b'a', b'f', 0xe9]));
+        assert_eq!(dictionary.encode("café").map(CString::into_bytes), Some(vec![b'c', b'a', b'f', 0xe9]));
         assert!(dictionary.encode("слово").is_none());
     }
 

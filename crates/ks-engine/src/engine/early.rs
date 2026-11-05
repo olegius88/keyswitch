@@ -173,9 +173,9 @@ impl EngineCore {
     /// The field may not show that key yet: a browser or an Electron editor reports its text a
     /// moment after the key, and the early switch was refused at the fourth letter as a changed
     /// field in 175 of 210 words in Firefox, 174 of 416 in the Claude app and 532 of 2 275 in VS
-    /// Code (Windows logs, 05.09-08.10.2026). Up to FIELD_PENDING_MAX_CHARACTERS of the last letters
+    /// Code (Windows logs, 05.09-08.10.2026). Up to `FIELD_PENDING_MAX_CHARACTERS` of the last letters
     /// may be missing, the caret right after the rest. Text typed ahead may follow the word, and
-    /// the caret may be seen short of it (caret_lag). None for any other text.
+    /// the caret may be seen short of it (`caret_lag`). None for any other text.
     pub(crate) fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
         let boundaries: Vec<usize> = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len())).collect();
         for &end in boundaries.iter().rev() {
@@ -437,7 +437,7 @@ impl EngineCore {
     }
 
     // -- Typo correction (typo_correction.py): one slip in a finished word, undone in the word's own injection --
-    /// The corrector while detection.correct_typos is on; its lists load once per process, on first use.
+    /// The corrector while `detection.correct_typos` is on; its lists load once per process, on first use.
     pub(crate) fn typo_corrector(&mut self) -> EngineResult<Option<Arc<TypoCorrector>>> {
         if !self.flag("detection.correct_typos", true) {
             return Ok(None);
@@ -455,7 +455,7 @@ impl EngineCore {
     /// the keys typed, in its target layout is the word judged. The plan keeps the layouts of `base`, so a word typed
     /// in the wrong layout and misspelt (`yhjvfkmyj`) is `нормально` after one injection, not two. A capital opens
     /// the word only at the start of a message or a sentence: one in the middle of a sentence is a name. A word whose
-    /// correction the user took back (schedule_undo) is left as typed from then on.
+    /// correction the user took back (`schedule_undo`) is left as typed from then on.
     pub(crate) fn typo_plan(&mut self, base: &PlanRef, keys: &[Stroke]) -> EngineResult<Option<PlanRef>> {
         let corrector = self.typo_corrector()?;
         let group = base.target_group;
@@ -545,7 +545,7 @@ impl EngineCore {
         })))
     }
 
-    /// The word judged at its boundary (typo_plan) was left as typed, or the user went back to it.
+    /// The word judged at its boundary (`typo_plan`) was left as typed, or the user went back to it.
     ///
     /// Typing on into the next word, or Enter or Tab delivered after it, leaves it; Backspace into it, Pause, undo, a
     /// click or the caret moved away go back to it, or may.
@@ -556,7 +556,7 @@ impl EngineCore {
         }
     }
 
-    /// Whether the last correction is a typo correction that undo can still take back (schedule_undo).
+    /// Whether the last correction is a typo correction that undo can still take back (`schedule_undo`).
     pub(crate) fn typo_correction_reversible(&self) -> bool {
         let (Some(previous), Some(committed)) = (&self.last_correction, &self.last_committed) else {
             return false;

@@ -1,5 +1,5 @@
 //! The counted word lists the typo correction reads (`resources/typo-frequency-<locale>.bin`), from the frequency lists of
-//! OpenSubtitles 2018 and the technical vocabulary of the ru.stackoverflow training split (`build_typo_frequency`). The
+//! `OpenSubtitles` 2018 and the technical vocabulary of the ru.stackoverflow training split (`build_typo_frequency`). The
 //! receipt records the digest of every decompressed section, so another deflate that compresses the same bytes otherwise
 //! still verifies.
 use ks_cast::To as _;
@@ -79,7 +79,7 @@ fn is_token_letter(character: char) -> bool {
     character.is_ascii_alphabetic() || ('А'..='я').contains(&character) || character == 'Ё' || character == 'ё'
 }
 
-/// `vocabulary_counts`: forms of at least MIN_LETTERS letters, lowercase or with one leading capital, by locale.
+/// `vocabulary_counts`: forms of at least `MIN_LETTERS` letters, lowercase or with one leading capital, by locale.
 pub(crate) fn vocabulary_counts(messages: &str, code: &str) -> Result<BTreeMap<&'static str, HashMap<String, i64>>, String> {
     let mut counts: BTreeMap<&'static str, HashMap<String, i64>> = SOURCES.iter().map(|source| (source.locale, HashMap::new())).collect();
     let mut add = |text: &str| {
@@ -209,6 +209,7 @@ pub struct Paths {
 
 impl Paths {
     /// Where the sources lie in a private folder of the working tree.
+    #[must_use]
     pub fn in_private(private: &Path) -> Paths {
         Paths {
             ru: private.join(SOURCES[0].default),

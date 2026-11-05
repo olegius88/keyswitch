@@ -45,7 +45,7 @@ impl EngineCore {
     /// the letters were judged as a word of their own at the start of an empty
     /// field. The field is read once, as the word begins, and the letters
     /// right before and after the caret say whether this is a new word or the
-    /// middle of an existing one (decide_inside_word).
+    /// middle of an existing one (`decide_inside_word`).
     pub fn read_insertion(&mut self, event: &Stroke) -> Option<InsertionPoint> {
         let reader = self.context_policy.reader.clone().filter(|_| self.flag("detection.context_read_field", false))?;
         let application = self.backend.active_application();
@@ -85,7 +85,7 @@ impl EngineCore {
     /// around them by their decision; the early switch waited inside them 55 times (`делай` took
     /// three tries, 09.10.2026), and 22 were left as typed as a changed field (`офыы` for `jass`).
     /// Before the early switch, the boundary and the pause rely on it, the field is read again
-    /// and the word typed so far found in it as the early switch finds it (_typed_in_field): with
+    /// and the word typed so far found in it as the early switch finds it (_`typed_in_field)`: with
     /// no letter right before or after it, the first read is dropped. A field that cannot be read
     /// or matched keeps it.
     pub(crate) fn insertion_holds(&mut self, typed: &str, ahead: &str, application: &str) -> bool {
@@ -268,7 +268,7 @@ impl EngineCore {
     /// Russian, and the model has no single-letter row to know the letter by, so in a user's
     /// logs this was the largest class of words left in the wrong layout (about fifty, a fifth
     /// of all). A lower-case letter whose other reading is one of the curated words converts when
-    /// the words before it on its line are a Latin term of up to STRANDED_TERM_MAX_WORDS words with
+    /// the words before it on its line are a Latin term of up to `STRANDED_TERM_MAX_WORDS` words with
     /// a Russian word before the term and no end of a sentence in between. A capital letter is
     /// left alone (`plan B` in English prose), and so is a letter after Latin text alone.
     fn stranded_letter(&self, decision: DetectionDecision, original: &str, alternatives: &Alternatives, source_group: i64) -> DetectionDecision {
@@ -306,7 +306,7 @@ impl EngineCore {
         }
     }
 
-    /// Whether text ends, on its line, with a Latin term of up to STRANDED_TERM_MAX_WORDS words after a
+    /// Whether text ends, on its line, with a Latin term of up to `STRANDED_TERM_MAX_WORDS` words after a
     /// Russian word, with no end of a sentence in between, and a space after it.
     fn _after_russian_term(before: &str) -> bool {
         match before.chars().next_back() {
@@ -358,7 +358,7 @@ impl EngineCore {
     /// word of the lexicon or the identifier index is not taken back: the prefix model was right
     /// about a term typed in the other layout that the context model, asked about the unknown
     /// typed reading alone, kept (an English word typed in the Russian layout after Russian prose).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn settle_early_switch(
         &mut self, shown: DetectionDecision, strokes: &[Stroke], shown_group: i64, origin: i64, application: &str, trigger: CorrectionTrigger,
         boundary_text: &str,
@@ -483,7 +483,7 @@ impl EngineCore {
         })?)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn consult_context_model(
         &mut self, decision: DetectionDecision, original: &str, alternatives: &Alternatives, rejected_targets: &[i64], application: &str,
         trigger: CorrectionTrigger, options: WordOptions,

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::constants::{APP_ID, APP_NAME};
 
 /// The command that starts this program: the installed `keyswitch` on the search path, else a launcher beside the sources.
+#[must_use]
 pub fn launcher_command() -> String {
     if let Some(installed) = find_in_path("keyswitch") {
         return shell_quote(&installed.to_string_lossy());
@@ -25,6 +26,7 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 }
 
 /// `shlex.quote`.
+#[must_use]
 pub fn shell_quote(text: &str) -> String {
     if text.is_empty() {
         return "''".to_owned();
@@ -34,6 +36,7 @@ pub fn shell_quote(text: &str) -> String {
 }
 
 /// `autostart_path`: `$XDG_CONFIG_HOME/autostart/<app id>.desktop`.
+#[must_use]
 pub fn autostart_path() -> PathBuf {
     let config_home = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(home) => PathBuf::from(home),
@@ -52,6 +55,7 @@ impl AutostartManager {
     }
 
     /// Whether the entry exists and neither `Hidden` nor `X-GNOME-Autostart-enabled` turns it off.
+    #[must_use]
     pub fn enabled(&self) -> bool {
         if !self.path.is_file() {
             return false;
