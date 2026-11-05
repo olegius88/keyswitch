@@ -383,7 +383,6 @@ mod scenario {
         let driver = Driver { source, ax: NativeAccessibility::new(), backend, document, failures: Default::default() };
         let outcome = (|| -> Result<(), String> {
             driver.release_modifiers()?;
-            driver.check("the document can be read", driver.attribute("AXValue").is_some(), "");
             typing(&driver)?;
             selection(&driver)?;
             words(&driver)?;

@@ -20,7 +20,7 @@
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
 //! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs|--lexicon-sources [--web-source <file>] [--prose-source <folder>]|--freeze-inputs [--output <folder>]`
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
-//! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
+//! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
@@ -117,7 +117,7 @@ fn main() {
     if arguments.first().map(String::as_str) == Some("typo-evaluation") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::new(root.join("resources"));
-        let request = ks_train::typo_evaluation::Request { root: &root, measurement: arguments.get(1).expect("synthetic, clean, field or all"), messages: Path::new(option(&arguments, "--messages").expect("--messages is required")), manifest: Path::new(option(&arguments, "--manifest").unwrap_or(".t/field/manifest.json")), out: Path::new(option(&arguments, "--out").expect("--out is required")), tune: arguments.iter().any(|argument| argument == "--tune"), local_offset_seconds: option(&arguments, "--utc-offset").map_or(0, |value| value.parse().expect("seconds")) };
+        let request = ks_train::typo_evaluation::Request { root: &root, measurement: arguments.get(1).expect("synthetic, clean, field or all"), messages: Path::new(option(&arguments, "--messages").expect("--messages is required")), manifest: Path::new(option(&arguments, "--manifest").unwrap_or(".t/field/manifest.json")), out: Path::new(option(&arguments, "--out").expect("--out is required")), tune: arguments.iter().any(|argument| argument == "--tune"), local_offset_seconds: option(&arguments, "--utc-offset").map_or(0, |value| value.parse().expect("seconds")), vocabulary: option(&arguments, "--clean").map(|clean| ks_train::typo_evaluation::VocabularyInputs { clean: PathBuf::from(clean), ru: PathBuf::from(option(&arguments, "--ru").expect("--ru is required")), en: PathBuf::from(option(&arguments, "--en").expect("--en is required")), train_messages: PathBuf::from(option(&arguments, "--train-messages").expect("--train-messages is required")), train_code: PathBuf::from(option(&arguments, "--train-code").expect("--train-code is required")) }) };
         if let Err(error) = ks_train::typo_evaluation::command(&request, &resources) {
             eprintln!("{error}");
             std::process::exit(1);

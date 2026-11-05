@@ -8,7 +8,7 @@ use crate::tools::reference_models;
 use flate2::read::MultiGzDecoder;
 use ks_config::personal_words::PersonalWords;
 use ks_context::context_model::TermTables;
-use ks_context::typo_correction::{Candidate, OPERATIONS, Operation, Reason, TypoCorrector, TypoJudgement, TypoPolicy, decide_under, known_elsewhere};
+use ks_context::typo_correction::{Candidate, OPERATIONS, Operation, Reason, TypoCorrector, TypoJudgement, TypoLexicon, TypoPolicy, decide_under, known_elsewhere};
 use ks_engine::engine::{PUNCTUATION, WORD_JOINERS};
 use ks_lang::Resources;
 use ks_lang::detector::ProtectedTokens;
@@ -17,12 +17,14 @@ use ks_lang::tables::WordTable;
 use ks_text::pystr;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const DRAW_HEX_DIGITS: usize = 16;
 const SAMPLE_MODULUS: u64 = 32;
+const VOCABULARY_MIN_COUNTS: [i64; 6] = [2, 3, 5, 10, 20, 50];
+const VOCABULARY_MAX_RECALL_LOSS: f64 = 0.02;
 const MIN_LETTERS: usize = 5;
 const TRANSPOSED_LETTERS: usize = 2;
 const CANDIDATE_MIN_COUNT: i64 = 20;
@@ -483,6 +485,95 @@ pub struct Request<'a> {
     pub out: &'a Path,
     pub tune: bool,
     pub local_offset_seconds: i64,
+    pub vocabulary: Option<VocabularyInputs>,
+}
+
+/// The files the choice of the technical vocabulary's count reads.
+pub struct VocabularyInputs {
+    pub clean: PathBuf,
+    pub ru: PathBuf,
+    pub en: PathBuf,
+    pub train_messages: PathBuf,
+    pub train_code: PathBuf,
+}
+
+/// The count of the technical vocabulary, chosen on the development splits. For each candidate count: how many corrections
+/// of the clean development texts the vocabulary would leave as typed, and how many synthetic typos of each operation no
+/// list holds that it would make known (the recall it costs, at most). The chosen count is the least one at which no
+/// operation loses more than `VOCABULARY_MAX_RECALL_LOSS` of those typos.
+fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> Result<Value, String> {
+    let read_gz = |path: &Path| -> Result<String, String> {
+        let mut text = String::new();
+        flate2::read::MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_string(&mut text).map_err(|error| error.to_string())?;
+        Ok(text)
+    };
+    let counts = crate::typo_frequency::vocabulary_counts(&read_gz(&inputs.train_messages)?, &read_gz(&inputs.train_code)?)?;
+    let mut lexicons = Vec::new();
+    for source in &crate::typo_frequency::SOURCES {
+        let path = if source.locale == "ru_RU" { &inputs.ru } else { &inputs.en };
+        let text = std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+        let built = crate::typo_frequency::build(source, &text, &HashMap::new())?;
+        let target = out.join(format!(".vocabulary-{}.bin", source.locale));
+        std::fs::write(&target, &built.file).map_err(|error| error.to_string())?;
+        let lexicon = TypoLexicon::load(&target, source.locale).map_err(|error| error.name.to_string())?;
+        let _ = std::fs::remove_file(&target);
+        lexicons.push((source.locale.to_owned(), lexicon));
+    }
+    let corrector = TypoCorrector::new(lexicons, TypoPolicy::default()).map_err(|error| error.name.to_string())?;
+    let known = |text: &str, floor: i64| counts.values().any(|table| table.get(&pystr::casefold(text)).copied().unwrap_or(0) >= floor);
+    let mut removed: BTreeMap<i64, BTreeMap<String, i64>> = VOCABULARY_MIN_COUNTS.iter().map(|floor| (*floor, BTreeMap::new())).collect();
+    let clean_rows = std::fs::read_to_string(&inputs.clean).map_err(|error| format!("{}: {error}", inputs.clean.display()))?;
+    for line in clean_rows.lines().skip(1) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let (corpus, locale, word) = (fields[0], fields[2], fields[4]);
+        let (_, reading) = other_reading(word, locale);
+        for (floor, table) in &mut removed {
+            if known(word, *floor) || known(&reading, *floor) {
+                *table.entry(format!("{corpus}:{locale}")).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut lost: BTreeMap<i64, HashMap<String, i64>> = VOCABULARY_MIN_COUNTS.iter().map(|floor| (*floor, HashMap::new())).collect();
+    let mut typos: BTreeMap<String, i64> = BTreeMap::new();
+    for name in PROSE_FILES.iter().chain(&FORUM_FILES) {
+        for (qid, text) in messages(directory, name)? {
+            for (index, token, capital_allowed) in words_of(&text) {
+                let Some(locale) = locale_of(&token) else { continue };
+                let lower = pystr::casefold(&token);
+                let characters: Vec<char> = token.chars().collect();
+                let lowered: Vec<char> = lower.chars().collect();
+                if characters.len() < MIN_LETTERS || !(token == lower || capital_allowed) || characters[1..] != lowered[1..] {
+                    continue;
+                }
+                let seed = draw(&["typo", name, &qid, &index.to_string()]);
+                let lexicon = corrector.lexicon(locale).ok_or("a locale without a list")?;
+                let Some(weight) = lexicon.weight(&lower) else { continue };
+                if seed % SAMPLE_MODULUS != 0 || weight < corrector.policy.minimum_weight() {
+                    continue;
+                }
+                let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len() as u64) as usize];
+                let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len() as u64, corrector.neighbours_of(locale)) else { continue };
+                if typo == lower || typo.chars().count() < MIN_LETTERS || lexicon.occurs(&typo) {
+                    continue;
+                }
+                let key = format!("{locale}:{}", operation.as_str());
+                *typos.entry(key.clone()).or_insert(0) += 1;
+                let (_, reading) = other_reading(&typo, locale);
+                for (floor, table) in &mut lost {
+                    if known(&typo, *floor) || known(&reading, *floor) {
+                        *table.entry(key.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+    let mut floors = Map::new();
+    for floor in VOCABULARY_MIN_COUNTS {
+        let shares: Map<String, Value> = typos.iter().map(|(key, total)| (key.clone(), json!(lost[&floor].get(key).copied().unwrap_or(0) as f64 / *total as f64))).collect();
+        floors.insert(floor.to_string(), json!({"clean_corrections_left_as_typed": removed[&floor], "synthetic_typos_lost": shares}));
+    }
+    let chosen = VOCABULARY_MIN_COUNTS.iter().copied().find(|floor| typos.iter().all(|(key, total)| lost[floor].get(key).copied().unwrap_or(0) as f64 <= VOCABULARY_MAX_RECALL_LOSS * *total as f64)).ok_or("no count keeps the recall")?;
+    Ok(json!({"synthetic_typos_no_list_holds": typos, "floors": floors, "chosen": chosen}))
 }
 
 pub fn command(request: &Request<'_>, resources: &Arc<Resources>) -> Result<(), String> {
@@ -506,6 +597,10 @@ pub fn command(request: &Request<'_>, resources: &Arc<Resources>) -> Result<(), 
     }
     if matches!(request.measurement, "clean" | "all") {
         report.insert("clean".to_owned(), clean(request.messages, &corrector, &knowledge, request.out)?);
+    }
+    if request.measurement == "vocabulary" {
+        let inputs = request.vocabulary.as_ref().ok_or("the vocabulary measurement needs --clean, --ru, --en, --train-messages and --train-code")?;
+        report.insert("vocabulary".to_owned(), vocabulary_floor(request.messages, inputs, request.out)?);
     }
     if matches!(request.measurement, "field" | "all") {
         report.insert("field".to_owned(), field_words(request.manifest, &corrector, &knowledge, request.out, request.local_offset_seconds)?);

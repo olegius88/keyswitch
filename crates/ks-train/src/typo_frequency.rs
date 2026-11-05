@@ -37,14 +37,14 @@ const CODE_SHA256: &str = "8ae3f9d850fb712b78d00aaed1a04d22037a6dd8405909fed0bb4
 const RECEIPT: &str = "resources/typo-frequency.receipt.json";
 const TOOL: &str = "crates/ks-train/src/typo_frequency.rs";
 
-struct Source {
-    locale: &'static str,
+pub(crate) struct Source {
+    pub(crate) locale: &'static str,
     path_in_repository: &'static str,
     default: &'static str,
     sha256: &'static str,
 }
 
-const SOURCES: [Source; 2] = [
+pub(crate) const SOURCES: [Source; 2] = [
     Source { locale: "ru_RU", path_in_repository: "content/2018/ru/ru_full.txt", default: "reliable-release-2026-09-12/lexicon-sources/FrequencyWords-full/ru_full.txt", sha256: "32dfd94138aea2667ec455dcc8512029e39bd4b8ea70b09410d569b69d511a30" },
     Source { locale: "en_US", path_in_repository: "content/2018/en/en_full.txt", default: "typo/FrequencyWords-en/en_full.txt", sha256: "7fea67ab954e2c01df6c608c9826e594cf36f8823b3243554f88245fb75dc506" },
 ];
@@ -79,7 +79,7 @@ fn is_token_letter(character: char) -> bool {
 }
 
 /// `vocabulary_counts`: forms of at least MIN_LETTERS letters, lowercase or with one leading capital, by locale.
-fn vocabulary_counts(messages: &str, code: &str) -> Result<BTreeMap<&'static str, HashMap<String, i64>>, String> {
+pub(crate) fn vocabulary_counts(messages: &str, code: &str) -> Result<BTreeMap<&'static str, HashMap<String, i64>>, String> {
     let mut counts: BTreeMap<&'static str, HashMap<String, i64>> = SOURCES.iter().map(|source| (source.locale, HashMap::new())).collect();
     let mut add = |text: &str| {
         for word in text.split(|character| !is_token_letter(character)).filter(|word| !word.is_empty()) {
@@ -120,8 +120,8 @@ fn bloom(forms: &[String]) -> (Vec<u8>, u64, u64) {
     (filter, bits, hashes)
 }
 
-struct Built {
-    file: Vec<u8>,
+pub(crate) struct Built {
+    pub(crate) file: Vec<u8>,
     sections: BTreeMap<&'static str, Vec<u8>>,
     selection: Value,
     seen: Value,
@@ -144,7 +144,7 @@ fn compact() -> JsonOptions {
 }
 
 /// `build`: the file of one locale.
-fn build(source: &Source, text: &str, vocabulary: &HashMap<String, i64>) -> Result<Built, String> {
+pub(crate) fn build(source: &Source, text: &str, vocabulary: &HashMap<String, i64>) -> Result<Built, String> {
     let letters = alphabet(source.locale);
     let (counts, total) = read_counts(text, letters);
     let codes: HashMap<char, u8> = letters.chars().enumerate().map(|(index, letter)| (letter, index as u8 + 1)).collect();
