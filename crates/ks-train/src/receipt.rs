@@ -22,6 +22,12 @@ const SEQUENCE_DOCUMENT_CAP_PER_GROUP: i64 = 512;
 const SEQUENCE_MAXIMUM_SELECTED_ROWS: i64 = 3 * SEQUENCE_DOCUMENT_CAP_PER_GROUP;
 const MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP: i64 = 32;
 const DEVCHAT_MIN_NET_MARGIN: i64 = 1;
+const RECEIPT_FIELDS: [&str; 29] = [
+    "schema_version", "feature_version", "model_version", "conversion_threshold", "artifact_sha256", "weights_sha256", "baseline_path", "baseline_sha256", "recipe_path", "recipe_sha256",
+    "candidate_seal_sha256", "full_test_report_sha256", "corpus_manifest_sha256", "provenance", "calibration", "test", "gate_policy", "protocol", "scope", "quality_gates_passed",
+    "prefix_model_version", "prefix_feature_version", "prefix_conversion_threshold", "prefix_artifact_sha256", "prefix_weights_sha256", "prefix_candidate_seal_sha256", "prefix_baseline_path",
+    "prefix_baseline_sha256", "devchat_test",
+];
 const DEVCHAT_SIGNIFICANCE: f64 = 0.05;
 const MODES: [&str; 4] = ["correct", "forget_ru", "forget_en", "start_wrong"];
 const RESTORING_MODES: [&str; 3] = ["forget_ru", "forget_en", "start_wrong"];
@@ -227,6 +233,7 @@ pub fn validate_receipt(receipt: &Value, artifact: &Path, root: &Path, prefix_ar
 
 /// Everything a receipt claims except the bytes of the sources it names: the identity of the pair, every gate recomputed.
 pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_artifact: &Path, models_dir: &Path) -> Result<(), String> {
+    fields_exact(receipt, "receipt", &RECEIPT_FIELDS)?;
     let protocols = read_json(&root.join("model/context_v3/protocols.json"))?;
     let recipe = read_json(&root.join(RECIPE))?;
     let policy = &recipe["gate_policy"];

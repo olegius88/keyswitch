@@ -16,6 +16,7 @@ const SECONDS_PER_DAY: i64 = 86_400;
 const ASSETS: [&str; 6] = ["KeySwitch-Setup-{version}-x64.exe", "KeySwitch-Setup-{version}-arm64.exe", "KeySwitch-Setup-{version}-x86.exe", "keyswitch_{version}_amd64.deb", "KeySwitch-{version}-macos-arm64.zip", "KeySwitch-{version}-macos-x86_64.zip"];
 const TESTED_CRATES: [&str; 8] = ["ks-text", "ks-lang", "ks-context", "ks-engine", "ks-config", "ks-replay", "ks-train", "logcourier"];
 
+#[derive(Default)]
 struct Options {
     version: String,
     dry_run: bool,
@@ -346,6 +347,127 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn options(version: &str, dry_run: bool) -> Options {
+        Options { version: version.to_owned(), dry_run, ..Options::default() }
+    }
+
+    struct Tree(PathBuf);
+
+    impl Tree {
+        fn new(label: &str) -> Tree {
+            let path = std::env::temp_dir().join(format!("keyswitch-release-test-{label}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(path.join("packaging")).unwrap();
+            Tree(path)
+        }
+
+        fn write(&self, name: &str, text: &str) {
+            std::fs::write(self.0.join(name), text).unwrap();
+        }
+
+        fn read(&self, name: &str) -> String {
+            std::fs::read_to_string(self.0.join(name)).unwrap()
+        }
+
+        fn with_version_sites(self) -> Tree {
+            self.write("Cargo.toml", "[workspace.package]\nversion = \"1.2.3\"\nrust-version = \"1.2.3\"\n");
+            self.write("packaging/keyswitch.1", ".TH KEYSWITCH 1 \"2026\" \"KeySwitch 1.2.3\"\n");
+            self.write("README.md", "[скачать](https://example.org/releases/tag/v1.2.3) KeySwitch-Setup-1.2.3.exe\n");
+            self.write("README.en.md", "[download](https://example.org/releases/tag/v1.2.3) KeySwitch-Setup-1.2.3.exe\n");
+            self
+        }
+    }
+
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn a_site_is_rewritten_in_its_own_way() {
+        let tree = Tree::new("sites").with_version_sites();
+        apply_version(&tree.0, &options("1.3.0", false)).unwrap();
+        // In Cargo.toml only the match is the version; a README names it in the files it lists too.
+        assert_eq!(tree.read("Cargo.toml"), "[workspace.package]\nversion = \"1.3.0\"\nrust-version = \"1.2.3\"\n");
+        assert!(tree.read("packaging/keyswitch.1").contains("KeySwitch 1.3.0"));
+        assert_eq!(tree.read("README.md"), "[скачать](https://example.org/releases/tag/v1.3.0) KeySwitch-Setup-1.3.0.exe\n");
+        assert_eq!(tree.read("README.en.md"), "[download](https://example.org/releases/tag/v1.3.0) KeySwitch-Setup-1.3.0.exe\n");
+    }
+
+    #[test]
+    fn a_dry_run_writes_nothing() {
+        let tree = Tree::new("dry").with_version_sites();
+        let before = tree.read("Cargo.toml");
+        apply_version(&tree.0, &options("1.3.0", true)).unwrap();
+        assert_eq!(tree.read("Cargo.toml"), before);
+    }
+
+    #[test]
+    fn a_site_without_a_version_is_an_error() {
+        let tree = Tree::new("missing").with_version_sites();
+        tree.write("README.md", "no version here\n");
+        assert!(apply_version(&tree.0, &options("1.3.0", false)).unwrap_err().contains("README.md"));
+    }
+
+    #[test]
+    fn the_sites_exist_in_the_repository() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (file, pattern, _) in VERSION_SITES {
+            let text = std::fs::read_to_string(root.join(file)).unwrap();
+            assert!(regex::Regex::new(pattern).unwrap().is_match(&text), "{file}");
+        }
+    }
+
+    #[test]
+    fn unreleased_entries_move_under_a_dated_heading() {
+        let tree = Tree::new("changelog");
+        tree.write("CHANGELOG.md", "# Changes\n\n## Unreleased\n\n- a change\n\n## 1.2.3 — 2026-01-01\n\n- old\n");
+        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        let text = tree.read("CHANGELOG.md");
+        let sections = changelog_sections(&text);
+        assert_eq!(sections[0], ("Unreleased".to_owned(), Vec::new()));
+        assert!(sections[1].0.starts_with("1.3.0 — "));
+        assert_eq!(sections[1].1, vec!["- a change".to_owned()]);
+    }
+
+    #[test]
+    fn an_empty_unreleased_section_stops_the_release() {
+        let tree = Tree::new("empty");
+        tree.write("CHANGELOG.md", "# Changes\n\n## Unreleased\n\n## 1.2.3 — 2026-01-01\n\n- old\n");
+        assert!(close_changelog(&tree.0, &options("1.3.0", false)).is_err());
+    }
+
+    #[test]
+    fn a_section_already_written_is_left_alone() {
+        let tree = Tree::new("written");
+        let text = "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- new\n";
+        tree.write("CHANGELOG.md", text);
+        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        assert_eq!(tree.read("CHANGELOG.md"), text);
+    }
+
+    #[test]
+    fn notes_are_checked_for_the_version_the_files_and_the_paragraphs() {
+        let tree = Tree::new("notes");
+        let files: String = assets("1.3.0").iter().map(|name| format!("`{name}`, ")).collect();
+        tree.write("RELEASE_NOTES.md", &format!("# KeySwitch 1.3.0\n\nAll on one line: {files}done.\n"));
+        check_release_notes(&tree.0, "1.3.0").unwrap();
+        assert!(check_release_notes(&tree.0, "1.4.0").is_err(), "notes for another version");
+        tree.write("RELEASE_NOTES.md", "# KeySwitch 1.3.0\n\nNo file named at all.\n");
+        assert!(check_release_notes(&tree.0, "1.3.0").is_err(), "notes without the published files");
+        tree.write("RELEASE_NOTES.md", &format!("# KeySwitch 1.3.0\n\nOver two lines: {files}\nand on.\n"));
+        assert!(check_release_notes(&tree.0, "1.3.0").is_err(), "a paragraph over several lines");
+    }
+
+    #[test]
+    fn a_bad_version_is_refused_before_anything_is_written() {
+        for version in ["1.2", "1.2.3.4", "1.2.x", "", "v1.2.3"] {
+            let tree = Tree::new("version").with_version_sites();
+            assert!(check_preconditions(&tree.0, &options(version, false)).unwrap_err().contains("no version"), "{version}");
+        }
+    }
 
     #[test]
     fn wrapped_lines_are_found() {
