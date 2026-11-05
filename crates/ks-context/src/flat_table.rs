@@ -789,6 +789,61 @@ pub fn load_artifact(path: &Path, limit: usize, too_large: &str, spec: &WeightSp
 mod tests {
     use super::*;
 
+    fn file(name: &str, text: &str) -> std::path::PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-flat-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("table.json");
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn term_tables_accept_only_their_shape() {
+        let good = file("good", r#"{"cyrillic": {"да": 2}, "latin": {"the": 3, "the": 4}}"#);
+        let tables = load_term_frequency(&good, &["cyrillic", "latin"], 1000).unwrap();
+        let latin = tables.alphabet("latin");
+        assert_eq!((latin.count("the"), latin.contains("the"), latin.len(), latin.is_empty()), (4, true, 1, false));
+        assert_eq!(latin.words().collect::<Vec<_>>(), ["the"]);
+        assert!(tables.alphabet("nothing").is_empty());
+        assert!(load_term_frequency(&good, &["latin"], 1000).is_err());
+        assert!(load_term_frequency(&good, &["cyrillic", "latin"], 5).is_err());
+        let values = ["1", "0", "-1", "1.5", "true", "\"x\"", "null", "[1, 2]", "{\"a\": 1, \"b\": 2}", "99999999999"];
+        for value in values {
+            let path = file("count", &format!(r#"{{"latin": {{"a": {value}}}}}"#));
+            let _ = load_term_frequency(&path, &["latin"], 1000);
+            let path = file("alphabet", &format!(r#"{{"latin": {value}}}"#));
+            assert_eq!(load_term_frequency(&path, &["latin"], 1000).is_ok(), value.starts_with('{'), "{value}");
+            let path = file("top", value);
+            assert!(load_term_frequency(&path, &["latin"], 1000).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn a_weight_artifact_accepts_only_its_shape() {
+        let spec = WeightSpec { max_entries: 2, max_name_characters: 5, name_required: true, max_magnitude: Some(10.0), entry_error: "entry", weight_error: "weight", table_error: "table" };
+        let load = |text: &str| {
+            let path = file("artifact", text);
+            load_artifact(&path, 10_000, "too large", &spec)
+        };
+        let weights = |name: &str, value: &str| format!(r#"{{"weights": {{"{name}": [{value}, 0, 0, 0]}}}}"#);
+        assert!(load(&weights("a", "1.5")).is_ok());
+        for bad in [weights("", "1"), weights("toolongname", "1"), weights("a", "99"), weights("a", "\"x\""), weights("a", "null"), weights("a", "true"), weights("a", "[1]"), weights("a", "{\"b\": 1}")] {
+            let _ = load(&bad);
+        }
+        for shape in ["1", "null", "true", "\"x\"", "[1]", "1.5", "-1"] {
+            let _ = load(shape);
+            let _ = load(&format!(r#"{{"weights": {shape}}}"#));
+            let _ = load(&format!(r#"{{"weights": {{"a": {shape}}}}}"#));
+            let _ = load(&format!(r#"{{"weights": {{"a": [{shape}, {shape}, {shape}, {shape}, {shape}]}}}}"#));
+        }
+        let _ = load(r#"{"weights": {"a": [0, 0, 0, 0], "b": [0, 0, 0, 0], "c": [0, 0, 0, 0]}}"#);
+        let _ = load(r#"{"weights": {"a": [0, 0, 0]}, "other": {"x": [1, {"y": 2}]}}"#);
+        let _ = load("\u{feff}{}");
+        assert!(load_artifact(Path::new("/nonexistent/x"), 10, "too large", &spec).is_err());
+        assert!(load(&"x".repeat(20_000)).is_err());
+        assert!(WeightTable::empty().is_empty());
+    }
+
     #[test]
     fn a_name_given_twice_keeps_its_last_value() {
         let table = WeightTable::from_entries([("a", [1.0, 2.0, 3.0, 4.0]), ("b", [0.0; 4]), ("a", [5.0, 6.0, 7.0, 8.0])]);
