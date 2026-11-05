@@ -1,4 +1,4 @@
-//! The HTTP transport of the updater on Linux: the system's `curl`, run for each request.
+//! The HTTP transport of the updater on Linux and macOS: the system's `curl`, run for each request.
 //!
 //! The Linux package is installed by APT, so the updater only looks for a new release and opens its page: one small request
 //! to GitHub. Spawning `curl` leaves a TLS stack out of the program. Redirects are followed by curl, limited to https; the
@@ -8,7 +8,7 @@ use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
-use ks_updates::{ResponseOpener, UpdateRequest, UpdateResponse};
+use crate::{ResponseOpener, UpdateRequest, UpdateResponse};
 
 const MAX_REDIRECTS: &str = "10";
 

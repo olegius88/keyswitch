@@ -23,9 +23,7 @@ ks-ui = { path = "../ks-ui" }
 ks-updates = { path = "../ks-updates" }
 serde_json.workspace = true
 
-# AppKit has no C interface: the objc2 family sends the messages, with the bindings of the few classes the window and
-# the menu bar item use. Everything else (CoreGraphics, Carbon, Accessibility, CoreFoundation) is declared by hand.
+# AppKit has no C interface: objc2 sends the messages. Everything else (CoreGraphics, Carbon, Accessibility, CoreFoundation)
+# is plain `extern "C"`.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSDictionary", "NSData", "NSObject", "NSGeometry", "NSRange", "NSURL", "NSUserDefaults", "NSThread", "NSAutoreleasePool", "NSRunLoop", "NSDate", "NSTimer", "NSNotification", "NSValue"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSButton", "NSControl", "NSView", "NSWindow", "NSTextField", "NSText", "NSTextView", "NSScrollView", "NSTableView", "NSTableColumn", "NSTableHeaderView", "NSPopUpButton", "NSStepper", "NSFont", "NSColor", "NSWorkspace", "NSRunningApplication", "NSPasteboard", "NSPasteboardItem", "NSOpenPanel", "NSPanel", "NSSavePanel", "NSAlert", "NSEvent", "NSImage", "NSGraphics", "NSBox", "NSOutlineView", "NSCell", "NSTextFieldCell", "NSActionCell", "NSLayoutConstraint", "NSStackView", "NSAppearance", "NSScreen", "NSTextContainer", "NSTableCellView"] }

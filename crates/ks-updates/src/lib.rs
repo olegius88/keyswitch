@@ -7,4 +7,6 @@
 pub mod constants;
 pub mod updates;
 
+#[cfg(unix)]
+pub mod http_curl;
 pub use updates::*;

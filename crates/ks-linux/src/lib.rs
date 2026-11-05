@@ -24,7 +24,7 @@ pub mod platform;
 pub mod gtk_model;
 pub mod tray;
 pub mod desktop_backend;
-pub mod http_curl;
+pub use ks_updates::http_curl;
 pub mod gtk_prompt;
 pub mod gtk_window;
 pub mod gtk_app;
