@@ -103,12 +103,24 @@ run_signing env PYTHONPATH="${nuitka_path:+$nuitka_path:}$project_dir/src" \
     --macos-signed-app-name="$bundle_identifier" \
     --macos-prohibit-multiple-instances \
     ${sign_arguments[@]+"${sign_arguments[@]}"} \
+    --enable-plugin=tk-inter \
     --include-package-data=keyswitch \
     --include-data-files="$frozen_english_model=keyswitch/resources/models/en_US.lm" \
     --include-data-files="$frozen_russian_model=keyswitch/resources/models/ru_RU.lm" \
     --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-en_US.bin=keyswitch/resources/typo-frequency-en_US.bin" \
     --include-data-files="$project_dir/src/keyswitch/resources/typo-frequency-ru_RU.bin=keyswitch/resources/typo-frequency-ru_RU.bin" \
-    --nofollow-import-to='keyswitch.windows_*' \
+    --nofollow-import-to='keyswitch.windows_app' \
+    --nofollow-import-to='keyswitch.windows_backend' \
+    --nofollow-import-to='keyswitch.windows_calls' \
+    --nofollow-import-to='keyswitch.windows_context' \
+    --nofollow-import-to='keyswitch.windows_instance' \
+    --nofollow-import-to='keyswitch.windows_instance_native' \
+    --nofollow-import-to='keyswitch.windows_native' \
+    --nofollow-import-to='keyswitch.windows_registry' \
+    --nofollow-import-to='keyswitch.windows_system' \
+    --nofollow-import-to='keyswitch.windows_tray' \
+    --nofollow-import-to='keyswitch.windows_tray_native' \
+    --nofollow-import-to='keyswitch.windows_ui' \
     --nofollow-import-to='keyswitch.app' \
     --nofollow-import-to='keyswitch.ui' \
     --nofollow-import-to='keyswitch.tray' \

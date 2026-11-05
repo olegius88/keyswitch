@@ -1040,6 +1040,20 @@ jobs:
           assert "KeySwitch.app" in bundled.parts, bundled
           PYTHON
 
+      - name: Open and close the window of the packaged application
+        run: |
+          # The report above stops short of the window's imports. Every Mac archive up to
+          # 0.66.1 passed it and then could not start.
+          python - <<'PYTHON'
+          import subprocess
+
+          subprocess.run(
+              ["dist/macos-native/KeySwitch.app/Contents/MacOS/keyswitch-bin", "--smoke-ui"],
+              check=True,
+              timeout=120,
+          )
+          PYTHON
+
       - name: Verify the signature and its entitlements
         if: ${{ env.KEYSWITCH_SIGN_IDENTITY != '' }}
         run: |
