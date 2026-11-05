@@ -4,10 +4,12 @@
 #![forbid(unsafe_code)]
 
 pub mod artifact;
+pub mod boundary;
 pub mod captured;
 pub mod compare;
 pub mod corpus;
 pub mod curricula;
+pub mod engine_reports;
 pub mod evaluate;
 pub mod evidence;
 pub mod fit;

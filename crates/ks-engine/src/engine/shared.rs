@@ -220,7 +220,7 @@ impl Shared {
         (window != NO_WINDOW).then_some(window)
     }
 
-    pub(crate) fn set_focus_window(&self, window: i64) {
+    pub fn set_focus_window(&self, window: i64) {
         self._focus_window.store(window, Ordering::Relaxed);
     }
 

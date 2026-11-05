@@ -45,6 +45,10 @@ pub fn misspelled(text: &str, model: &LanguageModel) -> bool {
 /// `features(original, alternative, suffix, source, target, version)`; the default version is `FEATURE_VERSION`.
 pub fn features(original: &str, alternative: &str, suffix: i64, source: &LanguageModel, target: &LanguageModel, version: i64) -> Features {
     let mut values = legacy_features(original, alternative, suffix, source, target);
+    // The rejected v1 experiment's features alone: the engine replay compares it, and no release loads one.
+    if version == BOUNDARY_V1_FEATURE_VERSION {
+        return values;
+    }
     // A candidate can be an English literal or a Russian word. Learning must compare both, not inherit the old
     // ranker's mostly-English calibration.
     let (source_known, target_known) = (values["source_word:known"], values["target_word:known"]);

@@ -65,7 +65,7 @@ fn digest(value: &Value) -> String {
     hex(&Sha256::digest(compact(value).as_bytes()))
 }
 
-fn role_named(name: &str) -> Result<FieldRole, String> {
+pub(crate) fn role_named(name: &str) -> Result<FieldRole, String> {
     match name {
         "unknown" => Ok(FieldRole::Unknown),
         "text" => Ok(FieldRole::Text),

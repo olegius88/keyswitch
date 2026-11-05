@@ -8,6 +8,8 @@
 //! `ks-train compare --tree <root> --corpus <folder> --artifact NAME=PATH... [--output <file>] [--jobs N]`
 //! `ks-train verify --tree <root> [--receipt <file> --artifact <file> --prefix <file> --evidence-only] [--report <file>]`
 //! `ks-train promote --tree <root> --candidate <folder> --prefix-candidate <folder> --corpus <folder> --report <file> --released <folder> --devchat <folder> [--check-only] [--jobs N]`
+//! `ks-train boundary --tree <root> --freeze|--train|--test|--verify|--promote [--directory <folder>] [--output <folder>]`
+//! `ks-train engine boundary|prefix --tree <root> [--verify|--refresh-runtime|--output <file>] [--jobs N]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -72,6 +74,33 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if arguments.first().map(String::as_str) == Some("engine") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+        let flag = |name: &str| arguments.iter().any(|argument| argument == name);
+        let jobs: usize = option(&arguments, "--jobs").map_or(4, |value| value.parse().expect("--jobs is a number"));
+        let which = arguments.get(1).map_or("", String::as_str);
+        if let Err(error) = ks_train::engine_reports::command(&root, &resources, which, flag("--verify"), flag("--refresh-runtime"), option(&arguments, "--output").map(Path::new), jobs) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("boundary") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+        let directory = option(&arguments, "--directory").map_or_else(|| root.join("model/boundary_v2"), PathBuf::from);
+        let output = option(&arguments, "--output").map_or_else(|| directory.clone(), PathBuf::from);
+        let Some(action) = ["freeze", "train", "test", "verify", "promote"].into_iter().find(|name| arguments.iter().any(|argument| *argument == format!("--{name}"))) else {
+            eprintln!("--freeze, --train, --test, --verify or --promote");
+            std::process::exit(2);
+        };
+        if let Err(error) = ks_train::boundary::command(&root, &resources, action, &directory, &output) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
     }
     if matches!(arguments.first().map(String::as_str), Some("compare" | "verify" | "promote")) {
         std::process::exit(cycle_command(&arguments));

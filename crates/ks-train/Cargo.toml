@@ -17,6 +17,7 @@ ks-context.workspace = true
 ks-engine.workspace = true
 ks-hunspell.workspace = true
 ks-replay.workspace = true
+indexmap.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 flate2.workspace = true
