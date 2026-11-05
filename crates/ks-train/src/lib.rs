@@ -20,6 +20,7 @@ pub mod kernel;
 pub mod lookahead;
 pub mod messages;
 pub mod mixed;
+pub mod ortho;
 pub mod physical;
 pub mod prefix;
 pub mod rows;

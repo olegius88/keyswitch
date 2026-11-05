@@ -46,7 +46,8 @@ fn run(command: &mut Command, label: &str) -> bool {
 
 fn tests_of(tree: &Path) -> Command {
     let mut command = Command::new("cargo");
-    command.current_dir(tree).args(["test", "--profile", "parity"]);
+    // A tree's tests read files beside their sources, whose paths are compiled in: a target folder of its own.
+    command.current_dir(tree).env("CARGO_TARGET_DIR", tree.join("target")).args(["test", "--profile", "parity"]);
     for name in TESTED_CRATES {
         command.args(["-p", name]);
     }
@@ -85,9 +86,12 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
         if !run(&mut tests_of(&scratch), "the tests with the candidate pair installed") {
             failures.push("the tests, with the candidate pair installed".to_owned());
         }
-        let mut field = Command::new("cargo");
-        field.current_dir(&scratch).args(["run", "--profile", "parity", "--bin", "field-gate", "--", "--root"]).arg(request.field_root).arg("--released").arg(request.released_rows);
-        if !run(&mut field, "the owner's typing against the last release") {
+        let mut build = Command::new("cargo");
+        build.current_dir(&scratch).env("CARGO_TARGET_DIR", scratch.join("target")).args(["build", "--profile", "parity", "-p", "ks-replay", "--bins"]);
+        let built = run(&mut build, "the replay of the candidate tree");
+        let mut field = Command::new(scratch.join("target/parity/field-gate"));
+        field.current_dir(&scratch).arg("--root").arg(request.field_root).arg("--released").arg(request.released_rows).arg("--replay").arg(scratch.join("target/parity/ks-replay"));
+        if !built || !run(&mut field, "the owner's typing against the last release") {
             failures.push("the owner's typing: a word the last release got right comes out wrong, or the field regression gate could not run".to_owned());
         }
         let _ = Command::new("git").current_dir(root).args(["worktree", "remove", "--force"]).arg(&scratch).status();

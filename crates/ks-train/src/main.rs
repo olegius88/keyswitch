@@ -18,6 +18,7 @@
 //! `ks-train carry --tree <root> --pair <file> --refit <head>... --output <file>`, `doctor --tree <root> [--corpus <folder>] [--ledger <folder>] [--stage <name>...]`,
 //! `supplement --tree <root> --verify | --input <file> [--output <file>] [--receipt <file>] [--removed-list <file>]`,
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
+//! `ks-train ortho --tree <root> --fit|--verify|--test|--promote [--output <folder>]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -98,6 +99,18 @@ fn main() {
     }
     if matches!(arguments.first().map(String::as_str), Some("carry" | "doctor" | "supplement" | "apt-build" | "apt-verify")) {
         std::process::exit(small_command(&arguments));
+    }
+    if arguments.first().map(String::as_str) == Some("ortho") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let Some(action) = ["fit", "verify", "test", "promote"].into_iter().find(|name| arguments.iter().any(|argument| *argument == format!("--{name}"))) else {
+            eprintln!("--fit, --verify, --test or --promote");
+            std::process::exit(2);
+        };
+        if let Err(error) = ks_train::ortho::command(&root, action, option(&arguments, "--output").map(Path::new)) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
     }
     if arguments.first().map(String::as_str) == Some("typo-frequency") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));

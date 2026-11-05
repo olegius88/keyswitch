@@ -32,6 +32,7 @@ regex = "1"
 bzip2-rs = "0.1"
 ruzstd = "0.8"
 sha1 = "0.10"
+num-bigint = "0.4"
 md-5 = "0.10"
 
 [dev-dependencies]

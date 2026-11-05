@@ -10,7 +10,7 @@ pub mod context_access;
 pub mod engine;
 pub mod engine_loader;
 pub mod rule_editor;
-mod unicode_category;
+pub mod unicode_category;
 
 pub use engine::{
     CorrectionPlan, EngineCore, EngineError, EngineParts, EngineSnapshot, Hotkey, KeySwitchEngine, LearningPrompt, Shared, Stroke,
