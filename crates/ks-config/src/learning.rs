@@ -10,6 +10,7 @@ use crate::constants::{
     USER_DATA_JSON_INDENT,
 };
 use crate::history::data_dir;
+use crate::pycompat::create_parent;
 use crate::pycompat::{decode_text, json_loads, with_name_suffix, with_suffix, write_text};
 use ks_text::pystr::{casefold, isdigit, isspace, strip};
 use ks_text::{json_dumps, max_by_key_first, py_int, Indent, JsonOptions};
@@ -410,9 +411,7 @@ impl LearningStore {
         let mut data = Map::new();
         data.insert("schema_version".into(), Value::from(LEARNING_STORE_SCHEMA_VERSION));
         data.insert("rules".into(), Value::Array(rules.iter().map(rule_to_json).collect()));
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        create_parent(&self.path)?;
         let temporary = with_suffix(&self.path, ".json.tmp");
         let options =
             JsonOptions { ensure_ascii: false, indent: Some(Indent::Spaces(USER_DATA_JSON_INDENT)), ..JsonOptions::default() };
@@ -523,6 +522,36 @@ impl LearningStore {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn errors_say_what_happened() {
+        assert_eq!(LearningError::Value("x".to_owned()).to_string(), "x");
+        let io_error = LearningError::from(io::Error::other("disk"));
+        assert_eq!(io_error.to_string(), "disk");
+        assert!(!LearningError::Invalid(InvalidRule("bad".to_owned())).to_string().is_empty());
+        assert_eq!(InvalidRule("bad".to_owned()).to_string(), "bad");
+    }
+
+    #[test]
+    fn a_folder_in_place_of_the_file_is_an_unreadable_file() {
+        let folder = directory("folder").join("learning.json");
+        std::fs::create_dir_all(&folder).unwrap();
+        let store = LearningStore::new(Some(folder.clone()), None).unwrap();
+        assert!(store.rules().is_empty());
+        assert!(store.save().is_err());
+    }
+
+    #[test]
+    fn an_old_file_with_a_broken_list_and_a_backup_already_there() {
+        let folder = directory("legacy-broken");
+        let file = folder.join("learning.json");
+        std::fs::write(&file, r#"{"schema_version": 2, "rules": {"0:слово": {"target_group": 1, "confirmations": 9}, "00:слово": {"target_group": 1, "confirmations": 9}}, "rejections": {"0:другое": 1, "0:третье": [1]}}"#).unwrap();
+        let backup = with_name_suffix(&file, LEARNING_STORE_BACKUP_SUFFIX);
+        std::fs::write(&backup, "kept").unwrap();
+        let store = LearningStore::new(Some(file), None).unwrap();
+        assert_eq!(store.rules().len(), 2);
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), "kept");
+    }
 
     fn directory(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!("ks-learning-{name}-{}", std::process::id()));

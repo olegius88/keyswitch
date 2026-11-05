@@ -6,6 +6,7 @@ use crate::constants::{
     UNREADABLE_FILE_TIME_FORMAT, USER_DATA_JSON_INDENT,
 };
 use crate::logsetup::{local_time, strftime, warning};
+use crate::pycompat::create_parent;
 use crate::pycompat::{
     is_py_int, json_loads, py_eq, read_text, with_name_suffix, with_suffix, write_text, ReadError,
 };
@@ -89,9 +90,8 @@ fn running_on_windows() -> bool {
 pub fn default_settings(platform: Option<&str>) -> SettingsData {
     let mut defaults = DEFAULT_SETTINGS.clone();
     let running = if cfg!(target_os = "macos") { "darwin" } else { "other" };
-    if platform.unwrap_or(running) == "darwin"
-        && let Some(Value::Object(hotkeys)) = defaults.get_mut("hotkeys")
-    {
+    if platform.unwrap_or(running) == "darwin" {
+        let hotkeys = defaults.get_mut("hotkeys").and_then(Value::as_object_mut).expect("the defaults have a hotkeys table");
         for (name, value) in MACOS_SELECTION_HOTKEY_DEFAULTS {
             hotkeys.insert(name.to_string(), Value::String(value.to_string()));
         }
@@ -210,9 +210,7 @@ impl SettingsStore {
     }
 
     fn save_locked(&self, data: &SettingsData) -> io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        create_parent(&self.path)?;
         let temporary = with_suffix(&self.path, ".json.tmp");
         let options = JsonOptions {
             ensure_ascii: false,
@@ -260,7 +258,6 @@ impl SettingsStore {
     /// `set(dotted_path, value, persist=...)`. Intermediate levels that are not mappings are replaced by empty ones. An
     /// unchanged value (Python `==`: `1` equals `True`) changes nothing and calls nobody. A failure to save is returned
     /// after the value has been changed in memory, and the callbacks are not called.
-    #[expect(clippy::unreachable, reason = "the mapping was put there two lines above")]
     pub fn set(&self, dotted_path: &str, value: Value, persist: bool) -> io::Result<()> {
         let callbacks;
         {
@@ -273,10 +270,7 @@ impl SettingsStore {
                 if !is_mapping {
                     target.insert((*part).to_string(), Value::Object(Map::new()));
                 }
-                target = match target.get_mut(*part) {
-                    Some(Value::Object(map)) => map,
-                    _ => unreachable!("a mapping was just put there"),
-                };
+                target = target.get_mut(*part).and_then(Value::as_object_mut).expect("a mapping was just put there");
             }
             // Python's `target.get(last) == value`: a missing key reads as None.
             let current = target.get(*last).unwrap_or(&Value::Null);
@@ -374,6 +368,17 @@ impl SettingsStore {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_file_that_cannot_be_moved_stays_and_the_macos_hotkeys_are_laid_over() {
+        assert_eq!(set_aside_unreadable(Path::new("/nonexistent-folder/settings.json")), None);
+        assert_ne!(default_settings(Some("darwin"))["hotkeys"], default_settings(Some("linux"))["hotkeys"]);
+        let _ = config_dir();
+        let store = SettingsStore::new(Some(temporary("unknown").join("config.json")));
+        store.set("unknown.key", json!(1), false).unwrap();
+        assert!(!store.is_default("unknown.key"));
+        assert!(store.is_default("missing.key"));
+    }
 
     fn temporary(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!("ks-config-{name}-{}", std::process::id()));

@@ -54,6 +54,11 @@ pub fn read_text(path: &Path, skip_bom: bool) -> Result<String, ReadError> {
     decode_text(&bytes, skip_bom).ok_or(ReadError::Decode)
 }
 
+/// Creates the folder of a file; a path without one has nothing to create.
+pub fn create_parent(path: &Path) -> io::Result<()> {
+    path.parent().map_or(Ok(()), std::fs::create_dir_all)
+}
+
 /// The bytes `write_text` puts in the file for `text`.
 #[must_use]
 pub fn encoded_text(text: &str) -> Vec<u8> {
@@ -128,7 +133,7 @@ pub fn py_eq(a: &Value, b: &Value) -> bool {
             (Some(Ok(x)), Some(Ok(y))) => x == y,
             (Some(Err(x)), Some(Err(y))) => x == y,
             (Some(Ok(i)), Some(Err(f))) | (Some(Err(f)), Some(Ok(i))) => {
-                f.is_finite() && f.fract() == 0.0 && f.abs() < 1.0e38 && f.to::<i128>() == i
+                f.fract() == 0.0 && f.abs() < 1.0e38 && f.to::<i128>() == i
             }
             _ => false,
         },
@@ -171,6 +176,14 @@ pub fn is_py_int(value: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_edges_of_numbers_and_of_truth() {
+        assert!(!py_eq(&json!(1), &json!(1e39)));
+        assert!(!truthy(&Value::Null) && !truthy(&json!(0)) && truthy(&json!(5)));
+        assert!(is_py_int(&json!(u64::MAX)));
+        create_parent(Path::new("")).unwrap();
+    }
 
     #[test]
     fn suffix_like_pathlib() {

@@ -4,6 +4,7 @@ use ks_cast::To as _;
 use crate::config::home_dir;
 use crate::constants::{DEFAULT_HISTORY_LIMIT, HISTORY_CONFIDENCE_DECIMALS};
 use crate::logsetup::utc_now;
+use crate::pycompat::create_parent;
 use crate::pycompat::{decode_text, encoded_text, json_loads, with_suffix, write_text};
 use ks_text::{json_dumps, py_int, py_round_ndigits, JsonOptions};
 use serde_json::{Map, Number, Value};
@@ -201,9 +202,7 @@ impl HistoryStore {
         let callbacks;
         {
             let _guard = lock(&self.lock);
-            if let Some(parent) = self.path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+            create_parent(&self.path)?;
             let mut handle = std::fs::OpenOptions::new().create(true).append(true).open(&self.path)?;
             handle.write_all(&encoded_text(&entry.as_row().line()))?;
             drop(handle);
@@ -284,6 +283,20 @@ impl HistoryStore {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn an_entry_made_now_and_a_folder_in_place_of_the_file() {
+        let entry = HistoryEntry::create("a", "b", "app", 0.5);
+        assert_eq!((entry.original.as_str(), entry.replacement.as_str()), ("a", "b"));
+        let folder = std::env::temp_dir().join(format!("ks-history-folder-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        assert!(HistoryStore::new(Some(folder), 10).read(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_limit_above_the_signed_range_is_still_a_number() {
+        assert!(history_limit(&serde_json::json!(u64::MAX)) > 0);
+    }
 
     fn directory(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!("ks-history-{name}-{}", std::process::id()));

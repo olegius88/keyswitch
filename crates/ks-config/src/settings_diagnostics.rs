@@ -105,6 +105,13 @@ pub fn setting_change(settings: &SettingsStore, path: &str, value: &Value) -> Op
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_known_name_that_is_gone_is_reported_missing() {
+        let defaults = json!({"a": 1}).as_object().cloned().unwrap();
+        let current = json!({}).as_object().cloned().unwrap();
+        assert_eq!(overrides(&defaults, &current, "")["a"], json!({"missing": true}));
+    }
+
     fn store(name: &str) -> SettingsStore {
         let directory = std::env::temp_dir().join(format!("ks-diag-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);

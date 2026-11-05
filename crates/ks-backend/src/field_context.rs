@@ -149,6 +149,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn no_characters_from_the_end_is_nothing() {
+        assert_eq!(last_characters("abc", 0), "");
+        assert_eq!(last_characters("abc", 2), "bc");
+    }
+
+    #[test]
     fn bounded_cuts_by_characters_and_hides_a_password() {
         let long = "я".repeat(600);
         let mut field = FieldContext::new("a", "f");
