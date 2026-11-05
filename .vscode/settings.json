@@ -1,7 +1,6 @@
 {
   // В дереве проекта лежат очень тяжёлые артефакты сборки:
   //   build/       ~42 ГБ, ~57 000 файлов (windows-vm, wine-validation, deb-сборки)
-  //   dist/ 258M, .typing/ 98M, .nuitka/ 34M, .mypy_cache/ 14M
   // Без исключений ниже VSCode вешает на них file watcher и ripgrep-индексацию
   // (quick open / поиск), из-за чего при открытии проекта грузятся все ядра.
   // Проверено на VSCode 1.135.
@@ -12,16 +11,7 @@
     "**/.git/subtree-cache/**": true,
     "**/build/**": true,
     "**/dist/**": true,
-    "**/.nuitka/**": true,
-    "**/.typing/**": true,
-    "**/.mypy_cache/**": true,
-    "**/.pytest_cache/**": true,
-    "**/.ruff_cache/**": true,
     "**/.t/**": true,
-    "**/htmlcov/**": true,
-    "**/__pycache__/**": true,
-    "**/*.egg-info/**": true,
-    "**/.venv/**": true,
     "**/node_modules/**": true
   },
 
@@ -29,16 +19,7 @@
   "search.exclude": {
     "**/build": true,
     "**/dist": true,
-    "**/.nuitka": true,
-    "**/.typing": true,
-    "**/.mypy_cache": true,
-    "**/.pytest_cache": true,
-    "**/.ruff_cache": true,
     "**/.t": true,
-    "**/htmlcov": true,
-    "**/__pycache__": true,
-    "**/*.egg-info": true,
-    "**/.venv": true,
     "**/node_modules": true
   },
   "search.useIgnoreFiles": true,
@@ -48,15 +29,6 @@
 
   // 3. Скрыть служебные каталоги из Explorer (на диске они остаются).
   "files.exclude": {
-    "**/__pycache__": true,
-    "**/*.pyc": true,
-    "**/.mypy_cache": true,
-    "**/.pytest_cache": true,
-    "**/.ruff_cache": true,
-    "**/.nuitka": true,
-    "**/.typing": true,
-    "**/*.egg-info": true,
-    "**/htmlcov": true
   },
 
   // 4. Git: не считать untracked-файлы вперемешку с изменениями в огромном дереве.

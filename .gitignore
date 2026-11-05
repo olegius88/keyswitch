@@ -1,15 +1,3 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.nuitka/
-.typing/
-.venv/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
 build/
 dist/
 *.deb

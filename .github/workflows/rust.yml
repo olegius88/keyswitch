@@ -102,6 +102,9 @@ jobs:
         timeout-minutes: 15
         shell: pwsh
         run: |
+          # The Windows 11 Arm image opens the host of web apps at sign-in, and it holds the foreground.
+          Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
           $list = New-WinUserLanguageList -Language "en-US"
           $list.Add("ru-RU")
           Set-WinUserLanguageList -LanguageList $list -Force
