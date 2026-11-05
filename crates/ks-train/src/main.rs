@@ -5,6 +5,9 @@
 //! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
 //! `ks-train mixed --tree <root> --messages <file> --count N --output <file> [--model <file>] [--kinds k,k] [--seed S] [--russian-share R] [--typo-rate R] [--prefix-rate R --code <file>] [--edit] [--jobs N]`
 //! `ks-train devchat --tree <root> --split dev|test --directory <folder> --candidate <file> [--released <file>] [--baseline <file>] --output <file> [--ledger <folder>] [--jobs N]`
+//! `ks-train compare --tree <root> --corpus <folder> --artifact NAME=PATH... [--output <file>] [--jobs N]`
+//! `ks-train verify --tree <root> [--receipt <file> --artifact <file> --prefix <file> --evidence-only] [--report <file>]`
+//! `ks-train promote --tree <root> --candidate <folder> --prefix-candidate <folder> --corpus <folder> --report <file> --released <folder> --devchat <folder> [--check-only] [--jobs N]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -69,6 +72,9 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if matches!(arguments.first().map(String::as_str), Some("compare" | "verify" | "promote")) {
+        std::process::exit(cycle_command(&arguments));
     }
     if matches!(arguments.first().map(String::as_str), Some("capture" | "mixed" | "devchat")) {
         std::process::exit(typing_command(&arguments));
@@ -211,6 +217,78 @@ fn typing_command(arguments: &[String]) -> i32 {
             println!("{summary}");
             0
         }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// The steps of a model cycle after a fit.
+fn cycle_command(arguments: &[String]) -> i32 {
+    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let root = required("--tree");
+    let resource_dir = root.join("resources");
+    let jobs: usize = option(arguments, "--jobs").map_or(4, |value| value.parse().expect("--jobs is a number"));
+    let ledger_root = root.join(".t/reliable-release-2026-09-12");
+    let ledger = option(arguments, "--ledger").map_or_else(|| ledger_root.join("context-action-test-ledger"), PathBuf::from);
+    let devchat_ledger = option(arguments, "--devchat-ledger").map_or_else(|| ledger_root.join("devchat-test-ledger"), PathBuf::from);
+    let result: Result<i32, String> = match arguments[0].as_str() {
+        "verify" => (|| {
+            let path_of = |name: &str, default: PathBuf| option(arguments, name).map_or(default, PathBuf::from);
+            let receipt = ks_train::corpus::read_json(&path_of("--receipt", root.join("model/context_v3/release-receipt.json")))?;
+            let (artifact, prefix) = (path_of("--artifact", resource_dir.join("models/context_policy_v1.json")), path_of("--prefix", resource_dir.join("models/prefix_policy_v1.json")));
+            let models = resource_dir.join("models");
+            if arguments.iter().any(|argument| argument == "--evidence-only") {
+                ks_train::receipt::validate_evidence(&receipt, &artifact, &root, &prefix, &models)?;
+            } else {
+                ks_train::receipt::validate_receipt(&receipt, &artifact, &root, &prefix, &models)?;
+            }
+            if let Some(path) = option(arguments, "--report") {
+                let report = ks_train::corpus::read_json(Path::new(path))?;
+                ks_train::receipt::validate_full_report(&report, &report["identity"])?;
+                println!("the private cases give the counts of the report");
+            }
+            println!("{} verified", receipt["model_version"].as_str().unwrap_or(""));
+            Ok(0)
+        })(),
+        "compare" => (|| {
+            let artifacts: Vec<(String, PathBuf)> = all_of(arguments, "--artifact").into_iter().map(|text| { let (name, path) = text.split_once('=').expect("an artifact is NAME=PATH"); (name.to_owned(), PathBuf::from(path)) }).collect();
+            let options = ks_train::corpus::read_json(&root.join("model/context_v3/recipe.json"))?;
+            let inputs = ks_train::fit::load_inputs(&root, &resource_dir, &required("--corpus"), options, &ledger)?;
+            let report = ks_train::compare::compare(&inputs, &artifacts, jobs)?;
+            if let Some(path) = option(arguments, "--output") {
+                let format = ks_text::JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() };
+                std::fs::write(path, ks_text::json_dumps(&report, &format) + "\n").map_err(|error| error.to_string())?;
+            }
+            for (split, profiles) in report.as_object().into_iter().flatten() {
+                for (profile, pairs) in profiles.as_object().into_iter().flatten() {
+                    for (name, scored) in pairs.as_object().into_iter().flatten() {
+                        println!("{split} {profile} {name} ({}): {}", scored["model_version"].as_str().unwrap_or(""), scored["by_class"]["all"]);
+                    }
+                }
+            }
+            Ok(0)
+        })(),
+        _ => {
+            let (candidate, prefix_candidate, corpus, report, released, devchat) = (required("--candidate"), required("--prefix-candidate"), required("--corpus"), required("--report"), required("--released"), required("--devchat"));
+            ks_train::promote::promote(&ks_train::promote::PromoteRequest {
+                root: &root,
+                candidate: &candidate,
+                prefix_candidate: &prefix_candidate,
+                corpus: &corpus,
+                report: &report,
+                released_rows: &released,
+                devchat_directory: &devchat,
+                ledger: &ledger,
+                devchat_ledger: &devchat_ledger,
+                check_only: arguments.iter().any(|argument| argument == "--check-only"),
+                jobs,
+            })
+        }
+    };
+    match result {
+        Ok(code) => code,
         Err(error) => {
             eprintln!("{error}");
             1

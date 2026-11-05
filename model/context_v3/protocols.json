@@ -1,0 +1,66 @@
+{
+ "sequence": {
+  "version": 4,
+  "document_cap_per_group": 512,
+  "selection": "hash-ranked documents and one hash-ranked focus per document/group, before screenability or scoring; no replacement of unsupported rows",
+  "window": "before + original + after; spacing and literal_tail are overlapping metadata and are never appended",
+  "trim": "at a full 96-character left or 64-character right clip beginning/ending inside letters, remove only that outer letter fragment; preserve focus and adjacent whitespace/punctuation",
+  "keyboard": "US/RU key pairs including Shift; natural script changes and focus first-letter layout are explicit user switches; subsequent glyphs follow the live backend group",
+  "intervention": "Type leading focus nonletters in intended layouts; explicitly select the intended or opposite layout immediately before the first letter of the declared US/RU group. Wrong mode must produce a different observed glyph at that letter. Nonletter-only focus has no wrong intervention.",
+  "punctuation": "physical keys chosen in intended layout, including ambiguous literal signs; no extra terminator or synthetic idle correction",
+  "profiles": [
+   "portable",
+   "reference_hunspell"
+  ],
+  "settings_modes": {
+   "early_off": "context assist; early switch, learning, history, field reading and manual-layout cooldown disabled; context tracking enabled; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word, exactly as in the default mode, so the completed-word decision reaches a document that ends without a boundary key",
+   "default": "application defaults with the early switch enabled explicitly, the configuration a user gets by turning that feature on: early switch from four letters, pause correction after 1.5 s, manual-layout protection, learning, context assist without field reading; 50 ms before every key-down, 30 ms before every key-up, engine timer callbacks after every key, 1.7 s idle with timer callbacks after every completed word; a layout selection is a manual switch only when it changes the live backend group"
+  },
+  "models": "candidate and baseline context and prefix artifacts are injected explicitly; installed context and prefix bytes are never loaded; boundary, orthotactic and intent models are the pinned packaged files",
+  "pairs": {
+   "early_off": [
+    "baseline: baseline context + baseline prefix",
+    "candidate: candidate context + candidate prefix"
+   ],
+   "default": [
+    "baseline: baseline context + baseline prefix",
+    "candidate: candidate context + candidate prefix",
+    "candidate_context_baseline_prefix: ablation, reported but not gated"
+   ]
+  },
+  "acceptance": "every gate must hold for the candidate pair against the baseline pair in both settings modes and both lexical profiles",
+  "identifier_lexicon": "src/keyswitch/resources/identifiers.json is lexical evidence for both readings of a token in the engine, the trainer and this replay alike; technical holdout rows therefore measure commands present in the shipped index, and behaviour on identifiers outside it is reported by a separate lexicon-blind development diagnostic",
+  "restoration_gate": "net outcome: candidate exactly_restored minus correct_text_corruptions must reach the baseline pair's exactly_restored minus correct_text_corruptions, and the candidate must not corrupt more correct rows than that pair; the model decides what to convert, and it is judged by the balance rather than by a ban on ever being wrong",
+  "scope": "in-process EditorBackend integration; no IME, native key loss, real focus races, actual injection acknowledgement, Enter/Tab submission or OS E2E proof; natural KEEP labels are not reviewed keyboard-intent ground truth"
+ },
+ "receipt": {
+  "version": 4,
+  "document_cap_per_group": 512,
+  "profiles": [
+   "portable",
+   "reference_hunspell"
+  ],
+  "window": "bounded_sentence",
+  "backend": "simulated_editor",
+  "physical_key_period_ms": 100,
+  "trim_clipped_token_edges": true,
+  "native_execution_verified": false,
+  "test_access": "sealed-before-test",
+  "fresh_fit_reproducibility_verified": false,
+  "source_protocol_sha256": "5a16cb2d18528fad2faad36f4016e271f445b5b09ceadaa36d07c21cb3115e1b",
+  "wrong_intervention": "first_declared_group_letter_after_literal_focus_prefix",
+  "settings_modes": [
+   "early_off",
+   "default"
+  ],
+  "default_key_down_ms": 50,
+  "default_key_up_ms": 30,
+  "default_word_idle_ms": 1700,
+  "models": "explicit_context_and_prefix_pairs",
+  "acceptance": "candidate_pair_against_baseline_pair_in_both_modes_and_profiles",
+  "restoration_gate": "net_restorations_exactly_restored_minus_correct_text_corruptions_at_least_baseline",
+  "identifier_lexicon": "packaged_identifiers_json_as_lexical_evidence_for_both_readings"
+ },
+ "scope": "Sealed private-corpus test aggregates, the sealed developer-chat test's counts and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted.",
+ "audited_sequence_protocol_sha256": "5a16cb2d18528fad2faad36f4016e271f445b5b09ceadaa36d07c21cb3115e1b"
+}

@@ -20,6 +20,8 @@ pub mod mixed;
 pub mod physical;
 pub mod prefix;
 pub mod rows;
+pub mod promote;
+pub mod receipt;
 pub mod replay;
 pub mod selection;
 pub mod spans;

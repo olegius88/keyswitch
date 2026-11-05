@@ -4,8 +4,7 @@
 //! read before.
 use crate::corpus::{CorpusRow, DEVELOPMENT, checksum, load_rows, read_json};
 use crate::curricula::Counts;
-use crate::fit::readable;
-use crate::physical::{KEYS, PhysicalKey, hex, hex_digest, key_of};
+use crate::physical::{PhysicalKey, hex, hex_digest, key_of};
 use crate::replay::{Mode, Plan, Replayer, prefix_indexes};
 use crate::tools::{Lexicons, Tools, reference_models};
 use ks_context::VersionedPrefixModel;
@@ -343,28 +342,30 @@ fn test_membership(corpus: &Path) -> Result<Value, String> {
 }
 
 /// What must not change between the seal and the end of a replay.
-struct Identity {
-    value: Value,
-    key: String,
+pub struct Identity {
+    pub value: Value,
+    pub key: String,
 }
 
-fn evaluation_identity(request: &EvaluationRequest<'_>) -> Result<Identity, String> {
+pub fn evaluation_identity(request: &EvaluationRequest<'_>) -> Result<Identity, String> {
     let root = request.root;
     let membership = test_membership(request.corpus)?;
     let key = hex(&Sha256::digest(crate::artifact::canonical(&membership)));
     let runtime = crate::fit::provenance(root, &root.join("model/context_v3/recipe.json"))?;
     let value = json!({"schema_version": 1, "artifact_sha256": checksum(request.artifact)?, "candidate_seal_sha256": checksum(request.seal)?, "corpus_manifest_sha256": checksum(&request.corpus.join("manifest.json"))?,
         "test_membership": membership, "baseline_sha256": checksum(&root.join(BASELINE))?, "prefix_candidate_sha256": checksum(request.prefix)?, "prefix_candidate_seal_sha256": checksum(request.prefix_seal)?,
-        "prefix_baseline_path": PREFIX_BASELINE, "prefix_baseline_sha256": checksum(&root.join(PREFIX_BASELINE))?, "settings_modes": ["early_off", "default"], "runtime": runtime, "protocol": protocol()});
+        "prefix_baseline_path": PREFIX_BASELINE, "prefix_baseline_sha256": checksum(&root.join(PREFIX_BASELINE))?, "settings_modes": ["early_off", "default"], "runtime": runtime, "protocol": protocol(root)?});
     Ok(Identity { value, key })
 }
 
-/// The protocol a report states, in the words of the audited protocol.
-pub fn protocol() -> Value {
-    json!({"version": 4, "document_cap_per_group": SEQUENCE_DOCUMENT_CAP_PER_GROUP, "profiles": PROFILES, "settings_modes": ["early_off", "default"],
-        "pairs": {"early_off": ["baseline: baseline context + baseline prefix", "candidate: candidate context + candidate prefix"],
-                  "default": ["baseline: baseline context + baseline prefix", "candidate: candidate context + candidate prefix", "candidate_context_baseline_prefix: ablation, reported but not gated"]},
-        "acceptance": "every gate must hold for the candidate pair against the baseline pair in both settings modes and both lexical profiles"})
+/// The protocol a report states, in the words of the audited protocol, whose bytes its hash pins.
+pub fn protocol(root: &Path) -> Result<Value, String> {
+    let protocols = read_json(&root.join("model/context_v3/protocols.json"))?;
+    let sequence = protocols["sequence"].clone();
+    if protocols["audited_sequence_protocol_sha256"].as_str() != Some(hex(&Sha256::digest(crate::artifact::canonical(&sequence))).as_str()) {
+        return Err("sequence protocol changed; public receipt protocol must be reviewed".to_owned());
+    }
+    Ok(sequence)
 }
 
 /// `immutable_record`: create a record, or verify the exact existing bytes.
@@ -557,7 +558,8 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     let tools = Tools::new(root, resources.clone(), portable, BTreeSet::new())?;
     let rows = load_rows(request.corpus, split)?;
     let pairs = Pairs { candidate: request.artifact.to_path_buf(), baseline: root.join(BASELINE), prefix_candidate: request.prefix.to_path_buf(), prefix_baseline: root.join(PREFIX_BASELINE) };
-    let mut report = json!({"schema_version": 1, "split": split, "identity": identity.value, "protocol": protocol(), "promotion_passed": false});
+    let gate_policy = read_json(&root.join("model/context_v3/recipe.json"))?["gate_policy"].clone();
+    let mut report = json!({"schema_version": 1, "split": split, "identity": identity.value, "protocol": protocol(root)?, "gate_policy": gate_policy, "promotion_passed": false});
     let scored = score_sequences(root, &resources, &tools, &spelling, &rows, &pairs, request.jobs);
     let write_report = |report: &Value| -> Result<(), String> {
         std::fs::create_dir_all(request.output.parent().ok_or("a report outside a folder")?).map_err(|error| error.to_string())?;
@@ -590,6 +592,5 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
         report["scope"] = json!("development diagnostic; cannot promote a model");
     }
     write_report(&report)?;
-    let _ = (readable, KEYS.len());
     Ok(report)
 }
