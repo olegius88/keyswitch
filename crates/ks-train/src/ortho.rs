@@ -27,6 +27,7 @@ const AUTHORED_KEYS: [&str; 25] = [".dist", "aghbdtn", "ayfath", "bild", "cjpdjy
 const TRAIN: &str = "train";
 const TEST: &str = "test";
 const LEXICON: &str = "lexicon";
+const EVIDENCE_SCHEMA: i64 = 2;
 const VERSION_HASH_CHARACTERS: usize = 12;
 const CHOICE_HEX_DIGITS: usize = 8;
 const UNIGRAM_PSEUDO_COUNT: f64 = 0.5;
@@ -990,7 +991,7 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
                 let thresholds: Map<String, Value> = SCRIPTS.iter().map(|script| ((*script).to_owned(), json!(py_round_ndigits(*model.thresholds.get(script), SEALED_DECIMALS)))).collect();
                 let per_script = model.features.as_ref().ok_or("an artifact without features")?;
                 let features: Map<String, Value> = SCRIPTS.iter().map(|script| ((*script).to_owned(), Value::Object(per_script.get(script).iter().map(|(name, weight)| ((*name).to_owned(), json!(py_round_ndigits(*weight, SEALED_DECIMALS)))).collect()))).collect();
-                let seal = json!({"schema_version": 1, "stage": "sealed-before-test", "namespace": NAMESPACE, "model_version": payload["version"], "candidate_sha256": checksum(&candidate)?, "thresholds": thresholds, "feature_weights_nats": features, "feature_ties": ties, "config": inputs.settings.value, "provenance": provenance(root)?});
+                let seal = json!({"schema_version": EVIDENCE_SCHEMA, "stage": "sealed-before-test", "namespace": NAMESPACE, "model_version": payload["version"], "candidate_sha256": checksum(&candidate)?, "thresholds": thresholds, "feature_weights_nats": features, "feature_ties": ties, "config": inputs.settings.value, "provenance": provenance(root)?});
                 std::fs::write(&seal_path, canonical(&seal)).map_err(|error| error.to_string())?;
                 println!("{}", payload["version"].as_str().unwrap_or(""));
             }
@@ -1017,7 +1018,7 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
                 let recall = summed("recalled_types") as f64 / summed("positive_types").max(1) as f64;
                 let promotion = &inputs.settings.value["promotion"];
                 let passed = summed("negative_types") >= promotion["minimum_test_negatives"].as_i64().unwrap_or(0) && summed("false_types") <= promotion["maximum_test_false_conversions"].as_i64().unwrap_or(0) && recall >= promotion["minimum_recall"].as_f64().unwrap_or(1.0);
-                let report = json!({"schema_version": 1, "model_version": seal["model_version"], "seal_sha256": checksum(&seal_path)?, "candidate_sha256": checksum(&candidate)?, "thresholds": seal["thresholds"], "corpus_test": corpus, "recall": py_round_ndigits(recall, RECALL_DECIMALS), "promotion_passed": passed,
+                let report = json!({"schema_version": EVIDENCE_SCHEMA, "model_version": seal["model_version"], "seal_sha256": checksum(&seal_path)?, "candidate_sha256": checksum(&candidate)?, "thresholds": seal["thresholds"], "corpus_test": corpus, "recall": py_round_ndigits(recall, RECALL_DECIMALS), "promotion_passed": passed,
                     "evidence_scope": "synthetic wrong-layout renderings of frozen CC0 corpus tokens, cut as the engine cuts them and limited to what it serves the model: keys of the us/ru pair, word-shaped, unknown to the layout's dictionary, with a word as the replacement; one type is (direction, keys, case shape)"});
                 std::fs::write(&report_path, canonical(&report)).map_err(|error| error.to_string())?;
                 println!("promotion passed: {passed}");
