@@ -283,3 +283,37 @@ fn a_pause_from_telegram_is_kept_across_requests() {
     assert_eq!(store.get_f64(&format!("telegram_cooldown:{BOT}")), 1038.0);
     assert!(client.call("getMe", json!({})).unwrap_err().to_string().contains("временно ограничил"));
 }
+
+#[test]
+fn list_and_fetch_save_what_the_catalog_names_and_nothing_else() {
+    use logcourier::cli::{fetch_or_list_with, parse};
+    let dir = Dir::new();
+    let log = dir.0.join("app.log");
+    let mut config = config(&log);
+    config.sources[0].include_existing = true;
+    append(&log, "2026-11-04 12:00:00,000 0.66.1 INFO keyswitch: a\n");
+    let store = Store::open(&dir.0.join("data")).unwrap();
+    Collector::new(&store).scan(&config).unwrap();
+    let group = Group::default();
+    deliver(&store, &config, &group, &never()).unwrap();
+    let output = dir.0.join("out");
+    let options = |text: String| parse(&text.split_whitespace().map(str::to_owned).collect::<Vec<_>>()).unwrap();
+    let all = format!("--all-versions --output {}", output.display());
+    assert_eq!(fetch_or_list_with(&group, "list", CHAT, options(all.clone())).unwrap(), 0);
+    assert_eq!(fetch_or_list_with(&group, "fetch", CHAT, options(all.clone())).unwrap(), 0);
+    let saved: Vec<PathBuf> = std::fs::read_dir(&output).unwrap().map(|item| item.unwrap().path()).collect();
+    assert!(!saved.is_empty());
+    assert_eq!(fetch_or_list_with(&group, "fetch", CHAT, options(all.clone())).unwrap(), 0);
+    let current = format!("--keyswitch-version current --output {}", output.display());
+    assert_eq!(fetch_or_list_with(&group, "fetch", CHAT, options(current.clone())).unwrap(), 0);
+    assert_eq!(fetch_or_list_with(&group, "fetch", CHAT, options(current)).unwrap(), 0);
+    let later = format!("--all-versions --since 2999-01-01 --output {}", output.display());
+    assert_eq!(fetch_or_list_with(&group, "fetch", CHAT, options(later)).unwrap(), 0);
+    let bad = format!("--all-versions --since x --output {}", output.display());
+    assert!(fetch_or_list_with(&group, "fetch", CHAT, options(bad)).is_err());
+    std::fs::write(&saved[0], "changed").unwrap();
+    assert!(fetch_or_list_with(&group, "fetch", CHAT, options(all.clone())).is_err());
+    std::fs::remove_file(&saved[0]).unwrap();
+    group.files.borrow_mut().iter_mut().for_each(|file| file.1.push(0));
+    assert!(fetch_or_list_with(&group, "fetch", CHAT, options(all)).is_err());
+}

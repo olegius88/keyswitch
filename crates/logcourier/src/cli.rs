@@ -52,13 +52,14 @@ fn selection_directory(root: &Path, entries: &[Value], scope: Option<&str>) -> R
     Ok((root, Some(data)))
 }
 
-struct Options {
-    chat_id: Option<String>,
-    bot_id: Option<String>,
-    limit: i64,
-    version: Option<String>,
-    output: Option<PathBuf>,
-    since: Option<String>,
+/// The arguments of `list` and `fetch`.
+pub struct Options {
+    pub chat_id: Option<String>,
+    pub bot_id: Option<String>,
+    pub limit: i64,
+    pub version: Option<String>,
+    pub output: Option<PathBuf>,
+    pub since: Option<String>,
 }
 
 fn usage(message: &str) -> i32 {
@@ -66,7 +67,7 @@ fn usage(message: &str) -> i32 {
     2
 }
 
-fn parse(arguments: &[String]) -> std::result::Result<Options, String> {
+pub fn parse(arguments: &[String]) -> std::result::Result<Options, String> {
     let mut options = Options { chat_id: None, bot_id: None, limit: DEFAULT_LIST_LIMIT, version: Some("current".to_owned()), output: None, since: None };
     let (mut index, mut scope) = (0, false);
     while index < arguments.len() {
@@ -101,18 +102,26 @@ fn parse(arguments: &[String]) -> std::result::Result<Options, String> {
     Ok(options)
 }
 
-fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
-    let config = load_config(&data_directory())?;
+/// What is wrong with the arguments before anything is asked of Telegram.
+fn refusal(command: &str, options: &Options) -> Option<String> {
     if !(1..=MAX_LIST_LIMIT).contains(&options.limit) {
-        return Ok(usage(&format!("--limit должен быть от 1 до {MAX_LIST_LIMIT}")));
+        return Some(format!("--limit должен быть от 1 до {MAX_LIST_LIMIT}"));
     }
     if options.version.as_deref().is_some_and(|version| version != "current" && !is_version(version)) {
-        return Ok(usage("--keyswitch-version: ожидается версия, например 0.16.2, или current"));
+        return Some("--keyswitch-version: ожидается версия, например 0.16.2, или current".to_owned());
     }
     if command == "fetch" && options.output.is_none() {
-        return Ok(usage("the following arguments are required: --output"));
+        return Some("the following arguments are required: --output".to_owned());
     }
-    let chat_id = options.chat_id.filter(|chat| !chat.is_empty()).unwrap_or_else(|| config.chat_id.clone());
+    None
+}
+
+fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
+    let config = load_config(&data_directory())?;
+    if let Some(message) = refusal(command, &options) {
+        return Ok(usage(&message));
+    }
+    let chat_id = options.chat_id.clone().filter(|chat| !chat.is_empty()).unwrap_or_else(|| config.chat_id.clone());
     if chat_id.is_empty() {
         return Ok(usage("Укажите --chat-id или сохраните группу в настройках"));
     }
@@ -125,7 +134,12 @@ fn fetch_or_list(command: &str, options: Options) -> Result<i32> {
         return Ok(usage("Нет токена в системном хранилище или LOGCOURIER_BOT_TOKEN"));
     }
     let client = Telegram::new(&token)?;
-    let mut entries = list_entries(&client, &chat_id, options.limit.to::<usize>(), MAX_CATALOG_PAGES, options.version.as_deref())?;
+    fetch_or_list_with(&client, command, &chat_id, options)
+}
+
+/// `list` and `fetch` over a client: what the archives in the group are, and saving them.
+pub fn fetch_or_list_with(client: &dyn Client, command: &str, chat_id: &str, options: Options) -> Result<i32> {
+    let mut entries = list_entries(client, chat_id, options.limit.to::<usize>(), MAX_CATALOG_PAGES, options.version.as_deref())?;
     if command == "list" {
         println!("{}", pretty(&Value::Array(entries), false));
         return Ok(0);
@@ -232,4 +246,78 @@ pub fn entry() {
         }
     };
     std::process::exit(code);
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn words(text: &str) -> Vec<String> {
+        text.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn arguments_are_read_as_the_python_read_them() {
+        let options = parse(&words("--chat-id -1 --bot-id 2 --limit 3 --keyswitch-version 1.2.3 --output o --since 2026-01-01")).unwrap();
+        assert_eq!((options.chat_id.as_deref(), options.bot_id.as_deref(), options.limit), (Some("-1"), Some("2"), 3));
+        assert_eq!((options.version.as_deref(), options.since.as_deref()), (Some("1.2.3"), Some("2026-01-01")));
+        assert_eq!(options.output, Some(PathBuf::from("o")));
+        assert_eq!(parse(&words("--all-versions")).unwrap().version, None);
+        for wrong in ["--limit x", "--limit", "--other 1", "--all-versions --keyswitch-version 1.2.3", "--keyswitch-version 1.2.3 --all-versions"] {
+            assert!(parse(&words(wrong)).is_err(), "{wrong}");
+        }
+        assert_eq!(parse_output(&words("fetch --output o")), Some(PathBuf::from("o")));
+        assert_eq!(parse_output(&words("fetch")), None);
+    }
+
+    #[test]
+    fn what_is_refused_before_telegram_is_asked() {
+        let options = |text: &str| parse(&words(text)).unwrap();
+        assert!(refusal("list", &options("")).is_none());
+        assert!(refusal("list", &options("--limit 0")).unwrap().starts_with("--limit"));
+        assert!(refusal("list", &options("--keyswitch-version x")).unwrap().starts_with("--keyswitch-version"));
+        assert!(refusal("list", &options("--keyswitch-version current")).is_none());
+        assert!(refusal("fetch", &options("")).unwrap().contains("--output"));
+        assert!(refusal("fetch", &options("--output o")).is_none());
+        assert_eq!(usage("x"), 2);
+    }
+
+    #[test]
+    fn commands_that_need_no_telegram() {
+        assert_eq!(run(&words("--version")).unwrap(), 0);
+        assert_eq!(run(&words("status")).unwrap(), 0);
+        assert_eq!(run(&words("nonsense")).unwrap(), 2);
+        assert_eq!(run(&words("list --other 1")).unwrap(), 2);
+        assert_eq!(run(&words("list --limit 0")).unwrap(), 2);
+    }
+
+    #[test]
+    fn a_selection_keeps_to_its_own_folder() {
+        let root = std::env::temp_dir().join(format!("lc-selection-{}", crate::timeutil::new_id()));
+        let entries = [json!({"bundle_id": "a", "sha256": "1", "size": 1})];
+        let (same, data) = selection_directory(&root, &entries, None).unwrap();
+        assert_eq!((same, data), (root.clone(), None));
+        let (folder, data) = selection_directory(&root, &entries, Some("current")).unwrap();
+        let data = data.unwrap();
+        assert!(folder.starts_with(&root));
+        std::fs::write(folder.join("selection.json"), &data).unwrap();
+        assert!(selection_directory(&root, &entries, Some("current")).is_ok());
+        std::fs::write(folder.join("selection.json"), "other").unwrap();
+        assert!(selection_directory(&root, &entries, Some("current")).is_err());
+        std::fs::remove_file(folder.join("selection.json")).unwrap();
+        std::fs::write(folder.join("foreign"), "x").unwrap();
+        assert!(selection_directory(&root, &entries, Some("current")).is_err());
+        std::fs::remove_file(folder.join("foreign")).unwrap();
+        #[cfg(unix)]
+        {
+            let link = folder.join("selection.json");
+            std::os::unix::fs::symlink("/nonexistent", &link).unwrap();
+            assert!(selection_directory(&root, &entries, Some("current")).is_err());
+            std::fs::remove_file(&link).unwrap();
+            std::fs::remove_dir(&folder).unwrap();
+            std::os::unix::fs::symlink(&root, &folder).unwrap();
+            assert!(selection_directory(&root, &entries, Some("current")).is_err());
+        }
+    }
 }
