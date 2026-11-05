@@ -10,7 +10,11 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::glib;
 use ks_engine::rule_editor::RuleDraft;
-use ks_config::learning::{RuleAction, RuleMatch};
+use ks_config::history::{HistoryEntry, HistoryStore};
+use ks_config::learning::{LearnedRule, LearningStore, RuleAction, RuleMatch};
+use ks_engine::engine::EngineSnapshot;
+use ks_updates::{UpdatePhase, UpdateSnapshot};
+use serde_json::json;
 use ks_linux::gtk_app;
 
 fn every_widget(widget: &gtk::Widget, found: &mut Vec<gtk::Widget>) {
@@ -151,6 +155,50 @@ fn walk_everything() -> Result<(), String> {
     Ok(())
 }
 
+fn window_calls() {
+    let _ = gtk_app::with_window_result(|window| {
+        window.toast("проба");
+        window.apply_engine_snapshot(&EngineSnapshot { enabled: false, ..EngineSnapshot::default() });
+        window.apply_engine_snapshot(&EngineSnapshot { enabled: true, last_error: "ошибка".to_owned(), ..EngineSnapshot::default() });
+        for (path, value) in [
+            ("enabled", json!(false)),
+            ("enabled", json!(true)),
+            ("detection.confidence_threshold", json!(0.5)),
+            ("detection.confidence_threshold", json!("x")),
+            ("appearance.theme", json!("dark")),
+            ("appearance.theme", json!(5)),
+            ("hotkeys.convert_last", json!("Pause")),
+            ("nothing.at.all", json!(1)),
+        ] {
+            window.apply_setting_update(path, &value);
+        }
+        for phase in [UpdatePhase::Idle, UpdatePhase::Checking, UpdatePhase::Current, UpdatePhase::Available, UpdatePhase::Downloading, UpdatePhase::Installing, UpdatePhase::Error] {
+            for available in ["", "9.9.9"] {
+                window.apply_update_snapshot(&UpdateSnapshot { phase, message: "проба".to_owned(), current_version: "1".to_owned(), available_version: available.to_owned(), release_url: "https://example.invalid/".to_owned(), progress: 5 });
+            }
+        }
+        window.refresh_history();
+        window.refresh_rules();
+        window.refresh_models();
+        window.flush_pending_saves();
+    });
+    pump(50);
+}
+
+/// What the lists of the window show when there is something to show.
+fn seed() {
+    let history = HistoryStore::new(None, 200);
+    history.append(&HistoryEntry::create("ghbdtn", "привет", "firefox", 0.9)).unwrap();
+    history.append(&HistoryEntry::create("ghbdtn", "привет", "", 0.9)).unwrap();
+    let rules = LearningStore::new(None, None).unwrap();
+    let mut keep = LearnedRule::new("ntcn", 0, 1);
+    keep.action = RuleAction::Keep;
+    for rule in [LearnedRule::new("ghbdtn", 0, 1), keep] {
+        rules.add_rule(rule).unwrap();
+    }
+    let _ = rules.save();
+}
+
 fn application_calls() {
     for theme in ["dark", "light", "system"] {
         gtk_app::set_theme(theme);
@@ -178,7 +226,13 @@ fn main() {
     unsafe {
         std::env::set_var("KEYSWITCH_CONFIG_DIR", folder.join("config"));
         std::env::set_var("KEYSWITCH_DATA_DIR", folder.join("data"));
+        // No program to open a folder or a page with: a button that opens one reports that it could not.
+        std::env::set_var("XDG_DATA_HOME", folder.join("xdg"));
+        std::env::set_var("XDG_DATA_DIRS", folder.join("xdg"));
+        std::env::set_var("XDG_CONFIG_HOME", folder.join("xdg"));
+        std::env::set_var("XDG_CONFIG_DIRS", folder.join("xdg"));
     }
+    seed();
     std::thread::spawn(|| {
         std::thread::sleep(Duration::from_secs(150));
         println!("E2E_FAILED: the walk did not end");
@@ -188,6 +242,7 @@ fn main() {
     let failure = failed.clone();
     glib::timeout_add_local_once(Duration::from_millis(500), move || {
         pump(200);
+        window_calls();
         if let Err(error) = walk_everything() {
             println!("E2E_FAILED: {error}");
             failure.set(true);
