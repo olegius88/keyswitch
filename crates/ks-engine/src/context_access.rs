@@ -180,3 +180,96 @@ impl FieldReader for PlatformFieldReader {
         self.state().status.clone()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+
+    type Answer = Result<Option<FieldContext>, ReaderFailure>;
+
+    struct Scripted {
+        answers: Arc<Mutex<VecDeque<Answer>>>,
+        closed: Arc<AtomicU64>,
+    }
+
+    impl ManagedFieldReader for Scripted {
+        fn read(&self, _application: &str, _window: i64) -> Answer {
+            self.answers.lock().unwrap().pop_front().unwrap_or(Ok(None))
+        }
+        fn close(&mut self) {
+            self.closed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn failure(permanent: bool) -> ReaderFailure {
+        ReaderFailure { failure_type: "T", failure_name: "N", failure_code: Some(7), permanent }
+    }
+
+    #[test]
+    fn a_reader_opens_fails_retries_and_closes() {
+        let answers: Arc<Mutex<VecDeque<Answer>>> = Arc::default();
+        let closed = Arc::new(AtomicU64::new(0));
+        let opens: Arc<Mutex<VecDeque<Result<(), ReaderFailure>>>> = Arc::default();
+        let now = Arc::new(AtomicU64::new(0));
+        let clock_now = now.clone();
+        let clock: Clock = Arc::new(move || clock_now.load(Ordering::SeqCst).to::<f64>());
+        let (factory_answers, factory_closed, factory_opens) = (answers.clone(), closed.clone(), opens.clone());
+        let factory: ReaderFactory = Arc::new(move || {
+            factory_opens.lock().unwrap().pop_front().unwrap_or(Ok(()))?;
+            let opened: Box<dyn ManagedFieldReader> = Box::new(Scripted { answers: factory_answers.clone(), closed: factory_closed.clone() });
+            Ok(opened)
+        });
+        let reader = PlatformFieldReader::new(factory, clock);
+        assert_eq!(reader.status(), "not_requested");
+        assert!(reader.read("", 1).is_none() && reader.read("app", 0).is_none());
+
+        // An opening that fails for now, and the attempts that wait for their time.
+        opens.lock().unwrap().push_back(Err(failure(false)));
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(reader.diagnostics()["failure_stage"], "initialization");
+        assert_eq!((&reader.diagnostics()["failure_name"], &reader.diagnostics()["failure_code"]), (&json!("N"), &json!(7)));
+        assert!(reader.retry_diagnostics()["after_ms"].is_i64());
+        assert!(reader.read("app", 1).is_none());
+        now.store(1000, Ordering::SeqCst);
+
+        // A text, then a field it cannot read, then a failure in the read, which closes the old reader on the next try.
+        answers.lock().unwrap().push_back(Ok(Some(FieldContext::new("app", "1"))));
+        assert!(reader.read("app", 1).is_some());
+        assert_eq!(reader.status(), "available");
+        assert!(reader.diagnostics().contains_key("last_read_ms"));
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(reader.status(), "unsupported_field");
+        answers.lock().unwrap().push_back(Err(failure(false)));
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(reader.diagnostics()["failure_stage"], "read");
+        now.store(2000, Ordering::SeqCst);
+        answers.lock().unwrap().push_back(Ok(Some(FieldContext::new("app", "1"))));
+        assert!(reader.read("app", 1).is_some());
+        assert_eq!(closed.load(Ordering::SeqCst), 1);
+
+        // A failure that lasts: no more attempts, whatever the clock says.
+        answers.lock().unwrap().push_back(Err(failure(true)));
+        assert!(reader.read("app", 1).is_none());
+        now.store(100_000, Ordering::SeqCst);
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(reader.retry_diagnostics()["after_ms"], Value::Null);
+        reader.close();
+        reader.close();
+        assert_eq!(reader.status(), "not_requested");
+        assert_eq!(closed.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_password_field_the_compositor_knows_is_never_read() {
+        let factory: ReaderFactory = Arc::new(|| Err(failure(true)));
+        let reader = PlatformFieldReader::new(factory, Arc::new(|| 0.0)).with_password_focus(Arc::new(|window| window == 5));
+        let field = reader.read("app", 5).unwrap();
+        assert!(field.sensitive && field.role == FieldRole::Password && field.source == "compositor");
+        assert!(reader.read("app", 6).is_none());
+        assert!(!reader.diagnostics().is_empty());
+    }
+}
