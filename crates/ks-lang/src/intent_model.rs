@@ -386,12 +386,6 @@ impl LinearNgramModel {
         manifest.get("metadata").cloned().unwrap_or_else(|| Value::Object(serde_json::Map::new()))
     }
 
-    /// Bytes of the file held in memory.
-    #[must_use]
-    pub fn resident_bytes(&self) -> usize {
-        self.data.len()
-    }
-
     /// `weights[bucket]`.
     #[must_use]
     pub fn weight(&self, bucket: usize) -> i16 {

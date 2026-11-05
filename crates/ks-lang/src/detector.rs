@@ -47,6 +47,7 @@ pub struct ProtectedTokens {
 }
 
 impl ProtectedTokens {
+
     /// The tokens, in no particular order.
     pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.tokens.iter().map(String::as_str)
@@ -555,6 +556,21 @@ fn looks_like_protected_token(token: &str, protected_tokens: &ProtectedTokens) -
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_and_tokens_read_from_a_folder() {
+        let error = DetectorError::from(LoadError::value("bad"));
+        assert_eq!(error.to_string(), "bad");
+        let folder = std::env::temp_dir().join(format!("ks-tokens-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        assert!(ProtectedTokens::load(&folder).is_empty());
+        std::fs::write(folder.join("protected_tokens.txt"), [0xff_u8, 0xfe]).unwrap();
+        assert!(ProtectedTokens::load(&folder).is_empty());
+        std::fs::write(folder.join("protected_tokens.txt"), "npm\n").unwrap();
+        let tokens = ProtectedTokens::load(&folder);
+        assert_eq!((tokens.len(), tokens.sorted()), (1, vec!["npm"]));
+        assert_eq!(script_of('1'), 0);
+    }
 
     fn guard(token: &str) -> bool {
         looks_like_protected_token(token, &ProtectedTokens::from_text("# c\nNPM\n\n  Docker \n"))

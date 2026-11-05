@@ -111,6 +111,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_kind_of_failure_has_its_python_name() {
+        let path = Path::new("x");
+        for (kind, name) in [
+            (io::ErrorKind::NotFound, "FileNotFoundError"),
+            (io::ErrorKind::PermissionDenied, "PermissionError"),
+            (io::ErrorKind::IsADirectory, "IsADirectoryError"),
+            (io::ErrorKind::NotADirectory, "NotADirectoryError"),
+            (io::ErrorKind::Other, "OSError"),
+        ] {
+            let error = LoadError::os(&io::Error::new(kind, "why"), path);
+            assert_eq!((error.name, error.message.as_str()), (name, "why"));
+            assert_eq!(error.to_string(), "why");
+        }
+    }
+
+    #[test]
     fn os_errors_read_like_python() {
         let path = Path::new("/nonexistent-ks-lang/file");
         let error = read_all(path).unwrap_err();

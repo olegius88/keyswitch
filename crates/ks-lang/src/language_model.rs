@@ -455,12 +455,6 @@ impl LanguageModel {
         (unigrams.finish(i64::saturating_add), bigrams.finish(i64::saturating_add))
     }
 
-    /// Compatibility helper retained for callers and focused tests.
-    #[must_use]
-    pub fn _read_arpa_unigrams(path: &Path) -> WordTable {
-        Self::_read_arpa(path).0
-    }
-
     /// `self.bigrams.get((left, right), 0)`.
     #[must_use]
     pub fn bigram(&self, left: &str, right: &str) -> i64 {

@@ -160,16 +160,6 @@ impl PackedGrams {
         })
     }
 
-    /// The bytes of the two arrays, for the record.
-    #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        self.keys.len()
-            + match &self.values {
-                GramValues::Small(values) => values.len() * 2,
-                GramValues::Int(values) => values.len() * 4,
-                GramValues::Float(values) => values.len() * 8,
-            }
-    }
 }
 
 /// A gram table of a channel: packed, or, where packing does not fit, a sorted table of the integers.
@@ -255,9 +245,6 @@ impl GramTable {
         }
     }
 }
-
-/// `pack_channels(model)`: the channels of a loaded model are packed already.
-pub fn pack_channels(_model: Option<&mut OrthoModel>) {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

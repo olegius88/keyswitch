@@ -105,6 +105,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_file_above_the_limit_and_too_many_entries_are_refused() {
+        let folder = std::env::temp_dir().join(format!("ks-identifiers-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let big = folder.join("big.json");
+        std::fs::write(&big, vec![b' '; IDENTIFIER_LEXICON_MAX_BYTES + 1]).unwrap();
+        assert!(IdentifierLexicon::load(&big).is_err());
+        let many: Vec<String> = (0..=IDENTIFIER_LEXICON_MAX_ENTRIES).map(|_| "\"a\"".to_owned()).collect();
+        std::fs::write(&big, format!("{{\"schema_version\":1,\"name\":\"x\",\"identifiers\":[{}]}}", many.join(","))).unwrap();
+        assert!(IdentifierLexicon::load(&big).is_err());
+    }
+
+    #[test]
     fn the_shape_of_an_identifier() {
         assert!(is_identifier("htop") && is_identifier("a12") && is_identifier(&"a".repeat(64)));
         assert!(!is_identifier("ab") && !is_identifier("1ab") && !is_identifier("Abc") && !is_identifier("abc\n"));

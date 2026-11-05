@@ -288,6 +288,17 @@ pub fn early_switch_decision(
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_empty_word_is_no_word_and_a_source_without_a_dictionary_has_no_words() {
+        let table = WordTable::from_pairs([("да", 5)]);
+        let index = PrefixIndex::new(["", "да"], table);
+        assert!(!index.is_empty());
+        assert_eq!(index.len(), 1);
+        assert_eq!(hunspell_dictionary_path("Hunspell: /nonexistent/x.dic; other"), None);
+        assert_eq!(hunspell_dictionary_path("Hunspell: /etc/hostname"), None);
+        assert!(dictionary_stems(Path::new("/nonexistent/x.dic"), 10).is_empty());
+    }
+
     fn word_score(known: bool) -> WordScore {
         WordScore { value: 0.0, known, frequency: 0, gram_ratio: 0.0, exact: false, spell_known: false, ngram_score: 0.0, invalid_ratio: 0.0, raw_ngram_score: 0.0 }
     }
