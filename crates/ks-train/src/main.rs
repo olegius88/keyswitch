@@ -22,6 +22,7 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
+//! `ks-train retired boundary-v1|context-v2 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -121,6 +122,9 @@ fn main() {
             std::process::exit(1);
         }
         return;
+    }
+    if arguments.first().map(String::as_str) == Some("retired") {
+        std::process::exit(retired_command(&arguments));
     }
     if arguments.first().map(String::as_str) == Some("archive") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
@@ -273,6 +277,31 @@ fn main() {
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// `ks-train retired <family> --tree <root> [--replay]`.
+fn retired_command(arguments: &[String]) -> i32 {
+    use ks_train::retired;
+    let root = PathBuf::from(option(arguments, "--tree").expect("--tree is required"));
+    let replaying = arguments.iter().any(|argument| argument == "--replay");
+    let result = match arguments.get(1).map(String::as_str) {
+        Some("boundary-v1") if replaying => retired::boundary_v1::replay(&root),
+        Some("boundary-v1") => retired::boundary_v1::verify(&root),
+        Some("context-v2") if replaying => retired::context_v2::replay(&root),
+        Some("context-v2") => retired::context_v2::verify(&root),
+        Some("context-corpus") => retired::context_v2::verify_corpus_receipt(&root),
+        other => Err(format!("unknown retired family: {other:?}")),
+    };
+    match result {
+        Ok(report) => {
+            println!("{}", ks_text::json_dumps(&report, &JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), ..JsonOptions::default() }));
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
         }
     }
 }

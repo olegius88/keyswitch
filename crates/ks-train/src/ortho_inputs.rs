@@ -21,6 +21,7 @@ use std::path::Path;
 const SOURCE: &str = "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz";
 const SOURCE_SHA256: &str = "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793";
 const PHRASE_NAMESPACE: &str = "keyswitch:context-v2:phrases-20260905";
+const PHRASE_SPLIT_BUCKETS: u64 = 100;
 const SPLIT_NAMESPACE: &str = "keyswitch:ortho-v1:served-split-g15";
 const DIRECTORY: &str = "model/ortho_v1";
 const PHRASES_PER_GROUP: usize = 4;
@@ -75,6 +76,7 @@ pub struct Phrase {
 pub struct Assigned<'a> {
     pub phrase: &'a Phrase,
     pub group: String,
+    pub split: &'static str,
 }
 
 /// `load_source`.
@@ -99,9 +101,14 @@ pub fn load_phrases(root: &Path) -> Result<Vec<Phrase>, String> {
     Ok(phrases.into_values().collect())
 }
 
-/// `assign`: identical and bounded single-token edits grouped; each group capped, by a hash, at a few phrases.
-pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
-    let eligible: Vec<&Phrase> = phrases.iter().filter(|item| { let length = item.text.chars().count(); (PHRASE_MIN_CHARACTERS..=PHRASE_MAX_CHARACTERS).contains(&length) && crate::boundary::canonical_tokens(&item.text).len() >= PHRASE_MIN_WORDS && !item.text.contains('\0') }).collect();
+fn phrase_is_eligible(item: &Phrase) -> bool {
+    let length = item.text.chars().count();
+    (PHRASE_MIN_CHARACTERS..=PHRASE_MAX_CHARACTERS).contains(&length) && crate::boundary::canonical_tokens(&item.text).len() >= PHRASE_MIN_WORDS && !item.text.contains('\0')
+}
+
+/// Identical and bounded single-token edits grouped: each group under its lowest phrase, members in order of identifier.
+fn phrase_groups(phrases: &[Phrase]) -> BTreeMap<usize, Vec<&Phrase>> {
+    let eligible: Vec<&Phrase> = phrases.iter().filter(|item| phrase_is_eligible(item)).collect();
     let mut parents: Vec<usize> = (0..eligible.len()).collect();
     fn root(parents: &mut [usize], mut index: usize) -> usize {
         while index != parents[index] {
@@ -140,14 +147,60 @@ pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
     for (index, item) in eligible.iter().enumerate() {
         grouped.entry(root(&mut parents, index)).or_default().push(item);
     }
+    grouped
+}
+
+/// `assign`: each group capped, by a hash, at a few phrases.
+pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
     let mut output = Vec::new();
-    for (group_index, mut members) in grouped {
-        let identifier = format!("tatoeba:{}", eligible[group_index].identifier);
+    for (_, mut members) in phrase_groups(phrases) {
+        let identifier = format!("tatoeba:{}", members[0].identifier);
+        let split = phrase_split(&identifier);
         members.sort_by_cached_key(|item| hex_digest(&format!("{PHRASE_NAMESPACE}:sample:{}", item.identifier)));
-        output.extend(members.into_iter().take(PHRASES_PER_GROUP).map(|phrase| Assigned { phrase, group: identifier.clone() }));
+        output.extend(members.into_iter().take(PHRASES_PER_GROUP).map(|phrase| Assigned { phrase, group: identifier.clone(), split }));
     }
     output.sort_by_key(|item| item.phrase.identifier);
     output
+}
+
+/// The split of a phrase family, decided by its name alone before anything looks at a model.
+fn phrase_split(group: &str) -> &'static str {
+    let digest = hex_digest(&format!("{PHRASE_NAMESPACE}:{group}"));
+    let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % PHRASE_SPLIT_BUCKETS;
+    match bucket {
+        0..60 => "train",
+        60..70 => "development",
+        70..80 => "calibration",
+        80..90 => "test",
+        _ => "reserve",
+    }
+}
+
+/// The receipt of the phrase split: what was kept of the snapshot and how it fell, without reading any model.
+pub fn assignment_report(phrases: &[Phrase]) -> serde_json::Map<String, Value> {
+    let assigned = assign(phrases);
+    let eligible = phrases.iter().filter(|item| phrase_is_eligible(item)).count();
+    let groups = phrase_groups(phrases);
+    let mut groups_by_split: BTreeMap<&str, usize> = BTreeMap::new();
+    for members in groups.values() {
+        *groups_by_split.entry(phrase_split(&format!("tatoeba:{}", members[0].identifier))).or_default() += 1;
+    }
+    let (mut rows_by_split, mut locale_rows): (BTreeMap<&str, usize>, BTreeMap<&str, usize>) = (BTreeMap::new(), BTreeMap::new());
+    let mut lines = Vec::with_capacity(assigned.len());
+    for item in &assigned {
+        *rows_by_split.entry(item.split).or_default() += 1;
+        *locale_rows.entry(item.phrase.locale.as_str()).or_default() += 1;
+        lines.push(format!("{}\t{}\t{}", item.phrase.identifier, item.group, item.split));
+    }
+    let report = serde_json::json!({
+        "source_rows": phrases.len(), "eligible_rows": eligible, "retained_rows": assigned.len(), "groups": groups.len(),
+        "maximum_group_size": groups.values().map(Vec::len).max().unwrap_or(0), "group_cap": PHRASES_PER_GROUP,
+        "groups_by_split": groups_by_split, "rows_by_split": rows_by_split, "locale_rows": locale_rows,
+        "assignment_sha256": hex_digest(&lines.join("\n")), "split_namespace": PHRASE_NAMESPACE,
+        "model_loaded": false, "metrics_evaluated": false,
+        "grouping_scope": "normalized lexical text and bounded single-token edits; not all paraphrases",
+    });
+    report.as_object().cloned().unwrap_or_default()
 }
 
 /// `script_of`.

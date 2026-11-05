@@ -32,6 +32,7 @@ pub mod rows;
 pub mod promote;
 pub mod receipt;
 pub mod replay;
+pub mod retired;
 pub mod selection;
 pub mod small_tools;
 pub mod spans;
