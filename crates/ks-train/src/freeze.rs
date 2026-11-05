@@ -419,7 +419,7 @@ fn draw(text: &str) -> u64 {
 fn captured_tatoeba_identifiers(root: &Path) -> Result<HashSet<String>, String> {
     let file = std::fs::File::open(root.join(CAPTURED_TATOEBA)).map_err(|error| error.to_string())?;
     let mut bytes = Vec::new();
-    lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut bytes).map_err(|error| format!("{error:?}"))?;
+    xz2::read::XzDecoder::new(std::io::BufReader::new(file)).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
     let text = String::from_utf8(bytes).map_err(|error| error.to_string())?;
     Ok(text.split_inclusive('\n').filter(|line| line.chars().next().is_some_and(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4])))).map(|line| line.split('\t').next().unwrap_or("").to_owned()).collect())
 }

@@ -20,8 +20,10 @@ ks-replay.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 flate2.workspace = true
-# The captured question files are xz, the Tatoeba exports bz2 and the RPM indexes zstd: decoded here, in Rust.
-lzma-rs = "0.3"
+# The captured question files are xz (liblzma, built in, as they are written with the preset that made them), the Tatoeba
+# exports bz2 and the RPM indexes zstd.
+xz2 = { version = "0.1", features = ["static"] }
+regex = "1"
 bzip2-rs = "0.1"
 ruzstd = "0.8"
 sha1 = "0.10"

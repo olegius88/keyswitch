@@ -2,6 +2,9 @@
 //! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
+//! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
+//! `ks-train mixed --tree <root> --messages <file> --count N --output <file> [--model <file>] [--kinds k,k] [--seed S] [--russian-share R] [--typo-rate R] [--prefix-rate R --code <file>] [--edit] [--jobs N]`
+//! `ks-train devchat --tree <root> --split dev|test --directory <folder> --candidate <file> [--released <file>] [--baseline <file>] --output <file> [--ledger <folder>] [--jobs N]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -66,6 +69,9 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if matches!(arguments.first().map(String::as_str), Some("capture" | "mixed" | "devchat")) {
+        std::process::exit(typing_command(&arguments));
     }
     if matches!(arguments.first().map(String::as_str), Some("holdout" | "fitting")) {
         std::process::exit(freeze_command(&arguments));
@@ -146,6 +152,59 @@ fn freeze_command(arguments: &[String]) -> i32 {
         freeze::freeze_holdout(&request, &required("--source-root"), &treebanks, &source)
     } else {
         freeze::freeze_fitting(&request)
+    };
+    match result {
+        Ok(summary) => {
+            println!("{summary}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// The commands of the typing bench.
+fn typing_command(arguments: &[String]) -> i32 {
+    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let root = required("--tree");
+    let resource_dir = root.join("resources");
+    let jobs: usize = option(arguments, "--jobs").map_or(4, |value| value.parse().expect("--jobs is a number"));
+    let installed = resource_dir.join("models/context_policy_v1.json");
+    let result = match arguments[0].as_str() {
+        "capture" => ks_train::mixed::capture(&resource_dir, &required("--manifest"), &required("--messages"), &required("--model"), option(arguments, "--only"), arguments.iter().any(|argument| argument == "--verify"), jobs),
+        "mixed" => {
+            let number = |name: &str, default: f64| option(arguments, name).map_or(default, |value| value.parse().expect("a number"));
+            let kinds: Vec<&str> = option(arguments, "--kinds").unwrap_or("comment").split(',').collect();
+            let recipe = serde_json::json!({"seed": option(arguments, "--seed").unwrap_or("mixbench-v1"), "kinds": kinds, "count": number("--count", 0.0) as i64, "russian_share": number("--russian-share", 0.25),
+                "typo_rate": number("--typo-rate", 0.0), "prefix_rate": number("--prefix-rate", 0.0), "edit": arguments.iter().any(|argument| argument == "--edit")});
+            let code = option(arguments, "--code").map(PathBuf::from);
+            let model = option(arguments, "--model").map_or_else(|| installed.clone(), PathBuf::from);
+            ks_train::mixed::evaluate(&resource_dir, &required("--messages"), &recipe, code.as_deref(), &model, &required("--output"), jobs)
+        }
+        _ => {
+            let ledger_root = root.join(".t/reliable-release-2026-09-12");
+            let (directory, candidate, output) = (required("--directory"), required("--candidate"), required("--output"));
+            let released = option(arguments, "--released").map_or_else(|| installed.clone(), PathBuf::from);
+            let baseline = option(arguments, "--baseline").map_or_else(|| root.join("model/context_v3/baseline-context-v1.json"), PathBuf::from);
+            let ledger = option(arguments, "--ledger").map_or_else(|| ledger_root.join("devchat-test-ledger"), PathBuf::from);
+            let sequences = option(arguments, "--sequences-ledger").map_or_else(|| ledger_root.join("context-action-test-ledger"), PathBuf::from);
+            ks_train::mixed::devchat(&ks_train::mixed::DevchatRequest {
+                root: &root,
+                resource_dir: &resource_dir,
+                split: option(arguments, "--split").expect("--split is required"),
+                directory: &directory,
+                candidate: &candidate,
+                released: &released,
+                baseline: &baseline,
+                output: &output,
+                ledger: &ledger,
+                sequences_ledger: &sequences,
+                workers: jobs,
+            })
+            .map(|report| serde_json::json!({"floors": report["floors"], "messages": report["messages"]}))
+        }
     };
     match result {
         Ok(summary) => {

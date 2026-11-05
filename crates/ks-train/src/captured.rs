@@ -12,7 +12,7 @@ use ks_text::pystr;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use ContextAction::{Convert, Keep, Suggest, Wait};
 
@@ -101,7 +101,7 @@ fn before_origin_of(name: &str) -> BeforeOrigin {
 pub fn captured_rows(source: &CapturedSource) -> Result<Vec<(ContextEvidence, usize)>, String> {
     let file = std::fs::File::open(&source.path).map_err(|error| error.to_string())?;
     let mut text = Vec::new();
-    lzma_rs::xz_decompress(&mut std::io::BufReader::new(file), &mut text).map_err(|error| format!("{}: {error:?}", source.path.display()))?;
+    xz2::read::XzDecoder::new(std::io::BufReader::new(file)).read_to_end(&mut text).map_err(|error| format!("{}: {error}", source.path.display()))?;
     let positions: HashMap<&str, usize> = source.columns.iter().enumerate().map(|(index, name)| (name.as_str(), index)).collect();
     let mut rows = Vec::new();
     for line in text.lines() {
