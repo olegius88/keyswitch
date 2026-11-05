@@ -1,377 +1,64 @@
 # Проверка, сборка и выпуск
 
-Инструкция для текущего рабочего дерева. Все команды — из корня репозитория.
-Разделы проверок не делают коммит, push или GitHub Release. Последний раздел
-публикации меняет Git и внешнее состояние; запускайте его только после явного
-решения о выпуске и проверки состава изменений.
+Все команды — из корня репозитория. Разделы проверок не делают коммит, push или выпуск. Последний раздел меняет Git и внешнее состояние: запускайте его только после явного решения о выпуске.
 
-## Среда и быстрые проверки
-
-Linux reference CI использует Ubuntu 26.04 и системный Python 3.14, тот же,
-на котором работает пакет `.deb`. Сборки для Windows и macOS и их тесты
-в CI идут на Python 3.15.
-Минимальная версия Python из `pyproject.toml` не означает, что любая такая
-среда может побайтно воспроизвести обучение. Полные зависимости перечислены
-в [Tests workflow](../.github/workflows/tests.yml) и
-[runbook](intent-model-runbook.md#1-подготовить-эталонную-среду).
+## Быстрые проверки
 
 ```bash
 git status --short
-git diff --check
-./tools/install-typing-tools.sh .typing
-KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
-./tools/run-gui-test.sh -- ./tests/run_coverage.sh
-PYTHONPATH=src python3 tools/verify_context_model.py
-PYTHONPATH=src python3 tools/verify_context_v2.py
-PYTHONPATH=src python3 tools/verify_boundary_model.py
-PYTHONPATH=src python3 tools/verify_boundary_v2.py
-PYTHONPATH=src python3 tools/verify_prefix_model.py
+cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
+cargo test --release -p ks-replay
+for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do cargo check -p ks-win --target "$target"; done
 ```
 
-Набор содержит `tests/test_quality_ratchet.py`: установленная пара моделей и
-замороженные engine-replay не могут опуститься ниже полов из
-`tests/fixture_values/quality_floors.py` (порчи, запас восстановлений, калибровка,
-пороги, число раскрытых ожиданий). Лучший результат поднимает пол в том же PR;
-понижение пола — явное решение, которое PR должен обосновать.
+`ks-replay` прогоняет движок по записям поведения в `crates/ks-replay`: что нажато, что вернул бэкенд, какие события вышли. Тесты программы на Linux (`-p ks-linux`) нужны с файлами разработки GTK и под `xvfb-run dbus-run-session`, тесты на macOS (`-p ks-mac`) идут на Mac.
 
-`tests/run_coverage.sh` запускает каждый тестовый модуль в отдельном процессе
-(`tools/run_test_modules.py`), по числу ядер одновременно, крупные первыми;
-модули, которые делят дисплей, буфер обмена или AT-SPI, идут по очереди в одной
-дорожке. Каждый процесс пишет свой файл покрытия (`coverage run --parallel-mode`),
-`coverage combine` собирает их перед отчётом. Вывод модуля печатается целиком,
-когда он закончился; `KEYSWITCH_TEST_JOBS=1` возвращает запуск по одному. Модуль
-должен проходить в одиночку: путь к `tools/` и прочее он ставит себе сам, а не
-получает от модуля, который случайно шёл раньше в том же процессе. На раннере CI
-это сократило шаг покрытия с 14,7 до 8,3 минуты, а Windows-шаг тестов — с 9–13 до
-~3 минут.
+## Модели
 
-Модуль, который строит движок в каждом тесте, вызывает из `setUpModule`
-`share_engine_models()` (`tests/engine_models.py`). Конструктор движка грузит обе
-языковые модели с пакетным дополнением словаря и разбирает контекстную модель: словари
-уже кешированы, но каждый вызов заново нормализует слова дополнения (0,86 с на язык), а
-артефакт контекстной модели в 7,5 МБ разбирается заново (0,7 с) — модули тратили на это
-большую часть времени. В таком модуле `LanguageModel.load` с пакетным дополнением
-возвращает тот самый объект, который вернул бы кеш, а `ContextModel.try_load`
-установленного артефакта — новую модель из однажды разобранной; остальные вызовы идут как
-обычно, а тест, подменяющий загрузчик сам, получает свою подмену. Приложение грузит модели
-по-прежнему. Модули, закреплённые печатью контекстной пары, так не сделаны: их изменение
-требует нового цикла.
-
-`KEYSWITCH_TEST_PART=K/N` запускает часть K из N (`run_test_modules.py --part`):
-модули раздаются от крупных к мелким «змейкой» (1..N, N..1, …), размер файла заменяет
-время прогона. Часть оставляет данные в `.coverage` и отчёт не строит — ни одна часть
-не покрывает всё. В CI набор под покрытием занимает около 37 минут одного ядра и упирался
-в четыре ядра раннера (9,3 минуты из 9,5 всего прогона тестов и 12,2 выпуска), поэтому
-задание `verify` идёт двумя частями на двух раннерах (типизация и E2E — в первой), а
-задание `coverage` объединяет их данные и требует 100% по объединению.
-
-Реплеи последовательностей (`tools/evaluate_context_action_sequences.py`) и
-префиксного движка (`tools/evaluate_prefix_engine.py`) раскладывают независимые
-сочетания профиля, режима и варианта по процессам (fork), отчёт собирается в
-порядке последовательного прогона и совпадает с ним побайтно;
-`KEYSWITCH_EVALUATION_JOBS=1` выполняет их в одном процессе.
-
-100% line/branch coverage относится к [.coveragerc](../.coveragerc): несколько
-нативных Win32-модулей и Windows UI исключены. Windows CI имеет собственную
-область coverage, настоящий hook/SendInput E2E и проверку установленного EXE.
-Linux-моки и `mypy --platform win32` не заменяют эти нативные проверки.
-
-### GUI-тесты без системных порталов и sudo
-
-Штатный запускатель `tools/run-gui-test.sh` создаёт Xvfb, затем личную сессию
-D-Bus: активируемые службы получают именно тестовый `DISPLAY`. Общий файл
-`tools/gui-test-env.sh` задаёт `GDK_DEBUG=no-portals` для GTK4,
-`ADW_DISABLE_PORTAL=1` для отдельного клиента libadwaita, `GTK_USE_PORTAL=0`
-для совместимости и локальный GIO. Его используют coverage, исходный X11 E2E,
-проверки извлечённого пакета, AT-SPI, CI и релизный конвейер.
-
-В ограниченном процессе с `NoNewPrivs=1` setuid-помощник `fusermount3` не может
-получить права на монтирование: ненужная активация `xdg-document-portal`
-давала `Operation not permitted`. Одного `GTK_USE_PORTAL=0` недостаточно для
-GTK4/libadwaita. Это исправление тестового окружения, не отключение служб
-рабочего стола, не подавление stderr и не изменение прав `/dev/fuse`.
-Пароль sudo для проверок не нужен. Не переносите эти переменные в профиль
-пользователя или обычный запуск приложения.
-
-GTK-тесты и X11 E2E проверяют по D-Bus, что Desktop/Documents portal не
-активировались. Настоящие проверки клавиатуры, окна, курсора, выделения и
-паролей сохраняются; AT-SPI не отключается общим запускателем. Этот контур
-не проверяет интеграцию приложения с системным порталом выбора файлов.
-
-Основания: [GDK_DEBUG в GTK4](https://docs.gtk.org/gtk4/running.html#gdk-debug),
-[отдельный клиент libadwaita](https://github.com/GNOME/libadwaita/blob/main/src/adw-settings-impl-portal.c),
-[NoNewPrivs в ядре Linux](https://docs.kernel.org/userspace-api/no_new_privs.html).
-
-`verify_context_model.py` выбирает проверку по `feature_version` активного
-артефакта: для схемы 2 — исторический v1-report и hashes, для схемы 3 —
-отдельный acceptance receipt. `verify_context_v2.py` сохраняет доказательства
-отклонённого эксперимента и запрещает установку его кандидата; он не требует,
-чтобы любая будущая принятая модель совпадала с frozen v1 baseline.
-Это проверки сохранённых доказательств, а не новое обучение или полевая оценка.
-`PYTHONPATH=src python3 tools/verify_context_model.py --replay` выбирает
-протокол воспроизведения, предусмотренный для активной схемы.
-
-## Повторное обучение и проверка контекстных моделей
-
-Историческая context-v1 (схема признаков 2) использует оценки, полученные через
-`LanguageModel.load()`. Её повторное обучение требует reference-словарей и
-среды CI; переопределения моделей или пользовательские Hunspell-словари могут
-изменить результат. На произвольном компьютере быстрая проверка артефакта
-не равнозначна успешному replay. Следующие команды относятся к старым
-v1/v2-экспериментам и не доказывают воспроизводимость новых весов схемы 3:
+Обучение и проверка — в `ks-train`, подробности в [цикле обучения](model-cycle.md).
 
 ```bash
-PYTHONPATH=src python3 tools/train_context_model.py --verify
-PYTHONPATH=src python3 tools/verify_context_model.py
+cargo build --profile train -p ks-train
+K=target/train/ks-train
+$K verify --tree .                                # квитанция установленной пары, числа пересчитываются
+$K boundary --tree . --verify                     # модель границ байт в байт
+$K ortho --tree . --verify                        # орфографическая модель байт в байт
+$K ortho --tree . --inputs                        # её входные данные из замороженных источников
+$K intent --tree . --verify                       # модель намерений: файл, манифест и отчёт теста байт в байт
+$K intent --tree . --evaluate --strict --output strict.json
+$K archive --tree .                               # файлы семейств, которые больше не обучаются
+$K detector --tree . --sample 10000 --dictionary-sample 10000 --strict
+dbus-run-session -- $K engine boundary --tree . --verify
+dbus-run-session -- $K engine prefix --tree . --verify
 ```
 
-С 0.35.0 (схема признаков 7) `train_context_model.py --verify` читает и вопросы движка из
-`model/context_v1/captured/` (их SHA-256 закреплены манифестом, манифест — отчётом) и считает эпохи
-C-ядром `tools/context_optimizer.c`: нужен компилятор C, обучение занимает 5–10 минут и до 6 ГБ памяти.
-Сами вопросы пересоздаются из исходных выгрузок командой `tools/mixed_typing.py capture --verify`
-([рецепты и источники](../model/context_v1/captured/README.md)).
+Модель намерений читает только замороженные в `model/intent_v1/sources` списки слов и словари Hunspell, поэтому её проверка не зависит от установленных в системе словарей; нужна библиотека `libhunspell-1.7-0`. `detector` проверяет то, что установлено: для его чисел нужны `hunspell-en-us`, `hunspell-ru` и `onboard-data`.
 
-Расширенный эксперимент использует уже зафиксированные публичные предложения
-и числовой словарный кэш, без загрузок из сети и без зависимости от установленных
-Hunspell-словарей во время replay:
+Строгая проверка модели намерений занимает около минуты, поэтому её отчёт не кэшируется, а считается заново.
+
+## Набор текста владельца
+
+Перед выпуском набор владельца воспроизводится деревом последнего выпуска и проверяемым деревом: слово, которое выпущенная версия делала правильно, а новая делает неправильно, останавливает выпуск. Батареи частные и в git не входят, барьер печатает только числа.
 
 ```bash
-PYTHONPATH=src python3 tools/context_corpus.py
-PYTHONPATH=src python3 tools/context_evidence.py
-PYTHONPATH=src python3 tools/train_context_v2.py verify
-PYTHONPATH=src python3 tools/verify_context_v2.py --verify-frozen
+cargo run --profile parity --bin field-gate -- --root <дерево с набором> --released <отчёты прошлого выпуска>
 ```
 
-Печать, квитанции и engine-report эксперимента закрепляют по SHA-256 файлы, из
-которых они получены. Файлы вне `model/context_v2/` с тех пор менялись, поэтому
-каждый закреплённый файл сверяется с его точной копией в
-`model/context_v2/compatibility/generation-sources/` (дайджесты — в
-`tools/historical_sources.py`), а не с живым файлом. Повторы выше выполняют
-нынешние инструменты и сравнивают результат с замороженными байтами; в печать и
-квитанцию, которые они воспроизводят, подставляются записанные дайджесты.
-Engine-report закреплён как историческое свидетельство о движке того времени:
-`tools/evaluate_context_engine.py` проигрывает нынешний движок, и ни его
-`--verify`, ни `--refresh-runtime` в проверку эксперимента не входят.
+## Сборка
 
-Для training replay эксперимента нужен Linux C-компилятор; GPU не используется.
-Команды выше проверяют сохранённые результаты и не устанавливают candidate
-в приложение. `fit`/`evaluate` и `--freeze` предназначены для отдельного цикла
-исследования, не для обычной проверки документации или сборки. Не удаляйте seal
-и не перезаписывайте раскрытый test, чтобы повторить изменённого кандидата.
-[Данные, результаты и границы эксперимента](../model/context_v2/README.md).
+| Что | Команда | Где |
+| --- | --- | --- |
+| DEB | `packaging/build-rust-deb.sh dist` | Linux, нужны файлы разработки GTK 4 |
+| Windows: установщик, ZIP | `packaging/build-rust.ps1 -Architecture x64` | Windows, нужны цель MSVC и Inno Setup |
+| macOS | `packaging/build-rust-macos.sh dist` | Mac, подпись через `KEYSWITCH_SIGN_IDENTITY` |
 
-Эксперимент границ слова проверяется отдельно от контекстных весов:
+Workflow [`rust.yml`](../.github/workflows/rust.yml) делает всё это на каждый коммит: тесты, повторные обучения, установку и запуск установщика Windows на каждой архитектуре, установку DEB в чистую Ubuntu, запуск приложения macOS и его нотаризацию. На теге он публикует файлы как предварительный выпуск.
+
+## Выпуск
 
 ```bash
-PYTHONPATH=src python3 tools/verify_boundary_model.py --verify-frozen
-PYTHONPATH=src python3 tools/evaluate_boundary_engine.py --verify
+target/train/ks-release --version X.Y.Z --dry-run
+target/train/ks-release --version X.Y.Z --field-root <дерево с набором текста> --field-released <отчёты прошлого выпуска>
 ```
 
-`--verify-frozen` заново обучает кандидата нынешними инструментами, заново
-считает запечатанный test и сравнивает кандидата, печать и отчёт побайтно.
-Источники, закреплённые печатью, сверяются с копиями в
-`model/boundary_v1/compatibility/generation-sources/`, а не с живыми файлами;
-`tools/train_boundary_model.py --verify` сверяет их с живыми файлами и после
-любой их правки падает, поэтому исторической проверкой не является.
-
-Кандидат boundary-v1 отклонён и не включён в программу. Его обучение использует слова из
-прежнего резерва публичных фраз; этот резерв больше нельзя считать новым
-независимым материалом. Подробности и ограничения —
-[в отчёте эксперимента](../model/boundary_v1/README.md). Запускайте тяжёлые
-обучения и replay последовательно. API-моки не заменяют нативный Windows E2E.
-
-Принятая boundary-v2 (`boundary-v2-db59e2332c9c`, признаки версии 3, порог 0.9)
-проверяется отдельно, без изменения старого v1-test:
-
-```bash
-PYTHONPATH=src python3 tools/filter_lexicon_supplement.py --verify
-PYTHONPATH=src python3 tools/boundary_v2_corpus.py
-PYTHONPATH=src python3 tools/train_boundary_v2.py --verify
-PYTHONPATH=src python3 tools/verify_boundary_v2.py
-```
-
-Первая команда сверяет словарное дополнение, по которому движок и корпус считают
-признаки, с его квитанцией и правилом фильтра. Квитанция корпуса закрепляет
-лексический контракт intent-v1 (словари и их контрольные суммы), дополнение, код и
-значения констант, а не весь конфиг intent. Запечатанный test этого поколения —
-2 093 строки: 1 907 верных решений, 186 воздержаний на неоднозначных вводах,
-0 ошибок; данные, выбор порога и ограничения описаны
-[в карточке модели](../model/boundary_v2/README.md). Повторный `--verify`
-сравнивает веса/отчёты побайтно, а не создаёт новую независимую проверку.
-Общий `evaluate_boundary_engine.py` явно сравнивает старый алгоритм,
-отклонённый v1 и активный v2 (18 авторских последовательностей: 13, 12 и 18
-точных); прежние отчёты архивируются.
-
-Раннюю модель префиксов проверяют отдельные команды (последовательно):
-
-```bash
-PYTHONPATH=src python3 tools/prefix_corpus.py
-PYTHONPATH=src python3 tools/train_prefix_model.py verify
-PYTHONPATH=src python3 tools/evaluate_prefix_engine.py --verify
-PYTHONPATH=src python3 tools/verify_prefix_model.py
-```
-
-Обучение использует замороженные числовые признаки; сквозной replay требует
-эталонных словарей. `verify` не меняет веса, не подбирает порог и не продвигает
-модель. Признаки корпуса считаются по словарям, которые использует движок:
-оценки слов — онбордовые словари с пакетным дополнением, индекс префиксов —
-онбордовые словари и основы Hunspell. Квитанция корпуса закрепляет лексический
-контракт intent-v1 (пути и контрольные суммы словарей), дополнение, код, из
-которого посчитаны строки, и значения констант, которые этот код импортирует;
-их изменение останавливает проверку до нового обучения prefix-v1, а новое
-поколение intent-v1 с теми же словарями — нет. Для изменений
-только движка доступен `evaluate_prefix_engine.py
---refresh-runtime` с архивированием старого отчёта; это регрессия, не свежий
-независимый тест. [Методика и ограничения](../model/prefix_v1/README.md).
-
-Нативное чтение поля проверяется отдельно:
-
-```bash
-./tools/run-atspi-e2e.sh
-```
-
-Этот скрипт сам изолирует Xvfb, D-Bus и runtime-каталог доступности. Для него
-не нужен дополнительный внешний `dbus-run-session`. Виртуальный редактор
-`evaluate_context_engine.py` проверяет итоговые строки, но не заменяет
-Windows/X11/AT-SPI E2E.
-
-## Базовая KSLM и сборка Linux
-
-Правила нового кандидата, необратимая граница seal и два retraining replay
-описаны в [runbook](intent-model-runbook.md) и
-[cookbook](intent-model-cookbook.md). У их trainer `--dry-run` **не гарантирует
-отсутствие записи seal**; не путайте его с `release.py --dry-run`.
-
-Для strict-оценки текущей KSLM в reference-среде и передачи отчёта в упаковку:
-
-```bash
-set -euo pipefail
-verification_dir="$(mktemp -d /tmp/keyswitch-verification.XXXXXXXX)"
-(cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
-PYTHONPATH=src python3 tools/evaluate_detector.py \
-  --sample 10000 --dictionary-sample 10000 --strict
-PYTHONPATH=src python3 tools/evaluate_intent_model.py --strict \
-  > "$verification_dir/intent-strict.json"
-python3 tools/verify_intent_strict_report.py \
-  --report "$verification_dir/intent-strict.json"
-
-./tools/install-build-tools.sh .nuitka
-KEYSWITCH_NUITKA_ROOT=.nuitka \
-  KEYSWITCH_INTENT_STRICT_REPORT="$verification_dir/intent-strict.json" \
-  ./packaging/build-deb.sh
-
-package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
-package="dist/keyswitch_${package_version}_$(dpkg --print-architecture).deb"
-./tools/verify-native-deb.sh "$package"
-desktop-file-validate packaging/io.github.olegius88.KeySwitch.desktop
-lintian --fail-on error "$package"
-
-./tools/run-gui-test.sh --noreset -- \
-  bash -c 'setxkbmap -layout us,ru && GTK_USE_PORTAL=0 ./tools/run-native-e2e.sh "$1"' \
-  _ "$package"
-```
-
-Репозиторий APT, из которого установленный пакет получает обновления, собирается
-и проверяется тем же деревом:
-
-```bash
-GNUPGHOME=.t/apt-signing/gnupg python3 tools/apt_repository.py build .t/apt-repo \
-  "$package" --passphrase-file .t/apt-signing/passphrase.txt
-python3 tools/apt_repository.py verify .t/apt-repo --expect-version "$package_version"
-```
-
-`verify` проверяет обе подписи открытым ключом из пакета, сверяет контрольные
-суммы из `Release` и заставляет APT прочитать репозиторий по `file://`.
-Ключ подписи, секреты рабочего процесса и порядок публикации описаны в
-[Репозитории APT](apt-repository.md); без ключа выполняется только `verify`
-уже собранного дерева.
-
-Сохраните нужные отчёты из `$verification_dir` до очистки временных файлов.
-Переданный strict-отчёт принимается только после сверки gates и текущих hashes.
-Без переменной `KEYSWITCH_INTENT_STRICT_REPORT` `build-deb.sh` запускает strict
-самостоятельно; с неправильным отчётом сборка падает, не обходит проверку.
-Обе нативные сборки также запускают проверки активной схемы context,
-исторической context-v2, boundary-v1, boundary-v2 и prefix-v1 (включая запрет установки отклонённых
-весов) и сверяют рабочие контекстный, префиксный и граничный артефакты
-после компиляции.
-
-Windows собирается на Windows через `packaging/build-windows.ps1`; зависимости,
-настройка EN/RU, unit/native E2E и silent-install smoke перечислены в job
-`windows` [Tests workflow](../.github/workflows/tests.yml). Смена языкового списка
-из CI влияет на пользовательские настройки ОС: не копируйте этот шаг в личный
-сеанс без проверки. Windows-результат нельзя объявлять проверенным локальным Linux-прогоном.
-
-## Что объединяет `release_pipeline.py`
-
-| Профиль | Состав |
-| --- | --- |
-| `quick` | Среда, входы KSLM, strict typing, coverage, detector gates, release metadata |
-| `app` | `quick` + strict KSLM, X11/tray E2E, DEB build/verifier/Lintian и packaged E2E |
-| `release` | `app` + replay development/preseal и два retraining KSLM с побайтным сравнением; strict replay-a включается `--replay-strict` |
-
-```bash
-python3 tools/release_pipeline.py phases
-python3 tools/release_pipeline.py start --profile app
-python3 tools/release_pipeline.py status
-python3 tools/release_pipeline.py wait
-```
-
-`start` отсоединяет процесс; `run` выполняет тот же выбранный профиль на
-переднем плане. Итоги — `dist/release-pipeline/latest/SUMMARY.md` и `summary.json`;
-`state.json` и журналы фаз показывают ход работы. `--jobs` и
-`--memory-reserve-mib` ограничивают планировщик, но оценка пиков памяти не
-гарантирует отсутствие OOM при любой внешней нагрузке. Strict latency-фазы
-выполняются отдельно от остальных фаз этого конвейера.
-
-Явный `run --resume <каталог-прогона>` повторно использует успешные фазы
-внутри того же каталога. Это отдельный механизм конвейера, не автоматическое
-восстановление `release.py`. Используйте его только при неизменных проверяемых
-входах; после изменения кода или данных запускайте новый прогон.
-
-**Это не весь CI:** отдельные contextual retraining, corpus/engine replay и
-нативный AT-SPI E2E не являются фазами конвейера; выполняйте их командами выше.
-Windows-проверки также идут отдельным job. Полный профиль `release` доказывает
-базовую KSLM, а не автоматически сертифицирует новую контекстную политику.
-Источник состава — [PROFILES/PHASES](../tools/release_pipeline.py).
-
-## Публикация и восстановление
-
-1. Выберите новую версию `X.Y.Z`, проверьте ветку, `git status` и полный diff.
-   Скрипт по умолчанию требует `main` и использует `origin`; `git add -A`
-   включает **все** изменённые и неигнорируемые новые файлы, не только код агента.
-2. Напишите `CHANGELOG.md` под `## Unreleased` (или раздел выбранной версии)
-   и `RELEASE_NOTES.md` с заголовком и точными именами DEB, Setup EXE и ZIP.
-   Версии в обслуживаемых файлах обновляет `version_sites()` в `release.py`;
-   исторические упоминания проверяйте по diff, не считайте замену смысловой.
-3. Выполните предварительную проверку. `X.Y.Z` ниже — заполнитель, не готовый номер:
-
-   ```bash
-   python3 tools/release.py --version X.Y.Z --dry-run
-   ```
-
-4. Только для согласованного выпуска:
-
-   ```bash
-   python3 tools/release.py --version X.Y.Z
-   ```
-
-Обычный запуск меняет файлы, выполняет выбранный профиль (по умолчанию
-`release`), коммитит, создаёт тег, пушит, ждёт release workflow и проверяет
-наличие четырёх опубликованных assets. Требуются `gh`, действующая
-аутентификация и права push. `--dry-run` не пишет файлы, но проверяет подготовку,
-ветку и предусловия; тесты, сборка и публикация не выполняются.
-
-После сбоя прочитайте названную фазу/лог и проверьте состояние Git и Actions.
-Повторный запуск обычно повторяет локальные проверки, а не продолжает
-последнюю фазу. Если тег уже существует, требуется тот же HEAD и чистое дерево;
-для исправленного кода нужна новая версия. Сбой CI не отменяет уже сделанный
-push; повтор `release.py` сам не перезапускает проваленный Actions run.
-Нужен осознанный повтор подходящего workflow либо новый выпуск после исправления.
-
-`--skip-pipeline` просто пропускает локальный конвейер: он не проверяет и не
-выбирает прошлый успешный прогон. `--skip-ci` останавливается после push и
-**не доказывает публикацию**. Не выдавайте эти режимы за завершённый полный
-релиз. Финальный шаг скрипта сверяет имена assets, а не скачивает и повторно
-проверяет их содержимое; сборочные проверки и `SHA256SUMS` формируются workflow.
-Источник поведения — [release.py](../tools/release.py) и
-[Release workflow](../.github/workflows/release.yml).
+Команда обновляет версию, закрывает раздел `Unreleased` в `CHANGELOG.md`, проверяет `RELEASE_NOTES.md`, запускает проверки, коммитит, ставит тег, отправляет и ждёт workflow. Уже отправленный тег или выпуск не откатывается. APT: `ks-train apt-build` и `ks-train apt-verify`, см. [репозиторий APT](apt-repository.md).

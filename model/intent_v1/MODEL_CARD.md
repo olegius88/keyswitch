@@ -1,5 +1,7 @@
 # KeySwitch Layout Intent v1
 
+> Записи ниже сохранены как история: инструменты `tools/*.py` и файлы `src/keyswitch/*.py`, которые они называют, были на Python и заменены программой `ks-train` на Rust. Текущие команды — в [цикле обучения](../../docs/model-cycle.md).
+
 [**Русский**](MODEL_CARD.md) · [English](MODEL_CARD.en.md)
 
 Область карточки — **базовая KSLM**, не приложение целиком. Контекстный
@@ -490,8 +492,7 @@ membership coverage на тех же строках сохраняются то�
 ## Воспроизводимость
 
 Полный процесс принятия/отклонения нового кандидата описан в
-[runbook](../../docs/intent-model-runbook.md), а команды для воспроизведения и
-нового обучения — в [cookbook](../../docs/intent-model-cookbook.md).
+[цикле обучения](../../docs/model-cycle.md#модель-намерений).
 
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)

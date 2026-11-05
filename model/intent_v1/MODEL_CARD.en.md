@@ -1,5 +1,7 @@
 # KeySwitch Layout Intent v1
 
+> The records below are kept as history: the `tools/*.py` and `src/keyswitch/*.py` files they name were Python and are replaced by the `ks-train` program in Rust. The current commands are in the Russian [training cycle](../../docs/model-cycle.md).
+
 [Русский](MODEL_CARD.md) · [**English**](MODEL_CARD.en.md)
 
 This card covers **baseline KSLM**, not the entire application. The contextual
@@ -494,8 +496,7 @@ decision.
 ## Reproducibility
 
 The complete candidate acceptance/rejection procedure is documented in the
-Russian [runbook](../../docs/intent-model-runbook.md), with copy-paste training
-recipes in the [cookbook](../../docs/intent-model-cookbook.md).
+Russian [training cycle](../../docs/model-cycle.md#модель-намерений).
 
 ```bash
 (cd model/intent_v1/sources && sha256sum --check SHA256SUMS)

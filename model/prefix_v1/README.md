@@ -1,5 +1,7 @@
 # Prefix v1: обученное переключение на полуслове
 
+> Записи ниже сохранены как история: инструменты `tools/*.py` и файлы `src/keyswitch/*.py`, которые они называют, были на Python и заменены программой `ks-train` на Rust. Текущие команды — в [цикле обучения](../../docs/model-cycle.md).
+
 С 02.10.2026 установлен `prefix-v2-bf3dc28f8567` (schema 2, [recipe](../prefix_v2/recipe.json),
 [seal](../prefix_v2/candidate-seal.json)), принятый только в паре с `context-v3-7d8e1c9b2d87` по
 протоколу последовательностей [context v3](../context_v3/README.md): пара воспроизводилась

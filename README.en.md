@@ -8,8 +8,6 @@ by default; it is not built into the KeySwitch input engine.
 [Русский](README.md) · [**English**](README.en.md)
 
 [![GitHub release](https://img.shields.io/github/v/release/olegius88/keyswitch)](https://github.com/olegius88/keyswitch/releases/latest)
-[![Tests](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml)
-[![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 KeySwitch is a desktop application for Windows 10/11 x64, 32-bit Windows 10 and Windows 11 on Arm,
@@ -162,13 +160,11 @@ a newer version exists, the per-user installer runs silently; KeySwitch exits
 and starts minimized again after installation. Automatic checking and
 installation can be disabled independently.
 
-To run from source on Windows, with Python 3.11 or newer:
+To run from source on Windows, with Rust and its MSVC target:
 
 ```powershell
-py -m venv .venv
-.venv\Scripts\python -m pip install -e ".[windows]"
 $env:KEYSWITCH_MODEL_PATH = "$PWD\model\intent_v1\sources"
-.venv\Scripts\keyswitch
+cargo run --release -p ks-win
 ```
 
 For the complete detection model when running from source, point
@@ -257,11 +253,7 @@ sudo apt install ./keyswitch_0.66.1_amd64.deb
 ```
 
 The package installs the required system dependencies and adds KeySwitch to the
-application menu. Nuitka compiles the application into an architecture-specific
-ELF executable: `/usr/lib/keyswitch` contains no application `.py` sources or
-`.pyc` bytecode, and the package does not depend on the system Python
-interpreter. The native runtime includes `libpython`, so the `amd64` package
-cannot be installed on a different architecture.
+application menu. The application in the package is one Rust executable and needs no interpreter. The `amd64` package cannot be installed on another architecture.
 
 ### Updates through APT
 
@@ -301,23 +293,17 @@ the version it found and an Open release button, and APT performs the
 installation — the application never installs the system package in the
 background.
 
-## Install from source for the current user
+## Install from source
+
+You need Rust and the GTK 4 development files:
 
 ```bash
-./install.sh
-keyswitch
+sudo apt install libgtk-4-dev libadwaita-1-dev
+./packaging/build-rust-deb.sh dist
+sudo apt install ./dist/keyswitch_*.deb
 ```
 
-The installer does not require root access. It places the application,
-launcher, desktop entry and icons under `~/.local`. XDG Autostart is enabled by
-default after the first launch, so KeySwitch starts at the next desktop login
-after a reboot. This can be changed on the Appearance and System settings page.
-
-To uninstall while preserving settings and history:
-
-```bash
-./uninstall.sh
-```
+To build without installing: `cargo run --release -p ks-linux`. Without the package the program has to be told where the word lists are: `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
 
 ## Wayland
 
@@ -369,8 +355,7 @@ The required components may already be present on a standard current Ubuntu
 installation. If the installer reports missing dependencies, install them with:
 
 ```bash
-sudo apt install at-spi2-core python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
-  gir1.2-atspi-2.0 \
+sudo apt install at-spi2-core libgtk-4-1 libadwaita-1-0 \
   libwayland-client0 libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
   hunspell-en-us hunspell-ru onboard-data
 ```
@@ -670,7 +655,7 @@ The manifest binds hashes of the config, frozen sources, trainer, external
 evaluator, preseal generator/receipt, development-corpus freezer, intent
 runtime, layouts, language scorer, detector, frozen hard-negative source and
 protected-token list to the
-Python/platform identity, candidate/full datasets, both quarantines, excluded
+candidate/full datasets, both quarantines, excluded
 test signatures and train-only scorer provenance. The receipt binds the exact
 KSLM payload/runtime parameters and is published from an fsynced temporary file
 through an atomic no-replace hard link. Until that receipt is valid, the
@@ -681,209 +666,43 @@ files are published in that order; the manifest is the final commit marker and
 a process error rolls back destinations already replaced. The exact two-run
 procedure for byte-comparing all three outputs is in the
 [model card](model/intent_v1/MODEL_CARD.en.md#reproducibility).
-The repository also contains a Russian
-[release runbook](docs/intent-model-runbook.md) and a copy-paste
-[training cookbook](docs/intent-model-cookbook.md) covering preseal, training,
-strict evaluation, replay, and packaging.
+The steps of a new candidate are in the Russian [training cycle](docs/model-cycle.md).
 
 ## Development and verification
 
-All Python application, test and tool code passes an enhanced `mypy --strict`
-profile. It rejects untyped definitions, explicit `Any`, `Any` from unfollowed
-imports and untyped decorators, and additionally checks unreachable branches,
-possibly undefined values and unused awaitables. Run it locally on Ubuntu with:
+All the code is Rust, a Cargo workspace in `crates/`. Training and checking the models live in the `ks-train` program, the release in `ks-release`.
 
 ```bash
-sudo apt install python3-pip
-./tools/install-typing-tools.sh .typing
-KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
+cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
+cargo test --release -p ks-replay
 ```
 
-To keep the `dbus-python` boundary strict, the repository carries a narrow
-contract for only the API surface it actually uses under `typings/dbus`.
+`ks-replay` runs the engine over recorded behaviour: what was pressed, what the backend answered, which events came out. The Windows code is checked by building it for each architecture: `cargo check -p ks-win --target x86_64-pc-windows-msvc`.
 
-Run the complete unit and GTK interaction suite with the mandatory 100% line
-and branch coverage gate (GTK needs an active X11 display or Xvfb):
+Checks of the models whose files are in the repository:
 
 ```bash
-./tests/run_coverage.sh
+cargo build --profile train -p ks-train
+target/train/ks-train verify --tree .
+target/train/ks-train boundary --tree . --verify
+target/train/ks-train ortho --tree . --verify
+target/train/ks-train ortho --tree . --inputs
+target/train/ks-train intent --tree . --verify
+target/train/ks-train intent --tree . --evaluate --strict --output strict.json
+target/train/ks-train archive --tree .
+target/train/ks-train detector --tree . --sample 10000 --dictionary-sample 10000 --strict
 ```
 
-For headless execution, run the same command inside `dbus-run-session` and
-`xvfb-run`; GitHub Actions uses that exact setup. The report stops the build if
-coverage drops below 100% within [.coveragerc](.coveragerc). Native Win32
-wrappers and the Windows UI are excluded from this metric and have separate
-Windows tests; it is not 100% coverage of every platform file.
+Training each model, freezing corpora and the measurements are in the Russian [training cycle](docs/model-cycle.md), the other checks in the [verification guide](docs/verification.md). The architecture and criteria are in [DESIGN.md](DESIGN.md), the reasoning behind the model in the [detection overview](docs/detection-research.en.md).
 
-Contextual models have separate checks, not covered by a KSLM report:
+Packages: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (Windows installer and ZIP, needs Inno Setup), `packaging/build-rust-macos.sh` (the macOS application). The [`rust.yml`](.github/workflows/rust.yml) workflow builds them on every commit and publishes the files of a tag.
+
+A release happens **only after an explicit decision to release**, and the command commits and pushes everything in the tree:
 
 ```bash
-PYTHONPATH=src python3 tools/verify_context_model.py
-PYTHONPATH=src python3 tools/verify_context_v2.py
+target/train/ks-release --version X.Y.Z --dry-run
+target/train/ks-release --version X.Y.Z --field-root <tree with the typing> --field-released <reports of the last release>
 ```
-
-These are fast artifact/provenance checks. Training replay, final-text
-evaluation, AT-SPI E2E and their environment requirements are documented in
-the [verification guide](docs/verification.md).
-
-On Windows, a separate E2E starts a real `WH_KEYBOARD_LL` hook, types scan codes
-through `SendInput` into a Tk field and verifies both directions, the rule offer
-after a double `Pause`, the rule window and its OK, automatic reuse of the rule,
-the final layout and history:
-
-```powershell
-$env:PYTHONPATH = "src"
-py tests/e2e_windows.py
-```
-
-Run the reproducible 40,000-word frequency/broad-dictionary corpus and
-defensive cases with:
-
-```bash
-(cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
-PYTHONPATH=src tools/evaluate_detector.py \
-  --sample 10000 --dictionary-sample 10000 --strict
-PYTHONPATH=src tools/evaluate_intent_model.py --strict
-```
-
-The second command validates bundled `layout_intent_v1.ksm`, KSLM schema 4,
-checksums, frozen-source and toolchain provenance, the protected-token hash,
-quarantine and train-only scorer, non-vacuous Wilson gates, production guarded
-safety, and separate precision-first thresholds for idle and completed-word
-decisions. Raw-model safety and membership slices remain diagnostic. This
-lexical-synthetic set is a regression gate, not an estimate of quality on real
-user input.
-
-Run the real end-to-end test in an active X11 session with:
-
-```bash
-PYTHONPATH=src python3 tests/e2e_x11.py
-```
-
-A successful run prints `E2E_OK` after real corrections, a rule added through a
-double `Pause/Break`, `Enter` and the rule window, and verification of the one-word guard following a manual
-layout switch inside a GTK Entry. An
-additional integration test exports a real StatusNotifierItem and DBusMenu on
-an isolated session bus:
-
-```bash
-dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
-```
-
-It prints `TRAY_MENU_E2E_OK` after registering the indicator, reading every
-menu item and activating Settings. The architecture and acceptance criteria
-are documented in [DESIGN.md](DESIGN.md). The
-[detection research](docs/detection-research.en.md) compares the verified
-mechanisms in existing products and explains the model.
-
-Build the reproducible native Debian package with:
-
-```bash
-sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
-./tools/install-build-tools.sh .nuitka
-KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
-package="dist/keyswitch_${package_version}_$(dpkg --print-architecture).deb"
-./tools/verify-native-deb.sh "$package"
-```
-
-The build runs strict KSLM evaluation and both fast contextual checks first.
-A verified strict report can be reused through `KEYSWITCH_INTENT_STRICT_REPORT`,
-as described in the [build guide](docs/verification.md).
-The DEB bundles KSLM, the contextual model and the exact frozen `en_US.lm`/`ru_RU.lm`
-from `model/intent_v1/sources`. The in-package directory takes precedence over
-system `onboard-data`, so runtime n-gram scores use the release-tested snapshot;
-the verifier requires both files to be byte-identical.
-
-Build the native Windows artifacts on Windows with Python, Nuitka and Inno
-Setup:
-
-```powershell
-./packaging/build-windows.ps1
-```
-
-This produces a standalone `KeySwitch.exe` without application `.py` files, a
-portable ZIP and a per-user Setup EXE. In a fresh clone the command defaults to
-the frozen `en_US.lm`, `ru_RU.lm` and license in `model/intent_v1/sources`;
-optional `-ModelDirectory` and `-ModelLicense` overrides accept only staged
-copies with the exact config-bound paths, sizes and SHA-256 digests;
-`SHA256SUMS` must also match config byte for byte. All external JSON/KSLM
-inputs are read with explicit bounds. Before Nuitka a portable provenance pass
-rebuilds both dataset phases and validates the seal registry, frozen sources,
-toolchain, artifact and complete embedded manifest; a separate check then
-validates the full threshold/sealed/context/typo/safety/veto quality matrix.
-After Nuitka it runs the
-finished `KeySwitch.exe --diagnose` without a model override and requires
-`intent_model.available=true` with the expected version and SHA-256.
-
-After stopping any already running instance, test the executable extracted
-from the package in an active X11 session with:
-
-```bash
-dbus-run-session -- ./tools/run-native-e2e.sh "$package"
-```
-
-It verifies six real corrections, a manually selected layout left unchanged
-for one word, XKB group changes, history, StatusNotifierItem registration and
-the popup DBusMenu contents. Pushing a `v*` tag makes GitHub Actions validate
-Linux and Windows independently, build the DEB, Windows Setup EXE and portable
-ZIP, silently install it, diagnose the exact bundled model, smoke-test the
-installed UI, create one
-`SHA256SUMS` file and publish all artifacts in a GitHub Release.
-
-The baseline-model/application Linux pipeline — KSLM provenance and strict
-evaluation, its replay evidence, type checking, coverage, detector gates, X11/tray E2E, the DEB
-build, its verifier and the packaged-binary E2E — runs as one process detached
-from the terminal:
-
-```bash
-python3 tools/release_pipeline.py start --profile release
-python3 tools/release_pipeline.py status
-python3 tools/release_pipeline.py wait
-```
-
-Phases form a dependency graph and run concurrently; the scheduler admits the
-next phase only when enough RAM stays available after the peaks that already
-running phases may still reach and a reserve (`--jobs`,
-`--memory-reserve-mib`). Every run lives in
-`dist/release-pipeline/<stamp>-<profile>/`: `state.json` is updated while the
-run proceeds, `summary.json` and `SUMMARY.md` appear at the end next to the
-phase logs, strict reports and the DEB. `quick` checks the environment, KSLM
-inputs, typing, coverage, detector and release metadata; `app` adds strict
-KSLM, X11/tray and native DEB tests; `release` adds KSLM/corpus replay.
-`app` and `release` also check the owner's typing (`field-regression`, the
-[gate](tools/field_regression_gate.py)): the field batteries rebuilt from the
-owner's technical logs are replayed with the tree of the last release and with
-the tree under test, and a word the released version got right that the new one
-gets wrong stops the release. The batteries are private and stay out of git;
-without them the phase fails. The gate prints counts alone.
-No profile directly runs contextual-model retraining, the contextual models'
-sequence replay or native AT-SPI E2E; CI runs these separately. The local
-pipeline is therefore not equivalent to all CI checks. `--replay-dir`
-adopts replays that are still running or already finished, and
-`python3 tools/release_pipeline.py phases` prints the phases, memory budgets
-and dependencies.
-
-Release publication is a separate command, **only after an explicit release
-decision**. It commits and pushes all working-tree changes, so review
-`git status` and the diff first. The script updates a fixed list of versioned
-files, closes the `Unreleased` section of `CHANGELOG.md`, checks
-`RELEASE_NOTES.md`, runs the verification contour, commits, tags, pushes and
-waits until the workflow publishes the DEB, the Windows Setup EXE, the ZIP and
-`SHA256SUMS`:
-
-```bash
-python3 tools/release.py --version X.Y.Z --dry-run  # replace X.Y.Z; no writes
-python3 tools/release.py --version X.Y.Z            # commit, tag, push, publish
-```
-
-`X.Y.Z` means an unused version. The author must prepare `## Unreleased`
-entries (or an already closed section for that version) and matching release
-notes with the asset names. `--dry-run` checks preparation but runs no tests
-or builds. A retry **does not automatically resume at the last failed phase**:
-verification normally runs again; an existing tag is accepted only at the
-same clean HEAD. Pushed tags or published releases are not rolled back.
-See [release and recovery procedures](docs/verification.md).
 
 ## Limitations
 
@@ -941,11 +760,9 @@ Windows releases are not signed yet (see [Limitations](#limitations)). Signing,
 once enabled, follows these rules:
 
 - Only files produced from a tagged commit of this repository by the
-  [Native packages](.github/workflows/release.yml) workflow on GitHub-hosted
+  [Rust](.github/workflows/rust.yml) workflow on GitHub-hosted
   runners are signed: the KeySwitch executables and the Setup EXE. Nothing built
-  on a developer machine is signed. Third-party binaries included in the package,
-  such as the Python runtime and Tcl/Tk, keep their upstream signatures or stay
-  unsigned.
+  on a developer machine is signed.
 - Every signing request is approved manually.
 - Team roles:
   - committers and reviewers: [Oleg Shevchuk (@olegius88)](https://github.com/olegius88);
@@ -999,6 +816,4 @@ This research corpus is not bundled as a runtime dictionary.
   — desktop panel indicator integration;
 - [Canonical DBusMenu interface](https://sources.debian.org/src/libdbusmenu/18.10.20180917~bzr492%2Brepack1-2/libdbusmenu-glib/dbus-menu.xml/)
   — native desktop-indicator popup menu;
-- [Nuitka User Manual](https://nuitka.net/user-documentation/user-manual.html)
-  — compilation into a standalone executable;
 - [official Ubuntu 26.04 LTS release notes](https://documentation.ubuntu.com/release-notes/26.04/).

@@ -141,7 +141,7 @@
 При включённом техническом журнале сопоставляйте следующие события по времени:
 
 - Для установленной схемы признаков 2 двухбуквенные слова из курируемого
-  списка (`short_words.py`) могут дать `decision_source=short_word_override`.
+  списка (`crates/ks-lang/src/short_words.rs`) могут дать `decision_source=short_word_override`.
   Действие и score модели записаны рядом, но `keep` или неуверенный `convert`
   не отменяют это решение; `wait` может отложить его до продолжения.
 - `decision_source=safety` с `fallback_reason=replacement_not_a_word` — модель
@@ -160,7 +160,7 @@
   контекстная модель; ортографический score — обучаемый числовой признак и
   не разрешает замену поверх её отказа. Явные пользовательские правила,
   ручные команды и защиты исполнения сохраняют приоритет. Схемы различает
-  [ContextPolicy](../src/keyswitch/context_policy.py).
+  [ContextPolicy](../crates/ks-context/src/context_policy.rs).
 - `context_decision`: решение модели и `baseline_reason` — причина базового
   решения до модели. `before_characters=0` означает отсутствие предшествующего
   контекста у этого прогноза, а не доказательство пустого поля в приложении.
@@ -275,5 +275,5 @@ Enter задерживалось примерно на 2 секунды, а ще
 
 Матрица проверенных механизмов и оставшиеся ограничения:
 [зрелость ввода](input-maturity.md), [контекстный помощник](context-assistant.md).
-Основание описаний: [движок](../src/keyswitch/engine.py),
-[журнал](../src/keyswitch/logsetup.py), [настройки](../src/keyswitch/config.py).
+Основание описаний: [движок](../crates/ks-engine/src/engine/mod.rs),
+[журнал](../crates/ks-config/src/logsetup.rs), [настройки](../crates/ks-config/src/lib.rs).

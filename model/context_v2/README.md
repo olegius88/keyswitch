@@ -1,5 +1,7 @@
 # Context policy, public-phrase experiment 1
 
+> Записи ниже сохранены как история: инструменты `tools/*.py` и файлы `src/keyswitch/*.py`, которые они называют, были на Python и заменены программой `ks-train` на Rust. Текущие команды — в [цикле обучения](../../docs/model-cycle.md).
+
 Status: **rejected for runtime promotion**. The comparison preserves the exact
 v1 weights that shipped at the time of this experiment in
 `baseline-context-v1.json`; that frozen baseline is not a declaration of the

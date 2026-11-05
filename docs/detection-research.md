@@ -204,7 +204,7 @@ sigmoid-derived confidence вычисляется только для диагн
 заранее записывает и `fsync`-ит все payload, затем публикует report, artifact и
 manifest именно в этом порядке. Manifest — последний commit marker; ошибка
 процесса откатывает уже заменённые назначения. Процедура двух независимых
-запусков в одной Python/platform среде и побайтного сравнения всех трёх файлов
+запусков на одной платформе и побайтного сравнения всех трёх файлов
 приведена в [карточке модели](../model/intent_v1/MODEL_CARD.md#воспроизводимость).
 
 Переключатель «Базовая модель слов (KSLM)» отключает только этот дополнительный
@@ -242,9 +242,9 @@ manifest именно в этом порядке. Manifest — последни�
 Команда:
 
 ```bash
-PYTHONPATH=src tools/evaluate_detector.py \
+target/train/ks-train detector --tree . \
   --sample 10000 --dictionary-sample 10000 --strict
-PYTHONPATH=src tools/evaluate_intent_model.py --strict
+target/train/ks-train intent --tree . --evaluate --strict --output strict.json
 ```
 
 Вторая команда отдельно проверяет структуру поставляемого KSLM, воспроизводит

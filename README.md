@@ -3,8 +3,6 @@
 [**Русский**](README.md) · [English](README.en.md)
 
 [![GitHub release](https://img.shields.io/github/v/release/olegius88/keyswitch)](https://github.com/olegius88/keyswitch/releases/latest)
-[![Tests](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/tests.yml)
-[![Native packages](https://github.com/olegius88/keyswitch/actions/workflows/release.yml/badge.svg)](https://github.com/olegius88/keyswitch/actions/workflows/release.yml)
 [![License: GPL v3+](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 
 KeySwitch — настольное приложение для Windows 10/11 x64, 32-битной Windows 10 и Windows 11 на ARM,
@@ -190,13 +188,11 @@ KeySwitch читает последний стабильный выпуск из
 режиме; KeySwitch закрывается и после завершения установки снова запускается
 свёрнутым. Обе автоматические опции можно отключить независимо.
 
-Для запуска из исходников в Windows нужен Python 3.11 или новее:
+Для запуска из исходников в Windows нужен Rust с целью MSVC:
 
 ```powershell
-py -m venv .venv
-.venv\Scripts\python -m pip install -e ".[windows]"
 $env:KEYSWITCH_MODEL_PATH = "$PWD\model\intent_v1\sources"
-.venv\Scripts\keyswitch
+cargo run --release -p ks-win
 ```
 
 Для полной модели распознавания при запуске из исходников задайте
@@ -283,11 +279,8 @@ sudo apt install ./keyswitch_0.66.1_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
-Приложение внутри пакета скомпилировано Nuitka в архитектурный ELF-бинарник:
-в `/usr/lib/keyswitch` нет исходных `.py` или байткода `.pyc`, а пакет не
-зависит от системного интерпретатора Python. В состав нативного runtime входит
-`libpython`, поэтому пакет для `amd64` нельзя устанавливать на другую
-архитектуру.
+Приложение внутри пакета — один исполняемый файл на Rust, интерпретатор ему не нужен.
+Пакет для `amd64` нельзя устанавливать на другую архитектуру.
 
 ### Обновления через APT
 
@@ -327,23 +320,17 @@ sudo apt update && sudo apt install keyswitch
 показывает найденную версию и кнопку «Открыть выпуск», а установку выполняет
 APT — сам системный пакет приложение в фоне не ставит.
 
-## Установка из исходников для текущего пользователя
+## Установка из исходников
+
+Нужны Rust и файлы разработки GTK 4:
 
 ```bash
-./install.sh
-keyswitch
+sudo apt install libgtk-4-dev libadwaita-1-dev
+./packaging/build-rust-deb.sh dist
+sudo apt install ./dist/keyswitch_*.deb
 ```
 
-Установщик не требует root: он размещает приложение, launcher, desktop-файл и
-иконки внутри `~/.local`. После первого запуска XDG Autostart включён по
-умолчанию: после перезагрузки KeySwitch стартует при следующем входе в рабочий
-стол. Это можно изменить в разделе «Внешний вид и система».
-
-Удаление программы (настройки и история сохраняются):
-
-```bash
-./uninstall.sh
-```
+Сборка без установки: `cargo run --release -p ks-linux`. Без пакета программе нужно сказать, где лежат списки слов: `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
 
 ## Wayland
 
@@ -395,8 +382,7 @@ KeySwitch отпускает клавиатуры (`LockedHint` и `Active` из
 установлены. Если проверка установщика сообщит об их отсутствии:
 
 ```bash
-sudo apt install at-spi2-core python3-gi python3-dbus gir1.2-gtk-4.0 gir1.2-adw-1 \
-  gir1.2-atspi-2.0 \
+sudo apt install at-spi2-core libgtk-4-1 libadwaita-1-0 \
   libwayland-client0 libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
   hunspell-en-us hunspell-ru onboard-data
 ```
@@ -694,7 +680,7 @@ Manifest связывает SHA-256 config, frozen sources, trainer, external ev
 preseal generator/receipt, freezer development-корпуса, intent runtime, layouts,
 language scorer и detector,
 а также frozen hard-negative source и SHA-256 списка защищённых токенов,
-с Python/platform identity, candidate/full dataset, обоими quarantine,
+с candidate/full dataset, обоими quarantine,
 исключёнными test-сигнатурами и train-only scorer provenance. Receipt связывает
 точный KSLM payload/runtime-параметры и публикуется через fsync-нутый временный
 файл и атомарный no-replace hard link. Evaluator до валидного receipt не строит
@@ -705,225 +691,43 @@ manifest служит последним commit marker, а ошибка проц
 заменённые файлы. Точная процедура двух независимых запусков и побайтного
 сравнения всех трёх результатов приведена в
 [карточке модели](model/intent_v1/MODEL_CARD.md#воспроизводимость).
-Операционный выпуск нового кандидата описывает
-[runbook](docs/intent-model-runbook.md), а готовые пошаговые команды для
-preseal, обучения, strict-проверки, replay и сборки пакета собраны в
-[cookbook](docs/intent-model-cookbook.md).
+Порядок выпуска нового кандидата описан в [цикле обучения](docs/model-cycle.md#модель-намерений).
 
 ## Разработка и проверка
 
-Весь Python-код приложения, тестов и утилит проходит усиленный профиль
-`mypy --strict`: запрещены нетипизированные определения, явные `Any`, `Any` из
-неописанных импортов и нетипизированные декораторы; дополнительно проверяются
-недостижимые ветви, потенциально неопределённые значения и неиспользованные
-awaitable. Локальный запуск на Ubuntu:
+Весь код — на Rust, рабочее пространство Cargo в `crates/`. Обучение и проверка моделей — в программе `ks-train`, выпуск — в `ks-release`.
 
 ```bash
-sudo apt install python3-pip
-./tools/install-typing-tools.sh .typing
-KEYSWITCH_TYPING_ROOT=.typing ./tools/typecheck.sh
+cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
+cargo test --release -p ks-replay
 ```
 
-Чтобы не ослаблять проверку на границе `dbus-python`, репозиторий содержит
-узкий типовой контракт только используемой части API в `typings/dbus`.
+`ks-replay` прогоняет движок по записям поведения: что нажато, что вернул бэкенд, какие события вышли. Код Windows проверяется сборкой под каждую архитектуру: `cargo check -p ks-win --target x86_64-pc-windows-msvc`.
 
-Полный набор unit- и GTK interaction-тестов с обязательным 100% line/branch
-coverage (для GTK нужен активный X11 display или Xvfb):
+Проверка моделей, файлы которых лежат в репозитории:
 
 ```bash
-./tests/run_coverage.sh
+cargo build --profile train -p ks-train
+target/train/ks-train verify --tree .
+target/train/ks-train boundary --tree . --verify
+target/train/ks-train ortho --tree . --verify
+target/train/ks-train ortho --tree . --inputs
+target/train/ks-train intent --tree . --verify
+target/train/ks-train intent --tree . --evaluate --strict --output strict.json
+target/train/ks-train archive --tree .
+target/train/ks-train detector --tree . --sample 10000 --dictionary-sample 10000 --strict
 ```
 
-Для headless-запуска используется та же команда внутри `dbus-run-session` и
-`xvfb-run`; именно так набор выполняется в GitHub Actions. Отчёт не позволит
-сборке продолжиться, если покрытие опустится ниже 100% в области
-[.coveragerc](.coveragerc). Нативные Win32-обвязки и Windows UI исключены из
-этой метрики и проверяются отдельными Windows-тестами; это не 100% всех файлов.
+Обучение каждой модели, заморозка корпусов и замеры описаны в [цикле обучения](docs/model-cycle.md), остальные проверки — в [инструкции проверки](docs/verification.md). Архитектура и критерии описаны в [DESIGN.md](DESIGN.md), обоснование модели — в [обзоре механизма распознавания](docs/detection-research.md).
 
-Контекстная модель имеет отдельные проверки, не заменяемые KSLM-отчётом:
+Сборка пакетов: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (установщик и ZIP Windows, нужен Inno Setup), `packaging/build-rust-macos.sh` (приложение macOS). Workflow [`rust.yml`](.github/workflows/rust.yml) собирает их на каждый коммит и публикует файлы тега.
+
+Выпуск выполняется **только после явного решения о релизе**, команда включает коммит и push всех изменений дерева:
 
 ```bash
-PYTHONPATH=src python3 tools/verify_context_model.py
-PYTHONPATH=src python3 tools/verify_context_v2.py
+target/train/ks-release --version X.Y.Z --dry-run
+target/train/ks-release --version X.Y.Z --field-root <дерево с набором текста> --field-released <отчёты прошлого выпуска>
 ```
-
-Полы качества. Протокол моделей принимает кандидата, который лучше замороженной
-пары context-v1 + prefix-v1, но не сравнивает его с установленной парой. Поэтому
-`tests/test_quality_ratchet.py` держит установленные артефакты (квитанцию пары,
-замороженные engine-replay prefix и boundary, число раскрытых ожиданий) не ниже
-полов из `tests/fixture_values/quality_floors.py`: 0 порч правильного текста,
-запас восстановлений над базой, recall и ложные преобразования калибровки, пороги
-принятия решения. Пол двигается только вверх; новая пара, которая лучше, поднимает
-его в том же изменении, а понижение — отдельное решение в описании PR, а не
-побочный эффект переобучения или правки теста.
-
-Это быстрые проверки артефактов и происхождения данных. Повторное обучение,
-сравнение конечного текста и AT-SPI E2E описаны в
-[инструкции проверки](docs/verification.md); там же указана требуемая среда.
-
-В Windows отдельный E2E запускает настоящий `WH_KEYBOARD_LL`, вводит scan-коды
-через `SendInput` в поле Tk и проверяет обе замены, подсказку о правиле после
-двойного `Pause`, окно правила и его OK, повторное автоматическое применение
-правила, итоговую раскладку и историю:
-
-```powershell
-$env:PYTHONPATH = "src"
-py tests/e2e_windows.py
-```
-
-Воспроизводимый прогон 40 000 частых и широких словарных слов, а также сложных
-защитных случаев:
-
-```bash
-(cd model/intent_v1/sources && sha256sum --check SHA256SUMS)
-PYTHONPATH=src tools/evaluate_detector.py \
-  --sample 10000 --dictionary-sample 10000 --strict
-PYTHONPATH=src tools/evaluate_intent_model.py --strict
-```
-
-Вторая команда проверяет bundled `layout_intent_v1.ksm`, его KSLM schema 4,
-контрольные суммы, frozen-source и toolchain provenance, hash protected tokens,
-quarantine и train-only scorer, непустые Wilson-gates, production guarded
-safety и отдельные precision-first пороги для паузы и завершённого слова.
-Raw-model safety/membership срезы остаются диагностическими. Набор
-лексико-синтетический и служит регрессионным барьером, а не оценкой качества на
-реальном пользовательском вводе.
-
-Настоящий сквозной тест в активной X11-сессии:
-
-```bash
-PYTHONPATH=src python3 tests/e2e_x11.py
-```
-
-Успешный тест печатает `E2E_OK` после фактических исправлений, правила через
-двойной `Pause/Break`, `Enter` и окно правила и проверки защиты слова после ручной смены раскладки
-внутри GTK Entry. Отдельный
-интеграционный тест поднимает настоящий StatusNotifierItem и
-DBusMenu в изолированной сессии D-Bus:
-
-```bash
-dbus-run-session -- env PYTHONPATH=src python3 tests/e2e_tray_menu.py
-```
-
-Успешный тест печатает `TRAY_MENU_E2E_OK` после регистрации индикатора, чтения
-всех пунктов меню и активации команды «Настройки». Архитектура и критерии
-описаны в [DESIGN.md](DESIGN.md), а сравнение с
-существующими решениями и обоснование модели — в
-[обзоре механизма распознавания](docs/detection-research.md).
-
-Для воспроизводимой нативной сборки DEB-пакета:
-
-```bash
-sudo apt install build-essential ccache patch patchelf python3-dev python3-pip
-./tools/install-build-tools.sh .nuitka
-KEYSWITCH_NUITKA_ROOT=.nuitka ./packaging/build-deb.sh
-package_version="$(sed -nE 's/^version = "([^"]+)"/\1/p' pyproject.toml | head -n 1)"
-package="dist/keyswitch_${package_version}_$(dpkg --print-architecture).deb"
-./tools/verify-native-deb.sh "$package"
-```
-
-Перед сборкой выполняются strict-оценка KSLM и обе быстрые контекстные проверки.
-Проверенный strict-отчёт можно передать через `KEYSWITCH_INTENT_STRICT_REPORT`,
-как описано в [инструкции сборки](docs/verification.md).
-DEB включает KSLM, контекстную модель и точные frozen `en_US.lm`/`ru_RU.lm` из
-`model/intent_v1/sources`. Встроенный каталог имеет приоритет над системным
-`onboard-data`, поэтому runtime n-граммные оценки совпадают с проверенным
-release snapshot; verifier требует побайтного равенства обоих файлов.
-
-Нативные Windows-артефакты собираются на Windows с Python, Nuitka и Inno Setup:
-
-```powershell
-./packaging/build-windows.ps1
-```
-
-Команда создаёт standalone `KeySwitch.exe` без исходных `.py`, переносимый ZIP
-и per-user Setup EXE. В fresh clone команда по умолчанию берёт закреплённые
-`en_US.lm`, `ru_RU.lm` и лицензию прямо из `model/intent_v1/sources`;
-необязательные `-ModelDirectory` и `-ModelLicense` принимаются только для
-staged-копий с точными путями, размерами и SHA-256 из config; `SHA256SUMS`
-также обязан побайтно совпасть с config. Все внешние JSON/KSLM-входы читаются
-с лимитами. До Nuitka portable provenance-pass заново строит обе dataset-фазы
-и проверяет seal registry, frozen sources, toolchain, artifact и полный
-embedded manifest, после чего отдельная проверка подтверждает всю матрицу
-threshold/sealed/context/typo/safety/veto quality evidence. После Nuitka сборка
-запускает готовый `KeySwitch.exe --diagnose` без model override и требует
-`intent_model.available=true` с ожидаемыми версией и SHA-256.
-
-После остановки уже запущенного экземпляра полный E2E именно бинарника из
-пакета можно выполнить в активной X11-сессии:
-
-```bash
-dbus-run-session -- ./tools/run-native-e2e.sh "$package"
-```
-
-Он проверяет шесть реальных коррекций, одно слово после ручной смены без
-исправления, смену XKB-группы, историю, регистрацию StatusNotifierItem и состав
-всплывающего DBusMenu. При отправке тега `v*` GitHub Actions независимо
-проверяет Linux и Windows, собирает DEB, Windows Setup EXE и переносимый ZIP,
-выполняет тихую установку, точную диагностику bundled-модели и UI-smoke
-установленного приложения, формирует
-единый `SHA256SUMS` и публикует артефакты в GitHub Release.
-Replay моделей на теге выполняются заново. В остальных прогонах CI группа
-replay пропускается, если уже прошла на том же дереве: ключ её метки составляют
-закоммиченные `src/keyswitch`, `tools`, `tests`, `model`, `pyproject.toml` и
-файл workflow, а также версии Python, gcc, glibc и словарей. Переменная
-репозитория `KEYSWITCH_CI_REPLAY_CACHE=off` возвращает replay в каждый прогон.
-
-Linux-конвейер базовой модели и приложения — provenance и strict-оценку KSLM,
-её replay-доказательства, typecheck, coverage, детектор, X11/tray E2E, сборку и
-проверку DEB и E2E упакованного бинарника — выполняет один процесс,
-отсоединённый от терминала:
-
-```bash
-python3 tools/release_pipeline.py start --profile release
-python3 tools/release_pipeline.py status
-python3 tools/release_pipeline.py wait
-```
-
-Фазы образуют граф зависимостей и выполняются параллельно; планировщик
-допускает следующую фазу только при достаточном свободном ОЗУ с учётом ещё не
-достигнутых пиков уже запущенных фаз и резерва (`--jobs`,
-`--memory-reserve-mib`). Каждый прогон живёт в
-`dist/release-pipeline/<метка>-<профиль>/`: `state.json` обновляется по ходу,
-`summary.json` и `SUMMARY.md` появляются в конце рядом с журналами фаз,
-strict-отчётами и DEB-пакетом. Профиль `quick` проверяет среду, входы KSLM,
-typecheck, coverage, детектор и метаданные выпуска; `app` добавляет strict KSLM,
-X11/tray и нативную DEB-проверку, `release` — воспроизведение KSLM и её корпусов.
-`app` и `release` также проверяют набор владельца (`field-regression`,
-[барьер](tools/field_regression_gate.py)): полевые батареи из его технических
-журналов воспроизводятся деревом последнего выпуска и проверяемым деревом, и
-слово, которое выпущенная версия делала правильно, а новая делает неправильно,
-останавливает выпуск. Батареи частные и в git не входят; без них шаг не
-проходит. Барьер печатает только числа.
-Ни один профиль сам не запускает отдельное повторное обучение контекстных
-моделей, replay их последовательностей или нативный AT-SPI E2E: эти шаги идут
-отдельно в CI. Поэтому локальный конвейер не равен всему CI.
-`--replay-dir` принимает уже идущие или
-завершённые replay, а `python3 tools/release_pipeline.py phases` печатает
-фазы, бюджеты памяти и зависимости. Strict-отчёт и replay-доказательство
-прежнего прогона переиспользуются, когда они привязаны к тем же входам и той
-же машине (проверяется по хешам и environment probe); `--fresh-models`
-пересчитывает их заново.
-
-Сам выпуск выполняется отдельной командой **только после явного решения о
-релизе**. Она включает коммит и push всех изменений дерева, поэтому сначала
-проверьте `git status` и diff. Скрипт обновляет версию в заданном списке файлов,
-закрывает раздел `Unreleased` в `CHANGELOG.md`, проверяет
-`RELEASE_NOTES.md`, запускает контур проверки, коммитит, ставит тег, пушит и
-ждёт, пока workflow опубликует DEB, Windows Setup EXE, ZIP и `SHA256SUMS`:
-
-```bash
-python3 tools/release.py --version X.Y.Z --dry-run  # заменить X.Y.Z; без записи
-python3 tools/release.py --version X.Y.Z            # коммит, тег, push, публикация
-```
-
-`X.Y.Z` — ещё не использованная версия. Текст выпуска пишет человек: нужны
-записи под `## Unreleased` (либо уже закрытый раздел этой версии) и
-`RELEASE_NOTES.md` с её именами файлов. `--dry-run` проверяет подготовку, но
-не запускает тесты и сборку. Повтор после сбоя **не является автоматическим
-продолжением с последней фазы**: проверки обычно идут заново; существующий тег
-допускается только на неизменённом чистом HEAD. Уже отправленный тег или релиз
-не откатывается. [Порядок выпуска и восстановление](docs/verification.md).
 
 ## Ограничения
 
@@ -980,11 +784,9 @@ KeySwitch, — отправляет только выбранные пользо
 Подпись, когда она появится, следует этим правилам:
 
 - Подписываются только файлы, собранные из помеченного тегом коммита этого
-  репозитория рабочим процессом [Native packages](.github/workflows/release.yml)
+  репозитория рабочим процессом [Rust](.github/workflows/rust.yml)
   на GitHub-hosted runners: исполняемые файлы KeySwitch и Setup EXE. Собранное
-  на машине разработчика не подписывается. Сторонние двоичные файлы в пакете,
-  например среда Python и Tcl/Tk, сохраняют подписи своих авторов или остаются
-  без подписи.
+  на машине разработчика не подписывается.
 - Каждый запрос на подпись подтверждается вручную.
 - Роли команды:
   - авторы изменений и рецензенты: [Oleg Shevchuk (@olegius88)](https://github.com/olegius88);
@@ -1038,6 +840,4 @@ Tatoeba; происхождение, ограничения и лицензии 
   — интеграция значка с панелью;
 - [Canonical DBusMenu interface](https://sources.debian.org/src/libdbusmenu/18.10.20180917~bzr492%2Brepack1-2/libdbusmenu-glib/dbus-menu.xml/)
   — нативное всплывающее меню системного индикатора;
-- [Nuitka User Manual](https://nuitka.net/user-documentation/user-manual.html)
-  — компиляция приложения в standalone-бинарник;
 - [официальные release notes Ubuntu 26.04 LTS](https://documentation.ubuntu.com/release-notes/26.04/).

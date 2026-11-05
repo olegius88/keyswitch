@@ -1,5 +1,7 @@
 # Learned completed-token boundaries, v2
 
+> Записи ниже сохранены как история: инструменты `tools/*.py` и файлы `src/keyswitch/*.py`, которые они называют, были на Python и заменены программой `ks-train` на Rust. Текущие команды — в [цикле обучения](../../docs/model-cycle.md).
+
 Status: accepted by the predeclared calibration/test gates and installed as the
 default completed-token boundary model.
 Runtime version: `boundary-v2-db59e2332c9c`, feature version 3, calibrated

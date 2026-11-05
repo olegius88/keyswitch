@@ -242,9 +242,9 @@ rejections.
 Run:
 
 ```bash
-PYTHONPATH=src tools/evaluate_detector.py \
+target/train/ks-train detector --tree . \
   --sample 10000 --dictionary-sample 10000 --strict
-PYTHONPATH=src tools/evaluate_intent_model.py --strict
+target/train/ks-train intent --tree . --evaluate --strict --output strict.json
 ```
 
 The second command validates the bundled KSLM structure, reproduces its fixed

@@ -1,5 +1,7 @@
 # Completed-token boundary experiment 1
 
+> Записи ниже сохранены как история: инструменты `tools/*.py` и файлы `src/keyswitch/*.py`, которые они называют, были на Python и заменены программой `ks-train` на Rust. Текущие команды — в [цикле обучения](../../docs/model-cycle.md).
+
 Status: **rejected, inactive**. `candidate.json` is research evidence, not an
 installed application model. No `resources/models/boundary-v1.json` is shipped.
 This experiment did not change the default punctuation policy or context-v1
