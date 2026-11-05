@@ -144,6 +144,19 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn russian_numbers_of_seconds_and_the_texts_of_the_window() {
+        for (count, form) in [(1.0, "1 секунду"), (21.0, "21 секунду"), (2.0, "2 секунды"), (5.0, "5 секунд"), (11.0, "11 секунд"), (12.0, "12 секунд"), (22.0, "22 секунды")] {
+            assert_eq!(seconds(count), form);
+        }
+        assert_eq!((number(2.0), number(2.5)), ("2".to_owned(), "2,5".to_owned()));
+        assert!(reset_warning("-100").contains("-100"));
+        assert_eq!(group_label(&serde_json::json!({"title": "Логи", "id": 5})), "Логи (5)");
+        assert_eq!(group_label(&serde_json::json!({"id": 5})), "Группа (5)");
+        assert_eq!(autostart_command("a.exe").unwrap(), "\"a.exe\" gui --minimized");
+        assert!(autostart_command(&"x".repeat(300)).is_err());
+    }
+
     const TOKEN: &str = "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     fn form(sources: &[Source]) -> Form<'_> {

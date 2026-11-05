@@ -240,6 +240,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_setting_of_a_source_and_of_the_group_has_its_limits() {
+        let good = if cfg!(windows) { "C:\\logs\\a.log" } else { "/var/log/a.log" };
+        let mut source = Source::new(good, "журнал");
+        assert!(source.validate().is_ok());
+        source.rotations = MAX_ROTATIONS + 1;
+        assert!(source.validate().is_err());
+        source.rotations = 0;
+        source.id = "x".to_owned();
+        assert!(source.validate().is_err());
+        source.id = new_id();
+        source.label = " ".to_owned();
+        assert!(source.validate().is_err());
+        source.label = "л".repeat(MAX_SOURCE_LABEL_CHARACTERS + 1);
+        assert!(source.validate().is_err());
+        assert!(!hex32("abc") && !hex32(&"z".repeat(32)) && hex32(&"a".repeat(32)));
+        assert!(!digits_after("", false, 5) && !digits_after("123456", false, 5) && !digits_after("1a", false, 5) && digits_after("0", false, 5) && !digits_after("0", true, 5) && digits_after("1", true, 5));
+        let mut config = Config::default();
+        config.device_id = "x".to_owned();
+        assert!(config.validate().is_err());
+        config = Config::default();
+        config.device_name = " ".to_owned();
+        assert!(config.validate().is_err());
+        config.device_name = "д".repeat(MAX_DEVICE_NAME_CHARACTERS + 1);
+        assert!(config.validate().is_err());
+        config = Config::default();
+        let one = Source::new(good, "a");
+        config.sources = vec![one.clone(); MAX_SOURCES + 1];
+        assert!(config.validate().is_err());
+        config.sources = vec![one.clone(), one];
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn a_settings_file_of_the_wrong_shape_is_refused() {
+        assert!(Source::from_json(&serde_json::json!(1)).is_err());
+        assert!(Source::from_json(&serde_json::json!({"path": 1})).is_err());
+        assert!(Source::from_json(&serde_json::json!({"other": 1})).is_err());
+        let refused = |value: Value| Config::from_json(value.as_object().unwrap()).is_err();
+        assert!(refused(serde_json::json!({"chat_id": 1})) && refused(serde_json::json!({"other": 1})));
+        let root = std::env::temp_dir().join(format!("lc-config-{}", new_id()));
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(load_config(&root).unwrap().device_name, Config::default().device_name);
+        std::fs::write(root.join("config.json"), vec![b' '; usize::try_from(CONFIG_MAX_BYTES).unwrap() + 1]).unwrap();
+        assert!(load_config(&root).is_err());
+        assert!(!data_directory().as_os_str().is_empty());
+    }
+
+    #[test]
     fn settings_come_back_as_they_were_written() {
         let root = std::env::temp_dir().join(format!("lc-config-{}", new_id()));
         let mut config = Config { chat_id: "-1001".to_owned(), bot_id: "123".to_owned(), ..Config::default() };

@@ -92,3 +92,42 @@ impl From<sqlite::Error> for Error {
 pub fn not_found(error: &Error) -> bool {
     matches!(error, Error::Os("FileNotFoundError"))
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_error_has_its_python_name_and_shows_only_what_it_may() {
+        for (error, name, text) in [
+            (Error::value("v"), "ValueError", true),
+            (Error::Os("OSError"), "OSError", false),
+            (Error::Other("TypeError"), "TypeError", false),
+            (Error::QueueFull("q".to_owned()), "QueueFull", true),
+            (Error::Cancelled("c".to_owned()), "DeliveryCancelled", true),
+            (Error::telegram("t"), "TelegramError", true),
+            (Error::Runtime("r".to_owned()), "RuntimeError", true),
+        ] {
+            assert_eq!((error.type_name(), error.has_user_text()), (name, text));
+            assert!(!error.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_failure_of_the_system_is_named_as_python_names_it() {
+        use std::io::{Error as Io, ErrorKind};
+        for (kind, name) in [
+            (ErrorKind::NotFound, "FileNotFoundError"),
+            (ErrorKind::PermissionDenied, "PermissionError"),
+            (ErrorKind::AlreadyExists, "FileExistsError"),
+            (ErrorKind::IsADirectory, "IsADirectoryError"),
+            (ErrorKind::NotADirectory, "NotADirectoryError"),
+            (ErrorKind::TimedOut, "TimeoutError"),
+            (ErrorKind::Other, "OSError"),
+        ] {
+            assert_eq!(Error::from(Io::new(kind, "x")).type_name(), name);
+        }
+        assert_eq!(Error::from(sqlite::Error::InvalidQuery).type_name(), "OperationalError");
+    }
+}
