@@ -912,7 +912,7 @@ impl Inner {
             let state = self.state();
             if state.holding { state.hold_known_seq } else { state.known_seq }
         };
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         let main = (|| -> Result<(), BackendError> {
             if self.state().hold_broken {
                 return Err(failed(INPUT_AHEAD_ERROR));
@@ -1021,7 +1021,7 @@ impl Inner {
     /// focused one put text on the clipboard. The layout ends in `final_group` or where it was.
     fn replace_selection(&self, selected: &SelectedText, replacement: &str, final_group: Option<i32>) -> Result<bool, SelectionError> {
         {
-            let _inject = lock(&self.inject_lock);
+            let inject_inner = lock(&self.inject_lock);
             self.check_hold()?;
             let written = match lock(&self.selection_source).as_mut() {
                 Some(source) => source.write_selection(selected, replacement)?,
@@ -1052,7 +1052,7 @@ impl Inner {
             let state = self.state();
             Some(if state.holding { state.hold_known_seq } else { state.known_seq })
         };
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         self.check_hold()?;
         for (index, (group, keys)) in runs.iter().enumerate() {
             let group = (*group).low::<i32>();
@@ -1210,7 +1210,7 @@ impl InputBackend for WaylandBackend {
         if !(0 <= group && group.to::<usize>() < self.inner.group_count()) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
-        let _inject = lock(&self.inner.inject_lock);
+        let inject_inner = lock(&self.inner.inject_lock);
         self.inner.switch_group(group)
     }
 

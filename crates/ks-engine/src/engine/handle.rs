@@ -21,7 +21,7 @@ pub struct KeySwitchEngine {
     backend_label: String,
     /// The state, until the worker takes it; the worker hands it back when it ends.
     core: Mutex<Option<EngineCore>>,
-    _worker: Mutex<Option<JoinHandle<EngineCore>>>,
+    worker: Mutex<Option<JoinHandle<EngineCore>>>,
 }
 
 impl KeySwitchEngine {
@@ -76,10 +76,10 @@ impl KeySwitchEngine {
         KeySwitchEngine {
             shared: core.shared.clone(),
             learning: core.learning.clone(),
-            personal: core._personal.clone(),
+            personal: core.personal.clone(),
             backend_label: core.backend_label.clone(),
             core: Mutex::new(Some(core)),
-            _worker: Mutex::new(None),
+            worker: Mutex::new(None),
         }
     }
 
@@ -138,7 +138,7 @@ impl KeySwitchEngine {
             None => self.learning.add_rule(rule)?,
             Some(old) => self.learning.replace_rule(old, rule)?,
         };
-        let excluded = !application.is_empty() && self.shared._application_excluded(application);
+        let excluded = !application.is_empty() && self.shared.application_excluded(application);
         technical_event!(
             self.shared, "learning_rule_added",
             "pattern": if excluded { "<redacted>" } else { stored.pattern.as_str() },
@@ -152,7 +152,7 @@ impl KeySwitchEngine {
             "application_excluded": excluded,
         );
         let verb = if stored.action == ks_config::learning::RuleAction::Convert { "переводить" } else { "не переводить" };
-        self.shared._update(Update { last_action: Some(format!("Правило добавлено: «{}» — {verb}", stored.pattern)), ..Update::default() });
+        self.shared.update(Update { last_action: Some(format!("Правило добавлено: «{}» — {verb}", stored.pattern)), ..Update::default() });
         Ok(stored)
     }
 
@@ -163,16 +163,16 @@ impl KeySwitchEngine {
     }
 
     pub fn start(&self) -> Result<(), BackendError> {
-        if self.shared._running.load(Ordering::Relaxed) {
+        if self.shared.running.load(Ordering::Relaxed) {
             return Ok(());
         }
         let Some(core) = self.core.lock().ok().and_then(|mut core| core.take()) else {
             return Err(BackendError::Failed("Движок раскладки уже остановлен".to_owned()));
         };
-        self.shared._running.store(true, Ordering::Relaxed);
-        let worker = std::thread::Builder::new().name("keyswitch-engine".to_owned()).spawn(move || _run(core));
+        self.shared.running.store(true, Ordering::Relaxed);
+        let worker = std::thread::Builder::new().name("keyswitch-engine".to_owned()).spawn(move || run(core));
         let worker = worker.map_err(|error| BackendError::Failed(error.to_string()))?;
-        *self._worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(worker);
+        *self.worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(worker);
         // The hook asks this before letting a key through to the window.
         self.shared.backend.set_key_filter(Some(self.shared.key_filter()));
         let started = self
@@ -182,7 +182,7 @@ impl KeySwitchEngine {
             .and_then(|()| self.shared.backend.current_group());
         match started {
             Ok(group) => {
-                self.shared._update(Update {
+                self.shared.update(Update {
                     running: Some(true),
                     backend: Some(self.backend_label.clone()),
                     current_group: Some(i64::from(group)),
@@ -192,9 +192,9 @@ impl KeySwitchEngine {
                 Ok(())
             }
             Err(error) => {
-                self.shared._running.store(false, Ordering::Relaxed);
+                self.shared.running.store(false, Ordering::Relaxed);
                 self.shared.put_nowait(QueueItem::Stop);
-                self.shared._update(Update {
+                self.shared.update(Update {
                     running: Some(false),
                     backend: Some("недоступен".to_owned()),
                     last_error: Some(error.to_string()),
@@ -208,17 +208,17 @@ impl KeySwitchEngine {
     pub fn stop(&self) {
         self.shared.dismiss_learning_prompt(None, "dismissed");
         self.shared.backend.set_key_filter(None);
-        if !self.shared._running.load(Ordering::Relaxed) {
+        if !self.shared.running.load(Ordering::Relaxed) {
             if let Some(core) = self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
                 core.context_policy.stream.clear();
             }
             self.shared.backend.close();
             return;
         }
-        self.shared._running.store(false, Ordering::Relaxed);
+        self.shared.running.store(false, Ordering::Relaxed);
         self.shared.backend.stop();
         self.shared.put_nowait(QueueItem::Stop);
-        let worker = self._worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let worker = self.worker.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
         if let Some(worker) = worker
             && worker.thread().id() != std::thread::current().id()
         {
@@ -234,7 +234,7 @@ impl KeySwitchEngine {
             }
         }
         self.shared.backend.close();
-        self.shared._update(Update {
+        self.shared.update(Update {
             running: Some(false),
             backend: Some("остановлен".to_owned()),
             current_word: Some(String::new()),
@@ -250,14 +250,14 @@ impl KeySwitchEngine {
     /// Queue an explicit selection of the language opposite to the current one.
     pub fn select_alternate_group(&self) -> bool {
         let failed = |error: &str| {
-            self.shared._update(Update {
+            self.shared.update(Update {
                 last_error: Some(error.to_owned()),
                 last_action: Some("Язык из меню не переключён".to_owned()),
                 ..Update::default()
             });
             false
         };
-        if !self.shared._running.load(Ordering::Relaxed) {
+        if !self.shared.running.load(Ordering::Relaxed) {
             return failed("Движок раскладки не запущен");
         }
         let target = alternate_layout_group(self.shared.current_group());
@@ -271,25 +271,25 @@ impl KeySwitchEngine {
     }
 }
 
-/// `_run`: the worker's loop. It owns the core and hands it back when it ends.
-fn _run(mut core: EngineCore) -> EngineCore {
+/// `run`: the worker's loop. It owns the core and hands it back when it ends.
+fn run(mut core: EngineCore) -> EngineCore {
     let shared = core.shared.clone();
-    while shared._running.load(Ordering::Relaxed) {
-        match shared.next(core._loop_timeout()) {
-            Next::Command(Command::SettingsChanged(path, value)) => core._settings_changed(&path, &value),
+    while shared.running.load(Ordering::Relaxed) {
+        match shared.next(core.loop_timeout()) {
+            Next::Command(Command::SettingsChanged(path, value)) => core.settings_changed(&path, &value),
             Next::Timeout => {
                 // The timers replace text too (pause correction, deferred Enter):
                 // an error there must not end this thread while the hook keeps
                 // queueing keys and a held Enter waits for its release.
-                if let Err(error) = core._run_timers() {
-                    core._recover_from_error(&error);
+                if let Err(error) = core.run_timers() {
+                    core.recover_from_error(&error);
                 }
             }
             Next::Item(QueueItem::Stop) => break,
-            Next::Item(QueueItem::LayoutSelection(group)) => core._apply_layout_selection(group),
+            Next::Item(QueueItem::LayoutSelection(group)) => core.apply_layout_selection(group),
             Next::Item(QueueItem::Key(event)) => {
-                if let Err(error) = core._handle(event) {
-                    core._recover_from_error(&error);
+                if let Err(error) = core.handle_inner(event) {
+                    core.recover_from_error(&error);
                 }
             }
         }
@@ -304,7 +304,7 @@ impl EngineCore {
     /// What the worker does as it wakes: the settings other threads changed, applied on the engine's own thread.
     pub fn apply_commands(&mut self) {
         while let Some(Command::SettingsChanged(path, value)) = self.shared.take_command() {
-            self._settings_changed(&path, &value);
+            self.settings_changed(&path, &value);
         }
     }
 
@@ -313,16 +313,16 @@ impl EngineCore {
         self.context_policy
     }
 
-    /// `_run_timers`: the eight timers of the live loop. The harness pumps its own five, one by one.
-    pub fn _run_timers(&mut self) -> EngineResult<()> {
-        self._expire_deferred_action()?;
-        self._expire_manual_correction();
-        self._poll_current_group()?;
-        self._maybe_correct_after_pause(None)?;
-        self._retry_field_wait();
-        self._expire_learning_prompt(None);
-        self._report_input_delay();
-        self._report_unseen_input()?;
+    /// `run_timers`: the eight timers of the live loop. The harness pumps its own five, one by one.
+    pub fn run_timers(&mut self) -> EngineResult<()> {
+        self.expire_deferred_action()?;
+        self.expire_manual_correction();
+        self.poll_current_group()?;
+        self.maybe_correct_after_pause(None)?;
+        self.retry_field_wait();
+        self.expire_learning_prompt(None);
+        self.report_input_delay();
+        self.report_unseen_input()?;
         Ok(())
     }
 
@@ -335,16 +335,16 @@ impl EngineCore {
     /// input no hook got came in the middle of words in 14 programs, and each time the word, the text before it and
     /// the last correction were forgotten, so Pause found no word to convert. A backend that cannot tell has no
     /// take_unseen_input.
-    pub fn _report_unseen_input(&mut self) -> EngineResult<()> {
+    pub fn report_unseen_input(&mut self) -> EngineResult<()> {
         let Some(unseen) = self.backend.take_unseen_input()? else {
             return Ok(());
         };
         let application = self.backend.active_application();
-        if !self._unseen_applications.insert(application.clone()) {
+        if !self.unseen_applications.insert(application.clone()) {
             return Ok(());
         }
         technical_event!(
-            self.shared, "input_unseen", "application": application, "application_excluded": self._application_excluded(&application),
+            self.shared, "input_unseen", "application": application, "application_excluded": self.application_excluded(&application),
             "unseen_ms": unseen, "silence_threshold_ms": HOOK_SILENCE_MS,
         );
         Ok(())
@@ -354,12 +354,12 @@ impl EngineCore {
     ///
     /// A backend that cannot tell (X11 observes keys after the window has them) has no
     /// take_input_delay; see input_delay.
-    pub fn _report_input_delay(&mut self) {
+    pub fn report_input_delay(&mut self) {
         let now = self.monotonic();
-        if now < self._input_delay_due {
+        if now < self.input_delay_due {
             return;
         }
-        self._input_delay_due = now + INPUT_DELAY_REPORT_INTERVAL_SECONDS;
+        self.input_delay_due = now + INPUT_DELAY_REPORT_INTERVAL_SECONDS;
         let Some(report) = self.backend.take_input_delay() else {
             return;
         };
@@ -375,9 +375,9 @@ impl EngineCore {
         }
     }
 
-    pub fn _recover_from_error(&mut self, error: &EngineError) {
-        self._clear_word(None, "input_error");
-        self.shared._update(Update {
+    pub fn recover_from_error(&mut self, error: &EngineError) {
+        self.clear_word(None, "input_error");
+        self.shared.update(Update {
             last_error: Some(error.to_string()),
             last_action: Some("Ошибка обработки ввода".to_owned()),
             ..Update::default()
@@ -385,41 +385,41 @@ impl EngineCore {
     }
 
     /// Wake exactly when the pause delay elapses, at most every 0.5 s.
-    pub fn _loop_timeout(&self) -> f64 {
-        if self._field_wait.is_some() {
+    pub fn loop_timeout(&self) -> f64 {
+        if self.field_wait.is_some() {
             return FIELD_CATCH_UP_RETRY_SECONDS;
         }
-        let Some(last_input) = self._last_word_input_at.filter(|_| self._pause_correction_pending) else {
+        let Some(last_input) = self.last_word_input_at.filter(|_| self.pause_correction_pending) else {
             return ENGINE_LOOP_MAX_WAKE_SECONDS;
         };
-        let remaining = last_input + self._pause_delay() - self.monotonic();
+        let remaining = last_input + self.pause_delay() - self.monotonic();
         let bounded = if remaining < ENGINE_LOOP_MAX_WAKE_SECONDS { remaining } else { ENGINE_LOOP_MAX_WAKE_SECONDS };
         if bounded > ENGINE_LOOP_MIN_WAKE_SECONDS { bounded } else { ENGINE_LOOP_MIN_WAKE_SECONDS }
     }
 
-    pub fn _apply_layout_selection(&mut self, group: i64) {
+    pub fn apply_layout_selection(&mut self, group: i64) {
         if let Err(error) = self.backend.switch_group(group.to::<i32>()) {
             technical_event!(self.shared, "layout_selection_failed", "requested_group": group, "error": error.to_string());
-            self.shared._update(Update {
+            self.shared.update(Update {
                 last_error: Some(error.to_string()),
                 last_action: Some("Язык из меню не переключён".to_owned()),
                 ..Update::default()
             });
             return;
         }
-        self._clear_word(None, "layout_selected");
-        self._last_committed_stale = true;
-        self._note_engine_switch(group);
-        self._manual_layout_group = self.flag("detection.respect_manual_layout", true).then_some(group);
-        self._manual_layout_observed_at = Some(self.monotonic());
-        self._manual_layout_source = "menu".to_owned();
-        self._manual_layout_word = false;
+        self.clear_word(None, "layout_selected");
+        self.last_committed_stale = true;
+        self.note_engine_switch(group);
+        self.manual_layout_group = self.flag("detection.respect_manual_layout", true).then_some(group);
+        self.manual_layout_observed_at = Some(self.monotonic());
+        self.manual_layout_source = "menu".to_owned();
+        self.manual_layout_word = false;
         technical_event!(
             self.shared, "layout_selected_from_menu",
             "selected_group": group,
-            "protects_next_word": self._manual_layout_group == Some(group),
+            "protects_next_word": self.manual_layout_group == Some(group),
         );
-        self.shared._update(Update {
+        self.shared.update(Update {
             current_group: Some(group),
             last_action: Some(format!("Язык выбран из меню: {}", ks_config::indicator::layout_label(group))),
             last_error: Some(String::new()),

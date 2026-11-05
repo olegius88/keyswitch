@@ -876,7 +876,7 @@ mod win32 {
         let marker = vec![0u8; size_of::<u32>()];
         let mut items: Vec<(u32, &[u8])> = contents.formats.iter().map(|(item, data)| (*item, data.as_slice())).collect();
         // An empty clipboard is put back empty, without even this marker.
-        if !items.is_empty() && history != 0 && items.iter().all(|(item, _data)| *item != history) {
+        if !items.is_empty() && history != 0 && items.iter().all(|(item, data)| *item != history) {
             items.push((history, &marker));
         }
         for (item, data) in items {

@@ -81,7 +81,7 @@ pub const PLANNED_CONTEXT_WORD_MAX_CHARACTERS: usize = 3;
 pub const PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: usize = 64;
 
 // `after_origin == "kept_next_word"`: a waiting word of at most this many characters asked once more
-// with its next word, which stayed as typed in the same layout (KeySwitchEngine._decide_with_kept_neighbour).
+// with its next word, which stayed as typed in the same layout (KeySwitchEngine.decide_with_kept_neighbour).
 // Five covers the terms the owner's typing left behind that way (`шзм6` for `ipv6`, `тзь` for `npm`).
 pub const KEPT_CONTEXT_WORD_MAX_CHARACTERS: usize = 5;
 
@@ -304,7 +304,7 @@ pub const ALNUM_SHAPE_MAX_RUNS: usize = 3;
 pub const ALNUM_RATIO_BOUND: i64 = 8;
 
 // The question about the next word of a waiting word asked with that word's other reading before it (engine
-// _decide_after_waiting_word, ContextEvidence.before_origin) has evidence of its own under this prefix: the hypothesis
+// decide_after_waiting_word, ContextEvidence.before_origin) has evidence of its own under this prefix: the hypothesis
 // head (context_action_features.hypothesis_question). `тыв` after `tot ` (`еще тыв`, a typo of `ты`) read as the keys of
 // `nsd`, a command name, and the pair became `tot nsd`.
 pub const HYPOTHESIS_FEATURE_PREFIX: &str = "hypo|";
@@ -423,7 +423,7 @@ pub const DASH_HEAD_TRIGGERS: &[&str] = &["space", "punctuation", "enter"];
 // digit-dot head (context_action_features.digit_dot_question). A person used to the English layout presses its dot key in
 // Russian text too, and the Russian layout prints `ю` there: `2ю` for `2.`, `5ю2` for `5.2` (the owner's typing, five such
 // tokens of the field batteries stayed). The engine replaces the sign and leaves the Russian layout on
-// (engine._plan_from_decision). The comma's key prints `б`, and digits with `б` are written as meant too (`класс 5б`): fitted
+// (engine.plan_from_decision). The comma's key prints `б`, and digits with `б` are written as meant too (`класс 5б`): fitted
 // with them, candidate v81 e3 left every token of the class a suggestion, so they stay out of the class.
 pub const DIGIT_DOT_FEATURE_PREFIX: &str = "digitdot|";
 

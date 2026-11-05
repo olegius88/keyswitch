@@ -278,19 +278,19 @@ impl Item {
         ObjectPath::from_static_str_unchecked(MENU_PATH)
     }
 
-    fn activate(&self, _x: i32, _y: i32) {
+    fn activate(&self, x: i32, y: i32) {
         self.request_open();
     }
 
-    fn secondary_activate(&self, _x: i32, _y: i32) {
+    fn secondary_activate(&self, x: i32, y: i32) {
         (self.shared.on_action)(TrayAction::ToggleEngine);
     }
 
-    fn context_menu(&self, _x: i32, _y: i32) {
+    fn context_menu(&self, x: i32, y: i32) {
         self.request_open();
     }
 
-    fn scroll(&self, _delta: i32, _orientation: String) {}
+    fn scroll(&self, delta: i32, orientation: String) {}
 
     #[zbus(signal)]
     async fn new_status(emitter: &SignalEmitter<'_>, status: String) -> zbus::Result<()>;
@@ -389,7 +389,7 @@ impl Menu {
         MenuState::property_default(&name).map(|value| variant(&value)).ok_or_else(|| zbus::fdo::Error::UnknownProperty(name))
     }
 
-    fn event(&self, id: i32, event_id: String, _data: Value<'_>, _timestamp: u32) {
+    fn event(&self, id: i32, event_id: String, data: Value<'_>, timestamp: u32) {
         self.dispatch(id, &event_id);
     }
 
@@ -397,7 +397,7 @@ impl Menu {
         events.into_iter().filter(|(id, event, _, _)| !self.dispatch(*id, event)).map(|(id, ..)| id).collect()
     }
 
-    fn about_to_show(&self, _id: i32) -> bool {
+    fn about_to_show(&self, id: i32) -> bool {
         false
     }
 

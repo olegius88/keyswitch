@@ -13,7 +13,7 @@ use ks_backend::field_context::{FieldContext, FieldRole};
 use ks_context::prefix_model::{PrefixInput, PrefixSide, features};
 use ks_lang::Resources;
 use ks_lang::constants::PREFIX_INDEX_DICTIONARY_MAX_BYTES;
-use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, _dictionary_stems, early_switch_decision};
+use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, dictionary_stems, early_switch_decision};
 use ks_text::pystr;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -158,7 +158,7 @@ fn profile(root: &Path, resources: &Resources, spelling: bool) -> Result<Profile
     for (group, locale) in ["en_US", "ru_RU"].into_iter().enumerate() {
         let onboard = ks_lang::LanguageModel::load(locale, std::iter::empty::<&str>(), &[root.join("model/intent_v1/sources")], ks_lang::LanguageModel::disabled_speller());
         if spelling {
-            let stems = _dictionary_stems(Path::new(models[group].speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
+            let stems = dictionary_stems(Path::new(models[group].speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
             indexes.push(PrefixIndex::new(onboard.frequencies.words().iter().chain(stems.iter()), onboard.frequencies.clone()));
         } else {
             indexes.push(PrefixIndex::new(onboard.frequencies.words().iter(), onboard.frequencies.clone()));

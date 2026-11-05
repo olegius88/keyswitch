@@ -13,7 +13,7 @@ use ks_backend::{FieldContext, FieldRole};
 use ks_context::prefix_model::{PrefixInput, PrefixModel, PrefixSide};
 use ks_context::prefix_schema::features_for_version;
 use ks_context::flat_table::WeightTable;
-use ks_lang::early_switch::{PrefixIndex, _dictionary_stems};
+use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
 use ks_lang::{Resources, LanguageModel};
 use ks_text::{JsonOptions, fsum, json_dumps, py_round_ndigits, pystr};
 use serde_json::{Map, Value, json};
@@ -172,7 +172,7 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
     Ok(result)
 }
 
-/// `contexts_for`, sorted and without repeats as `_contexts` leaves them.
+/// `contexts_for`, sorted and without repeats as `contexts` leaves them.
 fn contexts_of(parent: &ParentWord) -> Vec<PrefixContext> {
     let values: Vec<PrefixContext> = if SAFETY_CATEGORIES.contains(&parent.category.as_str()) {
         vec![PrefixContext { identifier: "existing", before: parent.before.clone(), application: parent.application.clone(), role: parent.role }]
@@ -212,7 +212,7 @@ fn indexes_of(portable: &Lexicons, spelling: &Lexicons) -> Indexes {
     let stemmed = spelling
         .iter()
         .map(|model| {
-            let stems = _dictionary_stems(Path::new(model.speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
+            let stems = dictionary_stems(Path::new(model.speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
             PrefixIndex::new(model.frequencies.words().iter().chain(stems.iter()), model.frequencies.clone())
         })
         .collect();

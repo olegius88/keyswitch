@@ -1,7 +1,7 @@
 //! Windows keyboard backend built around a small, testable native API.
 //!
 //! A private `_name` of the Python is `name` here, and methods live on the shared `Inner` that the hook thread also
-//! holds. `_switch_group` and `_inject_correction` keep their underscore, because `switch_group` and `inject_correction`
+//! holds. `switch_group_inner` and `inject_correction_inner` keep their underscore, because `switch_group` and `inject_correction`
 //! exist beside them.
 //!
 //! Two threads run this code, and the Python's interpreter lock is gone, so each field says how it is shared:
@@ -778,8 +778,8 @@ impl Inner {
         if !valid_group(group) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
-        let _inject = lock(&self.inject_lock);
-        self._switch_group(group).map(drop)
+        let inject_inner = lock(&self.inject_lock);
+        self.switch_group_inner(group).map(drop)
     }
 
     fn group_for_layout(&self, layout: i64) -> Result<i32, WindowsBackendError> {
@@ -1206,13 +1206,13 @@ impl Inner {
     /// that stays as it was: they, the boundary and the late keys are typed in the source layout, and the layout stays
     /// there.
     fn inject_correction(&self, injection: &Injection<'_>) -> Result<i32, WindowsBackendError> {
-        let result = self._inject_correction(injection);
+        let result = self.inject_correction_inner(injection);
         // In the Python this runs in a `finally`: its failure takes the place of the outcome above.
         self.release_input()?;
         result
     }
 
-    fn _inject_correction(&self, injection: &Injection<'_>) -> Result<i32, WindowsBackendError> {
+    fn inject_correction_inner(&self, injection: &Injection<'_>) -> Result<i32, WindowsBackendError> {
         let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = *injection;
         self.layouts()?;
         if !valid_group(target_group) {
@@ -1249,12 +1249,12 @@ impl Inner {
         let mut late_typed = false;
         let mut failure: Option<WindowsBackendError> = None;
         let held_count = {
-            let _inject = lock(&self.inject_lock);
+            let inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
                 // The layout is switched first so that the deletion and the replacement travel in one SendInput call:
                 // Windows keeps the events of a single call together, but lets the user's keys slip in between separate
                 // calls.
-                let switched = self._switch_group(target_group)?;
+                let switched = self.switch_group_inner(target_group)?;
                 if let Some((hold_pointer_epoch, hold_window)) = self.holding_place()
                     && self.input_place_changed(hold_pointer_epoch, hold_window)
                 {
@@ -1279,16 +1279,16 @@ impl Inner {
                 late_deleted = true;
                 if kept_tail != 0 {
                     // The kept word is typed in its own layout, and the text goes on there.
-                    self._switch_group(final_group)?;
+                    self.switch_group_inner(final_group)?;
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                     let mut batch = kept_inputs.clone();
                     batch.extend_from_slice(&boundary_inputs);
                     self.send_exact(&batch)?;
                 } else if preserve_boundary_layout {
-                    self._switch_group(literal_group)?;
+                    self.switch_group_inner(literal_group)?;
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                     self.send_exact(&boundary_inputs)?;
-                    self._switch_group(target_group)?;
+                    self.switch_group_inner(target_group)?;
                 }
                 // A partial send is not an all-or-nothing failure; retrying this whole batch could duplicate an already
                 // delivered prefix.
@@ -1525,7 +1525,7 @@ impl Inner {
             }
             reselect.push(NativeInput::key(false, VK_SHIFT));
         }
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         if let Some((hold_pointer_epoch, hold_window)) = self.holding_place()
             && self.input_place_changed(hold_pointer_epoch, hold_window)
         {
@@ -1545,7 +1545,7 @@ impl Inner {
             steps.is_some()
         };
         if let Some(final_group) = final_group {
-            self._switch_group(final_group)?;
+            self.switch_group_inner(final_group)?;
         }
         Ok(reselected)
     }
@@ -1605,7 +1605,7 @@ impl Inner {
     }
 
     /// Switch the window's layout to `group` and wait for it to say so; whether the layout changed.
-    fn _switch_group(&self, group: i32) -> Result<bool, WindowsBackendError> {
+    fn switch_group_inner(&self, group: i32) -> Result<bool, WindowsBackendError> {
         let (english, russian) = self.layouts()?;
         let layout = match group {
             0 => english,

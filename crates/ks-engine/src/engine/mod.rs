@@ -91,80 +91,80 @@ pub struct EngineCore {
     pub platform_reader: Option<Arc<crate::context_access::PlatformFieldReader>>,
     pub resource_dir: PathBuf,
     pub clock: Clock,
-    pub _context_result: Option<Arc<ContextResult>>,
+    pub context_result: Option<Arc<ContextResult>>,
     pub boundary_model: Option<Arc<BoundaryPolicy>>,
     pub prefix_model: Option<Arc<VersionedPrefixModel>>,
-    pub _early_switch_confidence: f64,
-    pub _context_waiting: Option<WaitingContextWord>,
-    pub _provisional: Option<ProvisionalWord>,
-    pub _paused_conversion: Option<ProvisionalWord>,
-    pub _kept: Vec<Arc<KeptWord>>,
-    pub _last_baseline: Option<DetectionDecision>,
-    pub _context_wait_sequence: i64,
-    pub _correction_sequence: i64,
-    pub _late_refusal: String,
-    pub _unseen_applications: HashSet<String>,
-    pub _untracked_token: bool,
-    pub _deferred_action: Option<Stroke>,
-    pub _action_deadline: f64,
-    pub _strokes: Strokes,
-    pub _source_group: i64,
-    pub _last_word_input_at: Option<f64>,
-    pub _pause_correction_pending: bool,
-    pub _manual_layout_group: Option<i64>,
-    pub _own_layout_ignored: bool,
-    pub _pressed: HashSet<u32>,
-    pub _pressed_since: Vec<(u32, f64)>,
-    pub _modifier_keycodes: HashSet<u32>,
-    pub _symbol_strokes: Strokes,
-    pub _mention_shown: Option<Stroke>,
-    pub _last_key_character: String,
-    pub _character_before_key: String,
-    pub _position_unknown: bool,
-    pub _insertion: Option<InsertionPoint>,
-    pub _last_committed_stale: bool,
-    pub _caret_moved: bool,
-    pub _early_switch_origin: Option<i64>,
-    pub _early_switch_at: Option<f64>,
-    pub _engine_switch_at: Option<f64>,
-    pub _engine_switch_group: Option<i64>,
-    pub _manual_layout_observed_at: Option<f64>,
-    pub _manual_layout_source: String,
-    pub _manual_layout_word: bool,
-    pub _early_switch_undone: bool,
-    pub _pause_deferral_logged: bool,
-    pub _wait_deferral_logged: i64,
-    pub _prefix_indexes: Vec<Arc<PrefixIndex>>,
-    pub _pending: Option<PlanRef>,
-    pub _field_wait: Option<FieldWait>,
-    pub _pending_trigger_keycode: i64,
-    pub _input_delay_due: f64,
-    pub _manual_release_deadline: f64,
-    pub _last_committed: Option<PlanRef>,
-    pub _last_correction: Option<PlanRef>,
-    pub _last_correction_time: f64,
-    pub _pause_agreement_open: bool,
-    pub _learning_prompt_after: Option<LearningPrompt>,
-    pub _correction_origin: Option<PlanRef>,
-    pub _last_requested_plan: Option<PlanRef>,
-    pub _convert_press_at: f64,
-    pub _convert_keycode: i64,
-    pub _convert_released: bool,
-    pub _convert_outcome: Option<ConvertOutcome>,
-    pub _selection_pending: Option<ks_config::selection_commands::PendingSelection>,
-    pub _foreign_input_active: bool,
-    pub _contexts: Vec<(String, LanguageContext)>,
-    pub _typo: Option<Arc<TypoCorrector>>,
-    pub _typo_keys: KeyTemplates,
-    pub _personal: Arc<PersonalWords>,
-    pub _personal_pending: String,
+    pub early_switch_confidence: f64,
+    pub context_waiting: Option<WaitingContextWord>,
+    pub provisional: Option<ProvisionalWord>,
+    pub paused_conversion: Option<ProvisionalWord>,
+    pub kept: Vec<Arc<KeptWord>>,
+    pub last_baseline: Option<DetectionDecision>,
+    pub context_wait_sequence: i64,
+    pub correction_sequence: i64,
+    pub late_refusal: String,
+    pub unseen_applications: HashSet<String>,
+    pub untracked_token: bool,
+    pub deferred_action: Option<Stroke>,
+    pub action_deadline: f64,
+    pub strokes: Strokes,
+    pub source_group: i64,
+    pub last_word_input_at: Option<f64>,
+    pub pause_correction_pending: bool,
+    pub manual_layout_group: Option<i64>,
+    pub own_layout_ignored: bool,
+    pub pressed: HashSet<u32>,
+    pub pressed_since: Vec<(u32, f64)>,
+    pub modifier_keycodes: HashSet<u32>,
+    pub symbol_strokes: Strokes,
+    pub mention_shown: Option<Stroke>,
+    pub last_key_character: String,
+    pub character_before_key: String,
+    pub position_unknown: bool,
+    pub insertion: Option<InsertionPoint>,
+    pub last_committed_stale: bool,
+    pub caret_moved: bool,
+    pub early_switch_origin: Option<i64>,
+    pub early_switch_at: Option<f64>,
+    pub engine_switch_at: Option<f64>,
+    pub engine_switch_group: Option<i64>,
+    pub manual_layout_observed_at: Option<f64>,
+    pub manual_layout_source: String,
+    pub manual_layout_word: bool,
+    pub early_switch_undone: bool,
+    pub pause_deferral_logged: bool,
+    pub wait_deferral_logged: i64,
+    pub prefix_indexes: Vec<Arc<PrefixIndex>>,
+    pub pending: Option<PlanRef>,
+    pub field_wait: Option<FieldWait>,
+    pub pending_trigger_keycode: i64,
+    pub input_delay_due: f64,
+    pub manual_release_deadline: f64,
+    pub last_committed: Option<PlanRef>,
+    pub last_correction: Option<PlanRef>,
+    pub last_correction_time: f64,
+    pub pause_agreement_open: bool,
+    pub learning_prompt_after: Option<LearningPrompt>,
+    pub correction_origin: Option<PlanRef>,
+    pub last_requested_plan: Option<PlanRef>,
+    pub convert_press_at: f64,
+    pub convert_keycode: i64,
+    pub convert_released: bool,
+    pub convert_outcome: Option<ConvertOutcome>,
+    pub selection_pending: Option<ks_config::selection_commands::PendingSelection>,
+    pub foreign_input_active: bool,
+    pub contexts: Vec<(String, LanguageContext)>,
+    pub typo: Option<Arc<TypoCorrector>>,
+    pub typo_keys: KeyTemplates,
+    pub personal: Arc<PersonalWords>,
+    pub personal_pending: String,
     term_tables: RefCell<Option<Arc<TermTables>>>,
     hotkey_cache: RefCell<HashMap<String, Arc<Hotkey>>>,
-    /// Every plan `_execute_correction` carried out, when a replay asks for them.
+    /// Every plan `execute_correction` carried out, when a replay asks for them.
     pub executed: Option<Vec<ExecutedPlan>>,
 }
 
-/// A failure the worker's loop recovers from, as `_run` catches an exception: `str(error)` is what the status line shows.
+/// A failure the worker's loop recovers from, as `run` catches an exception: `str(error)` is what the status line shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EngineError(pub String);
 
@@ -238,79 +238,79 @@ impl EngineCore {
             platform_reader,
             resource_dir,
             clock,
-            _context_result: None,
+            context_result: None,
             boundary_model,
             prefix_model,
-            _early_switch_confidence: EARLY_SWITCH_CONFIDENCE,
-            _context_waiting: None,
-            _provisional: None,
-            _paused_conversion: None,
-            _kept: Vec::new(),
-            _last_baseline: None,
-            _context_wait_sequence: 0,
-            _correction_sequence: 0,
-            _late_refusal: String::new(),
-            _unseen_applications: HashSet::new(),
-            _untracked_token: false,
-            _deferred_action: None,
-            _action_deadline: 0.0,
-            _strokes: Vec::new(),
-            _source_group: -1,
-            _last_word_input_at: None,
-            _pause_correction_pending: false,
-            _manual_layout_group: None,
-            _own_layout_ignored: false,
-            _pressed: HashSet::new(),
-            _pressed_since: Vec::new(),
-            _modifier_keycodes: HashSet::new(),
-            _symbol_strokes: Vec::new(),
-            _mention_shown: None,
-            _last_key_character: String::new(),
-            _character_before_key: String::new(),
-            _position_unknown: true,
-            _insertion: None,
-            _last_committed_stale: false,
-            _caret_moved: false,
-            _early_switch_origin: None,
-            _early_switch_at: None,
-            _engine_switch_at: None,
-            _engine_switch_group: None,
-            _manual_layout_observed_at: None,
-            _manual_layout_source: String::new(),
-            _manual_layout_word: false,
-            _early_switch_undone: false,
-            _pause_deferral_logged: false,
-            _wait_deferral_logged: 0,
-            _prefix_indexes: prefix_indexes,
-            _pending: None,
-            _field_wait: None,
-            _pending_trigger_keycode: -1,
-            _input_delay_due: now + INPUT_DELAY_REPORT_INTERVAL_SECONDS,
-            _manual_release_deadline: 0.0,
-            _last_committed: None,
-            _last_correction: None,
-            _last_correction_time: 0.0,
-            _pause_agreement_open: false,
-            _learning_prompt_after: None,
-            _correction_origin: None,
-            _last_requested_plan: None,
-            _convert_press_at: 0.0,
-            _convert_keycode: -1,
-            _convert_released: false,
-            _convert_outcome: None,
-            _selection_pending: None,
-            _foreign_input_active: false,
-            _contexts: Vec::new(),
-            _typo: None,
-            _typo_keys: KeyTemplates::default(),
-            _personal: Arc::new(personal),
-            _personal_pending: String::new(),
+            early_switch_confidence: EARLY_SWITCH_CONFIDENCE,
+            context_waiting: None,
+            provisional: None,
+            paused_conversion: None,
+            kept: Vec::new(),
+            last_baseline: None,
+            context_wait_sequence: 0,
+            correction_sequence: 0,
+            late_refusal: String::new(),
+            unseen_applications: HashSet::new(),
+            untracked_token: false,
+            deferred_action: None,
+            action_deadline: 0.0,
+            strokes: Vec::new(),
+            source_group: -1,
+            last_word_input_at: None,
+            pause_correction_pending: false,
+            manual_layout_group: None,
+            own_layout_ignored: false,
+            pressed: HashSet::new(),
+            pressed_since: Vec::new(),
+            modifier_keycodes: HashSet::new(),
+            symbol_strokes: Vec::new(),
+            mention_shown: None,
+            last_key_character: String::new(),
+            character_before_key: String::new(),
+            position_unknown: true,
+            insertion: None,
+            last_committed_stale: false,
+            caret_moved: false,
+            early_switch_origin: None,
+            early_switch_at: None,
+            engine_switch_at: None,
+            engine_switch_group: None,
+            manual_layout_observed_at: None,
+            manual_layout_source: String::new(),
+            manual_layout_word: false,
+            early_switch_undone: false,
+            pause_deferral_logged: false,
+            wait_deferral_logged: 0,
+            prefix_indexes: prefix_indexes,
+            pending: None,
+            field_wait: None,
+            pending_trigger_keycode: -1,
+            input_delay_due: now + INPUT_DELAY_REPORT_INTERVAL_SECONDS,
+            manual_release_deadline: 0.0,
+            last_committed: None,
+            last_correction: None,
+            last_correction_time: 0.0,
+            pause_agreement_open: false,
+            learning_prompt_after: None,
+            correction_origin: None,
+            last_requested_plan: None,
+            convert_press_at: 0.0,
+            convert_keycode: -1,
+            convert_released: false,
+            convert_outcome: None,
+            selection_pending: None,
+            foreign_input_active: false,
+            contexts: Vec::new(),
+            typo: None,
+            typo_keys: KeyTemplates::default(),
+            personal: Arc::new(personal),
+            personal_pending: String::new(),
             term_tables: RefCell::new(None),
             hotkey_cache: RefCell::new(HashMap::new()),
             executed: None,
         };
-        core._typo_corrector()?;
-        core._technical_session_event("engine_initialized");
+        core.typo_corrector()?;
+        core.technical_session_event("engine_initialized");
         if core.learning.migrated() != 0 {
             technical_event!(core.shared, "learning_rules_migrated", "rules": core.learning.migrated());
         }
@@ -363,13 +363,13 @@ impl EngineCore {
         (0..self.models.len().to::<i64>()).filter(|&group| group != source_group).collect()
     }
 
-    /// `{group: self._text_for_group(strokes, group) for group in self.models if group != source_group}`.
+    /// `{group: self.text_for_group(strokes, group) for group in self.models if group != source_group}`.
     pub(crate) fn alternatives_of(&self, strokes: &[Stroke], source_group: i64) -> Alternatives {
-        self.other_groups(source_group).into_iter().map(|group| (group, _text_for_group(strokes, group))).collect()
+        self.other_groups(source_group).into_iter().map(|group| (group, text_for_group(strokes, group))).collect()
     }
 
-    /// `_term_frequency()`: the tables the context model holds, or read once without one.
-    pub(crate) fn _term_frequency(&self) -> EngineResult<Arc<TermTables>> {
+    /// `term_frequency()`: the tables the context model holds, or read once without one.
+    pub(crate) fn term_frequency(&self) -> EngineResult<Arc<TermTables>> {
         if let Some(model) = &self.context_policy.model {
             return Ok(model.tables.clone());
         }
@@ -382,23 +382,23 @@ impl EngineCore {
         Ok(tables)
     }
 
-    /// `self._focus_window or 0`.
+    /// `self.focus_window or 0`.
     #[inline]
     pub(crate) fn focus_or_zero(&self) -> i64 {
-        self.shared._focus_window().unwrap_or(0)
+        self.shared.focus_window().unwrap_or(0)
     }
 
-    pub(crate) fn _application_excluded(&self, application: &str) -> bool {
-        self.shared._application_excluded(application)
+    pub(crate) fn application_excluded(&self, application: &str) -> bool {
+        self.shared.application_excluded(application)
     }
 
-    /// `_bounded_setting`.
+    /// `bounded_setting`.
     /// A numeric setting within the range the settings windows offer for it.
     ///
     /// Both windows take their ranges from the same constants, and a value edited
     /// into the settings file by hand is brought into that range here; one that is
     /// not a number at all falls back to the default.
-    pub(crate) fn _bounded_setting(&self, path: &str, default: f64, minimum: f64, maximum: f64) -> f64 {
+    pub(crate) fn bounded_setting(&self, path: &str, default: f64, minimum: f64, maximum: f64) -> f64 {
         let value = self.settings.with_value(path, |value| match value {
             None => default,
             Some(Value::Bool(flag)) => f64::from(u8::from(*flag)),
@@ -411,16 +411,16 @@ impl EngineCore {
         if low < maximum { low } else { maximum }
     }
 
-    pub(crate) fn _pause_delay(&self) -> f64 {
-        self._bounded_setting("detection.pause_delay_seconds", DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS)
+    pub(crate) fn pause_delay(&self) -> f64 {
+        self.bounded_setting("detection.pause_delay_seconds", DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS)
     }
 
-    pub(crate) fn _confidence_threshold(&self) -> f64 {
-        self._bounded_setting("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX)
+    pub(crate) fn confidence_threshold(&self) -> f64 {
+        self.bounded_setting("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX)
     }
 
-    pub(crate) fn _minimum_word_length(&self) -> i64 {
-        self._bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX).to::<i64>()
+    pub(crate) fn minimum_word_length(&self) -> i64 {
+        self.bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX).to::<i64>()
     }
 
     /// `known` of the policy built with an engine's models, as `KeySwitchEngine.__init__` hands it over: the orthotactic
@@ -452,9 +452,9 @@ pub fn default_learning_store(
     LearningStore::new(Some(sibling(&history.path, "learning.json")), Some(legacy.unwrap_or(LEGACY_RULE_CONFIRMATIONS_REQUIRED)))
 }
 
-/// `_text_for_group`.
+/// `text_for_group`.
 #[inline]
-pub fn _text_for_group(strokes: &[Stroke], group: i64) -> String {
+pub fn text_for_group(strokes: &[Stroke], group: i64) -> String {
     let group = group.to::<i32>();
     let mut text = String::with_capacity(strokes.len() * 2);
     for stroke in strokes {

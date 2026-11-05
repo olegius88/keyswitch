@@ -25,55 +25,55 @@ impl EngineCore {
     // Text typed while a modifier of the hotkey is still held would come out as shortcuts (Ctrl+C under a held Alt is
     // Ctrl+Alt+C). The selection is not the word being typed, so that word and whatever waits for it are let go
     // first: a correction of it typed after the selection changed would land in the wrong place.
-    pub(crate) fn _schedule_selection_command(&mut self, name: &str) {
+    pub(crate) fn schedule_selection_command(&mut self, name: &str) {
         let Some(command) = command_of_hotkey(name) else {
             return;
         };
-        self._clear_word(None, "selection_command");
-        self._selection_pending = Some(PendingSelection { command, deadline: self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS });
+        self.clear_word(None, "selection_command");
+        self.selection_pending = Some(PendingSelection { command, deadline: self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS });
         technical_event!(self.shared, "selection_command_scheduled", "command": command.as_str());
     }
 
-    pub fn _advance_selection_command(&mut self) {
-        let Some(pending) = self._selection_pending else {
+    pub fn advance_selection_command(&mut self) {
+        let Some(pending) = self.selection_pending else {
             return;
         };
-        if !self._pressed.is_empty() || !self._modifier_keycodes.is_empty() {
+        if !self.pressed.is_empty() || !self.modifier_keycodes.is_empty() {
             return;
         }
-        self._selection_pending = None;
-        self._run_selection_command(pending.command);
+        self.selection_pending = None;
+        self.run_selection_command(pending.command);
     }
 
     /// A selection hotkey whose keys were not seen to come up in time changes nothing.
     ///
-    /// As with _expire_manual_correction, a timeout is no proof that the keys are up, so nothing is typed.
-    pub(crate) fn _expire_selection_command(&mut self) {
-        let Some(pending) = self._selection_pending else {
+    /// As with expire_manual_correction, a timeout is no proof that the keys are up, so nothing is typed.
+    pub(crate) fn expire_selection_command(&mut self) {
+        let Some(pending) = self.selection_pending else {
             return;
         };
         if self.monotonic() < pending.deadline {
             return;
         }
-        self._selection_pending = None;
+        self.selection_pending = None;
         let mut fields = Map::new();
         fields.insert("reason".into(), json!("release_timeout"));
-        fields.insert("pressed_keycodes".into(), json!(sorted_keycodes(&self._pressed)));
-        fields.insert("modifier_keycodes".into(), json!(sorted_keycodes(&self._modifier_keycodes)));
-        self._log_selection(pending.command, "refused", self.monotonic(), fields);
-        self.shared._update(Update { last_action: Some(refusal_message(RefusalReason::ReleaseTimeout)), ..Update::default() });
+        fields.insert("pressed_keycodes".into(), json!(sorted_keycodes(&self.pressed)));
+        fields.insert("modifier_keycodes".into(), json!(sorted_keycodes(&self.modifier_keycodes)));
+        self.log_selection(pending.command, "refused", self.monotonic(), fields);
+        self.shared.update(Update { last_action: Some(refusal_message(RefusalReason::ReleaseTimeout)), ..Update::default() });
     }
 
     /// Why a selection hotkey may not touch the focused field: the checks every correction passes.
-    fn _selection_refusal(&self, application: &str, own_window: bool) -> Option<SelectionRefused> {
+    fn selection_refusal(&self, application: &str, own_window: bool) -> Option<SelectionRefused> {
         let reason = if !self.flag("enabled", true) {
             RefusalReason::Disabled
         } else if own_window {
             // KeySwitch's own window answers accessibility requests on the thread that would be waiting for this one.
             RefusalReason::OwnWindow
-        } else if self.shared._sensitive_context_window().is_some() && self.shared._sensitive_context_window() == self.shared._focus_window() {
+        } else if self.shared.sensitive_context_window().is_some() && self.shared.sensitive_context_window() == self.shared.focus_window() {
             RefusalReason::SensitiveField
-        } else if self._application_excluded(application) {
+        } else if self.application_excluded(application) {
             RefusalReason::ExcludedApplication
         } else if !self.backend.supports_selection() {
             RefusalReason::Unsupported
@@ -84,16 +84,16 @@ impl EngineCore {
     }
 
     /// Read the selection, change it and type the result over it; the log gets lengths, never the text.
-    pub fn _run_selection_command(&mut self, command: SelectionCommand) {
+    pub fn run_selection_command(&mut self, command: SelectionCommand) {
         let started = self.monotonic();
         let application = self.backend.active_application();
         let focus = self.backend.focused_window();
-        if let Some(refusal) = self._selection_refusal(&application, focus.is_some_and(|focus| focus.own)) {
+        if let Some(refusal) = self.selection_refusal(&application, focus.is_some_and(|focus| focus.own)) {
             let mut fields = Map::new();
             fields.insert("reason".into(), json!(refusal.reason.as_str()));
             fields.insert("application".into(), json!(application));
-            self._log_selection(command, "refused", started, fields);
-            self.shared._update(Update { last_action: Some(refusal_message(refusal.reason)), ..Update::default() });
+            self.log_selection(command, "refused", started, fields);
+            self.shared.update(Update { last_action: Some(refusal_message(refusal.reason)), ..Update::default() });
             return;
         }
         let backend = self.backend.clone();
@@ -107,7 +107,7 @@ impl EngineCore {
             selected = Some(backend.read_selection(&application, focus.map_or(0, |focus| focus.window))?);
             let text = checked_selection(&selected.as_ref().expect("just read").text)?.to_owned();
             let group = backend.current_group().map_err(SelectionError::Failed)?;
-            plan = plan_selection(command, &text, i64::from(group), &self._layout_names())?;
+            plan = plan_selection(command, &text, i64::from(group), &self.layout_names())?;
             if plan.changes(&text) {
                 let read = selected.as_ref().expect("just read");
                 reselected = backend.replace_selection(read, &plan.replacement, plan.target_group.map(|group| group.to::<i32>()))?;
@@ -124,21 +124,21 @@ impl EngineCore {
                 let mut fields = lengths(selected.as_ref(), &plan);
                 fields.insert("reason".into(), json!(error.reason.as_str()));
                 fields.insert("application".into(), json!(application));
-                self._log_selection(command, "refused", started, fields);
-                self.shared._update(Update { last_action: Some(refusal_message(error.reason)), ..Update::default() });
+                self.log_selection(command, "refused", started, fields);
+                self.shared.update(Update { last_action: Some(refusal_message(error.reason)), ..Update::default() });
                 return;
             }
             Err(SelectionError::Failed(error)) => {
                 // The type names the failure for the log; the message, which names the step, goes to the status line.
-                self._note_unconfirmed_switch(&error);
-                self._clear_word(None, "selection_failed");
+                self.note_unconfirmed_switch(&error);
+                self.clear_word(None, "selection_failed");
                 let mut fields = lengths(selected.as_ref(), &plan);
                 // The type names the failure for the log.
                 let name = if matches!(error, ks_backend::BackendError::LayoutSwitchUnconfirmed { .. }) { "LayoutSwitchUnconfirmed" } else { "BackendError" };
                 fields.insert("error".into(), json!(name));
                 fields.insert("application".into(), json!(application));
-                self._log_selection(command, "failed", started, fields);
-                self.shared._update(Update {
+                self.log_selection(command, "failed", started, fields);
+                self.shared.update(Update {
                     last_error: Some(error.to_string()),
                     last_action: Some("Ошибка замены выделения · проверьте текст в приложении".to_owned()),
                     ..Update::default()
@@ -150,30 +150,30 @@ impl EngineCore {
         let changed = selected.as_ref().is_some_and(|selected| plan.changes(&selected.text));
         if changed {
             // The text around the caret is no longer what the engine saw typed.
-            self._clear_word(None, "selection_replaced");
+            self.clear_word(None, "selection_replaced");
         }
         if changed && let Some(target) = plan.target_group {
             // As Pause with no word to convert: the layout is the user's explicit choice and protects the next word.
-            self._note_engine_switch(target);
+            self.note_engine_switch(target);
             let protects = self.flag("detection.respect_manual_layout", true);
-            self._manual_layout_group = protects.then_some(target);
-            self._manual_layout_observed_at = Some(self.monotonic());
-            self._manual_layout_source = "selection_layout".to_owned();
-            self._manual_layout_word = false;
-            self.shared._update(Update { current_group: Some(target), ..Update::default() });
+            self.manual_layout_group = protects.then_some(target);
+            self.manual_layout_observed_at = Some(self.monotonic());
+            self.manual_layout_source = "selection_layout".to_owned();
+            self.manual_layout_word = false;
+            self.shared.update(Update { current_group: Some(target), ..Update::default() });
         }
         let mut fields = lengths(selected.as_ref(), &plan);
         fields.insert("application".into(), json!(application));
         fields.insert("reselected".into(), json!(reselected));
-        self._log_selection(command, if changed { "applied" } else { "unchanged" }, started, fields);
-        self.shared._update(Update {
+        self.log_selection(command, if changed { "applied" } else { "unchanged" }, started, fields);
+        self.shared.update(Update {
             last_action: Some(if changed { command.title().to_owned() } else { "Выделение не изменилось".to_owned() }),
             last_error: Some(String::new()),
             ..Update::default()
         });
     }
 
-    fn _layout_names(&self) -> Vec<String> {
+    fn layout_names(&self) -> Vec<String> {
         let names: Vec<String> = self.settings.with_value("detection.layouts", |names| match names {
             Some(Value::Array(items)) => items.iter().map(|item| item.as_str().map_or_else(|| item.to_string(), str::to_owned)).collect(),
             _ => vec!["us".to_owned(), "ru".to_owned()],
@@ -181,7 +181,7 @@ impl EngineCore {
         names.into_iter().take(self.models.len()).collect()
     }
 
-    fn _log_selection(&self, command: SelectionCommand, outcome: &str, started: f64, fields: Map<String, Value>) {
+    fn log_selection(&self, command: SelectionCommand, outcome: &str, started: f64, fields: Map<String, Value>) {
         if !self.shared.technical_logging() {
             return;
         }

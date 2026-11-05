@@ -71,7 +71,7 @@ fn mapping(value: Option<&Value>) -> &Value {
 }
 
 /// The caret position nearest the end of `text` with `head` letters of a word before it and `tail` after it.
-fn _place_inside(text: &[char], head: usize, tail: usize) -> Option<usize> {
+fn place_inside(text: &[char], head: usize, tail: usize) -> Option<usize> {
     for position in (0..=text.len()).rev() {
         let (before, after) = text.split_at(position);
         if head != 0 && (before.len() < head || !before[before.len() - head..].iter().all(|c| is_alpha_char(*c))) {
@@ -177,7 +177,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
                 moved = true;
             }
             "inside" => {
-                let position = _place_inside(&field.session.backend.text(), int_of(&edit[1]).to::<usize>(), int_of(&edit[2]).to::<usize>());
+                let position = place_inside(&field.session.backend.text(), int_of(&edit[1]).to::<usize>(), int_of(&edit[2]).to::<usize>());
                 match position {
                     None => {
                         counts.add("opening:inside_unplaced");
@@ -222,7 +222,7 @@ fn apply_edits(field: &mut Field, edits: &[Value], first: &Value, previous: Opti
 }
 
 /// Send the message: Return as the engine sees it (a deferred action), the text it submits.
-fn _finish_with_enter(session: &mut Session) -> String {
+fn finish_with_enter(session: &mut Session) -> String {
     let backend = session.backend.clone();
     let action = KeyEvent {
         pressed: true,
@@ -422,12 +422,12 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
             // The first word was typed in the layout the log names, as a fresh field started it: a layout the tree left
             // differently in the stream before is the tree's own doing there, no choice of the typist's here.
             field_ref.session.backend.set_group(first_group);
-            field_ref.session.core._update(Update { current_group: Some(i64::from(first_group)), ..Update::default() });
+            field_ref.session.core.update(Update { current_group: Some(i64::from(first_group)), ..Update::default() });
             counts.add("opening:layout_as_logged");
         }
-        if kept != 0 && (carried_group != first_group || field_ref.session.core._strokes.len() != kept) {
+        if kept != 0 && (carried_group != first_group || field_ref.session.core.strokes.len() != kept) {
             let first_keys = keys_of(first);
-            field_ref.session.core._strokes = first_keys[..kept]
+            field_ref.session.core.strokes = first_keys[..kept]
                 .iter()
                 .map(|key| {
                     let character = key.characters[first_group.to::<usize>()].to_string();
@@ -443,7 +443,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                     })
                 })
                 .collect();
-            field_ref.session.core._source_group = i64::from(first_group);
+            field_ref.session.core.source_group = i64::from(first_group);
         }
         counts.add(&format!("opening:{mode}"));
         let backend = field_ref.session.backend.clone();
@@ -471,7 +471,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                     if let Some(wait) = item.get("manual_wait_s").filter(|wait| ks_config::pycompat::truthy(wait)).and_then(Value::as_f64) {
                         session.idle(wait);
                     }
-                    session.core._switch_layout_only(i64::from(PAUSE_KEYCODE));
+                    session.core.switch_layout_only(i64::from(PAUSE_KEYCODE));
                 } else {
                     session.select_layout(manual_before.to::<i32>());
                 }
@@ -538,7 +538,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
         let last = items.last().expect("a stream holds items");
         let mut submitted = None;
         if stream.get("closed_by").and_then(Value::as_str) == Some("enter") && last.get("trigger").and_then(Value::as_str) == Some("enter") {
-            submitted = Some(_finish_with_enter(session));
+            submitted = Some(finish_with_enter(session));
         } else if stream.get("closing_gap_s").is_none_or(|gap| gap.is_null() || gap.as_f64().is_some_and(|gap| gap >= DEFAULT_PAUSE_DELAY_SECONDS)) {
             // Only where the log shows the typist really stopped: a stream that ended with a Backspace or a click a moment
             // later had no pause to settle anything.

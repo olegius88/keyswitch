@@ -73,7 +73,7 @@ impl AfterOrigin {
 }
 
 /// How the text before a word was given: as the field holds it, or ending in the other reading of a waiting word the
-/// engine asks the next word after (engine._decide_after_waiting_word): a hypothesis, not text that was typed.
+/// engine asks the next word after (engine.decide_after_waiting_word): a hypothesis, not text that was typed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BeforeOrigin {
     Field,
@@ -134,7 +134,7 @@ pub struct ContextEvidence {
     pub source_opening: bool,
     pub target_opening: bool,
     /// Whether letters were typed into the middle of a word whose other letters are all in the other layout
-    /// (engine._decide_inside_word): the question is then what the whole word is.
+    /// (engine.decide_inside_word): the question is then what the whole word is.
     pub inside: bool,
     /// A training frame whose token reads as uncounted in every term table, as a term no table holds does at serving
     /// (context_action_features.own_bucket); never set outside training.
@@ -285,13 +285,13 @@ pub struct TermTables {
 }
 
 impl TermTables {
-    /// `_term_frequency()`: read at once, before the keyboard hook starts.
+    /// `term_frequency()`: read at once, before the keyboard hook starts.
     pub fn load(models_dir: &Path) -> Result<TermTables, LoadError> {
         let term = load_term_frequency(&models_dir.join(TERM_FREQUENCY_FILE), &TERM_ALPHABETS, MAX_CONTEXT_TERM_FREQUENCY_BYTES)?;
         Ok(TermTables { dir: models_dir.to_path_buf(), term, alnum: OnceLock::new(), short: OnceLock::new(), endings: OnceLock::new(), starts: OnceLock::new() })
     }
 
-    /// `_term_frequency()[alphabet]`.
+    /// `term_frequency()[alphabet]`.
     pub fn term(&self, alphabet: &str) -> &CountTable {
         self.term.alphabet(alphabet)
     }
@@ -381,7 +381,7 @@ pub struct ContextModel {
     pub answers_alnum: bool,
     /// Whether the resume head has weights here: a short word right after Latin text, asked again once its next word is
     /// planned for conversion, is its class, and the engine takes such a word along in the middle of a line on its
-    /// verdict (engine._take_along).
+    /// verdict (engine.take_along).
     pub answers_resume: bool,
     /// Whether the Cyrillic-letter head has weights here: a Latin letter whose Cyrillic reading is a Russian word of one
     /// letter, after Russian text, is its class.

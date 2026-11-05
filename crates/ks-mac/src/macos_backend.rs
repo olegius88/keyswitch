@@ -985,7 +985,7 @@ impl Inner {
         if !valid(literal_group) || literal.iter().any(|stroke| stroke.group != literal_group) {
             return Err(failed("Некорректная раскладка пунктуации; замена отменена"));
         }
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         let mut late_deleted = false;
         let mut late_typed = false;
         let mut failure: Option<MacBackendError> = (|| -> Result<(), MacBackendError> {
@@ -1044,7 +1044,7 @@ impl Inner {
     /// Shift+Left as many times as the result has characters. The layout moves to `final_group` afterwards.
     fn replace_selection(&self, selected: &SelectedText, replacement: &str, final_group: Option<i32>) -> Result<bool, SelectionError> {
         let steps = caret_steps(replacement);
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         if self.pointer_or_focus_moved() {
             return Err(refused(RefusalReason::FocusChanged));
         }

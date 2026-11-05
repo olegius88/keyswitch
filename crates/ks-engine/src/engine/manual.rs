@@ -7,22 +7,22 @@ use ks_config::learning::RuleAction;
 
 impl EngineCore {
     // Pause: convert what was typed since the last boundary, or switch.
-    pub fn _schedule_manual_conversion(&mut self, trigger_keycode: i64) {
-        if self._pending.as_ref().is_some_and(|pending| !pending.automatic) && self._strokes.is_empty() && self._symbol_strokes.is_empty() {
+    pub fn schedule_manual_conversion(&mut self, trigger_keycode: i64) {
+        if self.pending.as_ref().is_some_and(|pending| !pending.automatic) && self.strokes.is_empty() && self.symbol_strokes.is_empty() {
             technical_event!(
                 self.shared, "manual_conversion_waiting", "reason": "previous_command_pending",
-                "pressed_keycodes": sorted_keycodes(&self._pressed),
-                "modifier_keycodes": sorted_keycodes(&self._modifier_keycodes),
+                "pressed_keycodes": sorted_keycodes(&self.pressed),
+                "modifier_keycodes": sorted_keycodes(&self.modifier_keycodes),
             );
-            self.shared._update(Update { last_action: Some("Замена ожидает отпускания клавиш".to_owned()), ..Update::default() });
+            self.shared.update(Update { last_action: Some("Замена ожидает отпускания клавиш".to_owned()), ..Update::default() });
             return;
         }
-        if self._strokes.is_empty() && self._symbol_strokes.is_empty() {
-            self._personal_word_settled(false);
+        if self.strokes.is_empty() && self.symbol_strokes.is_empty() {
+            self.personal_word_settled(false);
         }
-        if self._typo_correction_reversible() {
+        if self.typo_correction_reversible() {
             // Pause right after a typo correction puts the word back as typed, as undo does; the next press converts.
-            self._schedule_undo(trigger_keycode);
+            self.schedule_undo(trigger_keycode);
             return;
         }
         let mut mode = "manual";
@@ -32,30 +32,30 @@ impl EngineCore {
         let boundary;
         let application;
         let source;
-        if !self._strokes.is_empty() {
-            strokes = self._symbol_strokes.iter().chain(self._strokes.iter()).cloned().collect();
-            source_group = self._source_group;
+        if !self.strokes.is_empty() {
+            strokes = self.symbol_strokes.iter().chain(self.strokes.iter()).cloned().collect();
+            source_group = self.source_group;
             boundary = None;
             application = self.backend.active_application();
-            source = if self._symbol_strokes.is_empty() { "current_word" } else { "symbols_and_word" };
-            self._mention_shown = None;
-            self._early_switch_origin = None;
-            self._early_switch_at = None;
-        } else if !self._symbol_strokes.is_empty() {
-            strokes = self._symbol_strokes.clone();
-            source_group = i64::from(self._symbol_strokes.last().expect("not empty").group);
-            if self._mention_shown.is_some() {
+            source = if self.symbol_strokes.is_empty() { "current_word" } else { "symbols_and_word" };
+            self.mention_shown = None;
+            self.early_switch_origin = None;
+            self.early_switch_at = None;
+        } else if !self.symbol_strokes.is_empty() {
+            strokes = self.symbol_strokes.clone();
+            source_group = i64::from(self.symbol_strokes.last().expect("not empty").group);
+            if self.mention_shown.is_some() {
                 // Pause on the "@" shown for a quote asks for the quote back, and
                 // the quote is then kept whatever word follows it.
                 source_group = self.other_groups(source_group)[0];
-                self._mention_shown = None;
-                self._symbol_strokes = Vec::new();
+                self.mention_shown = None;
+                self.symbol_strokes = Vec::new();
             }
             boundary = None;
             application = self.backend.active_application();
             source = "symbols";
             mode = "symbols";
-        } else if let Some(committed) = self._last_committed.clone().filter(|_| !self._last_committed_stale) {
+        } else if let Some(committed) = self.last_committed.clone().filter(|_| !self.last_committed_stale) {
             strokes = committed.strokes.clone();
             source_group = committed.source_group;
             boundary = committed.boundary.clone();
@@ -63,7 +63,7 @@ impl EngineCore {
             source = "last_committed";
             trailing = committed.trailing.clone();
         } else {
-            self._switch_layout_only(trigger_keycode);
+            self.switch_layout_only(trigger_keycode);
             return;
         }
         let targets = self.other_groups(source_group);
@@ -74,11 +74,11 @@ impl EngineCore {
         // typed: Pause converts the last part. `lid-'ne` was `дшв-эту` (a field log, 13.10.2026), and the
         // user pressed Pause again and typed the part anew; `lid-эту` was meant. Pause on what a correction
         // typed takes back all of it (`mongo-service`, converted whole, is `ьщтпщ-ыукмшсу` again).
-        let restores = self._last_correction.as_ref().is_some_and(|previous| strokes == previous.strokes && source_group == previous.target_group);
-        let kept_head = if mode == "manual" && !restores { self._joined_split(&strokes, source_group) } else { 0 };
+        let restores = self.last_correction.as_ref().is_some_and(|previous| strokes == previous.strokes && source_group == previous.target_group);
+        let kept_head = if mode == "manual" && !restores { self.joined_split(&strokes, source_group) } else { 0 };
         strokes.drain(..kept_head);
-        let original = _text_for_group(&strokes, source_group);
-        let replacement = _text_for_group(&strokes, target);
+        let original = text_for_group(&strokes, source_group);
+        let replacement = text_for_group(&strokes, target);
         let plan = Arc::new(CorrectionPlan {
             automatic: false,
             mode,
@@ -88,33 +88,33 @@ impl EngineCore {
         // Pause right after a correction converts the same keys back. That
         // teaches nothing: a rule comes only from the rule window, which a
         // double press of the hotkey offers.
-        let reversal = self._reversal_of_last_correction(&plan);
-        if let Some(reversal) = reversal.as_ref().filter(|_| self._agrees_with_pause_correction(&plan)) {
-            self._pause_agreement_open = false;
+        let reversal = self.reversal_of_last_correction(&plan);
+        if let Some(reversal) = reversal.as_ref().filter(|_| self.agrees_with_pause_correction(&plan)) {
+            self.pause_agreement_open = false;
             technical_event!(
                 self.shared, "manual_conversion_absorbed",
                 "reason": "pause_correction_just_made",
                 "source": source,
                 "mode": reversal.mode,
-                "elapsed_ms": ms(self.monotonic() - self._last_correction_time),
+                "elapsed_ms": ms(self.monotonic() - self.last_correction_time),
                 "application": application,
-                "application_excluded": self._application_excluded(&application),
+                "application_excluded": self.application_excluded(&application),
             );
-            self.shared._update(Update { last_action: Some(format!("Уже преобразовано: {original} · ещё одно нажатие вернёт")), ..Update::default() });
+            self.shared.update(Update { last_action: Some(format!("Уже преобразовано: {original} · ещё одно нажатие вернёт")), ..Update::default() });
             return;
         }
         // A second Pause before the first one ran replaces the plan; without
         // this line the first conversion would vanish without a trace.
-        self._log_pending_dropped("replaced_by_manual_conversion");
-        self._pending = Some(plan.clone());
-        self._learning_prompt_after = None;
-        self._convert_outcome = Some(ConvertOutcome::Plan(plan));
-        self._pending_trigger_keycode = trigger_keycode;
-        self._manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
-        let excluded = self._application_excluded(&application);
+        self.log_pending_dropped("replaced_by_manual_conversion");
+        self.pending = Some(plan.clone());
+        self.learning_prompt_after = None;
+        self.convert_outcome = Some(ConvertOutcome::Plan(plan));
+        self.pending_trigger_keycode = trigger_keycode;
+        self.manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
+        let excluded = self.application_excluded(&application);
         technical_event!(
             self.shared, "manual_conversion_scheduled",
-            "wait_id": self._context_waiting.as_ref().map(|waiting| waiting.diagnostic_id),
+            "wait_id": self.context_waiting.as_ref().map(|waiting| waiting.diagnostic_id),
             "source": source,
             "original": if excluded { "<redacted>" } else { original.as_str() },
             "replacement": if excluded { "<redacted>" } else { replacement.as_str() },
@@ -122,7 +122,7 @@ impl EngineCore {
             "target_group": target,
             "application": application,
             "application_excluded": excluded,
-            "symbol_count": self._symbol_strokes.len(),
+            "symbol_count": self.symbol_strokes.len(),
             "reversal": reversal.as_ref().map(|reversal| if reversal.automatic { "automatic" } else { "manual" }),
             "kept_head_characters": kept_head,
             "trailing_characters": trailing.len(),
@@ -130,21 +130,21 @@ impl EngineCore {
         // Explicit intent supersedes the model's old lookahead even while the
         // manual plan is waiting for release. Retain its ID in the event above,
         // but never let that stale wait block the following word's prefix.
-        self._cancel_context_wait("manual_conversion");
-        self._strokes = Vec::new();
-        self._insertion = None;
-        self._symbol_strokes = Vec::new();
-        self._source_group = -1;
-        self._early_switch_undone = false;
-        self._last_committed_stale = true;
-        self._reset_pause_correction();
+        self.cancel_context_wait("manual_conversion");
+        self.strokes = Vec::new();
+        self.insertion = None;
+        self.symbol_strokes = Vec::new();
+        self.source_group = -1;
+        self.early_switch_undone = false;
+        self.last_committed_stale = true;
+        self.reset_pause_correction();
     }
 
     /// A plain space pressed while an automatic correction made at a sign, not at a space, waits for its keys to
-    /// come up. A correction at a space may wait for the next word (_start_context_wait), and one of another kind
+    /// come up. A correction at a space may wait for the next word (start_context_wait), and one of another kind
     /// (Pause, the early switch, a mention) reaches text of its own: those still give way to the second boundary.
-    pub(crate) fn _space_follows_pending_sign(&self, event: &KeyEvent) -> bool {
-        let Some(plan) = &self._pending else {
+    pub(crate) fn space_follows_pending_sign(&self, event: &KeyEvent) -> bool {
+        let Some(plan) = &self.pending else {
             return false;
         };
         plan.mode == "boundary"
@@ -165,16 +165,16 @@ impl EngineCore {
     /// Converting the same keys back continues the chain; anything else starts a
     /// new one. The chain's first plan is what a double press of the hotkey
     /// reasons about: the engine's own decision, or the user's first conversion.
-    pub(crate) fn _remember_correction(&mut self, plan: &PlanRef) {
+    pub(crate) fn remember_correction(&mut self, plan: &PlanRef) {
         // An undo always puts back the last correction, also past the spaces typed after it, where its keys
-        // after the word are more than the correction's (_undo_past_spaces): the chain goes on.
-        if self._correction_origin.is_none() || (plan.mode != "undo" && self._reversal_of_last_correction(plan).is_none()) {
-            self._correction_origin = Some(plan.clone());
+        // after the word are more than the correction's (undo_past_spaces): the chain goes on.
+        if self.correction_origin.is_none() || (plan.mode != "undo" && self.reversal_of_last_correction(plan).is_none()) {
+            self.correction_origin = Some(plan.clone());
         }
-        self._last_correction = Some(plan.clone());
-        self._last_correction_time = self.monotonic();
-        // _maybe_correct_after_pause ends no word: its plans alone carry no boundary key.
-        self._pause_agreement_open = plan.automatic && plan.boundary.is_none() && (plan.mode == "pause" || plan.mode == "context_phrase");
+        self.last_correction = Some(plan.clone());
+        self.last_correction_time = self.monotonic();
+        // maybe_correct_after_pause ends no word: its plans alone carry no boundary key.
+        self.pause_agreement_open = plan.automatic && plan.boundary.is_none() && (plan.mode == "pause" || plan.mode == "context_phrase");
     }
 
     /// Whether ``plan``, the reversal of the last correction, asks for that correction instead.
@@ -185,14 +185,14 @@ impl EngineCore {
     /// held back behind it, so it converted the word straight back and the user pressed the
     /// hotkey again. A press that soon, with nothing typed since, is taken as that agreement,
     /// once; the next press converts the word back as before.
-    fn _agrees_with_pause_correction(&self, plan: &CorrectionPlan) -> bool {
-        self._pause_agreement_open && plan.boundary.is_none() && self.monotonic() - self._last_correction_time <= PAUSE_CORRECTION_AGREEMENT_SECONDS
+    fn agrees_with_pause_correction(&self, plan: &CorrectionPlan) -> bool {
+        self.pause_agreement_open && plan.boundary.is_none() && self.monotonic() - self.last_correction_time <= PAUSE_CORRECTION_AGREEMENT_SECONDS
     }
 
     /// The chain `plan` would continue once it runs.
-    fn _chain_origin(&self, plan: &PlanRef) -> PlanRef {
-        if let Some(origin) = &self._correction_origin
-            && self._reversal_of_last_correction(plan).is_some()
+    fn chain_origin(&self, plan: &PlanRef) -> PlanRef {
+        if let Some(origin) = &self.correction_origin
+            && self.reversal_of_last_correction(plan).is_some()
         {
             return origin.clone();
         }
@@ -208,23 +208,23 @@ impl EngineCore {
     }
 
     /// Whether this press of the conversion hotkey completes a double press.
-    pub(crate) fn _double_convert_press(&mut self, event: &KeyEvent) -> bool {
+    pub(crate) fn double_convert_press(&mut self, event: &KeyEvent) -> bool {
         let keycode = i64::from(event.keycode);
-        if keycode == self._convert_keycode && !self._convert_released && self._convert_press_at != 0.0 {
+        if keycode == self.convert_keycode && !self.convert_released && self.convert_press_at != 0.0 {
             // Auto-repeat of the held key: still the first press.
             return false;
         }
         let now = self.monotonic();
         let double = self.flag("detection.learning", true)
-            && self._convert_released
-            && keycode == self._convert_keycode
-            && self._convert_outcome.is_some()
-            && now - self._convert_press_at <= DOUBLE_CONVERT_PRESS_WINDOW_SECONDS;
-        self._convert_press_at = if double { 0.0 } else { now };
-        self._convert_keycode = keycode;
-        self._convert_released = false;
+            && self.convert_released
+            && keycode == self.convert_keycode
+            && self.convert_outcome.is_some()
+            && now - self.convert_press_at <= DOUBLE_CONVERT_PRESS_WINDOW_SECONDS;
+        self.convert_press_at = if double { 0.0 } else { now };
+        self.convert_keycode = keycode;
+        self.convert_released = false;
         if !double {
-            self._convert_outcome = None;
+            self.convert_outcome = None;
         }
         double
     }
@@ -236,57 +236,57 @@ impl EngineCore {
     /// missed one converted - the second press only opens the offer. If the
     /// first press undid a fix the user had made earlier, the second press puts
     /// the fix back, exactly as a single press would, and the offer follows.
-    pub(crate) fn _request_rule_after_double_press(&mut self, trigger_keycode: i64) {
-        let outcome = self._convert_outcome.take();
+    pub(crate) fn request_rule_after_double_press(&mut self, trigger_keycode: i64) {
+        let outcome = self.convert_outcome.take();
         let application = self.backend.active_application();
         if let Some(ConvertOutcome::Plan(outcome)) = &outcome
             && outcome.mode != "symbols"
         {
-            if self._pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, outcome)) {
-                let origin = self._chain_origin(outcome);
-                let offer = self._rule_offer(&origin, &application);
+            if self.pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, outcome)) {
+                let origin = self.chain_origin(outcome);
+                let offer = self.rule_offer(&origin, &application);
                 if Self::_wanted_group(&origin) == outcome.source_group {
                     // The first press, still waiting for its keys, would undo
                     // the user's own fix: it never runs.
-                    self._log_pending_dropped("rule_requested");
-                    self._pending = None;
-                    self._manual_release_deadline = 0.0;
-                    self.shared._show_learning_prompt(offer);
+                    self.log_pending_dropped("rule_requested");
+                    self.pending = None;
+                    self.manual_release_deadline = 0.0;
+                    self.shared.show_learning_prompt(offer);
                 } else {
-                    self._learning_prompt_after = Some(offer);
+                    self.learning_prompt_after = Some(offer);
                 }
                 return;
             }
-            if self._last_requested_plan.as_ref().is_some_and(|requested| Arc::ptr_eq(requested, outcome)) {
-                let origin = self._correction_origin.clone().unwrap_or_else(|| outcome.clone());
-                let offer = self._rule_offer(&origin, &application);
+            if self.last_requested_plan.as_ref().is_some_and(|requested| Arc::ptr_eq(requested, outcome)) {
+                let origin = self.correction_origin.clone().unwrap_or_else(|| outcome.clone());
+                let offer = self.rule_offer(&origin, &application);
                 if Self::_wanted_group(&origin) == outcome.target_group {
-                    self.shared._show_learning_prompt(offer);
+                    self.shared.show_learning_prompt(offer);
                     return;
                 }
-                self._schedule_manual_conversion(trigger_keycode);
-                let scheduled = self._convert_outcome.take();
+                self.schedule_manual_conversion(trigger_keycode);
+                let scheduled = self.convert_outcome.take();
                 match scheduled {
-                    Some(ConvertOutcome::Plan(scheduled)) if self._pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, &scheduled)) => {
-                        self._learning_prompt_after = Some(offer);
+                    Some(ConvertOutcome::Plan(scheduled)) if self.pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, &scheduled)) => {
+                        self.learning_prompt_after = Some(offer);
                     }
-                    _ => self.shared._show_learning_prompt(offer),
+                    _ => self.shared.show_learning_prompt(offer),
                 }
                 return;
             }
         }
         if matches!(outcome, Some(ConvertOutcome::Switch)) {
             // The first press toggled the layout; the second puts it back.
-            self._switch_layout_only(trigger_keycode);
-            self._convert_outcome = None;
+            self.switch_layout_only(trigger_keycode);
+            self.convert_outcome = None;
         }
-        let offer = self._empty_rule_offer(&application);
-        self.shared._show_learning_prompt(offer);
+        let offer = self.empty_rule_offer(&application);
+        self.shared.show_learning_prompt(offer);
     }
 
-    fn _rule_offer(&self, origin: &CorrectionPlan, application: &str) -> LearningPrompt {
+    fn rule_offer(&self, origin: &CorrectionPlan, application: &str) -> LearningPrompt {
         if !any_alpha(&origin.original) {
-            return self._empty_rule_offer(application);
+            return self.empty_rule_offer(application);
         }
         LearningPrompt {
             source_group: origin.source_group,
@@ -298,7 +298,7 @@ impl EngineCore {
         }
     }
 
-    fn _empty_rule_offer(&self, application: &str) -> LearningPrompt {
+    fn empty_rule_offer(&self, application: &str) -> LearningPrompt {
         let current = self.shared.current_group();
         let group = if self.in_models(current) { current } else { 0 };
         let target = self.other_groups(group).first().copied().unwrap_or(group);
@@ -318,35 +318,35 @@ impl EngineCore {
     /// keys of their own. They are not this keyboard's typing - the machine where
     /// they are typed has its own switcher - so they are neither words nor
     /// hotkeys nor keys to wait for; only the text they change is no longer known.
-    pub(crate) fn _observe_foreign_input(&mut self, event: &KeyEvent) {
+    pub(crate) fn observe_foreign_input(&mut self, event: &KeyEvent) {
         if !event.pressed || is_modifier_key(&event.key_name) {
             return;
         }
-        self._convert_press_at = 0.0;
-        if !self._foreign_input_active {
-            self._foreign_input_active = true;
+        self.convert_press_at = 0.0;
+        if !self.foreign_input_active {
+            self.foreign_input_active = true;
             technical_event!(
                 self.shared, "foreign_input_observed",
                 "key_name": event.key_name,
                 "application": self.backend.active_application(),
-                "word_length": self._strokes.len(),
-                "action_waiting": self._deferred_action.is_some(),
+                "word_length": self.strokes.len(),
+                "action_waiting": self.deferred_action.is_some(),
             );
         }
-        if self._deferred_action.is_some() {
+        if self.deferred_action.is_some() {
             // The user's own Enter is waiting for its keys to come up; the
             // injected key is held behind it and follows it. Nothing to undo.
             return;
         }
-        self._clear_word(None, "foreign_input");
-        self._untracked_token = false;
-        self._last_committed_stale = true;
-        self._contexts.clear();
+        self.clear_word(None, "foreign_input");
+        self.untracked_token = false;
+        self.last_committed_stale = true;
+        self.contexts.clear();
     }
 
     /// The last correction, if `plan` converts the same keys back.
-    pub(crate) fn _reversal_of_last_correction(&self, plan: &CorrectionPlan) -> Option<PlanRef> {
-        let previous = self._last_correction.as_ref()?;
+    pub(crate) fn reversal_of_last_correction(&self, plan: &CorrectionPlan) -> Option<PlanRef> {
+        let previous = self.last_correction.as_ref()?;
         if plan.strokes != previous.strokes
             || plan.trailing != previous.trailing
             || plan.source_group != previous.target_group
@@ -358,7 +358,7 @@ impl EngineCore {
     }
 
     /// Pause with nothing to convert just toggles the layout.
-    pub fn _switch_layout_only(&mut self, trigger_keycode: i64) {
+    pub fn switch_layout_only(&mut self, trigger_keycode: i64) {
         let current = self.shared.current_group();
         let Some(target) = alternate_layout_group(current).filter(|target| self.in_models(*target)) else {
             technical_event!(
@@ -366,9 +366,9 @@ impl EngineCore {
                 "reason": "no_alternate_layout",
                 "current_group": current,
                 "trigger_keycode": trigger_keycode,
-                "last_committed_stale": self._last_committed_stale,
+                "last_committed_stale": self.last_committed_stale,
             );
-            self.shared._update(Update { last_action: Some("Нет слова для ручного преобразования".to_owned()), ..Update::default() });
+            self.shared.update(Update { last_action: Some("Нет слова для ручного преобразования".to_owned()), ..Update::default() });
             return;
         };
         if let Err(error) = self.backend.switch_group(target.to::<i32>()) {
@@ -378,11 +378,11 @@ impl EngineCore {
                 "requested_group": target,
                 "error": error.to_string(),
             );
-            self._note_unconfirmed_switch(&error);
-            self.shared._update(Update { last_error: Some(error.to_string()), last_action: Some("Раскладка не переключена".to_owned()), ..Update::default() });
+            self.note_unconfirmed_switch(&error);
+            self.shared.update(Update { last_error: Some(error.to_string()), last_action: Some("Раскладка не переключена".to_owned()), ..Update::default() });
             return;
         }
-        // The layout the engine switched to holds no word from correction (_note_engine_switch): Pause with nothing to
+        // The layout the engine switched to holds no word from correction (note_engine_switch): Pause with nothing to
         // convert was pressed to fix a word the engine had lost track of, after a click, a Backspace or another window,
         // not to keep the next word as typed. Held, the next word stayed as typed where the person went on in the
         // layout this left on: `djghjc` for `вопрос`, `cltkfq` for `сделай` (8 of the 9 such words of a user's field
@@ -392,17 +392,17 @@ impl EngineCore {
         // types the word again as it was. `гупшуп` became `uegieg`, was undone in the editor, and Pause 2.2 s later
         // brought the Russian layout back for it (field typing, 28.09.2026); every such Pause of the batteries
         // came before a word meant as typed.
-        let undone = self._last_correction.as_ref().is_some_and(|previous| {
-            previous.automatic && previous.source_group == target && self.monotonic() - self._last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
+        let undone = self.last_correction.as_ref().is_some_and(|previous| {
+            previous.automatic && previous.source_group == target && self.monotonic() - self.last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
         });
-        self._note_engine_switch(target);
-        self._convert_outcome = Some(ConvertOutcome::Switch);
+        self.note_engine_switch(target);
+        self.convert_outcome = Some(ConvertOutcome::Switch);
         let protects = undone && self.flag("detection.respect_manual_layout", true);
         if protects {
-            self._manual_layout_group = Some(target);
-            self._manual_layout_observed_at = Some(self.monotonic());
-            self._manual_layout_source = "correction_undone".to_owned();
-            self._manual_layout_word = false;
+            self.manual_layout_group = Some(target);
+            self.manual_layout_observed_at = Some(self.monotonic());
+            self.manual_layout_source = "correction_undone".to_owned();
+            self.manual_layout_word = false;
         }
         technical_event!(
             self.shared, "layout_switched_without_word",
@@ -410,9 +410,9 @@ impl EngineCore {
             "previous_group": current,
             "selected_group": target,
             "protects_next_word": protects,
-            "last_committed_stale": self._last_committed_stale,
+            "last_committed_stale": self.last_committed_stale,
         );
-        self.shared._update(Update {
+        self.shared.update(Update {
             current_group: Some(target),
             last_action: Some(format!("Раскладка переключена: {}", layout_label(target))),
             last_error: Some(String::new()),
@@ -426,21 +426,21 @@ impl EngineCore {
     /// revert the *previous* correction and delete the wrong characters. This
     /// returns the prefix to the layout the user typed it in and protects
     /// the rest of the word from being switched again.
-    fn _schedule_early_switch_undo(&mut self, origin: i64, trigger_keycode: i64) {
-        let strokes = self._strokes.clone();
-        let current_group = self._source_group;
-        self._log_pending_dropped("replaced_by_undo");
+    fn schedule_early_switch_undo(&mut self, origin: i64, trigger_keycode: i64) {
+        let strokes = self.strokes.clone();
+        let current_group = self.source_group;
+        self.log_pending_dropped("replaced_by_undo");
         let prefix_length = strokes.len();
-        let original = _text_for_group(&strokes, current_group);
-        let replacement = _text_for_group(&strokes, origin);
-        self._pending = Some(Arc::new(CorrectionPlan {
+        let original = text_for_group(&strokes, current_group);
+        let replacement = text_for_group(&strokes, origin);
+        self.pending = Some(Arc::new(CorrectionPlan {
             automatic: false,
             mode: "early_undo",
             ..CorrectionPlan::new(strokes, None, current_group, origin, original, replacement, UNSCORED_CORRECTION_CONFIDENCE, &self.backend.active_application())
         }));
-        self._learning_prompt_after = None;
-        self._pending_trigger_keycode = trigger_keycode;
-        self._manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
+        self.learning_prompt_after = None;
+        self.pending_trigger_keycode = trigger_keycode;
+        self.manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
         technical_event!(
             self.shared, "early_switch_undo_scheduled",
             "source_group": current_group,
@@ -449,87 +449,87 @@ impl EngineCore {
         );
     }
 
-    pub fn _schedule_undo(&mut self, trigger_keycode: i64) {
-        self._personal_word_settled(false);
-        if self._pending.as_ref().is_some_and(|pending| pending.mode == "early") {
-            self._log_pending_dropped("replaced_by_undo");
-            self._pending = None;
-            self._learning_prompt_after = None;
-            self._early_switch_undone = true;
-            self.shared._update(Update { last_action: Some("Раннее переключение отменено до замены".to_owned()), ..Update::default() });
+    pub fn schedule_undo(&mut self, trigger_keycode: i64) {
+        self.personal_word_settled(false);
+        if self.pending.as_ref().is_some_and(|pending| pending.mode == "early") {
+            self.log_pending_dropped("replaced_by_undo");
+            self.pending = None;
+            self.learning_prompt_after = None;
+            self.early_switch_undone = true;
+            self.shared.update(Update { last_action: Some("Раннее переключение отменено до замены".to_owned()), ..Update::default() });
             return;
         }
-        if let Some(early_origin) = self._early_switch_origin
-            && !self._strokes.is_empty()
+        if let Some(early_origin) = self.early_switch_origin
+            && !self.strokes.is_empty()
         {
-            self._schedule_early_switch_undo(early_origin, trigger_keycode);
+            self.schedule_early_switch_undo(early_origin, trigger_keycode);
             return;
         }
-        let available = match (&self._last_correction, &self._last_committed) {
+        let available = match (&self.last_correction, &self.last_committed) {
             (Some(previous), Some(committed)) => {
-                !self._last_committed_stale
-                    && !(!self._strokes.is_empty() && self._strokes != previous.strokes)
+                !self.last_committed_stale
+                    && !(!self.strokes.is_empty() && self.strokes != previous.strokes)
                     // The text before the caret must end as the correction left it: undo deletes the corrected word and
                     // its boundary. After `ghbdtn vbh ` it deleted `ет мир ` and typed `ghbdtn ` there (`привghbdtn `), and
-                    // the spaces Pause reaches past (_extend_last_committed) are no part of this plan either.
+                    // the spaces Pause reaches past (extend_last_committed) are no part of this plan either.
                     && committed.strokes == previous.strokes
                     && committed.trailing == previous.trailing
                     && committed.boundary == previous.boundary
-                    && self._symbol_strokes.is_empty()
-                    && self.monotonic() - self._last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
+                    && self.symbol_strokes.is_empty()
+                    && self.monotonic() - self.last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
             }
             _ => false,
         };
         if !available {
             technical_event!(self.shared, "undo_unavailable", "reason": "text_changed_or_expired");
-            self.shared._update(Update { last_action: Some("Последнее исправление уже нельзя отменить".to_owned()), ..Update::default() });
+            self.shared.update(Update { last_action: Some("Последнее исправление уже нельзя отменить".to_owned()), ..Update::default() });
             return;
         }
-        let previous = self._last_correction.clone().expect("checked above");
+        let previous = self.last_correction.clone().expect("checked above");
         let undo = Self::_undo_of(&previous, previous.boundary.clone(), previous.trailing.clone());
-        self._queue_undo(undo, trigger_keycode);
+        self.queue_undo(undo, trigger_keycode);
     }
 
     /// The undo hotkey: the last correction back, also past the spaces typed after it.
     ///
     /// A wrong correction is noticed when it is seen, and by then a space or more often stands after
     /// it. The hotkey reaches the correction across those spaces, puts the word back as it was typed and
-    /// keeps the spaces, as Pause reaches the last word past them (_pause_reaches_past, which also bounds
+    /// keeps the spaces, as Pause reaches the last word past them (pause_reaches_past, which also bounds
     /// how many). Any other key typed after the correction still leaves nothing to undo: a letter, Backspace,
     /// an arrow key or a click leave text the correction did not, and Tab and Enter may have moved to
     /// another field or sent the text (they end the reach of Pause too).
     ///
-    /// There are two paths for one reason. `_schedule_undo` undoes a correction only while the text ends
+    /// There are two paths for one reason. `schedule_undo` undoes a correction only while the text ends
     /// exactly as the correction left it, and a frozen historical test calls it directly and pins that
     /// behaviour: tests/test_input_integrity.py, test_undo_is_unavailable_after_edit_or_pointer_move, where
     /// a space typed after the correction leaves nothing to undo. The bytes of that file are part of sealed
     /// evidence and cannot change. What the hotkey does is the product's, so the hotkey comes here, and
-    /// everything other than the spaces is left to `_schedule_undo`.
-    pub fn _schedule_undo_hotkey(&mut self, trigger_keycode: i64) {
-        let Some((plan, spaces)) = self._undo_past_spaces() else {
-            self._schedule_undo(trigger_keycode);
+    /// everything other than the spaces is left to `schedule_undo`.
+    pub fn schedule_undo_hotkey(&mut self, trigger_keycode: i64) {
+        let Some((plan, spaces)) = self.undo_past_spaces() else {
+            self.schedule_undo(trigger_keycode);
             return;
         };
         technical_event!(
             self.shared, "undo_past_spaces", "spaces": spaces, "application": plan.application,
-            "application_excluded": self._application_excluded(&plan.application),
+            "application_excluded": self.application_excluded(&plan.application),
         );
-        self._queue_undo(plan, trigger_keycode);
+        self.queue_undo(plan, trigger_keycode);
     }
 
     /// The undo of the last correction together with the spaces typed after it, and how many there are.
     ///
     /// None unless the text before the caret is the correction's text followed by plain spaces alone: the
-    /// word, the signs and the boundary the correction typed, then spaces (_extend_last_committed adds each
+    /// word, the signs and the boundary the correction typed, then spaces (extend_last_committed adds each
     /// to the last committed word as it is typed, and anything else makes that word stale).
-    fn _undo_past_spaces(&self) -> Option<(PlanRef, usize)> {
-        let (previous, committed) = (self._last_correction.as_ref()?, self._last_committed.as_ref()?);
-        if self._pending.is_some()
-            || self._last_committed_stale
-            || !self._strokes.is_empty()
-            || !self._symbol_strokes.is_empty()
+    fn undo_past_spaces(&self) -> Option<(PlanRef, usize)> {
+        let (previous, committed) = (self.last_correction.as_ref()?, self.last_committed.as_ref()?);
+        if self.pending.is_some()
+            || self.last_committed_stale
+            || !self.strokes.is_empty()
+            || !self.symbol_strokes.is_empty()
             || committed.strokes != previous.strokes
-            || self.monotonic() - self._last_correction_time > UNDO_AVAILABLE_WINDOW_SECONDS
+            || self.monotonic() - self.last_correction_time > UNDO_AVAILABLE_WINDOW_SECONDS
         {
             return None;
         }
@@ -578,13 +578,13 @@ impl EngineCore {
     }
 
     /// Run the undo `plan` once the hotkey's keys are up.
-    fn _queue_undo(&mut self, plan: PlanRef, trigger_keycode: i64) {
-        self._log_pending_dropped("replaced_by_undo");
-        self._pending = Some(plan);
+    fn queue_undo(&mut self, plan: PlanRef, trigger_keycode: i64) {
+        self.log_pending_dropped("replaced_by_undo");
+        self.pending = Some(plan);
         // Undo puts the text back and teaches nothing; a rule that keeps the
         // word comes only from the rule window.
-        self._learning_prompt_after = None;
-        self._pending_trigger_keycode = trigger_keycode;
-        self._manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
+        self.learning_prompt_after = None;
+        self.pending_trigger_keycode = trigger_keycode;
+        self.manual_release_deadline = self.monotonic() + MANUAL_RELEASE_TIMEOUT_SECONDS;
     }
 }

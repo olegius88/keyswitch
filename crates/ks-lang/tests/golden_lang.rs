@@ -154,7 +154,7 @@ fn check_language_row(fail: &Failures, word: &str, row: &Value, en: &LanguageMod
     fail.check("normalize", word, normalized.as_str(), row[0].as_str().unwrap());
     for (slot, model) in [(1, en), (2, ru)] {
         let want = &row[slot];
-        fail.check("_raw_ngram_score", word, hex(model._raw_ngram_score(word)).as_str(), hex_of(&want[0]));
+        fail.check("_raw_ngram_score", word, hex(model.raw_ngram_score(word)).as_str(), hex_of(&want[0]));
         fail.check("ngram_score", word, hex(model.ngram_score(word)).as_str(), hex_of(&want[1]));
         fail.check("frequency", word, model.frequencies.get_or_zero(&normalized), want[2].as_i64().unwrap());
         check_score(fail, "score", word, &model.score(word), &want[3]);
@@ -192,8 +192,8 @@ fn language_tables() {
                 fail.check("bigrams", name, model.bigrams.len().to::<u64>(), header["bigrams"].as_u64().unwrap());
                 fail.check("maximum", name, model.maximum, header["maximum"].as_i64().unwrap());
                 fail.check("maximum_bigram", name, model.maximum_bigram, header["maximum_bigram"].as_i64().unwrap());
-                fail.check("_ngram_mean", name, hex(model._ngram_mean).as_str(), header["mean"].as_str().unwrap());
-                fail.check("_ngram_deviation", name, hex(model._ngram_deviation).as_str(), header["deviation"].as_str().unwrap());
+                fail.check("_ngram_mean", name, hex(model.ngram_mean).as_str(), header["mean"].as_str().unwrap());
+                fail.check("_ngram_deviation", name, hex(model.ngram_deviation).as_str(), header["deviation"].as_str().unwrap());
                 for (slot, order) in [2, 3, 4].into_iter().enumerate() {
                     let (size, total) = model.gram_size(order);
                     fail.check("gram size", name, size.to::<u64>(), header["gram_sizes"][slot].as_u64().unwrap());
@@ -697,12 +697,12 @@ fn early_switch_misc() {
                 index = None;
                 continue;
             }
-            let stems = early_switch::_dictionary_stems(&path, ks_lang::constants::PREFIX_INDEX_DICTIONARY_MAX_BYTES);
+            let stems = early_switch::dictionary_stems(&path, ks_lang::constants::PREFIX_INDEX_DICTIONARY_MAX_BYTES);
             fail.check("stems", locale, stems.len().to::<u64>(), row["len"].as_u64().unwrap());
             fail.check("stems digest", locale, digest_lines(stems.iter()).as_str(), row["digest"].as_str().unwrap());
-            fail.check("stems limited", locale, early_switch::_dictionary_stems(&path, 10).len().to::<u64>(), row["limited"].as_u64().unwrap());
+            fail.check("stems limited", locale, early_switch::dictionary_stems(&path, 10).len().to::<u64>(), row["limited"].as_u64().unwrap());
             let source = format!("x; Hunspell: {}", path.display());
-            fail.check("dictionary path", locale, early_switch::_hunspell_dictionary_path(&source), Some(path));
+            fail.check("dictionary path", locale, early_switch::hunspell_dictionary_path(&source), Some(path));
             let plain = f.resources.language_model(locale, std::iter::empty::<&str>()).frequencies.clone();
             index = Some(PrefixIndex::from_lexicon(plain, &source));
         } else if let Some(locale) = row.get("stems_index").and_then(Value::as_str) {
@@ -715,7 +715,7 @@ fn early_switch_misc() {
             }
         } else {
             let word = row[0].as_str().unwrap();
-            fail.check("abbreviation", word, i64::from(early_switch::_looks_like_abbreviation(word)), row[1].as_i64().unwrap());
+            fail.check("abbreviation", word, i64::from(early_switch::looks_like_abbreviation(word)), row[1].as_i64().unwrap());
         }
     }
     fail.finish("early_misc");

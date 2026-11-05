@@ -20,7 +20,7 @@ macro_rules! technical_event {
 }
 pub(crate) use technical_event;
 
-/// The keyword arguments of `_log_word_evaluation`.
+/// The keyword arguments of `log_word_evaluation`.
 pub(crate) struct WordEvaluation<'a> {
     pub trigger: &'a str,
     pub original: &'a str,
@@ -55,7 +55,7 @@ fn build_platform() -> String {
 }
 
 impl EngineCore {
-    pub fn _technical_session_event(&self, event: &str) {
+    pub fn technical_session_event(&self, event: &str) {
         technical_event!(
             self.shared, event,
             "keyswitch_version": ks_config::logsetup::VERSION,
@@ -65,8 +65,8 @@ impl EngineCore {
             "backend": self.backend_label,
             "intent_model": self.intent_model_status.as_dict(),
             "context_model_status": self.context_policy.status,
-            "field_reader_status": self._field_reader_status(),
-            "field_reader_details": self._field_reader_details(),
+            "field_reader_status": self.field_reader_status(),
+            "field_reader_details": self.field_reader_details(),
             "language_models": Value::Object(self.models.iter().enumerate().map(|(group, model)| (group.to_string(), json!({
                 "locale": model.locale,
                 "words": model.frequencies.len(),
@@ -104,7 +104,7 @@ impl EngineCore {
         map
     }
 
-    pub(crate) fn _log_word_evaluation(&mut self, evaluation: WordEvaluation<'_>) -> EngineResult<()> {
+    pub(crate) fn log_word_evaluation(&mut self, evaluation: WordEvaluation<'_>) -> EngineResult<()> {
         if !self.shared.technical_logging() {
             return Ok(());
         }
@@ -143,12 +143,12 @@ impl EngineCore {
             && self.in_models(group)
         {
             let trigger_kind = ks_lang::intent_model::CorrectionTrigger::parse(trigger).unwrap_or(ks_lang::intent_model::CorrectionTrigger::Space);
-            let shadow = self._decide_word(original, alternatives, group, application, trigger_kind, WordOptions::default())?;
+            let shadow = self.decide_word(original, alternatives, group, application, trigger_kind, WordOptions::default())?;
             shadow_payload = Some(Self::_decision_diagnostics(&shadow));
         }
         let (context_words, context_group) = match context {
             Some(context) => context,
-            None => self._context_for(application),
+            None => self.context_for(application),
         };
         technical_event!(
             self.shared, "word_evaluation",
@@ -165,15 +165,15 @@ impl EngineCore {
             "protection": protection,
             "application_excluded": application_excluded,
             "skipped_reason": skipped_reason,
-            "minimum_length": self._minimum_word_length(),
-            "confidence_threshold": self._confidence_threshold(),
+            "minimum_length": self.minimum_word_length(),
+            "confidence_threshold": self.confidence_threshold(),
             "context": json!({
                 "group": context_group,
                 "words": if application_excluded { json!({}) } else { group_map(&context_words) },
             }),
             "early_switch_origin": early_switch_origin,
             "idle_ms": idle_ms,
-            "learning": self._learning_diagnostics(source_group, original),
+            "learning": self.learning_diagnostics(source_group, original),
             "decision": decision_payload,
             "shadow_decision": shadow_payload,
         );
@@ -185,11 +185,11 @@ impl EngineCore {
     /// A correction waits for the release of the key that triggered it, so a
     /// shortcut or a focus change in between silently cancels it: from the
     /// outside the hotkey simply did nothing.
-    pub(crate) fn _log_pending_dropped(&self, reason: &str) {
-        let Some(plan) = &self._pending else {
+    pub(crate) fn log_pending_dropped(&self, reason: &str) {
+        let Some(plan) = &self.pending else {
             return;
         };
-        let excluded = self._application_excluded(&plan.application);
+        let excluded = self.application_excluded(&plan.application);
         technical_event!(
             self.shared, "pending_correction_dropped",
             "reason": if reason.is_empty() { "unspecified" } else { reason },
@@ -198,7 +198,7 @@ impl EngineCore {
             "replacement": if excluded { "<redacted>" } else { plan.replacement.as_str() },
             "source_group": plan.source_group,
             "target_group": plan.target_group,
-            "trigger_keycode": self._pending_trigger_keycode,
+            "trigger_keycode": self.pending_trigger_keycode,
             "application": plan.application,
             "application_excluded": excluded,
         );
@@ -208,13 +208,13 @@ impl EngineCore {
     ///
     /// Without it a log line cannot tell a correction the user's rule forced, or
     /// a word their rule kept, from one the model decided on its own.
-    fn _learning_diagnostics(&self, source_group: Option<i64>, word: &str) -> Value {
+    fn learning_diagnostics(&self, source_group: Option<i64>, word: &str) -> Value {
         let enabled = self.flag("detection.learning", true);
         let Some(group) = source_group else {
             return json!({"enabled": enabled});
         };
         let rule = if enabled { self.learning.r#match(group, word) } else { None };
-        let mut rejected = self._rejected_targets(group, word);
+        let mut rejected = self.rejected_targets(group, word);
         rejected.sort_unstable();
         json!({
             "enabled": enabled,
@@ -225,14 +225,14 @@ impl EngineCore {
                 "action": rule.action.as_str(),
                 "target_group": rule.target_group,
             })),
-            "forced_target": self._forced_target_group(group, word),
+            "forced_target": self.forced_target_group(group, word),
             "rejected_targets": rejected,
         })
     }
 
     /// Record a word that was thrown away before it could be corrected.
-    pub(crate) fn _log_word_discarded(&self, reason: &str) {
-        if self._strokes.is_empty() && self._symbol_strokes.is_empty() {
+    pub(crate) fn log_word_discarded(&self, reason: &str) {
+        if self.strokes.is_empty() && self.symbol_strokes.is_empty() {
             return;
         }
         // Read the setting first: the application probe is a system call.
@@ -240,25 +240,25 @@ impl EngineCore {
             return;
         }
         let application = self.backend.active_application();
-        let excluded = self._application_excluded(&application);
+        let excluded = self.application_excluded(&application);
         let original = format!(
             "{}{}",
-            _text_for_group(&self._symbol_strokes, self._source_group),
-            _text_for_group(&self._strokes, self._source_group)
+            text_for_group(&self.symbol_strokes, self.source_group),
+            text_for_group(&self.strokes, self.source_group)
         );
         technical_event!(
             self.shared, "word_discarded",
             "reason": if reason.is_empty() { "unspecified" } else { reason },
             "original": if excluded { "<redacted>" } else { original.as_str() },
-            "length": self._strokes.len(),
-            "symbol_count": self._symbol_strokes.len(),
-            "source_group": self._source_group,
+            "length": self.strokes.len(),
+            "symbol_count": self.symbol_strokes.len(),
+            "source_group": self.source_group,
             "application": application,
             "application_excluded": excluded,
         );
     }
 
-    pub(crate) fn _log_context_wait(&self, event: &str, waiting: Option<&WaitingContextWord>, reason: &str, fields: &[(&str, Value)]) {
+    pub(crate) fn log_context_wait(&self, event: &str, waiting: Option<&WaitingContextWord>, reason: &str, fields: &[(&str, Value)]) {
         let Some(waiting) = waiting else {
             return;
         };
@@ -281,9 +281,9 @@ impl EngineCore {
         self.shared.emit_technical(payload);
     }
 
-    pub fn _log_input_edit(&self, event: &KeyEvent, application: &str) {
+    pub fn log_input_edit(&self, event: &KeyEvent, application: &str) {
         // Observe editing controls, not printable keystrokes or field contents.
-        if !self.shared.technical_logging() || !self.flag("enabled", true) || self._application_excluded(application) {
+        if !self.shared.technical_logging() || !self.flag("enabled", true) || self.application_excluded(application) {
             return;
         }
         let edit = if event.control() || event.alt() || event.super_key() {
@@ -301,15 +301,15 @@ impl EngineCore {
         };
         technical_event!(
             self.shared, "input_edit_observed", "edit": edit, "application": application,
-            "group": event.group, "tracked_word_characters": self._strokes.len(),
+            "group": event.group, "tracked_word_characters": self.strokes.len(),
             "context_characters_before": pystr::len(&self.context_policy.stream.text),
-            "last_committed_available": self._last_committed.is_some() && !self._last_committed_stale,
-            "wait_id": self._context_waiting.as_ref().map(|waiting| waiting.diagnostic_id),
+            "last_committed_available": self.last_committed.is_some() && !self.last_committed_stale,
+            "wait_id": self.context_waiting.as_ref().map(|waiting| waiting.diagnostic_id),
             "text_verified": false,
         );
     }
 
-    pub(crate) fn _field_reader_status(&self) -> String {
+    pub(crate) fn field_reader_status(&self) -> String {
         let Some(reader) = &self.context_policy.reader else {
             return "not_configured".to_owned();
         };
@@ -319,7 +319,7 @@ impl EngineCore {
         }
     }
 
-    pub(crate) fn _field_reader_details(&self) -> Value {
+    pub(crate) fn field_reader_details(&self) -> Value {
         if let (Some(reader), Some(platform)) = (&self.context_policy.reader, &self.platform_reader)
             && std::ptr::addr_eq(Arc::as_ptr(reader), Arc::as_ptr(platform))
         {
@@ -327,6 +327,6 @@ impl EngineCore {
             details.insert("retry".into(), Value::Object(platform.retry_diagnostics()));
             return Value::Object(details);
         }
-        json!({"status": self._field_reader_status()})
+        json!({"status": self.field_reader_status()})
     }
 }

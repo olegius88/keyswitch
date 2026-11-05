@@ -185,7 +185,7 @@ impl X11Api for Fake {
         self.with(|state| state.classes.get(&window).cloned())
     }
     fn set_input_focus(&self, _window: u32) {}
-    fn move_raise(&self, _window: u32, _x: i32, _y: i32) {}
+    fn move_raise(&self, _window: u32, x: i32, y: i32) {}
 }
 
 fn payload(event_type: u8, keycode: u8, state: u16, timestamp: u32) -> Vec<u8> {

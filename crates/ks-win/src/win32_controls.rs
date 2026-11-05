@@ -484,7 +484,7 @@ pub fn frame_rect(hdc: *mut c_void, rect: &RECT, color: u32) {
 
 // ------------------------------------------------------------------------------------------------------ the wheel
 
-unsafe extern "system" fn wheel_guard(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
+unsafe extern "system" fn wheel_guard(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, id: usize, data: usize) -> LRESULT {
     if message == WM_MOUSEWHEEL {
         // The wheel scrolls the page; it never changes the value of a combo box or a number box the pointer is over.
         send(parent_of(window), WM_MOUSEWHEEL, wparam, lparam);

@@ -45,7 +45,7 @@ pub(crate) fn is_action_boundary_key(name: &str) -> bool {
 
 /// What the focus probe found: another window, or one whose layout is moot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct _FocusChange {
+pub struct FocusChange {
     pub changed: bool,
     pub ignore_layout: bool,
 }
@@ -69,11 +69,11 @@ pub struct CorrectionPlan {
     pub trailing: Strokes,
     // A symbol typed in front of the word that this application reads as the
     // start of a mention. It is judged with the word, not on its own, so it is
-    // kept out of `strokes` until the correction runs (_execute_correction).
+    // kept out of `strokes` until the correction runs (execute_correction).
     pub head: Strokes,
     // A word converted at a space: its baseline decision and field, so the model can be
     // asked about it again once the next word shows which way that one went
-    // (_revert_with_next_word).
+    // (revert_with_next_word).
     pub revisit: Option<Arc<(DetectionDecision, Option<FieldContext>)>>,
     // The boundary sign was folded into `strokes` and is replayed in the new layout
     // (_replay_sign_with_word): the word ended there, though no boundary follows it.
@@ -83,15 +83,15 @@ pub struct CorrectionPlan {
     // this is the text it leaves there, the keys as typed.
     pub typed: String,
     // The last strokes of `strokes` that stay in `source_group`: a waiting word converted alone
-    // before its next word, which is typed again as it was (_decide_with_kept_neighbour). The
+    // before its next word, which is typed again as it was (decide_with_kept_neighbour). The
     // layout stays `source_group`.
     pub kept_tail: usize,
     // The keys on screen that `strokes` replace when they are other keys: a typo correction
-    // (mode "typo", _typo_plan) types the corrected word over the keys typed, and its undo types
+    // (mode "typo", typo_plan) types the corrected word over the keys typed, and its undo types
     // those back. Empty: `strokes` are the keys on screen, as for every other correction.
     pub replaced_strokes: Strokes,
     // The keys of the text this plan replaces, when they are not `strokes`: a case fix types the keys
-    // of the word with one letter's Shift changed (_fix_double_capitals), and undo types these back.
+    // of the word with one letter's Shift changed (fix_double_capitals), and undo types these back.
     // Empty when the plan replaces `strokes` themselves, as every conversion does.
     pub replaced: Strokes,
 }
@@ -170,7 +170,7 @@ impl Default for EngineSnapshot {
     }
 }
 
-/// The keyword arguments of `_update`.
+/// The keyword arguments of `update`.
 #[derive(Default)]
 pub struct Update {
     pub running: Option<bool>,
@@ -219,14 +219,14 @@ pub struct WaitingContextWord {
     // The detector's verdict on the word at its own boundary: the baseline the model saw there,
     // and the one it is asked with again beside a kept next word.
     pub baseline: Option<DetectionDecision>,
-    // The word was converted at its boundary and waits only in case the next word decides it again (_start_context_wait's
+    // The word was converted at its boundary and waits only in case the next word decides it again (start_context_wait's
     // fallback): nothing is left to convert when no next word comes.
     pub converted: bool,
 }
 
-// The baseline reason of the question a converted word is asked again (_revert_with_next_word).
+// The baseline reason of the question a converted word is asked again (revert_with_next_word).
 pub const REVISIT_REASON: &str = "слово после соседа, переведённого обратно";
-// The words of a line read by the stranded-letter rule (_stranded_letter): signs that end a
+// The words of a line read by the stranded-letter rule (stranded_letter): signs that end a
 // sentence, and the two scripts a word may be written in.
 pub const SENTENCE_END_SIGNS: &str = ".!?…";
 
@@ -270,7 +270,7 @@ pub struct LearningPrompt {
     pub action: RuleAction,
 }
 
-/// A correction waiting for its field to show the word it replaces (`_waits_for_field`).
+/// A correction waiting for its field to show the word it replaces (`waits_for_field`).
 #[derive(Clone, Debug)]
 pub struct FieldWait {
     pub plan: PlanRef,
@@ -285,7 +285,7 @@ pub enum ConvertOutcome {
     Switch,
 }
 
-/// A plan `_execute_correction` carried out, as it was asked to run.
+/// A plan `execute_correction` carried out, as it was asked to run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedPlan {
     pub mode: &'static str,

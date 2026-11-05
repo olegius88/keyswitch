@@ -130,7 +130,7 @@ struct GramCounter {
     keys: GramKeys,
     counts: Vec<u32>,
     total: u64,
-    /// `total + alpha * vocabulary` of `_raw_ngram_score`.
+    /// `total + alpha * vocabulary` of `raw_ngram_score`.
     denominator: f64,
 }
 
@@ -167,7 +167,7 @@ impl GramCounter {
     }
 }
 
-/// `_gram_counts`: the counters of the orders 2, 3 and 4 and the alphabet their narrow keys are written in.
+/// `gram_counts`: the counters of the orders 2, 3 and 4 and the alphabet their narrow keys are written in.
 struct GramCounts {
     /// Sorted; a character's code is its position plus one. `None` where the keys hold code points.
     alphabet: Option<Vec<char>>,
@@ -302,9 +302,9 @@ pub struct LanguageModel {
     pub maximum_bigram: i64,
     pub speller: Box<dyn SpellChecker>,
     pub source: String,
-    _gram_counts: GramCounts,
-    pub _ngram_mean: f64,
-    pub _ngram_deviation: f64,
+    gram_counts: GramCounts,
+    pub ngram_mean: f64,
+    pub ngram_deviation: f64,
 }
 
 impl LanguageModel {
@@ -320,21 +320,21 @@ impl LanguageModel {
             maximum_bigram,
             speller,
             source,
-            _gram_counts: GramCounts::build(&frequencies),
+            gram_counts: GramCounts::build(&frequencies),
             frequencies,
             bigrams,
-            _ngram_mean: LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN,
-            _ngram_deviation: 1.0,
+            ngram_mean: LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN,
+            ngram_deviation: 1.0,
         };
         let calibration = model.calibration();
         if !calibration.is_empty() {
-            model._ngram_mean = fmean(&calibration).unwrap_or(LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN);
+            model.ngram_mean = fmean(&calibration).unwrap_or(LANGUAGE_MODEL_DEFAULT_NGRAM_MEAN);
         }
         if calibration.len() > 1 {
-            model._ngram_deviation = pstdev(&calibration).unwrap_or(1.0);
+            model.ngram_deviation = pstdev(&calibration).unwrap_or(1.0);
         }
-        if model._ngram_deviation < LANGUAGE_MODEL_MIN_NGRAM_DEVIATION {
-            model._ngram_deviation = 1.0;
+        if model.ngram_deviation < LANGUAGE_MODEL_MIN_NGRAM_DEVIATION {
+            model.ngram_deviation = 1.0;
         }
         model
     }
@@ -349,7 +349,7 @@ impl LanguageModel {
             .iter()
             .map(|&index| self.frequencies.words().get(index.to::<usize>()))
             .filter(|word| pystr::len(word) >= LANGUAGE_MODEL_CALIBRATION_MIN_CHARACTERS && pystr::isalpha(word))
-            .map(|word| self._raw_ngram_score(word))
+            .map(|word| self.raw_ngram_score(word))
             .collect()
     }
 
@@ -464,16 +464,16 @@ impl LanguageModel {
         self.bigrams.get_or_zero(&bigram_key(left, right))
     }
 
-    /// `len(_gram_counts[order])`, `_gram_totals[order]`.
+    /// `len(gram_counts[order])`, `_gram_totals[order]`.
     pub fn gram_size(&self, order: usize) -> (usize, u64) {
-        let counter = &self._gram_counts.counters[order_slot(order)];
+        let counter = &self.gram_counts.counters[order_slot(order)];
         (counter.len(), counter.total)
     }
 
-    /// `_gram_counts[order].get(gram, 0)`; the gram must have `order` characters.
+    /// `gram_counts[order].get(gram, 0)`; the gram must have `order` characters.
     pub fn gram_count(&self, order: usize, gram: &str) -> u32 {
-        let codes: Vec<u32> = gram.chars().map(|c| encode_with(self._gram_counts.alphabet.as_deref(), c)).collect();
-        self._gram_counts.counters[order_slot(order)].get(&codes)
+        let codes: Vec<u32> = gram.chars().map(|c| encode_with(self.gram_counts.alphabet.as_deref(), c)).collect();
+        self.gram_counts.counters[order_slot(order)].get(&codes)
     }
 
     /// `gram in self._grams`.
@@ -481,12 +481,12 @@ impl LanguageModel {
         pystr::len(gram) == LANGUAGE_MODEL_TRIGRAM_ORDER && self.gram_count(LANGUAGE_MODEL_TRIGRAM_ORDER, gram) != 0
     }
 
-    pub fn _raw_ngram_score(&self, word: &str) -> f64 {
+    pub fn raw_ngram_score(&self, word: &str) -> f64 {
         let normalized = Self::normalize(word);
         if normalized.is_empty() {
             return LANGUAGE_MODEL_EMPTY_TOKEN_SCORE;
         }
-        let codes = self._gram_counts.padded_codes(&normalized);
+        let codes = self.gram_counts.padded_codes(&normalized);
         let mut order_scores = [0.0; 3];
         let mut scored = 0;
         for (slot, &order) in LANGUAGE_MODEL_NGRAM_ORDERS.iter().enumerate() {
@@ -494,7 +494,7 @@ impl LanguageModel {
             if codes.len() < order {
                 continue;
             }
-            let counter = &self._gram_counts.counters[slot];
+            let counter = &self.gram_counts.counters[slot];
             let grams = codes.windows(order);
             let count = grams.len();
             order_scores[scored] = py_sum(grams.map(|gram| ((f64::from(counter.get(gram)) + LANGUAGE_MODEL_GRAM_SMOOTHING) / counter.denominator).ln())) / count.to::<f64>();
@@ -504,7 +504,7 @@ impl LanguageModel {
     }
 
     pub fn ngram_score(&self, word: &str) -> f64 {
-        (self._raw_ngram_score(word) - self._ngram_mean) / self._ngram_deviation
+        (self.raw_ngram_score(word) - self.ngram_mean) / self.ngram_deviation
     }
 
     pub fn context_score(&self, previous_word: &str, word: &str) -> f64 {
@@ -555,8 +555,8 @@ impl LanguageModel {
         let exact = frequency != 0;
         let spell_known = lexical_eligible && pystr::isalpha(&normalized) && self.speller.check(&normalized);
         let known = exact || spell_known;
-        let codes = self._gram_counts.padded_codes(&normalized);
-        let counter = &self._gram_counts.counters[order_slot(LANGUAGE_MODEL_TRIGRAM_ORDER)];
+        let codes = self.gram_counts.padded_codes(&normalized);
+        let counter = &self.gram_counts.counters[order_slot(LANGUAGE_MODEL_TRIGRAM_ORDER)];
         let trigrams = codes.windows(LANGUAGE_MODEL_TRIGRAM_ORDER);
         let count = trigrams.len();
         let hits = trigrams.filter(|gram| counter.get(gram) != 0).count();

@@ -221,7 +221,7 @@ pub fn quit() {
 
 fn attach_engine(services: &Arc<Services>) {
     services.engine.when_built(Box::new(|engine: &KeySwitchEngine| {
-        engine.subscribe(Arc::new(|_snapshot| {
+        engine.subscribe(Arc::new(|snapshot| {
             run_on_main(Box::new(|| {
                 sync_tray();
                 settings_window::refresh_status();

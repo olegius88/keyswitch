@@ -179,7 +179,7 @@ pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Va
     let shared = core.shared.clone();
     match name {
         "_handle" => match args.get(0, "event").and_then(key_from) {
-            Some(event) => result_of(core._handle(Arc::new(event))),
+            Some(event) => result_of(core.handle_inner(Arc::new(event))),
             None => Outcome::Unknown("_handle of something that is no key".to_owned()),
         },
         "enqueue" => match args.get(0, "event").and_then(key_from) {
@@ -193,40 +193,40 @@ pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Va
             Some(event) => answer(disposition_value(shared.consumes_key(&event))),
             None => Outcome::Unknown("consumes_key of something that is no key".to_owned()),
         },
-        "_maybe_correct_after_pause" => result_of(core._maybe_correct_after_pause(args.float(usize::MAX, "now"))),
+        "_maybe_correct_after_pause" => result_of(core.maybe_correct_after_pause(args.float(usize::MAX, "now"))),
         "_remember_context" => {
             let strokes = strokes_from(args.get(2, "strokes"));
-            core._remember_context(args.text(0, "application").unwrap_or(""), args.int(1, "group").unwrap_or(0), &strokes);
+            core.remember_context(args.text(0, "application").unwrap_or(""), args.int(1, "group").unwrap_or(0), &strokes);
             done()
         }
         "_commit_word" => match args.get(0, "boundary").and_then(key_from) {
-            Some(event) => result_of(core._commit_word(&Arc::new(event))),
+            Some(event) => result_of(core.commit_word(&Arc::new(event))),
             None => Outcome::Unknown("_commit_word of something else".to_owned()),
         },
         "_execute_correction" => match args.get(0, "plan").and_then(plan_from) {
-            Some(plan) => answer(Value::Bool(core._execute_correction(Arc::new(plan), args.get(1, "learning_prompt").and_then(prompt_from)))),
+            Some(plan) => answer(Value::Bool(core.execute_correction(Arc::new(plan), args.get(1, "learning_prompt").and_then(prompt_from)))),
             None => Outcome::Unknown("_execute_correction of a plan with a revisit".to_owned()),
         },
         "_fix_double_capitals" => match (args.get(0, "plan").and_then(plan_from), args.get(1, "boundary").and_then(key_from)) {
             (Some(plan), Some(boundary)) => {
-                let fixed = core._fix_double_capitals(&Arc::new(plan), &Arc::new(boundary));
+                let fixed = core.fix_double_capitals(&Arc::new(plan), &Arc::new(boundary));
                 let digest = plan_digest(&fixed);
                 let expected = plan_from(recorded).map(|plan| plan_digest(&plan));
                 if expected.as_ref() == Some(&digest) { answer(recorded.clone()) } else { answer(digest) }
             }
             _ => Outcome::Unknown("_fix_double_capitals of a plan with a revisit".to_owned()),
         },
-        "_early_prefix_protection" => answer(json!(core._early_prefix_protection(args.text(0, "original").unwrap_or(""), args.int(1, "source").unwrap_or(0), args.int(2, "target").unwrap_or(0)))),
+        "_early_prefix_protection" => answer(json!(core.early_prefix_protection(args.text(0, "original").unwrap_or(""), args.int(1, "source").unwrap_or(0), args.int(2, "target").unwrap_or(0)))),
         "_early_prefix_field" => {
-            let (field, protection) = core._early_prefix_field(args.text(0, "original").unwrap_or(""), args.text(1, "application").unwrap_or(""));
+            let (field, protection) = core.early_prefix_field(args.text(0, "original").unwrap_or(""), args.text(1, "application").unwrap_or(""));
             answer(json!([super::backend::field_value(&field), protection]))
         }
         "_read_insertion" => match args.get(0, "event").and_then(key_from) {
-            Some(event) => answer(core._read_insertion(&Arc::new(event)).map_or(Value::Null, |point| json!({"$dc": "InsertionPoint", "head": point.head, "tail": point.tail}))),
+            Some(event) => answer(core.read_insertion(&Arc::new(event)).map_or(Value::Null, |point| json!({"$dc": "InsertionPoint", "head": point.head, "tail": point.tail}))),
             None => Outcome::Unknown("_read_insertion of something else".to_owned()),
         },
         "_ambiguous_key_is_boundary" => match args.get(0, "event").and_then(key_from) {
-            Some(event) => match core._ambiguous_key_is_boundary(&event) {
+            Some(event) => match core.ambiguous_key_is_boundary(&event) {
                 Ok(boundary) => answer(Value::Bool(boundary)),
                 Err(error) => Outcome::Done { returned: None, error: Some(error.to_string()) },
             },
@@ -234,13 +234,13 @@ pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Va
         },
         "_log_input_edit" => match args.get(0, "event").and_then(key_from) {
             Some(event) => {
-                core._log_input_edit(&event, args.text(1, "application").unwrap_or(""));
+                core.log_input_edit(&event, args.text(1, "application").unwrap_or(""));
                 done()
             }
             None => Outcome::Unknown("_log_input_edit of something else".to_owned()),
         },
         "_advance_selection_command" => {
-            core._advance_selection_command();
+            core.advance_selection_command();
             done()
         }
         "_run_selection_command" => {
@@ -249,78 +249,78 @@ pub fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, recorded: &Va
                 Some("case") => SelectionCommand::Case,
                 _ => SelectionCommand::Transliterate,
             };
-            core._run_selection_command(command);
+            core.run_selection_command(command);
             done()
         }
         "_is_boundary" => match args.get(0, "event").and_then(key_from) {
             Some(event) => answer(Value::Bool(EngineCore::_is_boundary(&event))),
             None => Outcome::Unknown("_is_boundary of something else".to_owned()),
         },
-        "_poll_current_group" => result_of(core._poll_current_group()),
-        "_expire_deferred_action" => result_of(core._expire_deferred_action()),
+        "_poll_current_group" => result_of(core.poll_current_group()),
+        "_expire_deferred_action" => result_of(core.expire_deferred_action()),
         "_expire_manual_correction" => {
-            core._expire_manual_correction();
+            core.expire_manual_correction();
             done()
         }
-        "_expire_learning_prompt" => answer(Value::Bool(core._expire_learning_prompt(args.float(usize::MAX, "now")))),
+        "_expire_learning_prompt" => answer(Value::Bool(core.expire_learning_prompt(args.float(usize::MAX, "now")))),
         "_retry_field_wait" => {
-            core._retry_field_wait();
+            core.retry_field_wait();
             done()
         }
-        "_report_unseen_input" => result_of(core._report_unseen_input()),
+        "_report_unseen_input" => result_of(core.report_unseen_input()),
         "_report_input_delay" => {
-            core._report_input_delay();
+            core.report_input_delay();
             done()
         }
-        "_run_timers" => result_of(core._run_timers()),
+        "_run_timers" => result_of(core.run_timers()),
         "_schedule_manual_conversion" => {
-            core._schedule_manual_conversion(args.int(0, "trigger_keycode").unwrap_or(-1));
+            core.schedule_manual_conversion(args.int(0, "trigger_keycode").unwrap_or(-1));
             done()
         }
         "_schedule_undo" => {
-            core._schedule_undo(args.int(0, "trigger_keycode").unwrap_or(-1));
+            core.schedule_undo(args.int(0, "trigger_keycode").unwrap_or(-1));
             done()
         }
         "_schedule_undo_hotkey" => {
-            core._schedule_undo_hotkey(args.int(0, "trigger_keycode").unwrap_or(-1));
+            core.schedule_undo_hotkey(args.int(0, "trigger_keycode").unwrap_or(-1));
             done()
         }
         "_clear_word" => {
             let action = args.text(0, "action");
             let reason = args.text(usize::MAX, "reason").unwrap_or("");
-            core._clear_word(action, reason);
+            core.clear_word(action, reason);
             done()
         }
         "_observe_group" => {
-            core._observe_group(args.int(0, "group").unwrap_or(0), args.text(usize::MAX, "source").unwrap_or("poll"));
+            core.observe_group(args.int(0, "group").unwrap_or(0), args.text(usize::MAX, "source").unwrap_or("poll"));
             done()
         }
         "_apply_layout_selection" => {
-            core._apply_layout_selection(args.int(0, "group").unwrap_or(0));
+            core.apply_layout_selection(args.int(0, "group").unwrap_or(0));
             done()
         }
         "_settings_changed" => {
             let value = args.get(1, "value").cloned().unwrap_or(Value::Null);
-            core._settings_changed(args.text(0, "path").unwrap_or(""), &value);
+            core.settings_changed(args.text(0, "path").unwrap_or(""), &value);
             done()
         }
         "_update" => {
-            core._update(update_from(args));
+            core.update(update_from(args));
             done()
         }
         "_show_learning_prompt" => match args.get(0, "prompt").and_then(prompt_from) {
             Some(prompt) => {
-                shared._show_learning_prompt(prompt);
+                shared.show_learning_prompt(prompt);
                 done()
             }
             None => Outcome::Unknown("_show_learning_prompt of something else".to_owned()),
         },
         "_technical_session_event" => {
-            core._technical_session_event(args.text(0, "event").unwrap_or(""));
+            core.technical_session_event(args.text(0, "event").unwrap_or(""));
             done()
         }
         "_maybe_execute_pending" => match args.get(0, "event").and_then(key_from) {
-            Some(event) => result_of(core._maybe_execute_pending(&event)),
+            Some(event) => result_of(core.maybe_execute_pending(&event)),
             None => Outcome::Unknown("_maybe_execute_pending of something else".to_owned()),
         },
         "confirm_learning_prompt" => {
@@ -440,14 +440,14 @@ pub fn learning_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outc
 pub fn personal_step(core: &mut EngineCore, name: &str, args: &Args<'_>) -> Outcome {
     match name {
         "clear" => {
-            core._personal.clear();
+            core.personal.clear();
             done()
         }
         "add" => {
-            core._personal.add(args.text(0, "word").unwrap_or(""));
+            core.personal.add(args.text(0, "word").unwrap_or(""));
             done()
         }
-        "keep" => answer(Value::Bool(core._personal.keep(args.text(0, "word").unwrap_or("")))),
+        "keep" => answer(Value::Bool(core.personal.keep(args.text(0, "word").unwrap_or("")))),
         _ => Outcome::Unknown(format!("personal.{name}")),
     }
 }

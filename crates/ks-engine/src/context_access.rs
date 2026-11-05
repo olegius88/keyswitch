@@ -22,19 +22,19 @@ thread_local! {
 #[derive(Default)]
 struct ReaderState {
     status: String,
-    _failure_stage: Option<&'static str>,
-    _failure_type: Option<&'static str>,
-    _failure_name: Option<&'static str>,
-    _failure_code: Option<i64>,
-    _last_read_ms: Option<i64>,
-    _retry_attempts: usize,
-    _retry_after: Option<f64>,
+    failure_stage: Option<&'static str>,
+    failure_type: Option<&'static str>,
+    failure_name: Option<&'static str>,
+    failure_code: Option<i64>,
+    last_read_ms: Option<i64>,
+    retry_attempts: usize,
+    retry_after: Option<f64>,
 }
 
 pub struct PlatformFieldReader {
     factory: ReaderFactory,
     clock: Clock,
-    _password: Option<PasswordFocus>,
+    password: Option<PasswordFocus>,
     state: Mutex<ReaderState>,
 }
 
@@ -43,13 +43,13 @@ impl PlatformFieldReader {
         PlatformFieldReader {
             factory,
             clock,
-            _password: None,
+            password: None,
             state: Mutex::new(ReaderState { status: "not_requested".to_owned(), ..ReaderState::default() }),
         }
     }
 
     pub fn with_password_focus(mut self, password: PasswordFocus) -> PlatformFieldReader {
-        self._password = Some(password);
+        self.password = Some(password);
         self
     }
 
@@ -66,15 +66,15 @@ impl PlatformFieldReader {
         let state = self.state();
         let mut result = Map::new();
         result.insert("status".into(), json!(state.status));
-        result.insert("failure_stage".into(), json!(state._failure_stage));
-        result.insert("failure_type".into(), json!(state._failure_type));
-        if let Some(name) = state._failure_name {
+        result.insert("failure_stage".into(), json!(state.failure_stage));
+        result.insert("failure_type".into(), json!(state.failure_type));
+        if let Some(name) = state.failure_name {
             result.insert("failure_name".into(), json!(name));
         }
-        if let Some(code) = state._failure_code {
+        if let Some(code) = state.failure_code {
             result.insert("failure_code".into(), json!(code));
         }
-        if let Some(elapsed) = state._last_read_ms {
+        if let Some(elapsed) = state.last_read_ms {
             result.insert("last_read_ms".into(), json!(elapsed));
         }
         result
@@ -92,9 +92,9 @@ impl PlatformFieldReader {
     pub fn retry_diagnostics(&self) -> Map<String, Value> {
         let state = self.state();
         let mut result = Map::new();
-        result.insert("attempts".into(), json!(state._retry_attempts));
+        result.insert("attempts".into(), json!(state.retry_attempts));
         result.insert("limit".into(), json!(FIELD_READER_RETRY_DELAYS_SECONDS.len()));
-        let after = state._retry_after.map(|after| (ks_text::py_round((after - (self.clock)()) * MILLISECONDS_PER_SECOND)).to::<i64>().max(0));
+        let after = state.retry_after.map(|after| (ks_text::py_round((after - (self.clock)()) * MILLISECONDS_PER_SECOND)).to::<i64>().max(0));
         result.insert("after_ms".into(), json!(after));
         result
     }
@@ -104,15 +104,15 @@ impl PlatformFieldReader {
         // cleanup require an explicit reset, not repeated calls against the same failure.
         let mut state = self.state();
         state.status = "unavailable".to_owned();
-        state._failure_stage = Some(stage);
-        state._failure_name = Some(failure.failure_name);
-        state._failure_code = failure.failure_code;
-        state._failure_type = Some(failure.failure_type);
+        state.failure_stage = Some(stage);
+        state.failure_name = Some(failure.failure_name);
+        state.failure_code = failure.failure_code;
+        state.failure_type = Some(failure.failure_type);
         // A missing module or a denied right needs a new process, so nothing is gained by asking again. Everything else
         // is about one window at one moment - a provider that has not woken up, a call that ran out of time - and the
         // next application may answer immediately, so the attempts slow down to one a minute instead of stopping for good.
-        let delay = FIELD_READER_RETRY_DELAYS_SECONDS[state._retry_attempts.min(FIELD_READER_RETRY_DELAYS_SECONDS.len() - 1)];
-        state._retry_after = if failure.permanent { None } else { Some((self.clock)() + delay) };
+        let delay = FIELD_READER_RETRY_DELAYS_SECONDS[state.retry_attempts.min(FIELD_READER_RETRY_DELAYS_SECONDS.len() - 1)];
+        state.retry_after = if failure.permanent { None } else { Some((self.clock)() + delay) };
         None
     }
 }
@@ -122,7 +122,7 @@ impl FieldReader for PlatformFieldReader {
         if application.is_empty() || window == 0 {
             return None;
         }
-        if self._password.as_ref().is_some_and(|password| password(window)) {
+        if self.password.as_ref().is_some_and(|password| password(window)) {
             let mut field = FieldContext::new(application, format!("{window}:compositor"));
             field.role = FieldRole::Password;
             field.sensitive = true;
@@ -132,10 +132,10 @@ impl FieldReader for PlatformFieldReader {
         let unavailable = self.state().status == "unavailable";
         if unavailable {
             let mut state = self.state();
-            if state._retry_after.is_none_or(|after| (self.clock)() < after) {
+            if state.retry_after.is_none_or(|after| (self.clock)() < after) {
                 return None;
             }
-            state._retry_attempts += 1;
+            state.retry_attempts += 1;
             drop(state);
             // Reopen a failed bridge, never carry stale field ranges into a retry. A bridge that cannot even be closed
             // is dropped all the same: holding the reference would only send the next attempt into the same broken object.
@@ -158,18 +158,18 @@ impl FieldReader for PlatformFieldReader {
         let result = READER.with_borrow(|reader| reader.as_ref().expect("just opened").read(application, window));
         // How long the provider took is a fact about the provider, and the only way to tell "too slow for the timeout"
         // from "cannot do it at all" without printing anything the user typed.
-        self.state()._last_read_ms = Some((ks_text::py_round(((self.clock)() - started) * MILLISECONDS_PER_SECOND)).to::<i64>());
+        self.state().last_read_ms = Some((ks_text::py_round(((self.clock)() - started) * MILLISECONDS_PER_SECOND)).to::<i64>());
         match result {
             Err(failure) => self.fail("read", failure),
             Ok(result) => {
                 let mut state = self.state();
                 state.status = if result.is_some() { "available" } else { "unsupported_field" }.to_owned();
-                state._failure_stage = None;
-                state._failure_type = None;
-                state._failure_name = None;
-                state._failure_code = None;
-                state._retry_attempts = 0;
-                state._retry_after = None;
+                state.failure_stage = None;
+                state.failure_type = None;
+                state.failure_name = None;
+                state.failure_code = None;
+                state.retry_attempts = 0;
+                state.retry_after = None;
                 result.map(|field| field.bounded())
             }
         }

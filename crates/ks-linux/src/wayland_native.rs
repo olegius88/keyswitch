@@ -1855,7 +1855,7 @@ impl DesktopAdapter for GenericWaylandAdapter {
     fn input_anchor(&self) -> Option<ScreenAnchor> {
         None
     }
-    fn position_window(&self, _window: i64, _x: i64, _y: i64) -> bool {
+    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
         false
     }
     fn activate_window(&self, _window: i64) -> bool {

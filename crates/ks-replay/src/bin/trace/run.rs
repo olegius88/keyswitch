@@ -108,80 +108,80 @@ fn internals(core: &EngineCore) -> Value {
         keys.sort_unstable();
         keys
     };
-    let mut pressed_since: Vec<(u32, f64)> = core._pressed_since.clone();
+    let mut pressed_since: Vec<(u32, f64)> = core.pressed_since.clone();
     pressed_since.sort_by_key(|entry| entry.0);
     let stream = &core.context_policy.stream;
     json!({
-        "_source_group": core._source_group,
-        "_manual_layout_group": core._manual_layout_group,
-        "_pending_trigger_keycode": core._pending_trigger_keycode,
-        "_pause_correction_pending": core._pause_correction_pending,
-        "_last_committed_stale": core._last_committed_stale,
-        "_caret_moved": core._caret_moved,
-        "_position_unknown": core._position_unknown,
-        "_early_switch_undone": core._early_switch_undone,
-        "_early_switch_origin": core._early_switch_origin,
-        "_manual_layout_word": core._manual_layout_word,
-        "_manual_layout_source": core._manual_layout_source,
-        "_last_key_character": core._last_key_character,
-        "_character_before_key": core._character_before_key,
-        "_untracked_token": core._untracked_token,
-        "_foreign_input_active": core._foreign_input_active,
-        "_own_layout_ignored": core._own_layout_ignored,
-        "_convert_keycode": core._convert_keycode,
-        "_convert_released": core._convert_released,
-        "_personal_pending": core._personal_pending,
-        "_late_refusal": core._late_refusal,
-        "_correction_sequence": core._correction_sequence,
-        "_context_wait_sequence": core._context_wait_sequence,
-        "_last_word_input_at": core._last_word_input_at,
-        "_action_deadline": core._action_deadline,
-        "_last_correction_time": core._last_correction_time,
-        "_manual_release_deadline": core._manual_release_deadline,
-        "_convert_press_at": core._convert_press_at,
-        "_engine_switch_at": core._engine_switch_at,
-        "_engine_switch_group": core._engine_switch_group,
-        "_early_switch_at": core._early_switch_at,
-        "_manual_layout_observed_at": core._manual_layout_observed_at,
-        "_input_delay_due": core._input_delay_due,
-        "_pause_deferral_logged": core._pause_deferral_logged,
-        "_wait_deferral_logged": core._wait_deferral_logged,
-        "_pause_agreement_open": core._pause_agreement_open,
-        "_focus_window": shared._focus_window(),
-        "_sensitive_context_window": shared._sensitive_context_window(),
-        "_prompt_key_deadline": shared._prompt_key_deadline(),
-        "_input_suspended": shared._input_suspended(),
-        "_test_field_focused": shared._test_field_focused(),
-        "_typed_events": shared._typed_events.load(Ordering::Relaxed),
-        "_typed_presses": shared._typed_presses.load(Ordering::Relaxed),
-        "_pressed": sorted(&core._pressed),
-        "_modifier_keycodes": sorted(&core._modifier_keycodes),
+        "_source_group": core.source_group,
+        "_manual_layout_group": core.manual_layout_group,
+        "_pending_trigger_keycode": core.pending_trigger_keycode,
+        "_pause_correction_pending": core.pause_correction_pending,
+        "_last_committed_stale": core.last_committed_stale,
+        "_caret_moved": core.caret_moved,
+        "_position_unknown": core.position_unknown,
+        "_early_switch_undone": core.early_switch_undone,
+        "_early_switch_origin": core.early_switch_origin,
+        "_manual_layout_word": core.manual_layout_word,
+        "_manual_layout_source": core.manual_layout_source,
+        "_last_key_character": core.last_key_character,
+        "_character_before_key": core.character_before_key,
+        "_untracked_token": core.untracked_token,
+        "_foreign_input_active": core.foreign_input_active,
+        "_own_layout_ignored": core.own_layout_ignored,
+        "_convert_keycode": core.convert_keycode,
+        "_convert_released": core.convert_released,
+        "_personal_pending": core.personal_pending,
+        "_late_refusal": core.late_refusal,
+        "_correction_sequence": core.correction_sequence,
+        "_context_wait_sequence": core.context_wait_sequence,
+        "_last_word_input_at": core.last_word_input_at,
+        "_action_deadline": core.action_deadline,
+        "_last_correction_time": core.last_correction_time,
+        "_manual_release_deadline": core.manual_release_deadline,
+        "_convert_press_at": core.convert_press_at,
+        "_engine_switch_at": core.engine_switch_at,
+        "_engine_switch_group": core.engine_switch_group,
+        "_early_switch_at": core.early_switch_at,
+        "_manual_layout_observed_at": core.manual_layout_observed_at,
+        "_input_delay_due": core.input_delay_due,
+        "_pause_deferral_logged": core.pause_deferral_logged,
+        "_wait_deferral_logged": core.wait_deferral_logged,
+        "_pause_agreement_open": core.pause_agreement_open,
+        "_focus_window": shared.focus_window(),
+        "_sensitive_context_window": shared.sensitive_context_window(),
+        "_prompt_key_deadline": shared.prompt_key_deadline(),
+        "_input_suspended": shared.input_suspended(),
+        "_test_field_focused": shared.test_field_focused(),
+        "_typed_events": shared.typed_events.load(Ordering::Relaxed),
+        "_typed_presses": shared.typed_presses.load(Ordering::Relaxed),
+        "_pressed": sorted(&core.pressed),
+        "_modifier_keycodes": sorted(&core.modifier_keycodes),
         "_pressed_since": pressed_since.iter().map(|entry| json!([entry.0, entry.1])).collect::<Vec<_>>(),
-        "_strokes": keys_text(&core._strokes),
-        "_symbol_strokes": keys_text(&core._symbol_strokes),
-        "_kept": core._kept.len(),
-        "_pending": plan_brief(core._pending.as_ref()),
-        "_last_committed": plan_brief(core._last_committed.as_ref()),
-        "_last_correction": plan_brief(core._last_correction.as_ref()),
-        "_correction_origin": plan_brief(core._correction_origin.as_ref()),
-        "_last_requested_plan": plan_brief(core._last_requested_plan.as_ref()),
-        "_context_waiting": core._context_waiting.as_ref().map(|waiting| {
+        "_strokes": keys_text(&core.strokes),
+        "_symbol_strokes": keys_text(&core.symbol_strokes),
+        "_kept": core.kept.len(),
+        "_pending": plan_brief(core.pending.as_ref()),
+        "_last_committed": plan_brief(core.last_committed.as_ref()),
+        "_last_correction": plan_brief(core.last_correction.as_ref()),
+        "_correction_origin": plan_brief(core.correction_origin.as_ref()),
+        "_last_requested_plan": plan_brief(core.last_requested_plan.as_ref()),
+        "_context_waiting": core.context_waiting.as_ref().map(|waiting| {
             json!([plan_brief(Some(&waiting.plan)), waiting.window, waiting.deadline, waiting.diagnostic_id, waiting.settles_on_pause, waiting.converted])
         }),
-        "_provisional": core._provisional.is_some(),
-        "_paused_conversion": core._paused_conversion.is_some(),
-        "_field_wait": core._field_wait.is_some(),
-        "_selection_pending": core._selection_pending.is_some(),
-        "_learning_prompt_after": core._learning_prompt_after.is_some(),
-        "_deferred_action": core._deferred_action.as_ref().map(|event| event.key_name.as_str()),
-        "_mention_shown": core._mention_shown.as_ref().map(|event| event.key_name.as_str()),
-        "_insertion": core._insertion.as_ref().map(|point| json!([point.head, point.tail])),
-        "_contexts": core._contexts.iter().map(|(name, context)| {
+        "_provisional": core.provisional.is_some(),
+        "_paused_conversion": core.paused_conversion.is_some(),
+        "_field_wait": core.field_wait.is_some(),
+        "_selection_pending": core.selection_pending.is_some(),
+        "_learning_prompt_after": core.learning_prompt_after.is_some(),
+        "_deferred_action": core.deferred_action.as_ref().map(|event| event.key_name.as_str()),
+        "_mention_shown": core.mention_shown.as_ref().map(|event| event.key_name.as_str()),
+        "_insertion": core.insertion.as_ref().map(|point| json!([point.head, point.tail])),
+        "_contexts": core.contexts.iter().map(|(name, context)| {
             let words: serde_json::Map<String, Value> = context.words.iter().map(|(group, word)| (group.to_string(), json!(word))).collect();
             json!([name, context.group, words, context.updated_at])
         }).collect::<Vec<_>>(),
         "stream": [stream.application, stream.window, stream.text, stream.updated_at],
-        "_input_overflow": shared._input_overflow.load(Ordering::Relaxed),
+        "_input_overflow": shared.input_overflow.load(Ordering::Relaxed),
         "queue": shared.qsize(),
     })
 }
@@ -694,13 +694,13 @@ impl Worker {
             }
         }
         if let Some(personal) = observed.get("p") {
-            let count = core._personal.len().to::<i64>();
+            let count = core.personal.len().to::<i64>();
             if personal["n"].as_i64() != Some(count) {
                 return differ("personal words", format!("python {}; rust {count}", compact(personal)));
             }
             for word in personal["w"].as_array().map_or(&[][..], Vec::as_slice) {
                 let word = word.as_str().unwrap_or("");
-                if !core._personal.contains(word) {
+                if !core.personal.contains(word) {
                     return differ("personal words", format!("the Rust store lacks {word}"));
                 }
             }

@@ -21,8 +21,8 @@ pub(crate) fn os_error_name(error: &std::io::Error) -> &'static str {
 }
 
 impl EngineCore {
-    fn _early_switch_policy(&self) -> EarlySwitchPolicy {
-        let minimum = self._bounded_setting(
+    fn early_switch_policy(&self) -> EarlySwitchPolicy {
+        let minimum = self.bounded_setting(
             "detection.early_switch_min_length", DEFAULT_EARLY_SWITCH_MIN_LENGTH,
             EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
         ).to::<i64>();
@@ -30,9 +30,9 @@ impl EngineCore {
     }
 
     /// Switch the layout as soon as the typed prefix proves it wrong.
-    pub(crate) fn _maybe_early_switch(&mut self) -> EngineResult<()> {
+    pub(crate) fn maybe_early_switch(&mut self) -> EngineResult<()> {
         if self.boundary_model.is_some()
-            && let Some(last) = self._strokes.last()
+            && let Some(last) = self.strokes.last()
             && !pystr::isalpha(&last.character)
             && Self::_is_layout_letter(last)
         {
@@ -44,54 +44,54 @@ impl EngineCore {
             // carry б, ю, ж, х, э or ъ and could only convert at their boundary.
             return Ok(());
         }
-        if !self.flag("detection.early_switch", true) || !self.flag("enabled", true) || self._caret_unknown() {
+        if !self.flag("detection.early_switch", true) || !self.flag("enabled", true) || self.caret_unknown() {
             return Ok(());
         }
-        if self._early_switch_origin.is_some() || self._pending.is_some() {
+        if self.early_switch_origin.is_some() || self.pending.is_some() {
             return Ok(());
         }
-        let policy = self._early_switch_policy();
-        if self._strokes.len() < policy.minimum_length {
+        let policy = self.early_switch_policy();
+        if self.strokes.len() < policy.minimum_length {
             return Ok(());
         }
-        let source_group = self._source_group;
-        if !self.in_models(source_group) || self._word_protected(source_group) {
+        let source_group = self.source_group;
+        if !self.in_models(source_group) || self.word_protected(source_group) {
             return Ok(());
         }
-        let strokes = self._strokes.clone();
-        let original = _text_for_group(&strokes, source_group);
+        let strokes = self.strokes.clone();
+        let original = text_for_group(&strokes, source_group);
         let alternatives = self.alternatives_of(&strokes, source_group);
         let mut decision = {
-            let indexes: Vec<(i64, &PrefixIndex)> = self._prefix_indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), &**index)).collect();
+            let indexes: Vec<(i64, &PrefixIndex)> = self.prefix_indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), &**index)).collect();
             let scorers: Vec<(i64, &dyn PrefixScorer)> =
                 self.models.iter().enumerate().map(|(group, model)| -> (i64, &dyn PrefixScorer) { (group.to::<i64>(), &**model) }).collect();
             let texts: Vec<(i64, &str)> = alternatives.iter().map(|(group, text)| (*group, text.as_str())).collect();
             early_switch_decision(&indexes, &scorers, &original, &texts, source_group, &policy)
         };
         let application = self.backend.active_application();
-        let mut excluded = self._application_excluded(&application);
+        let mut excluded = self.application_excluded(&application);
         let mut field: Option<FieldContext> = None;
         let mut confidence = EARLY_SWITCH_CONFIDENCE;
-        let mut protection = self._early_prefix_protection(&original, source_group, decision.target_group);
+        let mut protection = self.early_prefix_protection(&original, source_group, decision.target_group);
         if !excluded && protection.is_empty() {
-            let (found, refused) = self._early_prefix_field(&original, &application);
+            let (found, refused) = self.early_prefix_field(&original, &application);
             field = Some(found);
             protection = refused;
-            excluded = self._application_excluded(&application);
+            excluded = self.application_excluded(&application);
         }
         if !protection.is_empty() {
             decision.should_switch = false;
             decision.reason = protection.to_owned();
         } else if !excluded {
-            (decision, confidence) = self._decide_prefix(decision, field.as_ref())?;
+            (decision, confidence) = self.decide_prefix(decision, field.as_ref())?;
         }
         if strokes.len() == policy.minimum_length || decision.should_switch {
-            self._log_early_switch(&decision, &policy, &application, excluded);
+            self.log_early_switch(&decision, &policy, &application, excluded);
         }
         if !decision.should_switch || excluded {
             return Ok(());
         }
-        let head = self._mention_head(&application);
+        let head = self.mention_head(&application);
         let plan = CorrectionPlan {
             automatic: true,
             mode: "early",
@@ -103,15 +103,15 @@ impl EngineCore {
         // held key is ignored by the X server and the retyped letter would be
         // lost. Like boundary corrections, execute on that key's release and
         // absorb letters pressed before it (rollover typing).
-        self._pending = Some(Arc::new(plan));
-        self._learning_prompt_after = None;
+        self.pending = Some(Arc::new(plan));
+        self.learning_prompt_after = None;
         let trigger = strokes.last().map_or(-1, |stroke| i64::from(stroke.keycode));
-        self._pending_trigger_keycode = trigger;
+        self.pending_trigger_keycode = trigger;
         technical_event!(self.shared, "early_switch_scheduled", "trigger_keycode": trigger, "prefix_length": strokes.len());
         Ok(())
     }
 
-    pub fn _early_prefix_protection(&mut self, original: &str, source: i64, _target: i64) -> &'static str {
+    pub fn early_prefix_protection(&mut self, original: &str, source: i64, _target: i64) -> &'static str {
         let key = LanguageDetector::token_key(original);
         if self.words_setting("exclusions.words").iter().any(|word| LanguageDetector::token_key(word).starts_with(&key)) {
             return "excluded_word_prefix";
@@ -122,18 +122,18 @@ impl EngineCore {
         if self.flag("detection.protect_code", true) && self.detector.is_protected_token(original) {
             return "protected_token";
         }
-        if self._context_waiting.is_some() {
+        if self.context_waiting.is_some() {
             return "context_word_waiting";
         }
-        let ahead = self._typed_ahead(&self._strokes);
-        if self._insertion_holds(original, &ahead, &self.backend.active_application()) {
+        let ahead = self.typed_ahead(&self.strokes);
+        if self.insertion_holds(original, &ahead, &self.backend.active_application()) {
             // Letters typed into another word are not the start of one.
             return "inside_word";
         }
         ""
     }
 
-    pub fn _early_prefix_field(&mut self, original: &str, application: &str) -> (FieldContext, &'static str) {
+    pub fn early_prefix_field(&mut self, original: &str, application: &str) -> (FieldContext, &'static str) {
         let mut field = self.context_policy.stream.snapshot(original);
         if !self.flag("detection.context_aware", true) {
             field = FieldContext::new(application, self.focus_or_zero().to_string());
@@ -144,17 +144,17 @@ impl EngineCore {
         {
             let snapshot = snapshot.bounded();
             if snapshot.sensitive {
-                self.shared.set_sensitive_context_window(self.shared._focus_window());
+                self.shared.set_sensitive_context_window(self.shared.focus_window());
                 self.context_policy.stream.clear();
-                self._contexts.clear();
-                self.shared._update(Update {
+                self.contexts.clear();
+                self.shared.update(Update {
                     current_word: Some(String::new()),
                     last_action: Some("Защищённое поле: обработка отключена".to_owned()),
                     ..Update::default()
                 });
                 return (snapshot, "sensitive_field");
             }
-            let around = Self::_typed_in_field(&snapshot, original, &self._typed_ahead(&self._strokes));
+            let around = Self::_typed_in_field(&snapshot, original, &self.typed_ahead(&self.strokes));
             if around.is_none() && snapshot.input_buffer_only(original) && !snapshot.selection && snapshot.application == application {
                 // Not the text the prefix went into (FieldContext.input_buffer_only): the observed keys stand.
                 return (field, "");
@@ -191,7 +191,7 @@ impl EngineCore {
             .map(|short| (pystr::slice(&field.before, None, Some(-pystr::len(&short).to::<i64>())).to_owned(), field.after.clone()))
     }
 
-    pub(crate) fn _decide_prefix(&self, baseline: EarlySwitchDecision, field: Option<&FieldContext>) -> EngineResult<(EarlySwitchDecision, f64)> {
+    pub(crate) fn decide_prefix(&self, baseline: EarlySwitchDecision, field: Option<&FieldContext>) -> EngineResult<(EarlySwitchDecision, f64)> {
         let mode = self.text_setting("detection.context_policy", "assist");
         if !self.flag("detection.context_aware", true) || (mode != "assist" && mode != "shadow") {
             return Ok((baseline, EARLY_SWITCH_CONFIDENCE));
@@ -206,15 +206,15 @@ impl EngineCore {
             && baseline.target_group == 1 - baseline.source_group
             && self.in_models(0)
             && self.in_models(1)
-            && self._prefix_indexes.len() > 1;
+            && self.prefix_indexes.len() > 1;
         let (Some(model), Some(field), true) = (self.prefix_model.as_ref(), field, supported) else {
             let reason = if self.prefix_model.is_none() { "prefix_model_unavailable" } else { "prefix_input_unsupported" };
             let result = if mode == "assist" { EarlySwitchDecision { should_switch: false, reason: reason.to_owned(), ..baseline } } else { baseline };
             return Ok((result, EARLY_SWITCH_CONFIDENCE));
         };
         let sides = [
-            PrefixSide { index: &self._prefix_indexes[0], model: &self.models[0] },
-            PrefixSide { index: &self._prefix_indexes[1], model: &self.models[1] },
+            PrefixSide { index: &self.prefix_indexes[0], model: &self.models[0] },
+            PrefixSide { index: &self.prefix_indexes[1], model: &self.models[1] },
         ];
         let item = PrefixInput {
             original: baseline.original.clone(),
@@ -241,25 +241,25 @@ impl EngineCore {
     }
 
     /// Extend a scheduled early switch with letters typed before release.
-    pub(crate) fn _refresh_early_plan(&mut self, plan: &PlanRef) -> EngineResult<Option<PlanRef>> {
-        let strokes = self._strokes.clone();
+    pub(crate) fn refresh_early_plan(&mut self, plan: &PlanRef) -> EngineResult<Option<PlanRef>> {
+        let strokes = self.strokes.clone();
         let prefix = plan.strokes.len();
-        if strokes.len() < prefix || strokes[..prefix] != plan.strokes[..] || self._source_group != plan.source_group {
+        if strokes.len() < prefix || strokes[..prefix] != plan.strokes[..] || self.source_group != plan.source_group {
             return Ok(None);
         }
-        let original = _text_for_group(&strokes, plan.source_group);
-        let replacement = _text_for_group(&strokes, plan.target_group);
+        let original = text_for_group(&strokes, plan.source_group);
+        let replacement = text_for_group(&strokes, plan.target_group);
         if plan.mode == "early"
             && (!self.flag("detection.early_switch", true)
-                || strokes.len() < self._early_switch_policy().minimum_length
-                || !self._early_prefix_protection(&original, plan.source_group, plan.target_group).is_empty()
+                || strokes.len() < self.early_switch_policy().minimum_length
+                || !self.early_prefix_protection(&original, plan.source_group, plan.target_group).is_empty()
                 || !pystr::isalpha(&replacement))
         {
             return Ok(None);
         }
         let mut confidence = plan.confidence;
         if plan.mode == "early" {
-            let (field, protection) = self._early_prefix_field(&original, &plan.application);
+            let (field, protection) = self.early_prefix_field(&original, &plan.application);
             if !protection.is_empty() {
                 return Ok(None);
             }
@@ -273,7 +273,7 @@ impl EngineCore {
                 source_evidence: None,
                 target_evidence: None,
             };
-            let (decision, decided) = self._decide_prefix(scheduled, Some(&field))?;
+            let (decision, decided) = self.decide_prefix(scheduled, Some(&field))?;
             if !decision.should_switch {
                 return Ok(None);
             }
@@ -287,7 +287,7 @@ impl EngineCore {
         })))
     }
 
-    fn _log_early_switch(&self, decision: &EarlySwitchDecision, policy: &EarlySwitchPolicy, application: &str, excluded: bool) {
+    fn log_early_switch(&self, decision: &EarlySwitchDecision, policy: &EarlySwitchPolicy, application: &str, excluded: bool) {
         if !self.shared.technical_logging() {
             return;
         }
@@ -306,32 +306,32 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn _late_stroke_after_early_switch(&self, event: &KeyEvent) -> bool {
+    pub(crate) fn late_stroke_after_early_switch(&self, event: &KeyEvent) -> bool {
         let group = i64::from(event.group);
-        self._early_switch_at.is_some_and(|switched_at| {
-            Some(group) == self._early_switch_origin && group != self._source_group && self.monotonic() - switched_at <= LATE_STROKE_GRACE_SECONDS
+        self.early_switch_at.is_some_and(|switched_at| {
+            Some(group) == self.early_switch_origin && group != self.source_group && self.monotonic() - switched_at <= LATE_STROKE_GRACE_SECONDS
         })
     }
 
     /// Schedule the mixed prefix for replacement after all keys are up.
-    pub(crate) fn _convert_late_stroke(&mut self, event: &Stroke) -> Stroke {
-        let target_group = self._source_group;
-        let delay_ms = self._early_switch_at.map(|switched_at| ms(self.monotonic() - switched_at));
+    pub(crate) fn convert_late_stroke(&mut self, event: &Stroke) -> Stroke {
+        let target_group = self.source_group;
+        let delay_ms = self.early_switch_at.map(|switched_at| ms(self.monotonic() - switched_at));
         let converted = key_of(KeyEvent {
             character: event.character_for(target_group.to::<i32>()).to_owned(),
             group: target_group.to::<i32>(),
             ..(**event).clone()
         });
-        let mut strokes = self._strokes.clone();
+        let mut strokes = self.strokes.clone();
         strokes.push(converted.clone());
-        let original = format!("{}{}", _text_for_group(&self._strokes, target_group), event.character);
-        let replacement = _text_for_group(&strokes, target_group);
-        self._pending = Some(Arc::new(CorrectionPlan {
+        let original = format!("{}{}", text_for_group(&self.strokes, target_group), event.character);
+        let replacement = text_for_group(&strokes, target_group);
+        self.pending = Some(Arc::new(CorrectionPlan {
             mode: "late_stroke",
             ..CorrectionPlan::new(strokes, None, target_group, target_group, original, replacement, EARLY_SWITCH_CONFIDENCE, &self.backend.active_application())
         }));
-        self._pending_trigger_keycode = i64::from(event.keycode);
-        self._learning_prompt_after = None;
+        self.pending_trigger_keycode = i64::from(event.keycode);
+        self.learning_prompt_after = None;
         technical_event!(
             self.shared, "late_stroke_scheduled",
             "source_group": event.group, "target_group": target_group, "delay_ms": delay_ms,
@@ -340,13 +340,13 @@ impl EngineCore {
     }
 
     /// Remember that the engine itself just switched the layout.
-    pub(crate) fn _note_engine_switch(&mut self, group: i64) {
-        self._engine_switch_at = Some(self.monotonic());
-        self._engine_switch_group = Some(group);
+    pub(crate) fn note_engine_switch(&mut self, group: i64) {
+        self.engine_switch_at = Some(self.monotonic());
+        self.engine_switch_group = Some(group);
         // The layout the engine chose supersedes the user's earlier manual
         // pick; otherwise that pick would revive when the engine returned to
         // its group minutes later.
-        self._manual_layout_group = None;
+        self.manual_layout_group = None;
     }
 
     /// A layout asked for and not confirmed in time is still the engine's when it arrives.
@@ -354,53 +354,53 @@ impl EngineCore {
     /// The request stays posted. VS Code confirmed one a second after it was asked for, the
     /// correction had been given up by then, and the layout that came was booked as the
     /// user's own pick: it protected the next word from correction.
-    pub(crate) fn _note_unconfirmed_switch(&mut self, error: &ks_backend::BackendError) {
+    pub(crate) fn note_unconfirmed_switch(&mut self, error: &ks_backend::BackendError) {
         if let ks_backend::BackendError::LayoutSwitchUnconfirmed { group, .. } = error {
-            self._note_engine_switch(i64::from(*group));
+            self.note_engine_switch(i64::from(*group));
         }
     }
 
     /// The current word must be neither corrected nor switched early.
-    pub(crate) fn _word_protected(&self, source_group: i64) -> bool {
-        self._early_switch_undone || (self.flag("detection.respect_manual_layout", true) && self._manual_layout_group == Some(source_group))
+    pub(crate) fn word_protected(&self, source_group: i64) -> bool {
+        self.early_switch_undone || (self.flag("detection.respect_manual_layout", true) && self.manual_layout_group == Some(source_group))
     }
 
-    pub(crate) fn _protection_details(&self) -> Value {
+    pub(crate) fn protection_details(&self) -> Value {
         json!({
-            "reason": if self._early_switch_undone { "early_switch_undone" } else { "manual_layout" },
-            "group": self._manual_layout_group,
-            "source": self._manual_layout_source,
-            "observed_ms_ago": self._manual_layout_observed_at.map(|observed_at| ms(self.monotonic() - observed_at)),
+            "reason": if self.early_switch_undone { "early_switch_undone" } else { "manual_layout" },
+            "group": self.manual_layout_group,
+            "source": self.manual_layout_source,
+            "observed_ms_ago": self.manual_layout_observed_at.map(|observed_at| ms(self.monotonic() - observed_at)),
         })
     }
 
     /// Record the completed word of an early switch as one correction.
     ///
-    /// `strokes` and `trailing` are the committed word exactly as `_commit_word`
+    /// `strokes` and `trailing` are the committed word exactly as `commit_word`
     /// recorded it: Pause, undo and Backspace delete `strokes + trailing + boundary`,
     /// so a literal comma left out here leaves one letter of the word on screen.
-    pub(crate) fn _finish_early_switch(&mut self, strokes: Strokes, boundary: Option<Stroke>, application: &str, final_group: i64, trailing: Strokes) {
-        let origin = self._early_switch_origin.take();
-        self._early_switch_at = None;
+    pub(crate) fn finish_early_switch(&mut self, strokes: Strokes, boundary: Option<Stroke>, application: &str, final_group: i64, trailing: Strokes) {
+        let origin = self.early_switch_origin.take();
+        self.early_switch_at = None;
         let Some(origin) = origin else {
             return;
         };
-        let original = _text_for_group(&strokes, origin);
-        let replacement = _text_for_group(&strokes, final_group);
+        let original = text_for_group(&strokes, origin);
+        let replacement = text_for_group(&strokes, final_group);
         let plan = CorrectionPlan {
             mode: "early",
             trailing: trailing.clone(),
-            ..CorrectionPlan::new(strokes.clone(), boundary.clone(), origin, final_group, original.clone(), replacement.clone(), self._early_switch_confidence, application)
+            ..CorrectionPlan::new(strokes.clone(), boundary.clone(), origin, final_group, original.clone(), replacement.clone(), self.early_switch_confidence, application)
         };
         let plan = Arc::new(plan);
-        self._remember_correction(&plan);
-        self._last_committed = Some(Arc::new(CorrectionPlan {
+        self.remember_correction(&plan);
+        self.last_committed = Some(Arc::new(CorrectionPlan {
             automatic: false,
             trailing,
-            ..CorrectionPlan::new(strokes.clone(), boundary, final_group, origin, replacement.clone(), original.clone(), self._early_switch_confidence, application)
+            ..CorrectionPlan::new(strokes.clone(), boundary, final_group, origin, replacement.clone(), original.clone(), self.early_switch_confidence, application)
         }));
-        self._last_committed_stale = false;
-        let excluded = self._application_excluded(application);
+        self.last_committed_stale = false;
+        let excluded = self.application_excluded(application);
         technical_event!(
             self.shared, "early_switch_completed",
             "original": if excluded { "<redacted>" } else { original.as_str() },
@@ -411,12 +411,12 @@ impl EngineCore {
             "application_excluded": excluded,
             "word_length": strokes.len(),
         );
-        self.shared._update(Update {
+        self.shared.update(Update {
             correction_count: Some(self.shared.correction_count() + 1),
             last_action: Some(format!("{original} → {replacement}")),
             ..Update::default()
         });
-        self._record_history(&original, &replacement, application, EARLY_SWITCH_CONFIDENCE);
+        self.record_history(&original, &replacement, application, EARLY_SWITCH_CONFIDENCE);
         for callback in self.shared.correction_callbacks() {
             callback(&plan);
         }
@@ -426,27 +426,27 @@ impl EngineCore {
     ///
     /// The text was replaced before this runs, so a full or locked disk is reported
     /// and the bookkeeping after it (undo, callbacks, the learning prompt) goes on.
-    pub(crate) fn _record_history(&self, original: &str, replacement: &str, application: &str, confidence: f64) {
+    pub(crate) fn record_history(&self, original: &str, replacement: &str, application: &str, confidence: f64) {
         if !self.flag("general.keep_history", true) {
             return;
         }
         if let Err(error) = self.history.append(&ks_config::history::HistoryEntry::create(original, replacement, application, confidence)) {
             technical_event!(self.shared, "history_write_failed", "error": os_error_name(&error));
-            self.shared._update(Update { last_error: Some(format!("История не записана: {error}")), ..Update::default() });
+            self.shared.update(Update { last_error: Some(format!("История не записана: {error}")), ..Update::default() });
         }
     }
 
     // -- Typo correction (typo_correction.py): one slip in a finished word, undone in the word's own injection --
     /// The corrector while detection.correct_typos is on; its lists load once per process, on first use.
-    pub(crate) fn _typo_corrector(&mut self) -> EngineResult<Option<Arc<TypoCorrector>>> {
+    pub(crate) fn typo_corrector(&mut self) -> EngineResult<Option<Arc<TypoCorrector>>> {
         if !self.flag("detection.correct_typos", true) {
             return Ok(None);
         }
-        if self._typo.is_none() {
+        if self.typo.is_none() {
             let locales: Vec<&str> = self.models.iter().map(|model| model.locale.as_str()).collect();
-            self._typo = Some(Arc::new(TypoCorrector::packaged(&self.resource_dir, &locales)?));
+            self.typo = Some(Arc::new(TypoCorrector::packaged(&self.resource_dir, &locales)?));
         }
-        Ok(self._typo.clone())
+        Ok(self.typo.clone())
     }
 
     /// `base` with the slip in its word undone, or None.
@@ -455,9 +455,9 @@ impl EngineCore {
     /// the keys typed, in its target layout is the word judged. The plan keeps the layouts of `base`, so a word typed
     /// in the wrong layout and misspelt (`yhjvfkmyj`) is `нормально` after one injection, not two. A capital opens
     /// the word only at the start of a message or a sentence: one in the middle of a sentence is a name. A word whose
-    /// correction the user took back (_schedule_undo) is left as typed from then on.
-    pub(crate) fn _typo_plan(&mut self, base: &PlanRef, keys: &[Stroke]) -> EngineResult<Option<PlanRef>> {
-        let corrector = self._typo_corrector()?;
+    /// correction the user took back (schedule_undo) is left as typed from then on.
+    pub(crate) fn typo_plan(&mut self, base: &PlanRef, keys: &[Stroke]) -> EngineResult<Option<PlanRef>> {
+        let corrector = self.typo_corrector()?;
         let group = base.target_group;
         let Some(corrector) = corrector else {
             return Ok(None);
@@ -466,16 +466,16 @@ impl EngineCore {
             // English slips are corrected only on request (constants.typo.TYPO_ENGLISH_LOCALE).
             return Ok(None);
         }
-        let word = _text_for_group(keys, group);
-        self._personal_pending = String::new();
-        if self._personal.contains(&word) || (self.flag("detection.learning", true) && self.learning.keeps(group, &word)) {
+        let word = text_for_group(keys, group);
+        self.personal_pending = String::new();
+        if self.personal.contains(&word) || (self.flag("detection.learning", true) && self.learning.keeps(group, &word)) {
             // The word is the user's own (personal_words), or a rule of theirs keeps it as it is.
             return Ok(None);
         }
         let readings: Vec<(String, String)> = self
             .other_groups(group)
             .into_iter()
-            .map(|other| (self.model(other).locale.clone(), _text_for_group(keys, other)))
+            .map(|other| (self.model(other).locale.clone(), text_for_group(keys, other)))
             .collect();
         let reading_refs: Vec<(&str, &str)> = readings.iter().map(|(locale, text)| (locale.as_str(), text.as_str())).collect();
         // The observed text says where a sentence begins; with the context off nothing does, and a capital is left.
@@ -484,7 +484,7 @@ impl EngineCore {
         let before = pystr::rstrip(&before_word);
         let excluded: HashSet<String> = self.words_setting("exclusions.words").iter().map(|item| LanguageDetector::token_key(item)).collect();
         let lexicons: Vec<&ks_lang::WordTable> = self.models.iter().map(|model| &*model.frequencies).collect();
-        let terms = self._term_frequency()?;
+        let terms = self.term_frequency()?;
         let identifiers = self.context_policy.shared_identifiers();
         let protected = self.detector.protected_tokens.clone();
         let capital_allowed = observed && (before.is_empty() || before.chars().next_back().is_some_and(|last| SENTENCE_END_SIGNS.contains(last)));
@@ -494,15 +494,15 @@ impl EngineCore {
         drop(lexicons);
         let reason_name = judgement.reason.as_str();
         if matches!(reason_name, "no_candidate" | "rare" | "ambiguous" | "corrected") {
-            // No list knows the word: left as typed, it counts towards the user's own (_personal_word_settled).
-            self._personal_pending = word.clone();
+            // No list knows the word: left as typed, it counts towards the user's own (personal_word_settled).
+            self.personal_pending = word.clone();
         }
         let Some(choice) = judgement.choice.as_ref() else {
             return Ok(None);
         };
         let mut reason = reason_name;
         let typed: Vec<KeyEvent> = keys.iter().map(|key| (**key).clone()).collect();
-        let mut strokes = if reason == "corrected" { corrected_keys(&typed, group.to::<i32>(), choice, &self._typo_keys) } else { None };
+        let mut strokes = if reason == "corrected" { corrected_keys(&typed, group.to::<i32>(), choice, &self.typo_keys) } else { None };
         if reason == "corrected" && strokes.is_none() {
             reason = "no_key";
         } else if strokes.as_ref().is_some_and(|strokes| strokes.len() != keys.len()) && !self.backend.erases_any_length() {
@@ -521,7 +521,7 @@ impl EngineCore {
             );
             return Ok(None);
         };
-        self._personal_pending = String::new();
+        self.personal_pending = String::new();
         technical_event!(
             self.shared, "typo_correction_planned", "position": choice.edit.position,
             "margin": if choice.margin.is_finite() { logged(choice.margin) } else { None },
@@ -545,29 +545,29 @@ impl EngineCore {
         })))
     }
 
-    /// The word judged at its boundary (_typo_plan) was left as typed, or the user went back to it.
+    /// The word judged at its boundary (typo_plan) was left as typed, or the user went back to it.
     ///
     /// Typing on into the next word, or Enter or Tab delivered after it, leaves it; Backspace into it, Pause, undo, a
     /// click or the caret moved away go back to it, or may.
-    pub(crate) fn _personal_word_settled(&mut self, kept: bool) {
-        let word = std::mem::take(&mut self._personal_pending);
-        if !word.is_empty() && kept && self._personal.keep(&word) {
+    pub(crate) fn personal_word_settled(&mut self, kept: bool) {
+        let word = std::mem::take(&mut self.personal_pending);
+        if !word.is_empty() && kept && self.personal.keep(&word) {
             technical_event!(self.shared, "personal_word_added", "reason": "left_as_typed", "letters": pystr::len(&word));
         }
     }
 
-    /// Whether the last correction is a typo correction that undo can still take back (_schedule_undo).
-    pub(crate) fn _typo_correction_reversible(&self) -> bool {
-        let (Some(previous), Some(committed)) = (&self._last_correction, &self._last_committed) else {
+    /// Whether the last correction is a typo correction that undo can still take back (schedule_undo).
+    pub(crate) fn typo_correction_reversible(&self) -> bool {
+        let (Some(previous), Some(committed)) = (&self.last_correction, &self.last_committed) else {
             return false;
         };
         previous.mode == "typo"
-            && self._strokes.is_empty()
-            && self._symbol_strokes.is_empty()
-            && !self._last_committed_stale
+            && self.strokes.is_empty()
+            && self.symbol_strokes.is_empty()
+            && !self.last_committed_stale
             && committed.strokes == previous.strokes
             && committed.trailing == previous.trailing
             && committed.boundary == previous.boundary
-            && self.monotonic() - self._last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
+            && self.monotonic() - self.last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
     }
 }

@@ -212,7 +212,7 @@ pub fn stretch_readings(keys: &str, collapse: Option<i64>, stretch: Option<i64>,
     if once == typed { vec![typed] } else { vec![typed, once] }
 }
 
-fn _compound_known(text: &str, script: &str, known: &dyn Fn(&str, &str) -> bool, min_letters: i64) -> bool {
+fn compound_known(text: &str, script: &str, known: &dyn Fn(&str, &str) -> bool, min_letters: i64) -> bool {
     let Some((head, tail)) = two_parts(text) else {
         return false;
     };
@@ -280,8 +280,8 @@ pub fn token_features(
     let target_script = if source_script == "en" { "ru" } else { "en" };
     let (source, target) = readings(keys, source_script);
     let unknown = pystr::isalpha(&target) && !known(target_script, &target);
-    let mut parts_source = _compound_known(&source, source_script, known, compound_min_letters.get(source_script).unwrap_or(0));
-    let mut parts_target = _compound_known(&target, target_script, known, compound_min_letters.get(target_script).unwrap_or(0));
+    let mut parts_source = compound_known(&source, source_script, known, compound_min_letters.get(source_script).unwrap_or(0));
+    let mut parts_target = compound_known(&target, target_script, known, compound_min_letters.get(target_script).unwrap_or(0));
     if symmetric && parts_source && parts_target {
         parts_source = false;
         parts_target = false;
@@ -323,7 +323,7 @@ pub struct Channel {
 
 impl Channel {
     /// log P(last | context), walking the backoff chain to the unigram.
-    fn _conditional(&self, gram: &[char]) -> f64 {
+    fn conditional(&self, gram: &[char]) -> f64 {
         let mut gram = gram;
         let mut accumulated = 0.0;
         loop {
@@ -344,7 +344,7 @@ impl Channel {
         padded.resize(self.order - 1, BOS);
         padded.extend(keys.chars());
         padded.push(EOS);
-        py_sum(padded.windows(self.order).map(|gram| self._conditional(gram)))
+        py_sum(padded.windows(self.order).map(|gram| self.conditional(gram)))
     }
 }
 
@@ -659,8 +659,8 @@ pub struct OrthoModel {
     /// a feature only for a reading less plausible than the centre of the layout typed (`gated`).
     pub target_centres: Option<PerScript<f64>>,
     pub gated: Vec<&'static str>,
-    _identifier: OnceLock<Identifier>,
-    _known: OnceLock<KnownWord>,
+    identifier: OnceLock<Identifier>,
+    known: OnceLock<KnownWord>,
     resources: Option<Arc<Resources>>,
 }
 
@@ -679,10 +679,10 @@ impl OrthoModel {
         drop(content);
         let mut model = Self::from_payload(payload)?;
         if let Some(identifier) = identifier {
-            let _ = model._identifier.set(identifier);
+            let _ = model.identifier.set(identifier);
         }
         if let Some(known) = known {
-            let _ = model._known.set(known);
+            let _ = model.known.set(known);
         }
         model.resources = resources;
         Ok(model)
@@ -807,8 +807,8 @@ impl OrthoModel {
             compound_min_letters,
             target_centres,
             gated,
-            _identifier: OnceLock::new(),
-            _known: OnceLock::new(),
+            identifier: OnceLock::new(),
+            known: OnceLock::new(),
             resources: None,
         })
     }
@@ -914,14 +914,14 @@ impl OrthoModel {
     }
 
     fn identifier(&self) -> &Identifier {
-        self._identifier.get_or_init(|| match &self.resources {
+        self.identifier.get_or_init(|| match &self.resources {
             Some(resources) => resources.packaged_identifier(),
             None => Arc::new(|_token| false),
         })
     }
 
     fn known(&self) -> &KnownWord {
-        self._known.get_or_init(|| match &self.resources {
+        self.known.get_or_init(|| match &self.resources {
             Some(resources) => resources.engine_dictionaries(),
             None => Arc::new(|_script, _word| false),
         })
@@ -972,14 +972,14 @@ impl OrthoModel {
         // ambiguous, the reading that protects the text wins.
         let judged = stretch_readings(&keys, self.collapse, self.stretch, self.hyphens).into_iter().map(|letters| {
             let featured = if self.stretch.is_none() { keys.as_str() } else { letters.as_str() };
-            self._judged(featured, source_channel.score(&letters), target_channel.score(&letters), shape_ratio, source, known, shape)
+            self.judged(featured, source_channel.score(&letters), target_channel.score(&letters), shape_ratio, source, known, shape)
         });
         min_by_key_first(judged, |scored| scored.total).expect("a token has at least one reading")
     }
 
     /// One reading scored: its character ratio, the case shape and the features of `featured`.
     #[allow(clippy::too_many_arguments)]
-    fn _judged(&self, featured: &str, source_logprob: f64, target_logprob: f64, shape_ratio: f64, source: &str, known: Option<KnownRef<'_>>, shape: &str) -> OrthoScore {
+    fn judged(&self, featured: &str, source_logprob: f64, target_logprob: f64, shape_ratio: f64, source: &str, known: Option<KnownRef<'_>>, shape: &str) -> OrthoScore {
         let ratio = target_logprob - source_logprob;
         let mut features = 0.0;
         if let Some(weights) = &self.features {

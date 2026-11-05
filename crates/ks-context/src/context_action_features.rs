@@ -1610,7 +1610,7 @@ fn dash_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap,
 /// A letter of the variable head's class (variable_question) asked once more with the token after it given as kept text
 /// (after_origin kept_next_word), that token holding no letter and no dash alone (sign_token_asked): a sign, signs or
 /// digits (`ч =`, `м +`, `ч 2`). The engine asks a kept letter so when a token that reads alike in both layouts follows it
-/// (_decide_letter_before_sign), and a waiting one before any token kept as typed (_decide_with_kept_neighbour). In a
+/// (decide_letter_before_sign), and a waiting one before any token kept as typed (decide_with_kept_neighbour). In a
 /// question about code the letter is a Latin variable; before a number in Russian prose it is meant as written (`ГОСТ Р
 /// 54960`). The question reads only the letter, the text around it and the origin, as the trainer and the GPU path route
 /// frames by them.
@@ -2008,7 +2008,7 @@ fn prose_count(word: &str, language: &str, tables: &TermTables) -> u64 {
 }
 
 /// The question the engine asks about the next word of a waiting word with that word's other reading before it
-/// (engine._decide_after_waiting_word): the hypothesis head's class. Only the question says so (before_origin); the same
+/// (engine.decide_after_waiting_word): the hypothesis head's class. Only the question says so (before_origin); the same
 /// text before a word is typed when the layout was switched by hand after a word of the other script, and that word is the
 /// frozen model's.
 pub fn hypothesis_question(item: &ContextEvidence) -> bool {

@@ -48,13 +48,13 @@ impl DeferredEngine {
         });
         if background {
             let loader = deferred.clone();
-            let thread = std::thread::Builder::new().name("KeySwitchEngineLoader".to_owned()).spawn(move || loader._load(build));
+            let thread = std::thread::Builder::new().name("KeySwitchEngineLoader".to_owned()).spawn(move || loader.load(build));
             if let Err(error) = thread {
                 deferred.lock().error = Some(error.to_string());
                 deferred.lock().ready = true;
             }
         } else {
-            deferred._load(build);
+            deferred.load(build);
         }
         deferred
     }
@@ -63,7 +63,7 @@ impl DeferredEngine {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn _load(self: &Arc<Self>, build: Build) {
+    fn load(self: &Arc<Self>, build: Build) {
         match build() {
             Err(error) => {
                 // Reported on the window's thread, as a failed start is.
@@ -74,7 +74,7 @@ impl DeferredEngine {
                 }
                 self.built.notify_all();
                 let this = self.clone();
-                (self.post)(Box::new(move || this._report_error()));
+                (self.post)(Box::new(move || this.report_error()));
             }
             Ok(engine) => {
                 {
@@ -84,13 +84,13 @@ impl DeferredEngine {
                 }
                 self.built.notify_all();
                 let this = self.clone();
-                (self.post)(Box::new(move || this._attach()));
+                (self.post)(Box::new(move || this.attach()));
             }
         }
     }
 
     /// On the window's thread: hand the waiting subscriptions to the engine and start it if it was asked to.
-    fn _attach(&self) {
+    fn attach(&self) {
         let (engine, subscriptions, start_failed, stopped) = {
             let mut state = self.lock();
             (state.engine.clone(), std::mem::take(&mut state.subscriptions), state.start_failed.clone(), state.stopped)
@@ -109,7 +109,7 @@ impl DeferredEngine {
         }
     }
 
-    fn _report_error(&self) {
+    fn report_error(&self) {
         // Posted by the failed build and by a start asked for after it: the window hears of it once.
         let (start_failed, error) = {
             let mut state = self.lock();
@@ -181,7 +181,7 @@ impl DeferredEngine {
                     state.start_failed = Some(failed);
                     if state.error.is_some() {
                         let this = self.clone();
-                        (self.post)(Box::new(move || this._report_error()));
+                        (self.post)(Box::new(move || this.report_error()));
                     }
                     return Ok(());
                 }

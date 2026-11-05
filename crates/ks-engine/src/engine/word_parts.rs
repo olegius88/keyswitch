@@ -15,27 +15,27 @@ impl EngineCore {
     // If the word accumulated before this key is already recognisable, the
     // key is punctuation and can safely trigger a correction. Otherwise it is
     // retained as a physical stroke (for example `,fpf` -> `база`).
-    pub fn _ambiguous_key_is_boundary(&mut self, event: &KeyEvent) -> EngineResult<bool> {
+    pub fn ambiguous_key_is_boundary(&mut self, event: &KeyEvent) -> EngineResult<bool> {
         if self.boundary_model.is_some() {
             // No completed-word classifier gets to cut an unfinished prefix.
             // Retain the key until a hard boundary or an idle evaluation.
             return Ok(false);
         }
-        if self._strokes.is_empty() || self._source_group < 0 {
+        if self.strokes.is_empty() || self.source_group < 0 {
             return Ok(false);
         }
         if event.character == "'" || event.character == "-" {
             return Ok(false);
         }
-        if self._strokes.iter().any(|stroke| !pystr::isalpha(&stroke.character) && Self::_is_layout_letter(stroke)) {
+        if self.strokes.iter().any(|stroke| !pystr::isalpha(&stroke.character) && Self::_is_layout_letter(stroke)) {
             return Ok(false);
         }
-        let strokes = self._strokes.clone();
-        let source_group = self._source_group;
-        let original = _text_for_group(&strokes, source_group);
+        let strokes = self.strokes.clone();
+        let source_group = self.source_group;
+        let original = text_for_group(&strokes, source_group);
         let alternatives = self.alternatives_of(&strokes, source_group);
         let application = self.backend.active_application();
-        let decision = self._decide_word(&original, &alternatives, source_group, &application, CorrectionTrigger::BoundaryProbe, WordOptions::default())?;
+        let decision = self.decide_word(&original, &alternatives, source_group, &application, CorrectionTrigger::BoundaryProbe, WordOptions::default())?;
         let mut effective_length = pystr::len(&LanguageModel::normalize(&original));
         for (_, value) in &alternatives {
             effective_length = effective_length.max(pystr::len(&LanguageModel::normalize(value)));
@@ -52,13 +52,13 @@ impl EngineCore {
         Ok(recognisable
             || protected_boundary
             || ignored_boundary
-            || (decision.source_score.known && effective_length.to::<i64>() >= self._minimum_word_length())
+            || (decision.source_score.known && effective_length.to::<i64>() >= self.minimum_word_length())
             || natural_source_boundary)
     }
 
     /// The word's keys, the signs split off its end, whether its segmentation is certain, and
     /// whether the boundary model, asked, could not split it (it abstained).
-    pub(crate) fn _completed_word(&mut self, strokes: &[Stroke], source_group: i64) -> (Strokes, Strokes, bool, bool) {
+    pub(crate) fn completed_word(&mut self, strokes: &[Stroke], source_group: i64) -> (Strokes, Strokes, bool, bool) {
         let whole = || strokes.to_vec();
         let Some(model) = self.boundary_model.clone().filter(|_| self.in_models(source_group)) else {
             return (whole(), Vec::new(), true, false);
@@ -82,13 +82,13 @@ impl EngineCore {
             );
             return (whole(), Vec::new(), false, false);
         }
-        let original = _text_for_group(strokes, source_group);
-        if self._forced_target_group(source_group, &original).is_some() {
+        let original = text_for_group(strokes, source_group);
+        if self.forced_target_group(source_group, &original).is_some() {
             return (whole(), Vec::new(), true, false); // Explicit full-token rule outranks segmentation.
         }
         // Segmentation cannot turn an excluded token/path into an eligible word.
         let folded = pystr::casefold(&original);
-        let rejected = self._rejected_targets(source_group, &original);
+        let rejected = self.rejected_targets(source_group, &original);
         if (self.flag("detection.protect_code", true) && self.detector.is_protected_token(&original))
             || self.words_setting("exclusions.words").iter().any(|word| pystr::casefold(word) == folded)
             || targets.iter().all(|target| rejected.contains(target))
@@ -96,7 +96,7 @@ impl EngineCore {
             return (whole(), Vec::new(), false, false);
         }
         let target = targets[0];
-        let alternative = _text_for_group(strokes, target);
+        let alternative = text_for_group(strokes, target);
         let candidates: Vec<_> = (0..=tail.to::<i64>())
             .map(|length| model.extract(&original, &alternative, length, self.model(source_group), self.model(target)))
             .collect();
@@ -125,7 +125,7 @@ impl EngineCore {
     /// never replaced. A head that itself looks like a wrong-layout word
     /// abstains: one span cannot fix two words, and manual Pause still
     /// converts the whole token.
-    pub(crate) fn _literal_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub(crate) fn literal_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
         if !self.in_models(source_group)
             || !self.flag("detection.protect_code", true)
             || !self.flag("detection.context_aware", true)
@@ -141,8 +141,8 @@ impl EngineCore {
         if last_slash.is_none()
             || targets.is_empty()
             || core.is_empty()
-            || !self.detector.is_protected_token(&_text_for_group(strokes, source_group))
-            || self.detector.is_protected_token(&_text_for_group(core, source_group))
+            || !self.detector.is_protected_token(&text_for_group(strokes, source_group))
+            || self.detector.is_protected_token(&text_for_group(core, source_group))
             || !core.iter().all(|stroke| {
                 pystr::isalpha(&stroke.character) || Self::_is_layout_letter(stroke) || WORD_JOINERS.contains(&stroke.character.as_str())
             })
@@ -153,7 +153,7 @@ impl EngineCore {
         for stroke in &strokes[..head] {
             if stroke.character != "/" {
                 segment.push(stroke.clone());
-            } else if !segment.is_empty() && !self._head_segment_settled(&segment, source_group, targets[0]) {
+            } else if !segment.is_empty() && !self.head_segment_settled(&segment, source_group, targets[0]) {
                 return 0;
             } else {
                 segment = Vec::new();
@@ -171,31 +171,31 @@ impl EngineCore {
     /// either. Asked alone, behind the head as typed, the part after the hyphen is decided as
     /// any word (19 of 20 authored terms and Russian words, 13.10.2026). Any sign typed the same
     /// in both layouts joins parts the same way (_joins_parts); a slash has its own rule
-    /// (_literal_head). A token the code guard protects stays whole, as before: an identifier, an
+    /// (literal_head). A token the code guard protects stays whole, as before: an identifier, an
     /// assignment or an address (`user_name`, `foo=bar`, `user@host`) is not prose whose words were
     /// typed in two layouts. As after a slash, the head is never replaced, a head segment that itself
     /// looks like a word in the wrong layout abstains (one span cannot fix two words), and only
     /// the contextual model is asked.
-    fn _joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    fn joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
         if !self.flag("detection.context_aware", true)
             || self.text_setting("detection.context_policy", "assist") != "assist"
             || self.context_policy.model.is_none()
         {
             return 0;
         }
-        self._joined_split(strokes, source_group)
+        self.joined_split(strokes, source_group)
     }
 
     /// The strokes up to the last joining sign, when the token is parts joined by it and every part before
-    /// it is settled as typed (_joined_head); 0 otherwise. Pause converts the part after them alone, whatever
-    /// decides automatic corrections (_schedule_manual_conversion).
-    pub(crate) fn _joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    /// it is settled as typed (joined_head); 0 otherwise. Pause converts the part after them alone, whatever
+    /// decides automatic corrections (schedule_manual_conversion).
+    pub(crate) fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
         let last_join = strokes.iter().rposition(|stroke| Self::_joins_parts(stroke));
         let targets = self.other_groups(source_group);
         let Some(last_join) = last_join else {
             return 0;
         };
-        if !self.in_models(source_group) || targets.is_empty() || self.detector.is_protected_token(&_text_for_group(strokes, source_group)) {
+        if !self.in_models(source_group) || targets.is_empty() || self.detector.is_protected_token(&text_for_group(strokes, source_group)) {
             return 0;
         }
         let head = last_join + 1;
@@ -210,7 +210,7 @@ impl EngineCore {
                 segment.push(stroke.clone());
             } else if !segment.is_empty() {
                 // Signs in a row (`C++-`) join as one; each run of letters must be settled as typed.
-                if !self._head_segment_settled(&segment, source_group, targets[0]) {
+                if !self.head_segment_settled(&segment, source_group, targets[0]) {
                     return 0;
                 }
                 lettered = true;
@@ -220,56 +220,56 @@ impl EngineCore {
         if lettered { head } else { 0 }
     }
 
-    /// The part after the last joining sign asked as a word of its own (_joined_head).
+    /// The part after the last joining sign asked as a word of its own (joined_head).
     ///
     /// Returns the head's length and the part's decision when the model converts the part and the
     /// head stays: a token kept whole (`mongo-cthdbcf`), or one converted whole although the model,
     /// asked about the head alone, keeps it (`docker-j,hfp` became `вщслук-образ`; `docker` alone is
     /// kept at p=1.0, while `BB` of `BB-fccbcntyn` is only a suggestion and the whole `ИИ-ассистент`
-    /// stands). Signs split off the end (_replayed_signs) stay split off the part: `mongo-cthdbcf/` is
+    /// stands). Signs split off the end (replayed_signs) stay split off the part: `mongo-cthdbcf/` is
     /// `mongo-сервиса.`. Otherwise the token stays as the whole of it was judged, with that
     /// judgement's context result.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn _decide_joined_part(
+    pub(crate) fn decide_joined_part(
         &mut self, strokes: &[Stroke], signs: &[Stroke], source_group: i64, targets: &[i64], application: &str, trigger: CorrectionTrigger,
         boundary: Option<&Stroke>, whole: &DetectionDecision,
     ) -> EngineResult<Option<(usize, DetectionDecision)>> {
-        let split = self._joined_head(strokes, source_group);
+        let split = self.joined_head(strokes, source_group);
         if split == 0 {
             return Ok(None);
         }
         let head = &strokes[..split - 1];
         let tail = &strokes[split..];
-        let original = _text_for_group(tail, source_group);
-        let alternatives: Alternatives = targets.iter().map(|group| (*group, _text_for_group(tail, *group))).collect();
+        let original = text_for_group(tail, source_group);
+        let alternatives: Alternatives = targets.iter().map(|group| (*group, text_for_group(tail, *group))).collect();
         if trigger == CorrectionTrigger::Pause
             && signs.is_empty()
-            && self._word_begun(&original, source_group, &alternatives[0].1, targets[0])?
+            && self.word_begun(&original, source_group, &alternatives[0].1, targets[0])?
         {
             // A pause in the middle of the part is a pause to think, as in the middle of a word.
             return Ok(None);
         }
-        let result = self._context_result.clone();
-        let baseline = self._last_baseline.clone();
+        let result = self.context_result.clone();
+        let baseline = self.last_baseline.clone();
         let closing: Strokes = signs.iter().chain(boundary).cloned().collect();
-        let following: Alternatives = targets.iter().map(|group| (*group, _text_for_group(&closing, *group))).collect();
-        let decision = self._decide_word(&original, &alternatives, source_group, application, trigger, WordOptions {
+        let following: Alternatives = targets.iter().map(|group| (*group, text_for_group(&closing, *group))).collect();
+        let decision = self.decide_word(&original, &alternatives, source_group, application, trigger, WordOptions {
             literal_tail: signs.iter().map(|stroke| stroke.character.as_str()).collect(),
             boundary_text: boundary.map_or_else(String::new, |boundary| boundary.character.clone()),
             following: Some(following),
             ..WordOptions::default()
         })?;
-        let parted = self._context_result.clone();
-        let parted_baseline = self._last_baseline.clone();
+        let parted = self.context_result.clone();
+        let parted_baseline = self.last_baseline.clone();
         let mut head_action: Option<&'static str> = None;
         if decision.should_convert && whole.should_convert {
-            let head_alternatives: Alternatives = targets.iter().map(|group| (*group, _text_for_group(head, *group))).collect();
-            self._decide_word(&_text_for_group(head, source_group), &head_alternatives, source_group, application, CorrectionTrigger::Punctuation, WordOptions {
+            let head_alternatives: Alternatives = targets.iter().map(|group| (*group, text_for_group(head, *group))).collect();
+            self.decide_word(&text_for_group(head, source_group), &head_alternatives, source_group, application, CorrectionTrigger::Punctuation, WordOptions {
                 boundary_text: strokes[split - 1].character.clone(),
                 ..WordOptions::default()
             })?;
             head_action = Some(
-                self._context_result.as_ref().and_then(|asked| asked.prediction.as_ref()).map_or("none", |prediction| prediction.action.as_str()),
+                self.context_result.as_ref().and_then(|asked| asked.prediction.as_ref()).map_or("none", |prediction| prediction.action.as_str()),
             );
         }
         let taken = decision.should_convert && matches!(head_action, None | Some("keep"));
@@ -279,29 +279,29 @@ impl EngineCore {
             "head_action": head_action, "taken": taken,
         );
         if !taken {
-            self._context_result = result;
-            self._last_baseline = baseline;
+            self.context_result = result;
+            self.last_baseline = baseline;
             return Ok(None);
         }
-        self._context_result = parted;
-        self._last_baseline = parted_baseline;
+        self.context_result = parted;
+        self.last_baseline = parted_baseline;
         Ok(Some((split, decision)))
     }
 
     /// A head segment is settled when nothing suggests it needs conversion.
-    fn _head_segment_settled(&self, segment: &[Stroke], source_group: i64, target: i64) -> bool {
-        let original = _text_for_group(segment, source_group);
+    fn head_segment_settled(&self, segment: &[Stroke], source_group: i64, target: i64) -> bool {
+        let original = text_for_group(segment, source_group);
         if self.detector.is_protected_token(&original) {
             return true;
         }
-        let alternative = _text_for_group(segment, target);
+        let alternative = text_for_group(segment, target);
         if self.model(target).score(&alternative).known {
             return false;
         }
         let alternatives = [(target, alternative)];
         let decision = self.detector.decide(&original, &alternatives, source_group, &DetectorOptions {
             minimum_length: 1,
-            confidence_threshold: self._confidence_threshold(),
+            confidence_threshold: self.confidence_threshold(),
             aggressive: self.flag("detection.aggressive", false),
             protect_code: true,
             use_intent_model: self.flag("detection.intent_model_enabled", true),
@@ -317,7 +317,7 @@ impl EngineCore {
     /// sign in both layouts but another one. The word is judged without them and, if it
     /// converts, they are replayed with it; a token that is a word as typed (`хлеб`) keeps
     /// its letters, and a key that types the same sign in both layouts is no part of this.
-    pub(crate) fn _replayed_signs(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub(crate) fn replayed_signs(&self, strokes: &[Stroke], source_group: i64) -> usize {
         let targets = self.other_groups(source_group);
         let Some(&target) = targets.first() else {
             return 0;
@@ -336,7 +336,7 @@ impl EngineCore {
             || strokes[..strokes.len() - count]
                 .iter()
                 .any(|stroke| !(pystr::isalpha(&stroke.character) || pystr::isalpha(stroke.character_for(target)) || Self::_joins_parts(stroke)))
-            || self.model(source_group).score(&_text_for_group(strokes, source_group)).known
+            || self.model(source_group).score(&text_for_group(strokes, source_group)).known
         {
             // A token with digits or other signs inside (`з+1ю` for `p+1.`) is judged whole, as before,
             // and so is one whose rest is a single letter: `чё` is not `ч` with a backtick. A key that is
@@ -347,14 +347,14 @@ impl EngineCore {
         count
     }
 
-    pub(crate) fn _with_signs(&self, plan: &PlanRef, signs: &[Stroke]) -> PlanRef {
+    pub(crate) fn with_signs(&self, plan: &PlanRef, signs: &[Stroke]) -> PlanRef {
         if signs.is_empty() {
             return plan.clone();
         }
         plan.replaced_with(|plan| {
             plan.strokes.extend(signs.iter().cloned());
-            plan.original.push_str(&_text_for_group(signs, plan.source_group));
-            plan.replacement.push_str(&_text_for_group(signs, plan.target_group));
+            plan.original.push_str(&text_for_group(signs, plan.source_group));
+            plan.replacement.push_str(&text_for_group(signs, plan.target_group));
         })
     }
 
@@ -393,7 +393,7 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn _plan_from_decision(
+    pub(crate) fn plan_from_decision(
         &self, strokes: &[Stroke], boundary: Option<&Stroke>, application: &str, decision: &DetectionDecision, mode: &'static str,
     ) -> PlanRef {
         if mode == "boundary"
@@ -403,11 +403,11 @@ impl EngineCore {
             // Digits with the Russian letter on the key of the English dot (`2ю` for `2.`): the person writes
             // Russian and pressed the English key for the sign, so the layout stays where it is (target_group is the
             // source one) and the keys are typed again in the other layout as literals, which the backends type in their
-            // own layout before restoring the current one, as the "@" of a mention (_execute_correction). Retyped in the
+            // own layout before restoring the current one, as the "@" of a mention (execute_correction). Retyped in the
             // English layout as a conversion, the next Russian word would come out in Latin letters.
             return Arc::new(CorrectionPlan {
                 mode: "sign",
-                context_field: self._context_field_id(),
+                context_field: self.context_field_id(),
                 ..CorrectionPlan::new(
                     strokes.to_vec(), boundary.cloned(), decision.source_group, decision.source_group, decision.original.clone(),
                     decision.replacement.clone(), decision.confidence, application,
@@ -416,7 +416,7 @@ impl EngineCore {
         }
         Arc::new(CorrectionPlan {
             mode,
-            context_field: self._context_field_id(),
+            context_field: self.context_field_id(),
             ..CorrectionPlan::new(
                 strokes.to_vec(), boundary.cloned(), decision.source_group, decision.target_group, decision.original.clone(),
                 decision.replacement.clone(), decision.confidence, application,
@@ -424,8 +424,8 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn _context_field_id(&self) -> String {
-        self._context_result
+    pub(crate) fn context_field_id(&self) -> String {
+        self.context_result
             .as_ref()
             .and_then(|result| result.field.as_ref())
             .filter(|field| field.source != "observed")
@@ -435,19 +435,19 @@ impl EngineCore {
     /// The start of a word still being typed: PAUSE_WORD_START_LETTERS letters that many words of
     /// their own language begin with, whose other reading is no word of the other language's prose.
     /// `иг` is the start of `игру` and `bu` no English word, while `ша` typed for `if` is.
-    pub(crate) fn _word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
+    pub(crate) fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
         if pystr::len(original) != PAUSE_WORD_START_LETTERS || !pystr::isalpha(original) || !self.in_models(group) {
             return Ok(false);
         }
         if ks_lang::short_words::word_starts(self.model(group)).count(&pystr::casefold(original)) < PAUSE_WORD_START_MIN_WORDS {
             return Ok(false);
         }
-        let prose = match self._layout_name(target).as_str() {
+        let prose = match self.layout_name(target).as_str() {
             "us" => "english",
             "ru" => "russian",
             _ => return Ok(false),
         };
-        Ok(self._term_frequency()?.term(prose).count(&pystr::casefold(alternative)) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0].to::<u64>())
+        Ok(self.term_frequency()?.term(prose).count(&pystr::casefold(alternative)) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0].to::<u64>())
     }
 
     /// Whether Pause still converts the last word once `keys` follow it.
@@ -457,14 +457,14 @@ impl EngineCore {
     /// few such keys typed after it, got only the other layout, and erased and typed the word again (13.10.2026;
     /// 9 of the 16 such presses in the PC logs since 01.10 were followed by the word typed again by hand).
     /// Letters, Backspace, the arrow keys, a click, Enter and Tab end the reach as before.
-    pub(crate) fn _pause_reaches_past(&self, keys: &[Stroke]) -> bool {
-        let Some(plan) = &self._last_committed else {
+    pub(crate) fn pause_reaches_past(&self, keys: &[Stroke]) -> bool {
+        let Some(plan) = &self.last_committed else {
             return false;
         };
         let Some(boundary) = &plan.boundary else {
             return false;
         };
-        !self._last_committed_stale
+        !self.last_committed_stale
             && !is_action_boundary_key(&boundary.key_name)
             && any_alpha(&plan.original)
             && plan.trailing.len() + 1 + keys.len() <= PAUSE_TRAILING_MAX_KEYS
@@ -475,16 +475,16 @@ impl EngineCore {
             })
     }
 
-    /// Make `keys`, typed after the last word, part of what Pause deletes and types again (_pause_reaches_past).
+    /// Make `keys`, typed after the last word, part of what Pause deletes and types again (pause_reaches_past).
     ///
     /// They are the same in every layout, so they take the group of the word's boundary: a correction types its
     /// literal keys in one layout.
-    pub(crate) fn _extend_last_committed(&mut self, keys: &[Stroke]) {
-        let plan = self._last_committed.clone().expect("a last committed word");
+    pub(crate) fn extend_last_committed(&mut self, keys: &[Stroke]) {
+        let plan = self.last_committed.clone().expect("a last committed word");
         let boundary = plan.boundary.clone().expect("with a boundary");
         let group = boundary.group;
         let extra: Strokes = keys.iter().map(|key| key_of(KeyEvent { group, ..(**key).clone() })).collect();
-        self._last_committed = Some(plan.replaced_with(|plan| {
+        self.last_committed = Some(plan.replaced_with(|plan| {
             plan.trailing.push(boundary);
             plan.trailing.extend(extra[..extra.len() - 1].iter().cloned());
             plan.boundary = extra.last().cloned();
@@ -497,12 +497,12 @@ impl EngineCore {
     /// was typed or clicked since (it is not stale), no literal punctuation
     /// sits between the word and that boundary, and the boundary is not
     /// Enter or Tab, whose effect on the text one Backspace cannot undo.
-    pub(crate) fn _reopenable_committed_word(&self) -> Option<PlanRef> {
-        let plan = self._last_committed.as_ref()?;
+    pub(crate) fn reopenable_committed_word(&self) -> Option<PlanRef> {
+        let plan = self.last_committed.as_ref()?;
         let boundary = plan.boundary.as_ref()?;
-        if self._last_committed_stale
-            || !self._strokes.is_empty()
-            || !self._symbol_strokes.is_empty()
+        if self.last_committed_stale
+            || !self.strokes.is_empty()
+            || !self.symbol_strokes.is_empty()
             || !plan.trailing.is_empty()
             || plan.strokes.is_empty()
             || is_action_boundary_key(&boundary.key_name)
@@ -513,7 +513,7 @@ impl EngineCore {
         Some(plan.clone())
     }
 
-    pub(crate) fn _layout_name(&self, group: i64) -> String {
+    pub(crate) fn layout_name(&self, group: i64) -> String {
         self.settings.with_value("detection.layouts", |names| {
             let default = ["us", "ru"];
             match names {
@@ -523,8 +523,8 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn _layout_letters(&self, group: i64) -> HashSet<char> {
-        let keys = match self._layout_name(group).as_str() {
+    pub(crate) fn layout_letters(&self, group: i64) -> HashSet<char> {
+        let keys = match self.layout_name(group).as_str() {
             "us" => ks_text::layouts::US_KEYS,
             "ru" => ks_text::layouts::RU_KEYS,
             _ => "",
@@ -562,25 +562,25 @@ impl EngineCore {
     ///
     /// `t\`` is `её`, while `t` alone, `е`, is no word. When the word without the
     /// sign is a word itself, the boundary model's split stands.
-    pub(crate) fn _sign_reads_as_letter(&self, plan: &PlanRef) -> bool {
+    pub(crate) fn sign_reads_as_letter(&self, plan: &PlanRef) -> bool {
         let keys: Strokes = plan.strokes.iter().chain(plan.trailing.iter()).cloned().collect();
-        let whole = _text_for_group(&keys, plan.target_group);
-        self._known_reading(plan.target_group, &whole) && !self.model(plan.target_group).score(&plan.replacement).known
+        let whole = text_for_group(&keys, plan.target_group);
+        self.known_reading(plan.target_group, &whole) && !self.model(plan.target_group).score(&plan.replacement).known
     }
 
     /// Whether a lexicon of the group holds the text, spelt with `ё` or with `е`: Russian writes `ё` as `е` as often
     /// as not, and a lexicon may hold one spelling alone. The shipped one holds `ее` and not `её`, and `T\`` opening a
     /// sentence stayed for `Её` (the development sentences of the Tatoeba dump, 22.10.2026).
-    pub(crate) fn _known_reading(&self, group: i64, text: &str) -> bool {
+    pub(crate) fn known_reading(&self, group: i64, text: &str) -> bool {
         let model = self.model(group);
         model.score(text).known || model.score(&text.replace('ё', "е").replace('Ё', "Е")).known
     }
 
-    /// Whether the text is a word of the group's language: the lexicon holds it (_known_reading), or prose of that
+    /// Whether the text is a word of the group's language: the lexicon holds it (known_reading), or prose of that
     /// language uses it at least KEPT_WORD_PROSE_MIN_COUNT times (the term tables): the shipped Russian lexicon holds no
     /// `ой`, `ох` or `эх`.
-    pub(crate) fn _word_of_its_language(&self, group: i64, text: &str) -> EngineResult<bool> {
+    pub(crate) fn word_of_its_language(&self, group: i64, text: &str) -> EngineResult<bool> {
         let prose = if group == 1 { "russian" } else { "english" };
-        Ok(self._known_reading(group, text) || self._term_frequency()?.term(prose).count(&pystr::casefold(text)) >= KEPT_WORD_PROSE_MIN_COUNT)
+        Ok(self.known_reading(group, text) || self.term_frequency()?.term(prose).count(&pystr::casefold(text)) >= KEPT_WORD_PROSE_MIN_COUNT)
     }
 }

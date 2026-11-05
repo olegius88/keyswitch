@@ -127,7 +127,7 @@ impl PrefixIndex {
     /// whatever the model passed: `Resources::prefix_index` does the same. A replay patches that `load` to return the
     /// reference model with the supplement; it passes that model's frequencies here.
     pub fn from_lexicon(frequencies: Arc<WordTable>, source: &str) -> Self {
-        let stems = _hunspell_dictionary_path(source).map(|path| _dictionary_stems(&path, PREFIX_INDEX_DICTIONARY_MAX_BYTES));
+        let stems = hunspell_dictionary_path(source).map(|path| dictionary_stems(&path, PREFIX_INDEX_DICTIONARY_MAX_BYTES));
         match stems {
             Some(stems) if !stems.is_empty() => PrefixIndex { words: Some(frequencies.words().merged(&stems)), frequencies },
             _ => PrefixIndex { words: None, frequencies },
@@ -173,7 +173,7 @@ impl PrefixIndex {
     }
 }
 
-pub fn _hunspell_dictionary_path(source: &str) -> Option<PathBuf> {
+pub fn hunspell_dictionary_path(source: &str) -> Option<PathBuf> {
     for part in source.split(';') {
         let part = pystr::strip(part);
         if let Some(rest) = part.strip_prefix("Hunspell: ") {
@@ -187,7 +187,7 @@ pub fn _hunspell_dictionary_path(source: &str) -> Option<PathBuf> {
 }
 
 /// Read the alphabetic stems of a Hunspell `.dic` file (bounded), sorted.
-pub fn _dictionary_stems(path: &Path, limit: usize) -> WordList {
+pub fn dictionary_stems(path: &Path, limit: usize) -> WordList {
     let Ok(payload) = crate::load_error::read_limited(path, limit) else {
         return WordList::new();
     };
@@ -208,7 +208,7 @@ pub fn _dictionary_stems(path: &Path, limit: usize) -> WordList {
 }
 
 /// ALL-CAPS, camelCase and similar shapes are never switched early.
-pub fn _looks_like_abbreviation(token: &str) -> bool {
+pub fn looks_like_abbreviation(token: &str) -> bool {
     token.chars().skip(1).any(ucd::isupper)
 }
 
@@ -252,7 +252,7 @@ pub fn early_switch_decision(
     if !pystr::isalpha(replacement) {
         return with_reason(&rejected, "префикс содержит не буквы");
     }
-    if _looks_like_abbreviation(original) || _looks_like_abbreviation(replacement) {
+    if looks_like_abbreviation(original) || looks_like_abbreviation(replacement) {
         return with_reason(&rejected, "похоже на сокращение или camelCase");
     }
     let source_evidence = source_index.completions(original);
@@ -329,15 +329,15 @@ mod tests {
 
     #[test]
     fn dictionary_paths_and_abbreviations() {
-        assert_eq!(_hunspell_dictionary_path("x; Hunspell: /nonexistent-ks-lang/a.dic"), None);
-        assert_eq!(_hunspell_dictionary_path("x"), None);
-        assert!(_looks_like_abbreviation("aB") && !_looks_like_abbreviation("Ab") && !_looks_like_abbreviation(""));
+        assert_eq!(hunspell_dictionary_path("x; Hunspell: /nonexistent-ks-lang/a.dic"), None);
+        assert_eq!(hunspell_dictionary_path("x"), None);
+        assert!(looks_like_abbreviation("aB") && !looks_like_abbreviation("Ab") && !looks_like_abbreviation(""));
         let path = std::env::temp_dir().join(format!("ks-lang-stems-{}.dic", std::process::id()));
         std::fs::write(&path, "3\nСлово/ABC\nabc\tpo:x\n123\n слово \n").unwrap();
-        let stems = _dictionary_stems(&path, 1000);
+        let stems = dictionary_stems(&path, 1000);
         assert_eq!(stems.iter().collect::<Vec<_>>(), ["abc", "слово"]);
-        assert!(_dictionary_stems(&path, 3).is_empty());
-        assert_eq!(_hunspell_dictionary_path(&format!("x; Hunspell: {}", path.display())), Some(path.clone()));
+        assert!(dictionary_stems(&path, 3).is_empty());
+        assert_eq!(hunspell_dictionary_path(&format!("x; Hunspell: {}", path.display())), Some(path.clone()));
         std::fs::remove_file(&path).unwrap();
     }
 }

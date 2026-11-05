@@ -20,7 +20,7 @@ use ks_text::{pystr, ucd};
 use std::sync::Arc;
 
 /// A curated one-letter Russian word typed in the English layout right after an English term inside a Russian phrase
-/// (KeySwitchEngine._stranded_letter): an explicit rule like the message-start one.
+/// (KeySwitchEngine.stranded_letter): an explicit rule like the message-start one.
 pub const STRANDED_SHORT_WORD_REASON: &str = "однобуквенное слово из безопасного списка после английского термина в русской фразе";
 /// A lone letter the action model alone would convert: it has never seen one (ContextPolicy.decide).
 pub const LONE_LETTER_REASON: &str = "одиночную букву переводят только правила из безопасного списка";
@@ -478,7 +478,7 @@ impl ContextPolicy {
                         field = snapshot;
                     } else if let Some(shown) = (!anchor.is_empty()).then(|| typed_short_of(&before, &snapshot.after, &anchor)).flatten() {
                         // The editor has not shown the last letters yet: the word is the one typed and is decided on
-                        // its keys, and its correction waits for the field to show it (engine._waits_for_field).
+                        // its keys, and its correction waits for the field to show it (engine.waits_for_field).
                         // Refused as a changed field, `ашкуащч` stayed for `firefox` in Antigravity (the owner's
                         // typing, 19.10.2026), and a word in such an editor was never put to the model at its space.
                         snapshot.before = behind(&before, pystr::len(&shown).to::<i64>());

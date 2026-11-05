@@ -80,7 +80,7 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
-    /// `baseline_decision`: exactly what `engine._decide_word` hands to the policy.
+    /// `baseline_decision`: exactly what `engine.decide_word` hands to the policy.
     fn baseline_for(&mut self, word: &str, group: i64, before: &str, trigger: &'static str) -> bool {
         let context_group = context_group_of(before);
         let key = (word.to_owned(), group, trigger, context_group);

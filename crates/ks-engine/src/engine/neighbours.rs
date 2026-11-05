@@ -14,8 +14,8 @@ use serde_json::json;
 
 impl EngineCore {
     /// The model converted a short word that opens the message, with nothing before it.
-    pub(crate) fn _opening_conversion(&self, inside: Option<&DetectionDecision>, original: &str) -> bool {
-        let Some(result) = self._context_result.as_ref().filter(|_| inside.is_none()) else {
+    pub(crate) fn opening_conversion(&self, inside: Option<&DetectionDecision>, original: &str) -> bool {
+        let Some(result) = self.context_result.as_ref().filter(|_| inside.is_none()) else {
             return false;
         };
         result.decision_source == "context_model"
@@ -38,11 +38,11 @@ impl EngineCore {
     /// has to decide the letter; if it went through, the observed text no longer
     /// matches and the wait cancels itself. A token of signs the other layout
     /// types the same (`-`) has nothing to wait for: it stands among the kept
-    /// words instead (_keep_for_next_word).
-    pub(crate) fn _start_context_wait(
+    /// words instead (keep_for_next_word).
+    pub(crate) fn start_context_wait(
         &mut self, plan: &PlanRef, decision: &DetectionDecision, boundary: &Stroke, trailing: &[Stroke], head: usize, fallback: bool,
     ) -> bool {
-        let Some(result) = self._context_result.clone() else {
+        let Some(result) = self.context_result.clone() else {
             return false;
         };
         let (Some(prediction), Some(field)) = (&result.prediction, &result.field) else {
@@ -58,42 +58,42 @@ impl EngineCore {
             && !Self::_reads_alike(plan)
             && self.text_setting("detection.context_policy", "assist") == "assist"
         {
-            self._context_wait_sequence += 1;
+            self.context_wait_sequence += 1;
             // A word waits as long as the text around it stays context. The wait
             // used to lapse after ten seconds, so `tot`, a thought and then `ghbdtn`
             // twelve seconds later gave `tot привет` (0.31.0 log, 24.09.2026).
             // Anything that makes the pair stale ends the wait sooner: another
             // window, a caret move, Backspace, a changed field.
-            self._context_waiting = Some(WaitingContextWord {
+            self.context_waiting = Some(WaitingContextWord {
                 plan: plan.clone(),
                 decision: decision.clone(),
                 field: field.clone(),
                 window: self.focus_or_zero(),
                 deadline: self.monotonic() + CONTEXT_TTL,
-                diagnostic_id: self._context_wait_sequence,
+                diagnostic_id: self.context_wait_sequence,
                 settles_on_pause: settles,
-                baseline: self._last_baseline.clone(),
+                baseline: self.last_baseline.clone(),
                 converted: fallback,
             });
-            // The pause that settles this wait (_settle_context_wait_after_pause) is
+            // The pause that settles this wait (settle_context_wait_after_pause) is
             // counted from its boundary. The commit has just cleared the word timer,
             // and nothing else would set it until the next key, so without this the
             // pause never settled anything. The pause correction stays off.
-            self._last_word_input_at = Some(self.monotonic());
-            self._log_context_wait("context_wait_started", self._context_waiting.as_ref(), if settles { "model_wait" } else { "model_suggest" }, &[]);
+            self.last_word_input_at = Some(self.monotonic());
+            self.log_context_wait("context_wait_started", self.context_waiting.as_ref(), if settles { "model_wait" } else { "model_suggest" }, &[]);
             return true;
         }
         false
     }
 
-    pub(crate) fn _cancel_context_wait(&mut self, reason: &str) {
-        self._log_context_wait("context_wait_cancelled", self._context_waiting.as_ref(), reason, &[]);
-        self._context_waiting = None;
+    pub(crate) fn cancel_context_wait(&mut self, reason: &str) {
+        self.log_context_wait("context_wait_cancelled", self.context_waiting.as_ref(), reason, &[]);
+        self.context_waiting = None;
         // Whatever ends a wait - another field, a caret move, Backspace, a manual
         // conversion - also ends a converted or kept word's claim on the next word.
-        self._provisional = None;
-        self._paused_conversion = None;
-        self._kept = Vec::new();
+        self.provisional = None;
+        self.paused_conversion = None;
+        self.kept = Vec::new();
     }
 
     /// Decide a waiting word together with the next word, at its boundary or at a pause.
@@ -101,12 +101,12 @@ impl EngineCore {
     /// `switched` says the early switch converted the next word while it was typed: its keys
     /// are in two layouts, and `decision` is that conversion, from the waiting word's layout.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn _resolve_context_wait(
+    pub(crate) fn resolve_context_wait(
         &mut self, waiting: Option<&WaitingContextWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision,
         application: &str, alternatives: &Alternatives, switched: bool,
     ) -> EngineResult<Option<(PlanRef, DetectionDecision)>> {
         if waiting.is_none() || self.text_setting("detection.context_policy", "assist") != "assist" {
-            self._log_context_wait("context_wait_cancelled", waiting, "policy_disabled", &[]);
+            self.log_context_wait("context_wait_cancelled", waiting, "policy_disabled", &[]);
             return Ok(None);
         }
         let waiting = waiting.expect("checked above");
@@ -122,7 +122,7 @@ impl EngineCore {
             || !same_keys(previous.source_group, &previous.strokes)
             || (!switched && !same_keys(previous.source_group, strokes))
         {
-            self._log_context_wait(
+            self.log_context_wait(
                 "context_wait_cancelled", Some(waiting), "preconditions_changed",
                 &[
                     ("expired", json!(now > waiting.deadline)),
@@ -144,10 +144,10 @@ impl EngineCore {
             // word once more after the waiting word's other reading, `еще в`; the
             // pair converts only if it then converts the next word and, below, the
             // waiting word with it.
-            match self._decide_after_waiting_word(waiting, &decision, alternatives, boundary, &previous_boundary.character)? {
+            match self.decide_after_waiting_word(waiting, &decision, alternatives, boundary, &previous_boundary.character)? {
                 Some(converted) => decision = converted,
                 None => {
-                    self._log_context_wait("context_wait_cancelled", Some(waiting), "next_word_not_converted", &[]);
+                    self.log_context_wait("context_wait_cancelled", Some(waiting), "next_word_not_converted", &[]);
                     return Ok(None);
                 }
             }
@@ -157,18 +157,18 @@ impl EngineCore {
         let closing = boundary.filter(|boundary| !boundary.deferred).cloned();
         let suffix = closing.as_ref().map_or("", |closing| closing.character.as_str());
         if !self.context_policy.stream.text.ends_with(&format!("{original}{suffix}")) {
-            self._log_context_wait("context_wait_cancelled", Some(waiting), "observed_suffix_changed", &[]);
+            self.log_context_wait("context_wait_cancelled", Some(waiting), "observed_suffix_changed", &[]);
             return Ok(None);
         }
         let group = decision.target_group;
-        let alternative = _text_for_group(&previous.strokes, group);
+        let alternative = text_for_group(&previous.strokes, group);
         // A feature-version-3 context model re-decides the waiting word with the
         // converted next word as its language context, exactly as a word after an
         // existing neighbour would be; the installed feature-version-2 model keeps
         // the decision it was certified with.
         let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>());
         let planned_baseline = if new_features {
-            self._planned_baseline(&previous.original, &vec![(group, alternative.clone())], previous.source_group, &decision.replacement, group)?
+            self.planned_baseline(&previous.original, &vec![(group, alternative.clone())], previous.source_group, &decision.replacement, group)?
         } else {
             waiting.decision.clone()
         };
@@ -194,7 +194,7 @@ impl EngineCore {
             pair_decision = planned_baseline;
         }
         if !pair_decision.should_convert {
-            self._log_context_wait("context_wait_cancelled", Some(waiting), "lookahead_not_converted", &[]);
+            self.log_context_wait("context_wait_cancelled", Some(waiting), "lookahead_not_converted", &[]);
             return Ok(None);
         }
         technical_event!(
@@ -204,11 +204,11 @@ impl EngineCore {
         let mut keys = previous.strokes.clone();
         keys.push(previous_boundary.clone());
         keys.extend(strokes.iter().cloned());
-        let typed = if switched { _text_for_group(&keys, previous.source_group) } else { String::new() };
+        let typed = if switched { text_for_group(&keys, previous.source_group) } else { String::new() };
         let replacement = format!("{alternative}{}{}", previous_boundary.character, decision.replacement);
         let plan = Arc::new(CorrectionPlan {
             mode: "context_phrase",
-            context_field: self._context_field_id(),
+            context_field: self.context_field_id(),
             typed,
             ..CorrectionPlan::new(keys, closing, previous.source_group, group, original, replacement, pair_decision.confidence, application)
         });
@@ -224,7 +224,7 @@ impl EngineCore {
     /// the `kept_next_word` question it has weights and frames of its own for, and a conversion
     /// it is sure of replaces that word alone: the next word is typed again in its own layout,
     /// and the layout stays there.
-    pub(crate) fn _decide_with_kept_neighbour(
+    pub(crate) fn decide_with_kept_neighbour(
         &mut self, waiting: &WaitingContextWord, strokes: &[Stroke], boundary: &Stroke, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<PlanRef>> {
         let previous = waiting.plan.clone();
@@ -255,7 +255,7 @@ impl EngineCore {
             return Ok(None);
         }
         let group = previous.target_group;
-        let alternative = _text_for_group(&previous.strokes, group);
+        let alternative = text_for_group(&previous.strokes, group);
         let result = self.context_policy.decide(baseline, &alternative, group, &self.detector, "space", "assist", &PolicyOptions {
             after: &decision.original,
             field_override: Some(waiting.field.clone()),
@@ -264,7 +264,7 @@ impl EngineCore {
             ..PolicyOptions::default()
         })?;
         if !result.decision.should_convert {
-            self._log_context_wait("context_wait_cancelled", Some(waiting), "kept_neighbour_declined", &[]);
+            self.log_context_wait("context_wait_cancelled", Some(waiting), "kept_neighbour_declined", &[]);
             return Ok(None);
         }
         technical_event!(
@@ -272,7 +272,7 @@ impl EngineCore {
             "previous_characters": length, "next_characters": pystr::len(&decision.original),
             "next_word_kept": true,
         );
-        Ok(Some(self._word_before_kept(&previous, strokes, boundary, group, &alternative, &decision.original, result.decision.confidence, application)))
+        Ok(Some(self.word_before_kept(&previous, strokes, boundary, group, &alternative, &decision.original, result.decision.confidence, application)))
     }
 
     /// The correction of a word converted alone before the token after it, which stays as typed.
@@ -282,17 +282,17 @@ impl EngineCore {
     /// the token kept in its own layout (kept_tail), `м + ` became `v + ` and the next letter of the formula came out
     /// Russian again: `v + ы`, and a lone letter there is refused. A word is typed again in its own layout, which stays.
     #[allow(clippy::too_many_arguments)]
-    fn _word_before_kept(
+    fn word_before_kept(
         &self, previous: &PlanRef, strokes: &[Stroke], boundary: &Stroke, group: i64, alternative: &str, following: &str, confidence: f64, application: &str,
     ) -> PlanRef {
         let previous_boundary = previous.boundary.clone().expect("a boundary");
-        let alike = _text_for_group(strokes, group) == following && !any_alpha(following);
+        let alike = text_for_group(strokes, group) == following && !any_alpha(following);
         let mut keys = previous.strokes.clone();
         keys.push(previous_boundary.clone());
         keys.extend(strokes.iter().cloned());
         Arc::new(CorrectionPlan {
             mode: "context_word",
-            context_field: self._context_field_id(),
+            context_field: self.context_field_id(),
             kept_tail: if alike { 0 } else { strokes.len() },
             ..CorrectionPlan::new(
                 keys, Some(boundary.clone()), previous.source_group, group,
@@ -309,11 +309,11 @@ impl EngineCore {
     /// the model kept it at p=0.94. A sign after it is evidence the word itself never had: `м + ` is the formula
     /// `v + ` typed in the Russian layout (field typing, 19.10.2026, which he corrected with Pause). The letter
     /// is asked with the sign after it, the question a waiting letter is asked before its kept neighbour
-    /// (_decide_with_kept_neighbour), and only a letter of the class the variable and sign heads answer
+    /// (decide_with_kept_neighbour), and only a letter of the class the variable and sign heads answer
     /// (context_action_features.sign_question): a one-letter word of the Russian layout after a Cyrillic word, no
     /// Russian word of one letter, before a token that is no dash alone (a dash tells a minus from the dash of a
-    /// sentence only by what follows it). The model decides; a conversion takes the sign along (_word_before_kept).
-    pub(crate) fn _decide_letter_before_sign(
+    /// sentence only by what follows it). The model decides; a conversion takes the sign along (word_before_kept).
+    pub(crate) fn decide_letter_before_sign(
         &mut self, kept: &[Arc<KeptWord>], strokes: &[Stroke], boundary: &Stroke, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<PlanRef>> {
         let Some(word) = kept.last() else {
@@ -334,8 +334,8 @@ impl EngineCore {
             || decision.original.is_empty()
             || decision.original.chars().any(char_isspace)
             || !sign_token_asked(&decision.original)
-            || _text_for_group(strokes, previous.target_group) != decision.original
-            || !variable_question(&previous.original, &_text_for_group(&previous.strokes, previous.target_group), &field.before, "space")
+            || text_for_group(strokes, previous.target_group) != decision.original
+            || !variable_question(&previous.original, &text_for_group(&previous.strokes, previous.target_group), &field.before, "space")
             || self.monotonic() > word.deadline
             || word.window != self.focus_or_zero()
             || previous.application != application
@@ -348,7 +348,7 @@ impl EngineCore {
             return Ok(None);
         }
         let group = previous.target_group;
-        let alternative = _text_for_group(&previous.strokes, group);
+        let alternative = text_for_group(&previous.strokes, group);
         let result = self.context_policy.decide(baseline, &alternative, group, &self.detector, "space", "assist", &PolicyOptions {
             after: &decision.original,
             field_override: Some(field.clone()),
@@ -363,19 +363,19 @@ impl EngineCore {
         if !result.decision.should_convert {
             return Ok(None);
         }
-        Ok(Some(self._word_before_kept(&previous, strokes, boundary, group, &alternative, &decision.original, result.decision.confidence, application)))
+        Ok(Some(self.word_before_kept(&previous, strokes, boundary, group, &alternative, &decision.original, result.decision.confidence, application)))
     }
 
     /// A word converted at a pause and kept at its space, as the conversion a next word may take back.
     ///
     /// A correction at a pause leaves the word open, so its space commits the converted reading as a
     /// word of its own, which the model keeps; the conversion at a space is asked again when the next
-    /// word goes back the other way (_revert_with_next_word), and this one was not. In the sealed
+    /// word goes back the other way (revert_with_next_word), and this one was not. In the sealed
     /// sequences every word pauses before its space: an English message opening with a token whose
     /// sign is a Russian letter's key was converted there, the next English word typed in the Russian
     /// layout went back, and the first word stayed Cyrillic (test v47). The plan is the pause's, ended
     /// by this space; only the very word converted, with nothing typed onto it, qualifies.
-    pub(crate) fn _provisional_after_pause(
+    pub(crate) fn provisional_after_pause(
         &self, paused: Option<&ProvisionalWord>, strokes: &[Stroke], source_group: i64, boundary: &Stroke,
     ) -> Option<ProvisionalWord> {
         let paused = paused?;
@@ -415,14 +415,14 @@ impl EngineCore {
     /// before a word that is no word of either layout turned it into its Latin
     /// reading, `тыв` after `tot ` into `nsd` (`еще тыв`, field typing). Nothing
     /// is decided here that the model does not decide.
-    fn _decide_after_waiting_word(
+    fn decide_after_waiting_word(
         &self, waiting: &WaitingContextWord, decision: &DetectionDecision, alternatives: &Alternatives, boundary: Option<&Stroke>, boundary_character: &str,
     ) -> EngineResult<Option<DetectionDecision>> {
         let previous = &waiting.plan;
         let group = previous.target_group;
         let alternative = alternatives.iter().find(|entry| entry.0 == group).map(|entry| entry.1.clone()).expect("the waiting word's target");
-        let reading = _text_for_group(&previous.strokes, group);
-        let baseline = self._planned_baseline(&decision.original, &vec![(group, alternative.clone())], decision.source_group, &reading, group)?;
+        let reading = text_for_group(&previous.strokes, group);
+        let baseline = self.planned_baseline(&decision.original, &vec![(group, alternative.clone())], decision.source_group, &reading, group)?;
         let trigger = boundary.map_or(CorrectionTrigger::Pause, |boundary| Self::_trigger_for_boundary(boundary));
         let field = field_with(&waiting.field, format!("{}{reading}{boundary_character}", waiting.field.before), waiting.field.after.clone());
         let result = self.context_policy.decide(&baseline, &alternative, group, &self.detector, trigger.as_str(), "assist", &PolicyOptions {
@@ -439,10 +439,10 @@ impl EngineCore {
     /// Russian. When the engine then converts that word into the language `ns` was
     /// typed in - `vs` and `code` come out as `мы сщву` - the first word is decided
     /// once more with the converted next word after it, exactly as a waiting word
-    /// is (_resolve_context_wait). If the model no longer converts it, one
+    /// is (resolve_context_wait). If the model no longer converts it, one
     /// correction returns both: `vs code`. The engine only asks; the model decides.
     /// Only a word that opened its text is asked again.
-    pub(crate) fn _revert_with_next_word(
+    pub(crate) fn revert_with_next_word(
         &mut self, provisional: Option<&ProvisionalWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<(PlanRef, DetectionDecision)>> {
         let Some(provisional) = provisional else {
@@ -469,7 +469,7 @@ impl EngineCore {
             return Ok(None);
         }
         let (baseline, field) = &*revisit;
-        let tables = self._term_frequency()?;
+        let tables = self.term_frequency()?;
         if baseline.reason == STRANDED_SHORT_WORD_REASON
             || term_question(&applied.original, field.as_ref().map_or("", |field| field.before.as_str()), &tables)
         {
@@ -506,14 +506,14 @@ impl EngineCore {
         let replacement = format!("{}{}{}", applied.original, applied_boundary.character, decision.replacement);
         let plan = Arc::new(CorrectionPlan {
             mode: "context_phrase",
-            context_field: self._context_field_id(),
+            context_field: self.context_field_id(),
             ..CorrectionPlan::new(keys, closing, applied.target_group, applied.source_group, original, replacement, decision.confidence, application)
         });
         Ok(Some((plan, decision.clone())))
     }
 
     /// Remember the words left as typed at a space until a later word shows their layout.
-    pub(crate) fn _keep_for_next_word(&mut self, kept: Vec<Arc<KeptWord>>, word: Option<Arc<KeptWord>>, boundary: &Stroke) {
+    pub(crate) fn keep_for_next_word(&mut self, kept: Vec<Arc<KeptWord>>, word: Option<Arc<KeptWord>>, boundary: &Stroke) {
         if boundary.character != " " || boundary.deferred {
             return;
         }
@@ -521,12 +521,12 @@ impl EngineCore {
             // A token of signs alone (`.`, `1.2`, `...`) is never converted on its own, and a
             // converted next word does not make it a word either: `.` before `ghbdtn` is no `ю`.
             // One that reads the same in either layout, alone after a kept word, stands between
-            // that word and the next as it is (_take_along): `Ytn - ult` kept `Ytn` for good
+            // that word and the next as it is (take_along): `Ytn - ult` kept `Ytn` for good
             // once `-` had cut the words apart, and only `где` converted.
             if Self::_reads_alike(&word.plan) && kept.last().is_some_and(|last| !Self::_reads_alike(&last.plan)) {
                 let mut chain = kept;
                 chain.push(word.clone());
-                self._kept = chain;
+                self.kept = chain;
             }
             return;
         }
@@ -535,7 +535,7 @@ impl EngineCore {
             chain.push(word);
         }
         let words: Vec<usize> = chain.iter().enumerate().filter(|(_, item)| !Self::_reads_alike(&item.plan)).map(|(index, _)| index).collect();
-        self._kept = if words.len() > KEPT_WORDS_TAKEN_ALONG { chain.split_off(words[words.len() - KEPT_WORDS_TAKEN_ALONG]) } else { chain };
+        self.kept = if words.len() > KEPT_WORDS_TAKEN_ALONG { chain.split_off(words[words.len() - KEPT_WORDS_TAKEN_ALONG]) } else { chain };
     }
 
     fn ortho_score(&self, plan: &CorrectionPlan, before: &str) -> Option<ks_lang::ortho_model::OrthoScore> {
@@ -552,7 +552,7 @@ impl EngineCore {
     ///
     /// The model of the policy's licence (ContextPolicy._licensed), asked about the whole token,
     /// signs at its end included: those are the keys of letters (`[` is `х`, `.` is `ю`).
-    fn _keys_of_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
+    fn keys_of_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
         let Some(ortho) = &self.context_policy.ortho else {
             return false;
         };
@@ -565,10 +565,10 @@ impl EngineCore {
     }
 
     /// Whether the orthotactic model reads a token's keys, signs at its end included, as the language of its other
-    /// layout more than as its own (a score above zero; _keys_of_target_language asks for the policy's licence). A
+    /// layout more than as its own (a score above zero; keys_of_target_language asks for the policy's licence). A
     /// token shorter than the licence's minimum is read too, as the model supports it: `T\`` (`Её`) scores +37, the
     /// English `I.`, `A.`, `S.` from -10 to -31.
-    fn _keys_lean_to_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
+    fn keys_lean_to_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
         self.ortho_score(plan, before).is_some_and(|score| score.supported && score.total > 0.0)
     }
 
@@ -578,9 +578,9 @@ impl EngineCore {
     /// by: `руку` is a Russian word and `here` an English one, and `dc\`` is `всё` or
     /// `вс` with a backtick. When a word typed in the same layout converts - `ерун` is
     /// `they` - the model is asked about the word before it once more with the
-    /// converted word after it, as a waiting word is (_resolve_context_wait); while
+    /// converted word after it, as a waiting word is (resolve_context_wait); while
     /// it converts them, one correction takes the words along: `hey here they`. The
-    /// mirror of _revert_with_next_word; the engine only asks, the model decides.
+    /// mirror of revert_with_next_word; the engine only asks, the model decides.
     ///
     /// Only the first words of a line are taken along: a word with words before it
     /// on its line was decided with them, and asked again it reads to the model like
@@ -602,8 +602,8 @@ impl EngineCore {
     /// the English layout types as a sign stayed in the middle of every sentence
     /// (`в 2 vbkkbjyf[ cdtnjds[` converted only `световых`, though the model, asked,
     /// converts `миллионах` before it at p=1.0). A word the user excluded, or one a rule
-    /// of theirs keeps, is never taken along: the model is not asked about it (_decide_word).
-    pub(crate) fn _take_along(
+    /// of theirs keeps, is never taken along: the model is not asked about it (decide_word).
+    pub(crate) fn take_along(
         &mut self, kept: &[Arc<KeptWord>], plan: &PlanRef, first_characters: usize, application: &str, switched: bool,
     ) -> EngineResult<PlanRef> {
         if self.text_setting("detection.context_policy", "assist") != "assist" {
@@ -641,7 +641,7 @@ impl EngineCore {
                 || !self.context_policy.stream.text.ends_with(&asked)
                 // The user's exclusions and rules stand, as at the word's own space.
                 || ignored.contains(&LanguageDetector::token_key(&previous.original))
-                || self._rejected_targets(previous.source_group, &previous.original).contains(&previous.target_group)
+                || self.rejected_targets(previous.source_group, &previous.original).contains(&previous.target_group)
             {
                 break;
             }
@@ -650,14 +650,14 @@ impl EngineCore {
                 Some(field) => field.clone(),
                 None => self.context_policy.stream.snapshot(&asked),
             };
-            if !passed && !self._word_of_its_language(previous.target_group, &previous.replacement)? {
+            if !passed && !self.word_of_its_language(previous.target_group, &previous.replacement)? {
                 // Only a word whose other reading is a word is asked: a term typed as intended before
                 // a Russian word typed in the English layout (`htop gjrfpsdftn`) is no `рещз`, yet
                 // asked with `показывает` after it the model converts it. A token whose segmentation
                 // is open is asked as well when the orthotactic model reads its keys as the other
                 // layout's language, as it does for words no lexicon holds (`vehpbkrf[` is
                 // `мурзилках`) and does not for terms with a sign after them (`docs.`, `UI,`).
-                if !(word.segmentation_open && self._keys_of_target_language(&previous, &field.before)) {
+                if !(word.segmentation_open && self.keys_of_target_language(&previous, &field.before)) {
                     if word.segmentation_open {
                         technical_event!(
                             self.shared, "kept_word_not_asked", "previous_characters": pystr::len(&previous.original),
@@ -670,7 +670,7 @@ impl EngineCore {
             if !passed {
                 let baseline = match &word.baseline {
                     Some(baseline) => baseline.clone(),
-                    None => self._baseline_decision(
+                    None => self.baseline_decision(
                         &previous.original, &vec![(previous.target_group, previous.replacement.clone())], previous.source_group, application,
                         CorrectionTrigger::Space, None,
                     )?,
@@ -693,7 +693,7 @@ impl EngineCore {
                 // the whole token: its keys read as the other layout's language (`T\`` is `Её`, `dc.` is `всю`) and
                 // not as the typed one's (`it.`, `ok.`). Unconfirmed, `Её платье` and `всю неделю` typed in the English
                 // layout kept their first word (the development sentences of the Tatoeba dump, 22.10.2026).
-                let suggested = word.segmentation_open && action == Some("suggest") && self._keys_lean_to_target_language(&previous, &field.before);
+                let suggested = word.segmentation_open && action == Some("suggest") && self.keys_lean_to_target_language(&previous, &field.before);
                 if !suggested
                     && (!again.decision.should_convert
                         || (word.segmentation_open && !(again.decision_source == "short_word_override" || action == Some("convert"))))
@@ -709,7 +709,7 @@ impl EngineCore {
                     resumed.push(word.clone());
                 }
             }
-            let context_field = self._context_field_id();
+            let context_field = self.context_field_id();
             plan = plan.replaced_with(|plan| {
                 let mut strokes = previous.strokes.clone();
                 strokes.push(previous_boundary.clone());

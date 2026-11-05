@@ -259,11 +259,11 @@ impl Replayer {
     fn type_keys(&self, core: &mut EngineCore, backend: &Arc<Backend>, clock: &FakeClock, plan: &Plan, expected: &[char], intervention: &mut Value) -> Result<(), String> {
         let timers = |core: &mut EngineCore| -> Result<(), String> {
             // The engine's idle loop runs exactly these callbacks when no key arrives.
-            core._expire_deferred_action().map_err(|error| format!("{error:?}"))?;
-            core._expire_manual_correction();
-            core._poll_current_group().map_err(|error| format!("{error:?}"))?;
-            core._maybe_correct_after_pause(None).map_err(|error| format!("{error:?}"))?;
-            core._expire_learning_prompt(None);
+            core.expire_deferred_action().map_err(|error| format!("{error:?}"))?;
+            core.expire_manual_correction();
+            core.poll_current_group().map_err(|error| format!("{error:?}"))?;
+            core.maybe_correct_after_pause(None).map_err(|error| format!("{error:?}"))?;
+            core.expire_learning_prompt(None);
             Ok(())
         };
         for (index, key) in plan.keys.iter().enumerate() {
@@ -298,11 +298,11 @@ impl Replayer {
                 ..KeyEvent::default()
             };
             backend.type_key(&pressed);
-            core._handle(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
+            core.handle_inner(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
             clock.advance(SIMULATED_KEY_UP_SECONDS);
             let released = KeyEvent { pressed: false, timestamp: (ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND)).to::<i64>(), ..pressed };
             backend.type_key(&released);
-            core._handle(Arc::new(released)).map_err(|error| format!("{error:?}"))?;
+            core.handle_inner(Arc::new(released)).map_err(|error| format!("{error:?}"))?;
             timers(core)?;
             let space = |value: char| pystr::isspace(value.encode_utf8(&mut [0_u8; 4]));
             // Both modes run the idle callbacks: a document that ends without a boundary key still reaches its decision.

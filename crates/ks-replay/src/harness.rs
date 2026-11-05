@@ -372,11 +372,11 @@ pub struct Session {
 
 impl Session {
     fn timers(&mut self) {
-        self.core._expire_deferred_action().expect("a timer of the harness");
-        self.core._expire_manual_correction();
-        self.core._poll_current_group().expect("a timer of the harness");
-        self.core._maybe_correct_after_pause(None).expect("a timer of the harness");
-        self.core._expire_learning_prompt(None);
+        self.core.expire_deferred_action().expect("a timer of the harness");
+        self.core.expire_manual_correction();
+        self.core.poll_current_group().expect("a timer of the harness");
+        self.core.maybe_correct_after_pause(None).expect("a timer of the harness");
+        self.core.expire_learning_prompt(None);
     }
 
     pub fn idle(&mut self, seconds: f64) {
@@ -386,11 +386,11 @@ impl Session {
 
     pub fn select_layout(&mut self, group: i32) {
         self.backend.set_group(group);
-        self.core._poll_current_group().expect("the layout of the editor");
+        self.core.poll_current_group().expect("the layout of the editor");
     }
 
     pub fn handle(&mut self, event: KeyEvent) {
-        self.core._handle(Arc::new(event)).expect("a key the engine handles");
+        self.core.handle_inner(Arc::new(event)).expect("a key the engine handles");
     }
 
     fn stamp(&self) -> i64 {

@@ -516,7 +516,7 @@ impl Typist {
 
     fn send(session: &mut Session, event: KeyEvent) {
         session.backend.type_key(&event);
-        session.core._handle(Arc::new(event)).expect("a key the engine handles");
+        session.core.handle_inner(Arc::new(event)).expect("a key the engine handles");
     }
 
     fn tap(session: &mut Session, event: KeyEvent) {
@@ -549,7 +549,7 @@ impl Typist {
             if let Some(selected) = selected.filter(|value| i64::from(session.backend.group()) != *value) {
                 session.backend.set_group(selected.to::<i32>());
                 if !slipped {
-                    session.core._observe_group(selected, "hotkey");
+                    session.core.observe_group(selected, "hotkey");
                 }
             }
             let Some(mut keys) = keys_for(&token, intended, &self.inverse) else {
@@ -592,8 +592,8 @@ impl Typist {
         let group = session.backend.group();
         let pointer = KeyEvent { pressed: true, keycode: 0, key_name: "Pointer".to_owned(), character: String::new(), characters: vec![String::new(), String::new()], group, state: 0, timestamp: 0, ..KeyEvent::default() };
         let released = KeyEvent { pressed: false, ..pointer.clone() };
-        session.core._handle(Arc::new(pointer)).expect("a key the engine handles");
-        session.core._handle(Arc::new(released)).expect("a key the engine handles");
+        session.core.handle_inner(Arc::new(pointer)).expect("a key the engine handles");
+        session.core.handle_inner(Arc::new(released)).expect("a key the engine handles");
         for key in keys {
             session.clock.advance(MIXED_EDIT_KEY_INTERVAL_SECONDS);
             let group = session.backend.group();
@@ -601,7 +601,7 @@ impl Typist {
             Self::tap(&mut session, event);
         }
         session.clock.advance(MIXED_EDIT_PAUSE_SECONDS);
-        session.core._maybe_correct_after_pause(None).expect("a timer of the bench");
+        session.core.maybe_correct_after_pause(None).expect("a timer of the bench");
         Some(self.finish(session))
     }
 

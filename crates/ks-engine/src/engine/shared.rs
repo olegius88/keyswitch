@@ -59,13 +59,13 @@ pub type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
 
 /// What the Python's `_lock` guards. It is never held while calling a callback, the backend or the settings.
 struct Guarded {
-    _snapshot: EngineSnapshot,
-    _callbacks: Vec<SnapshotCallback>,
-    _correction_callbacks: Vec<CorrectionCallback>,
-    _learning_prompt: Option<LearningPrompt>,
-    _learning_prompt_deadline: Option<f64>,
-    _learning_prompt_callbacks: Vec<LearningPromptCallback>,
-    _rule_request_callbacks: Vec<RuleRequestCallback>,
+    snapshot: EngineSnapshot,
+    callbacks: Vec<SnapshotCallback>,
+    correction_callbacks: Vec<CorrectionCallback>,
+    learning_prompt: Option<LearningPrompt>,
+    learning_prompt_deadline: Option<f64>,
+    learning_prompt_callbacks: Vec<LearningPromptCallback>,
+    rule_request_callbacks: Vec<RuleRequestCallback>,
 }
 
 pub struct Shared {
@@ -75,25 +75,25 @@ pub struct Shared {
     pub(crate) models_len: usize,
     swallows_hotkeys: bool,
     // Read from the keyboard hook without a lock: see `consumes_key`.
-    _prompt_key_deadline: AtomicU64,
-    _input_suspended: AtomicBool,
-    _test_field_focused: AtomicBool,
+    prompt_key_deadline: AtomicU64,
+    input_suspended: AtomicBool,
+    test_field_focused: AtomicBool,
     // Input other programs inject (remote control, macros) counts as typing
     // only with detection.injected_input; read by the hook, so cached here.
-    _injected_input: AtomicBool,
-    _sensitive_context_window: AtomicI64,
-    _focus_window: AtomicI64,
-    _action_keys: AtomicU8,
+    injected_input: AtomicBool,
+    sensitive_context_window: AtomicI64,
+    focus_window: AtomicI64,
+    action_keys: AtomicU8,
     /// Swapped whole when the settings change; the hook only tries it, so it never waits.
-    _own_hotkeys: RwLock<Arc<Vec<Hotkey>>>,
-    pub _typed_events: AtomicI64,
-    pub _typed_presses: AtomicI64,
-    pub _input_overflow: AtomicBool,
-    pub(crate) _running: AtomicBool,
+    own_hotkeys: RwLock<Arc<Vec<Hotkey>>>,
+    pub typed_events: AtomicI64,
+    pub typed_presses: AtomicI64,
+    pub input_overflow: AtomicBool,
+    pub(crate) running: AtomicBool,
     inbox: Mutex<Inbox>,
     wake: Condvar,
     guarded: Mutex<Guarded>,
-    pub(crate) _log_redactor: Mutex<ks_config::log_privacy::LogRedactor>,
+    pub(crate) log_redactor: Mutex<ks_config::log_privacy::LogRedactor>,
     /// The settings' unsubscribe call, made when the engine goes.
     unsubscribe: Mutex<Option<ks_config::config::Unsubscribe>>,
 }
@@ -113,37 +113,37 @@ impl Shared {
             clock,
             models_len,
             swallows_hotkeys,
-            _prompt_key_deadline: AtomicU64::new(0f64.to_bits()),
-            _input_suspended: AtomicBool::new(false),
-            _test_field_focused: AtomicBool::new(false),
-            _injected_input: AtomicBool::new(false),
-            _sensitive_context_window: AtomicI64::new(NO_WINDOW),
-            _focus_window: AtomicI64::new(NO_WINDOW),
-            _action_keys: AtomicU8::new(0),
-            _own_hotkeys: RwLock::new(Arc::new(Vec::new())),
-            _typed_events: AtomicI64::new(0),
-            _typed_presses: AtomicI64::new(0),
-            _input_overflow: AtomicBool::new(false),
-            _running: AtomicBool::new(false),
+            prompt_key_deadline: AtomicU64::new(0f64.to_bits()),
+            input_suspended: AtomicBool::new(false),
+            test_field_focused: AtomicBool::new(false),
+            injected_input: AtomicBool::new(false),
+            sensitive_context_window: AtomicI64::new(NO_WINDOW),
+            focus_window: AtomicI64::new(NO_WINDOW),
+            action_keys: AtomicU8::new(0),
+            own_hotkeys: RwLock::new(Arc::new(Vec::new())),
+            typed_events: AtomicI64::new(0),
+            typed_presses: AtomicI64::new(0),
+            input_overflow: AtomicBool::new(false),
+            running: AtomicBool::new(false),
             inbox: Mutex::new(Inbox::default()),
             wake: Condvar::new(),
             guarded: Mutex::new(Guarded {
-                _snapshot: snapshot,
-                _callbacks: Vec::new(),
-                _correction_callbacks: Vec::new(),
-                _learning_prompt: None,
-                _learning_prompt_deadline: None,
-                _learning_prompt_callbacks: Vec::new(),
-                _rule_request_callbacks: Vec::new(),
+                snapshot: snapshot,
+                callbacks: Vec::new(),
+                correction_callbacks: Vec::new(),
+                learning_prompt: None,
+                learning_prompt_deadline: None,
+                learning_prompt_callbacks: Vec::new(),
+                rule_request_callbacks: Vec::new(),
             }),
-            _log_redactor: Mutex::new(ks_config::log_privacy::LogRedactor::new()),
+            log_redactor: Mutex::new(ks_config::log_privacy::LogRedactor::new()),
             unsubscribe: Mutex::new(None),
         });
         shared.refresh_hook_settings();
         shared
     }
 
-    /// `self.settings.subscribe(self._settings_changed)`. What the hook reads changes at once, on the caller's thread; the
+    /// `self.settings.subscribe(self.settings_changed)`. What the hook reads changes at once, on the caller's thread; the
     /// rest of the change is the worker's.
     pub(crate) fn subscribe_settings(shared: &Arc<Shared>) {
         let weak = Arc::downgrade(shared);
@@ -162,15 +162,15 @@ impl Shared {
         self.settings.with_value(path, |value| value.map_or(default, truthy))
     }
 
-    /// `_action_keys`, `_own_hotkeys` and `_injected_input`, read from the settings for the hook.
+    /// `action_keys`, `own_hotkeys` and `injected_input`, read from the settings for the hook.
     pub(crate) fn refresh_hook_settings(&self) {
-        self._action_keys.store(self._configured_action_keys(), Ordering::Relaxed);
-        let hotkeys = Arc::new(self._configured_hotkeys());
-        *self._own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
-        self._injected_input.store(self.flag("detection.injected_input", false), Ordering::Relaxed);
+        self.action_keys.store(self.configured_action_keys(), Ordering::Relaxed);
+        let hotkeys = Arc::new(self.configured_hotkeys());
+        *self.own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
+        self.injected_input.store(self.flag("detection.injected_input", false), Ordering::Relaxed);
     }
 
-    fn _configured_action_keys(&self) -> u8 {
+    fn configured_action_keys(&self) -> u8 {
         if !self.flag("enabled", true) {
             return 0;
         }
@@ -185,7 +185,7 @@ impl Shared {
     }
 
     /// Every hotkey of the settings, parsed once for the keyboard hook (see `consumes_key`).
-    fn _configured_hotkeys(&self) -> Vec<Hotkey> {
+    fn configured_hotkeys(&self) -> Vec<Hotkey> {
         self.settings.with_value("hotkeys", |configured| match configured {
             Some(Value::Object(map)) => map
                 .values()
@@ -198,46 +198,46 @@ impl Shared {
         })
     }
 
-    pub fn _prompt_key_deadline(&self) -> f64 {
-        f64::from_bits(self._prompt_key_deadline.load(Ordering::Relaxed))
+    pub fn prompt_key_deadline(&self) -> f64 {
+        f64::from_bits(self.prompt_key_deadline.load(Ordering::Relaxed))
     }
 
     pub(crate) fn set_prompt_key_deadline(&self, deadline: f64) {
-        self._prompt_key_deadline.store(deadline.to_bits(), Ordering::Relaxed);
+        self.prompt_key_deadline.store(deadline.to_bits(), Ordering::Relaxed);
     }
 
-    pub fn _sensitive_context_window(&self) -> Option<i64> {
-        let window = self._sensitive_context_window.load(Ordering::Relaxed);
+    pub fn sensitive_context_window(&self) -> Option<i64> {
+        let window = self.sensitive_context_window.load(Ordering::Relaxed);
         (window != NO_WINDOW).then_some(window)
     }
 
     pub(crate) fn set_sensitive_context_window(&self, window: Option<i64>) {
-        self._sensitive_context_window.store(window.unwrap_or(NO_WINDOW), Ordering::Relaxed);
+        self.sensitive_context_window.store(window.unwrap_or(NO_WINDOW), Ordering::Relaxed);
     }
 
-    pub fn _focus_window(&self) -> Option<i64> {
-        let window = self._focus_window.load(Ordering::Relaxed);
+    pub fn focus_window(&self) -> Option<i64> {
+        let window = self.focus_window.load(Ordering::Relaxed);
         (window != NO_WINDOW).then_some(window)
     }
 
     pub fn set_focus_window(&self, window: i64) {
-        self._focus_window.store(window, Ordering::Relaxed);
+        self.focus_window.store(window, Ordering::Relaxed);
     }
 
-    pub fn _input_suspended(&self) -> bool {
-        self._input_suspended.load(Ordering::Relaxed)
+    pub fn input_suspended(&self) -> bool {
+        self.input_suspended.load(Ordering::Relaxed)
     }
 
-    pub fn _test_field_focused(&self) -> bool {
-        self._test_field_focused.load(Ordering::Relaxed)
+    pub fn test_field_focused(&self) -> bool {
+        self.test_field_focused.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn _accepts_injected(&self, event: &KeyEvent) -> bool {
+    pub(crate) fn accepts_injected(&self, event: &KeyEvent) -> bool {
         // Whether input another program injected is treated as the user's typing.
         //
         // A key that carries a character instead of a key position (VK_PACKET on
         // Windows) never is: it cannot be typed again in another layout.
-        self._injected_input.load(Ordering::Relaxed) && event.key_name != ks_backend::constants::UNICODE_PACKET_KEY_NAME
+        self.injected_input.load(Ordering::Relaxed) && event.key_name != ks_backend::constants::UNICODE_PACKET_KEY_NAME
     }
 
     /// `consumes_key`.
@@ -252,10 +252,10 @@ impl Shared {
         if !event.pressed || event.synthetic {
             return KeyDisposition::Pass;
         }
-        if self._input_suspended() || (event.foreign && !self._accepts_injected(event)) {
+        if self.input_suspended() || (event.foreign && !self.accepts_injected(event)) {
             return KeyDisposition::Pass;
         }
-        if self._sensitive_context_window.load(Ordering::Relaxed) != NO_WINDOW {
+        if self.sensitive_context_window.load(Ordering::Relaxed) != NO_WINDOW {
             return KeyDisposition::Pass;
         }
         if is_modifier_key(&event.key_name) {
@@ -267,14 +267,14 @@ impl Shared {
             // TextEdit typed Control+Option+Z as U+001A, which the undo then deleted in place of the
             // word's last letter. The Win32 hook and XRecord leave them to the window, as before.
             return if self.swallows_hotkeys
-                && self._own_hotkeys.try_read().is_ok_and(|hotkeys| hotkeys.iter().any(|hotkey| hotkey.matches(event)))
+                && self.own_hotkeys.try_read().is_ok_and(|hotkeys| hotkeys.iter().any(|hotkey| hotkey.matches(event)))
             {
                 KeyDisposition::Consume
             } else {
                 KeyDisposition::Pass
             };
         }
-        if (self.clock)() < self._prompt_key_deadline() && PROMPT_KEYS.contains(&event.key_name.as_str()) {
+        if (self.clock)() < self.prompt_key_deadline() && PROMPT_KEYS.contains(&event.key_name.as_str()) {
             return KeyDisposition::Consume;
         }
         self.set_prompt_key_deadline(0.0);
@@ -284,7 +284,7 @@ impl Shared {
             "Tab" => ACTION_TAB,
             _ => 0,
         };
-        if action & self._action_keys.load(Ordering::Relaxed) != 0 { KeyDisposition::Defer } else { KeyDisposition::Pass }
+        if action & self.action_keys.load(Ordering::Relaxed) != 0 { KeyDisposition::Defer } else { KeyDisposition::Pass }
     }
 
     /// `enqueue`: on the hook's thread, behind the inbox's short lock, which nothing holds while it blocks.
@@ -296,8 +296,8 @@ impl Shared {
             self.set_prompt_key_deadline(0.0);
         }
         // Physical events and presses are separate: a key-up is not text.
-        self._typed_events.fetch_add(1, Ordering::Relaxed);
-        self._typed_presses.fetch_add(i64::from(event.pressed), Ordering::Relaxed);
+        self.typed_events.fetch_add(1, Ordering::Relaxed);
+        self.typed_presses.fetch_add(i64::from(event.pressed), Ordering::Relaxed);
         let mut inbox = locked(&self.inbox);
         if inbox.events.len() < ENGINE_EVENT_QUEUE_MAX_SIZE {
             inbox.events.push_back(QueueItem::Key(Arc::new(event)));
@@ -307,7 +307,7 @@ impl Shared {
             drop(inbox);
             // The hook must not mutate the worker's state or invoke UI/file
             // callbacks. The worker invalidates the text before its next action.
-            self._input_overflow.store(true, Ordering::Relaxed);
+            self.input_overflow.store(true, Ordering::Relaxed);
         }
     }
 
@@ -391,9 +391,9 @@ impl Shared {
         locked(&self.inbox).events.pop_front()
     }
 
-    pub(crate) fn _application_excluded(&self, application: &str) -> bool {
-        if let Some(window) = self._sensitive_context_window()
-            && Some(window) == self._focus_window()
+    pub(crate) fn application_excluded(&self, application: &str) -> bool {
+        if let Some(window) = self.sensitive_context_window()
+            && Some(window) == self.focus_window()
         {
             return true;
         }
@@ -409,47 +409,47 @@ impl Shared {
 
     /// `self.snapshot`.
     pub fn snapshot(&self) -> EngineSnapshot {
-        locked(&self.guarded)._snapshot.clone()
+        locked(&self.guarded).snapshot.clone()
     }
 
     pub(crate) fn current_group(&self) -> i64 {
-        locked(&self.guarded)._snapshot.current_group
+        locked(&self.guarded).snapshot.current_group
     }
 
     pub(crate) fn correction_count(&self) -> i64 {
-        locked(&self.guarded)._snapshot.correction_count
+        locked(&self.guarded).snapshot.correction_count
     }
 
     pub fn subscribe(&self, callback: SnapshotCallback) {
-        locked(&self.guarded)._callbacks.push(callback.clone());
+        locked(&self.guarded).callbacks.push(callback.clone());
         callback(&self.snapshot());
     }
 
     pub fn subscribe_corrections(&self, callback: CorrectionCallback) {
-        locked(&self.guarded)._correction_callbacks.push(callback);
+        locked(&self.guarded).correction_callbacks.push(callback);
     }
 
     pub(crate) fn correction_callbacks(&self) -> Vec<CorrectionCallback> {
-        locked(&self.guarded)._correction_callbacks.clone()
+        locked(&self.guarded).correction_callbacks.clone()
     }
 
     /// `self.learning_prompt`.
     pub fn learning_prompt(&self) -> Option<LearningPrompt> {
-        locked(&self.guarded)._learning_prompt.clone()
+        locked(&self.guarded).learning_prompt.clone()
     }
 
     pub fn subscribe_learning_prompts(&self, callback: LearningPromptCallback) {
         let prompt = {
             let mut guarded = locked(&self.guarded);
-            guarded._learning_prompt_callbacks.push(callback.clone());
-            guarded._learning_prompt.clone()
+            guarded.learning_prompt_callbacks.push(callback.clone());
+            guarded.learning_prompt.clone()
         };
         callback(prompt.as_ref());
     }
 
     /// Be told when Enter on the prompt asks for the rule window.
     pub fn subscribe_rule_requests(&self, callback: RuleRequestCallback) {
-        locked(&self.guarded)._rule_request_callbacks.push(callback);
+        locked(&self.guarded).rule_request_callbacks.push(callback);
     }
 
     /// Enter on the prompt: open the rule window, filled in from the prompt.
@@ -459,16 +459,16 @@ impl Shared {
     pub fn confirm_learning_prompt(&self, prompt: Option<&LearningPrompt>) -> bool {
         let (current, callbacks, requests) = {
             let mut guarded = locked(&self.guarded);
-            let Some(current) = guarded._learning_prompt.clone() else {
+            let Some(current) = guarded.learning_prompt.clone() else {
                 return false;
             };
             if prompt.is_some_and(|prompt| *prompt != current) {
                 return false;
             }
-            guarded._learning_prompt = None;
-            guarded._learning_prompt_deadline = None;
+            guarded.learning_prompt = None;
+            guarded.learning_prompt_deadline = None;
             self.set_prompt_key_deadline(0.0);
-            (current, guarded._learning_prompt_callbacks.clone(), guarded._rule_request_callbacks.clone())
+            (current, guarded.learning_prompt_callbacks.clone(), guarded.rule_request_callbacks.clone())
         };
         technical_event!(
             self, "learning_prompt_confirmed",
@@ -490,16 +490,16 @@ impl Shared {
     pub fn dismiss_learning_prompt(&self, prompt: Option<&LearningPrompt>, reason: &str) -> bool {
         let (current, callbacks) = {
             let mut guarded = locked(&self.guarded);
-            let Some(current) = guarded._learning_prompt.clone() else {
+            let Some(current) = guarded.learning_prompt.clone() else {
                 return false;
             };
             if prompt.is_some_and(|prompt| *prompt != current) {
                 return false;
             }
-            guarded._learning_prompt = None;
-            guarded._learning_prompt_deadline = None;
+            guarded.learning_prompt = None;
+            guarded.learning_prompt_deadline = None;
             self.set_prompt_key_deadline(0.0);
-            (current, guarded._learning_prompt_callbacks.clone())
+            (current, guarded.learning_prompt_callbacks.clone())
         };
         technical_event!(
             self, "learning_prompt_dismissed",
@@ -514,17 +514,17 @@ impl Shared {
         true
     }
 
-    pub fn _show_learning_prompt(&self, prompt: LearningPrompt) {
+    pub fn show_learning_prompt(&self, prompt: LearningPrompt) {
         let now = (self.clock)();
         let callbacks = {
             let mut guarded = locked(&self.guarded);
-            guarded._learning_prompt = Some(prompt.clone());
+            guarded.learning_prompt = Some(prompt.clone());
             let deadline = now + LEARNING_PROMPT_TIMEOUT_SECONDS;
-            guarded._learning_prompt_deadline = Some(deadline);
+            guarded.learning_prompt_deadline = Some(deadline);
             self.set_prompt_key_deadline(deadline);
-            guarded._learning_prompt_callbacks.clone()
+            guarded.learning_prompt_callbacks.clone()
         };
-        let excluded = self._application_excluded(&prompt.application);
+        let excluded = self.application_excluded(&prompt.application);
         technical_event!(
             self, "learning_prompt_shown",
             "original": if excluded { "<redacted>" } else { prompt.original.as_str() },
@@ -540,8 +540,8 @@ impl Shared {
         }
     }
 
-    pub fn _expire_learning_prompt(&self, now: Option<f64>) -> bool {
-        let Some(deadline) = locked(&self.guarded)._learning_prompt_deadline else {
+    pub fn expire_learning_prompt(&self, now: Option<f64>) -> bool {
+        let Some(deadline) = locked(&self.guarded).learning_prompt_deadline else {
             return false;
         };
         let current_time = now.unwrap_or_else(|| (self.clock)());
@@ -556,10 +556,10 @@ impl Shared {
     /// The window reports when it gains and loses the keyboard, so typing elsewhere
     /// while it stays open is corrected as usual.
     pub fn set_rule_editor_open(&self, opened: bool) {
-        if opened == self._input_suspended() {
+        if opened == self.input_suspended() {
             return;
         }
-        self._input_suspended.store(opened, Ordering::Relaxed);
+        self.input_suspended.store(opened, Ordering::Relaxed);
         technical_event!(self, if opened { "rule_editor_focused" } else { "rule_editor_left" });
     }
 
@@ -572,17 +572,17 @@ impl Shared {
     /// and a layout picked by hand while it has the keyboard must protect the next word there
     /// too. Only the window knows which of its controls has the keyboard, so it reports it here.
     pub fn set_test_field_focused(&self, focused: bool) {
-        if focused == self._test_field_focused() {
+        if focused == self.test_field_focused() {
             return;
         }
-        self._test_field_focused.store(focused, Ordering::Relaxed);
+        self.test_field_focused.store(focused, Ordering::Relaxed);
         technical_event!(self, if focused { "test_field_focused" } else { "test_field_left" });
     }
 
-    pub fn _update(&self, update: Update) {
+    pub fn update(&self, update: Update) {
         let (callbacks, snapshot) = {
             let mut guarded = locked(&self.guarded);
-            let current = &mut guarded._snapshot;
+            let current = &mut guarded.snapshot;
             if let Some(value) = update.running {
                 current.running = value;
             }
@@ -613,10 +613,10 @@ impl Shared {
             if let Some(value) = update.context_model {
                 current.context_model = value;
             }
-            if guarded._callbacks.is_empty() {
+            if guarded.callbacks.is_empty() {
                 return;
             }
-            (guarded._callbacks.clone(), guarded._snapshot.clone())
+            (guarded.callbacks.clone(), guarded.snapshot.clone())
         };
         for callback in callbacks {
             callback(&snapshot);
@@ -629,7 +629,7 @@ impl Shared {
 
     /// The technical record, after its words that look like a password went into stars (log_privacy).
     pub(crate) fn emit_technical(&self, payload: Map<String, Value>) {
-        let record = locked(&self._log_redactor).record(&payload);
+        let record = locked(&self.log_redactor).record(&payload);
         let options = ks_text::JsonOptions {
             ensure_ascii: false,
             indent: None,

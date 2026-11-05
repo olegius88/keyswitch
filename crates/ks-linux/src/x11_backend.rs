@@ -552,7 +552,7 @@ impl Shared {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
         let Some(api) = self.api() else { return Err(failed("X11 backend не запущен")) };
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         if !api.lock_group(group.low::<u8>()) {
             return Err(failed(format!("Не удалось переключить XKB-группу на {group}")));
         }
@@ -706,7 +706,7 @@ impl Shared {
         let source_boundary_sequence = if preserve_boundary_layout && kept_tail == 0 { &boundary_sequence } else { &none };
         // After a kept word the boundary follows it in the same layout.
         let kept_boundary_sequence = if kept_tail != 0 { &boundary_sequence } else { &none };
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         self.expect(&[&sequence, target_boundary_sequence, source_boundary_sequence, &kept_sequence, kept_boundary_sequence]);
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {
@@ -798,7 +798,7 @@ impl Shared {
             reselect.push((false, shift_keycode));
         }
         let typed: Vec<(bool, u8)> = runs.iter().flat_map(|(_, events)| events.iter().copied()).collect();
-        let _inject = lock(&self.inject_lock);
+        let inject_inner = lock(&self.inject_lock);
         self.expect(&[&typed, &reselect]);
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {

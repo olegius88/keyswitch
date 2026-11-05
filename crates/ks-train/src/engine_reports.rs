@@ -18,7 +18,7 @@ use ks_engine::engine::{EngineCore, EngineParts};
 use ks_lang::boundary_model::BoundaryModel;
 use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::constants::{BOUNDARY_V1_FEATURE_VERSION, PREFIX_INDEX_DICTIONARY_MAX_BYTES};
-use ks_lang::early_switch::{PrefixIndex, _dictionary_stems};
+use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_lang::{LanguageModel, Resources};
 use ks_replay::harness::{Backend, FakeClock, UnreadField};
@@ -143,8 +143,8 @@ impl Engine {
         };
         let _ = character;
         self.backend.type_key(&pressed);
-        self.core._handle(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
-        self.core._handle(Arc::new(KeyEvent { pressed: false, ..pressed })).map_err(|error| format!("{error:?}"))
+        self.core.handle_inner(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
+        self.core.handle_inner(Arc::new(KeyEvent { pressed: false, ..pressed })).map_err(|error| format!("{error:?}"))
     }
 
     /// The text typed, and the policy with its model back for the next replay: parsing the artifact took 97% of a replay.
@@ -301,7 +301,7 @@ fn lexicon(root: &Path, resources: &Arc<Resources>, profile: &str) -> Result<Pre
         let directory = path.parent().ok_or("a lexicon outside a folder")?.to_path_buf();
         let onboard = LanguageModel::load(locale, std::iter::empty::<&str>(), &[directory], LanguageModel::disabled_speller());
         let index = if spelling {
-            let stems = _dictionary_stems(Path::new(models[group].speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
+            let stems = dictionary_stems(Path::new(models[group].speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
             PrefixIndex::new(onboard.frequencies.words().iter().chain(stems.iter()), onboard.frequencies.clone())
         } else {
             PrefixIndex::new(onboard.frequencies.words().iter(), onboard.frequencies.clone())
@@ -338,7 +338,7 @@ fn prefix_replay(row: &PrefixRow, task: &PrefixTask<'_>, policy: &mut Option<Con
         let other = other_of(*character, source, target);
         let characters = if row.source == 1 { [other, *character] } else { [*character, other] };
         engine.type_key(*character, characters, index + PREFIX_KEY_BASE, index + PREFIX_KEY_BASE)?;
-        if early.is_none() && engine.core._early_switch_origin.is_some() {
+        if early.is_none() && engine.core.early_switch_origin.is_some() {
             early = Some(index + 1);
         }
     }
@@ -526,8 +526,8 @@ fn context_v2_replay(text: &str, target: i32, initial: i32, setting: &str, polic
             ..KeyEvent::default()
         };
         backend.type_key(&pressed);
-        engine.core._handle(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
-        engine.core._handle(Arc::new(KeyEvent { pressed: false, ..pressed })).map_err(|error| format!("{error:?}"))?;
+        engine.core.handle_inner(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
+        engine.core.handle_inner(Arc::new(KeyEvent { pressed: false, ..pressed })).map_err(|error| format!("{error:?}"))?;
     }
     let injections = backend.corrections().len();
     let (typed, returned) = engine.finish();

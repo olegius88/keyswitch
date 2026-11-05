@@ -271,7 +271,7 @@ pub(crate) mod fake {
             self.asked.lock().unwrap().push(format!("{url} {body}"));
             Ok(self.answers.lock().unwrap().remove(0))
         }
-        fn post_document(&self, url: &str, _fields: &[(&str, String)], filename: &str, _data: &[u8]) -> Result<Answer> {
+        fn post_document(&self, url: &str, _fields: &[(&str, String)], filename: &str, data: &[u8]) -> Result<Answer> {
             self.asked.lock().unwrap().push(format!("{url} {filename}"));
             Ok(self.answers.lock().unwrap().remove(0))
         }
