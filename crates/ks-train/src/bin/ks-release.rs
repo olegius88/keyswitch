@@ -203,7 +203,11 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     } else {
         return Err(fail("--field-root and --field-released name the owner's typing and the last release's reports; a release does not skip them"));
     }
-    run(root, "the Debian package", "bash", &["packaging/build-rust-deb.sh"])
+    run(root, "the Debian package", "bash", &["packaging/build-rust-deb.sh"])?;
+    let architecture = output(root, "dpkg", &["--print-architecture"])?;
+    let package = format!("dist/keyswitch_{}_{architecture}.deb", options.version);
+    run(root, "what the package holds", &trainer, &["deb-check", "--tree", &tree, &package])?;
+    run(root, "the real tests in a private X server, and the package", "bash", &["packaging/e2e.sh", &package])
 }
 
 fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
