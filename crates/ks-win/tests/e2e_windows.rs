@@ -388,13 +388,24 @@ mod scenario {
         }
         println!("WINDOWS_EN_TO_RU_E2E_OK");
         editor.pump(PHASE_SETTLE);
-        editor.prepare(1)?;
-        editor.scans(&HELLO)?;
-        editor.scans(&[SCAN_SPACE])?;
-        editor.expect("hello ", 0, LONG)?;
-        let history = tail(history_of(root)?, 2);
-        if history != pairs(&[("ghbdtn", "привет"), ("руддщ", "hello")]) {
-            return Err(format!("unexpected correction history: {history:?}"));
+        // Another window can take the foreground of a runner in the middle of a correction, and the engine rightly gives
+        // the correction up: the word is typed again.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            editor.prepare(1)?;
+            editor.scans(&HELLO)?;
+            editor.scans(&[SCAN_SPACE])?;
+            match editor.expect("hello ", 0, LONG) {
+                Ok(()) => break,
+                Err(error) if attempt >= START_ATTEMPTS => return Err(error),
+                Err(_) => editor.pump(PHASE_SETTLE),
+            }
+        }
+        // The engine records a correction after it has typed it.
+        let wanted = pairs(&[("ghbdtn", "привет"), ("руддщ", "hello")]);
+        if !editor.pump_until(STANDARD, |_| history_of(root).is_ok_and(|history| tail(history, 2) == wanted)) {
+            return Err(format!("unexpected correction history: {:?}", tail(history_of(root)?, 2)));
         }
         println!("WINDOWS_RU_TO_EN_E2E_OK");
         editor.pump(PHASE_SETTLE);
@@ -477,9 +488,9 @@ mod scenario {
             editor.scans(&HELLO)?;
             editor.scans(&[SCAN_SPACE])?;
             editor.expect("руддщ ", 1, LONG)?;
-            let history = tail(history_of(&root)?, 3);
-            if history != pairs(&[("ghbdtn", "привет"), ("руддщ", "hello"), ("hello", "руддщ")]) {
-                return Err(format!("unexpected learned history: {history:?}"));
+            let wanted = pairs(&[("ghbdtn", "привет"), ("руддщ", "hello"), ("hello", "руддщ")]);
+            if !editor.pump_until(STANDARD, |_| history_of(&root).is_ok_and(|history| tail(history, 3) == wanted)) {
+                return Err(format!("unexpected learned history: {:?}", tail(history_of(&root)?, 3)));
             }
             println!("WINDOWS_LEARNING_PROMPT_E2E_OK");
             let _ = child.kill();
