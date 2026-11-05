@@ -208,8 +208,8 @@ impl EngineCore {
             None => Arc::new(default_learning_store(&settings, &history).map_err(|error| EngineError(error.to_string()))?),
         };
         let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> =
-            models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
-        let classifier: Option<Arc<dyn IntentClassifier>> = intent_model.map(|model| model as _);
+            models.iter().enumerate().map(|(group, model)| -> (i64, Arc<dyn LanguageScorer>) { (group.to::<i64>(), model.clone()) }).collect();
+        let classifier: Option<Arc<dyn IntentClassifier>> = intent_model.map(|model| -> Arc<dyn IntentClassifier> { model });
         let detector = LanguageDetector::new(scorers, classifier, protected_tokens)?;
         let personal_settings = settings.clone();
         let personal = PersonalWords::new(
@@ -350,7 +350,7 @@ impl EngineCore {
 
     #[inline]
     pub(crate) fn in_models(&self, group: i64) -> bool {
-        0 <= group && (group as usize) < self.models.len()
+        0 <= group && group.to::<usize>() < self.models.len()
     }
 
     #[inline]

@@ -194,7 +194,7 @@ fn build(root: &Path, resources: &Arc<Resources>, config: &Value) -> Result<(BTr
                 let sides = [PrefixSide { index: &lexicon.indexes[0], model: &lexicon.models[0] }, PrefixSide { index: &lexicon.indexes[1], model: &lexicon.models[1] }];
                 let values: Map<String, Value> = features(&item, [&sides[0], &sides[1]]).into_iter().map(|(feature, value)| (feature, json!(value))).collect();
                 let indexes: Vec<(i64, &PrefixIndex)> = lexicon.indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), index)).collect();
-                let scorers: Vec<(i64, &dyn PrefixScorer)> = lexicon.models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), &**model as &dyn PrefixScorer)).collect();
+                let scorers: Vec<(i64, &dyn PrefixScorer)> = lexicon.models.iter().enumerate().map(|(group, model)| -> (i64, &dyn PrefixScorer) { (group.to::<i64>(), &**model) }).collect();
                 let baseline = early_switch_decision(&indexes, &scorers, &original, &[(1 - situation.source, alternate.as_str())], situation.source, &policy);
                 let row = json!({"sequence": sequence, "family": situation.signature, "source": situation.source, "text": situation.text, "before": situation.before, "application": situation.application, "role": role_name(situation.role), "category": situation.category, "length": length, "profile": name, "label": label, "desired": desired, "legacy_convert": baseline.should_switch, "features": values});
                 content.get_mut(situation.split).expect("a split").extend(crate::artifact::canonical(&row));

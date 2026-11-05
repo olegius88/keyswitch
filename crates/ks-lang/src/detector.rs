@@ -311,7 +311,7 @@ impl LanguageDetector {
             .chain(alternatives.iter().map(|item| pystr::len(&LanguageModel::normalize(&item.1))))
             .max()
             .expect("two lengths at least");
-        if (effective_length as i64) < minimum_length {
+        if effective_length.to::<i64>() < minimum_length {
             return Ok(rejected("короткое слово"));
         }
         if ignored.contains(&original_key) {

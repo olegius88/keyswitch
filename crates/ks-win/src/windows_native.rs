@@ -252,7 +252,7 @@ mod win32 {
     }
 
     fn to_hwnd(window: i64) -> HWND {
-        window.to::<isize>() as HWND
+        window.to::<isize>().pointer_mut::<c_void>()
     }
 
     fn from_handle(handle: *mut c_void) -> i64 {
@@ -341,9 +341,9 @@ mod win32 {
     extern "system" fn mouse_callback(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
         if code == HC_ACTION {
             // SAFETY: for HC_ACTION the system passes a MSLLHOOKSTRUCT in lParam, valid for this call.
-            append_time(unsafe { (*(data as *const MSLLHOOKSTRUCT)).time });
+            append_time(unsafe { (*data.pointer::<MSLLHOOKSTRUCT>()).time });
             // A button press invalidates the caret position; a scroll does not.
-            if POINTER_INVALIDATING_MESSAGES.contains(&(message as u32)) {
+            if POINTER_INVALIDATING_MESSAGES.contains(&message.low::<u32>()) {
                 call_listener(NativeKeyEvent::new(true, 0, 0, false, false, 0));
             }
         }
@@ -355,7 +355,7 @@ mod win32 {
     extern "system" fn keyboard_callback(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
         if code == HC_ACTION {
             // SAFETY: for HC_ACTION the system passes a KBDLLHOOKSTRUCT in lParam, valid for this call.
-            let native = unsafe { &*(data as *const KBDLLHOOKSTRUCT) };
+            let native = unsafe { &*data.pointer::<KBDLLHOOKSTRUCT>() };
             if let Some(event) =
                 native_key_event(message.low::<u32>(), native.vkCode, native.scanCode, native.flags, native.time, native.dwExtraInfo)
             {
@@ -453,7 +453,7 @@ mod win32 {
                     buffer.as_mut_ptr(),
                     buffer.len().low::<i32>(),
                     TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
-                    layout.to::<isize>() as *mut c_void,
+                    layout.to::<isize>().pointer_mut::<c_void>(),
                 )
             };
             if written <= 0 {

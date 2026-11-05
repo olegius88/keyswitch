@@ -260,7 +260,7 @@ mod tests {
         let mut table = Vec::new();
         for &a in &letters {
             for &b in &letters {
-                table.push((format!("{a}{b}"), -(table.len() as f64) / 512.0));
+                table.push((format!("{a}{b}"), -table.len().to::<f64>() / 512.0));
             }
         }
         table

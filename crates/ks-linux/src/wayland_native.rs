@@ -88,12 +88,12 @@ fn check(result: c_int) -> io::Result<c_int> {
 
 fn ioctl_buffer(fd: RawFd, request: libc::c_ulong, buffer: &mut [u8]) -> io::Result<()> {
     // SAFETY: `request` encodes a buffer of at most `buffer.len()` bytes, and `buffer` stays valid for the whole call.
-    check(unsafe { libc::ioctl(fd, request as _, buffer.as_mut_ptr().cast::<c_void>()) }).map(|_| ())
+    check(unsafe { libc::ioctl(fd, request.to::<libc::c_ulong>(), buffer.as_mut_ptr().cast::<c_void>()) }).map(|_| ())
 }
 
 fn ioctl_value(fd: RawFd, request: libc::c_ulong, value: libc::c_ulong) -> io::Result<()> {
     // SAFETY: the requests used with this function take their argument by value, not through a pointer.
-    check(unsafe { libc::ioctl(fd, request as _, value) }).map(|_| ())
+    check(unsafe { libc::ioctl(fd, request.to::<libc::c_ulong>(), value) }).map(|_| ())
 }
 
 /// The numbers of the set bits of a bitmap, least significant bit of the first byte first.
@@ -137,8 +137,8 @@ fn read_sysfs_hex(path: &Path) -> u32 {
 fn input_event_bytes(ev_type: u32, code: u32, value: i32) -> Vec<u8> {
     let mut bytes = vec![0u8; std::mem::size_of::<libc::input_event>()];
     let header = std::mem::size_of::<libc::timeval>();
-    bytes[header..header + 2].copy_from_slice(&(ev_type as u16).to_ne_bytes());
-    bytes[header + 2..header + 4].copy_from_slice(&(code as u16).to_ne_bytes());
+    bytes[header..header + 2].copy_from_slice(&ev_type.low::<u16>().to_ne_bytes());
+    bytes[header + 2..header + 4].copy_from_slice(&code.low::<u16>().to_ne_bytes());
     bytes[header + 4..header + 8].copy_from_slice(&value.to_ne_bytes());
     bytes
 }
@@ -287,7 +287,7 @@ impl HelperOs for LinuxHelperOs {
             // `struct uinput_setup`: the device's id, its name and the force-feedback effect count.
             let mut setup = Vec::with_capacity(92);
             for number in [BUS_I8042, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, WAYLAND_UINPUT_VERSION] {
-                setup.extend_from_slice(&(number as u16).to_ne_bytes());
+                setup.extend_from_slice(&number.low::<u16>().to_ne_bytes());
             }
             let mut name = VIRTUAL_KEYBOARD_NAME.to_vec();
             name.resize(UINPUT_MAX_NAME_BYTES, 0);
@@ -332,7 +332,7 @@ impl HelperOs for LinuxHelperOs {
         let flags = (if writable { libc::O_RDWR } else { libc::O_RDONLY }) | libc::O_NONBLOCK | libc::O_CLOEXEC;
         let fd = open_raw(path, flags)?;
         // The kernel stamps events with the clock `monotonic_ms` reads; a device that cannot be asked keeps its own.
-        let _ = ioctl_buffer(fd, EVIOCSCLOCKID, &mut (libc::CLOCK_MONOTONIC as c_int).to_ne_bytes());
+        let _ = ioctl_buffer(fd, EVIOCSCLOCKID, &mut libc::CLOCK_MONOTONIC.to::<c_int>().to_ne_bytes());
         Ok(fd)
     }
 
@@ -409,7 +409,7 @@ impl HelperOs for LinuxHelperOs {
     fn poll(&mut self, fds: &[i32], timeout_ms: i32) -> Vec<(i32, i16)> {
         let mut polled: Vec<libc::pollfd> = fds.iter().map(|fd| libc::pollfd { fd: *fd, events: libc::POLLIN | libc::POLLHUP | libc::POLLERR, revents: 0 }).collect();
         // SAFETY: `polled` is a valid array of `polled.len()` entries.
-        let ready = unsafe { libc::poll(polled.as_mut_ptr(), polled.len() as libc::nfds_t, timeout_ms) };
+        let ready = unsafe { libc::poll(polled.as_mut_ptr(), polled.len().to::<libc::nfds_t>(), timeout_ms) };
         if ready <= 0 {
             return Vec::new();
         }
@@ -828,7 +828,7 @@ pub fn wayland_socket_path(display: Option<&str>, runtime_dir: Option<&str>) -> 
 
 fn wl_string(text: &str) -> Vec<u8> {
     let length = text.len() + 1;
-    let mut bytes = (length as u32).to_ne_bytes().to_vec();
+    let mut bytes = length.low::<u32>().to_ne_bytes().to_vec();
     bytes.extend_from_slice(text.as_bytes());
     bytes.push(0);
     while !bytes.len().is_multiple_of(4) {
@@ -892,7 +892,7 @@ impl WlSocket {
         header.msg_iov = &mut io_vector;
         header.msg_iovlen = 1;
         header.msg_control = control.as_mut_ptr().cast::<c_void>();
-        header.msg_controllen = control.len() as _;
+        header.msg_controllen = control.len();
         // SAFETY: `header` points to buffers that stay alive and are as large as it says.
         let count = (check((unsafe { libc::recvmsg(self.stream.as_raw_fd(), &mut header, libc::MSG_CMSG_CLOEXEC) }).low::<c_int>())?).to::<usize>();
         // SAFETY: `header` was filled in by the kernel; the control-message macros walk only what it reports.
@@ -939,7 +939,7 @@ impl WlSocket {
             fds.push(libc::pollfd { fd: wake, events: libc::POLLIN, revents: 0 });
         }
         // SAFETY: `fds` is a valid array of `fds.len()` entries.
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len().to::<libc::nfds_t>(), timeout_ms) };
         if ready <= 0 {
             return (false, false);
         }
@@ -2190,7 +2190,7 @@ impl NativeWaylandApi {
             && child.try_wait().ok().flatten().is_none()
         {
             // SAFETY: the pid is of our own child, which has not been reaped.
-            unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+            unsafe { libc::kill(child.id().to::<libc::pid_t>(), libc::SIGTERM) };
             let deadline = Instant::now() + seconds(WAYLAND_IPC_TIMEOUT_SECONDS);
             while child.try_wait().ok().flatten().is_none() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(5));

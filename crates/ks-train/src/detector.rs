@@ -165,7 +165,7 @@ fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
 /// The command: the report on standard output; `strict` fails the exit status when a gate does not hold.
 pub fn command(resources: &Arc<Resources>, sample: usize, dictionary_sample: usize, strict: bool) -> Result<i32, String> {
     let models: Vec<Arc<LanguageModel>> = LOCALES.iter().map(|locale| Arc::new(resources.language_model(locale, std::iter::empty::<&str>()))).collect();
-    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
+    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| -> (i64, Arc<dyn LanguageScorer>) { (group.to::<i64>(), model.clone()) }).collect();
     let classifier: Option<Arc<dyn IntentClassifier>> = None;
     let protected = resources.protected_tokens();
     let harness = Harness { detector: LanguageDetector::new(scorers, classifier, protected.clone()).map_err(|error| error.name.to_string())? };

@@ -80,7 +80,7 @@ mod scenario {
                 // SAFETY: the rectangle is ours and both windows belong to this thread.
                 unsafe {
                     GetClientRect(window, &mut area);
-                    MoveWindow(edit as HWND, 0, 0, area.right, area.bottom, 1);
+                    MoveWindow(edit.pointer_mut::<std::ffi::c_void>(), 0, 0, area.right, area.bottom, 1);
                 }
             }
         }

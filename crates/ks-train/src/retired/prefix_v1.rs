@@ -309,7 +309,7 @@ pub fn verify(root: &Path) -> Result<Value, String> {
         }
         let (current, previous) = (&table["candidate"], &table["shipping_no_prefix"]);
         let number = |value: &Value, name: &str| value[name].as_i64().unwrap_or(0);
-        if number(current, "length_mismatches") != 0 || number(current, "changed_correct") > number(previous, "changed_correct") || number(current, "restored") < number(previous, "restored") || (number(current, "early_restored") as f64) < EARLY_RESTORED_MIN_FRACTION * number(current, "desired").to::<f64>() {
+        if number(current, "length_mismatches") != 0 || number(current, "changed_correct") > number(previous, "changed_correct") || number(current, "restored") < number(previous, "restored") || number(current, "early_restored").to::<f64>() < EARLY_RESTORED_MIN_FRACTION * number(current, "desired").to::<f64>() {
             return Err("prefix engine quality gates failed".to_owned());
         }
     }

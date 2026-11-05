@@ -1,5 +1,6 @@
 //! The settings window and the tray icon on Windows, in plain Win32. The worker and short tasks run on threads of their
 //! own and hand their results to this thread through the window's message queue.
+use ks_cast::To as _;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -829,7 +830,7 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
         }
         WM_NOTIFY => {
             // SAFETY: for WM_NOTIFY the parameter points to a header valid during the message.
-            let header = unsafe { &*(lparam as *const NMHDR) };
+            let header = unsafe { &*lparam.pointer::<NMHDR>() };
             if header.idFrom == ID_TABS as usize && header.code == TCN_SELCHANGE {
                 with_app(|app| {
                     // SAFETY: a plain message to a control of this thread.

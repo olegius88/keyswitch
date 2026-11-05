@@ -79,6 +79,46 @@ pub trait To: Sized {
     {
         self.same_bits()
     }
+
+    /// The pointer a system call handed over as a number.
+    #[inline]
+    #[must_use]
+    fn pointer<T>(self) -> *const T
+    where
+        Self: Address,
+    {
+        std::ptr::with_exposed_provenance(self.address())
+    }
+
+    /// The mutable pointer a system call handed over as a number.
+    #[inline]
+    #[must_use]
+    fn pointer_mut<T>(self) -> *mut T
+    where
+        Self: Address,
+    {
+        std::ptr::with_exposed_provenance_mut(self.address())
+    }
+}
+
+/// A number that holds an address, as a Win32 message parameter does.
+pub trait Address {
+    /// The address.
+    fn address(self) -> usize;
+}
+
+impl Address for usize {
+    #[inline]
+    fn address(self) -> usize {
+        self
+    }
+}
+
+impl Address for isize {
+    #[inline]
+    fn address(self) -> usize {
+        self.cast_unsigned()
+    }
 }
 
 macro_rules! numbers {
@@ -272,6 +312,17 @@ mod tests {
         let pointer = std::ptr::from_ref(&value);
         assert_eq!(pointer.to::<usize>(), pointer.expose_provenance());
         assert_eq!(pointer.cast_mut().to::<isize>(), pointer.expose_provenance().cast_signed());
+    }
+
+    #[test]
+    fn an_address_becomes_the_pointer_again() {
+        let mut value = 7_u8;
+        let address = std::ptr::from_mut(&mut value).to::<usize>();
+        // SAFETY: the address was taken from `value` above, and `value` is alive.
+        unsafe {
+            *address.pointer_mut::<u8>() = 8;
+            assert_eq!(*address.to::<isize>().pointer::<u8>(), 8);
+        }
     }
 
     #[test]

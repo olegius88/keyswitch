@@ -125,7 +125,7 @@ fn restoration_shortfall(report: &Value) -> Vec<String> {
             if restored - baseline["exactly_restored"].as_i64().unwrap_or(0) < margin {
                 failures.push(format!("{name}/{mode}: the margin over the baseline pair"));
             }
-            if mode == "early_off" && (restored as f64) < RECEIPT_MIN_RESTORED_SHARE * (candidate["initially_wrong"].as_i64().unwrap_or(0)).to::<f64>() {
+            if mode == "early_off" && restored.to::<f64>() < RECEIPT_MIN_RESTORED_SHARE * (candidate["initially_wrong"].as_i64().unwrap_or(0)).to::<f64>() {
                 failures.push(format!("{name}/{mode}: the share restored"));
             }
         }

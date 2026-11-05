@@ -1,5 +1,6 @@
 //! The Python's `test_wayland_helper.py` on a fake kernel and a fake socket.
 
+use ks_cast::To as _;
 use super::*;
 use std::sync::atomic::AtomicI32;
 use std::time::Instant;
@@ -215,12 +216,12 @@ fn key_frame(frames: &[(u32, Vec<u8>)], index: usize) -> (u32, bool, u32, u32, u
 
 fn batch(req_id: u32, check: u32, known_seq: u32, items: &[(bool, u32)]) -> Vec<u8> {
     let mut body = req_id.to_be_bytes().to_vec();
-    body.extend((items.len() as u16).to_be_bytes());
+    body.extend(items.len().low::<u16>().to_be_bytes());
     body.push(check.low::<u8>());
     body.extend(known_seq.to_be_bytes());
     for (pressed, code) in items {
         body.push(u8::from(*pressed));
-        body.extend((*code as u16).to_be_bytes());
+        body.extend((*code).low::<u16>().to_be_bytes());
     }
     body
 }
@@ -513,7 +514,7 @@ fn the_client_starts_asks_and_answers_the_helpers_keys() {
         // The helper asks about a key and gets the verdict; then answers a batch and a key query.
         let mut key = 77u32.to_be_bytes().to_vec();
         key.push(1);
-        key.extend((EVDEV_KEY_PAUSE as u16).to_be_bytes());
+        key.extend(EVDEV_KEY_PAUSE.low::<u16>().to_be_bytes());
         key.extend(1234u32.to_be_bytes());
         key.push(HELPER_KEY_NEEDS_VERDICT.low::<u8>());
         helper_side.write_all(&pack_frame(HELPER_MSG_KEY, &key).unwrap()).unwrap();

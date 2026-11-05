@@ -10,7 +10,7 @@ use ks_config::logsetup::{self, LocalTime};
 /// The local time, broken down (Python's `time.localtime`).
 fn local_time() -> LocalTime {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    let seconds = now.as_secs() as libc::time_t;
+    let seconds = now.as_secs().to::<libc::time_t>();
     // SAFETY: `tm` is a C struct of integers and one pointer (`tm_zone`); all-zero is a valid value of it.
     let mut broken: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: both pointers refer to live values owned by this frame; `localtime_r` writes only into `broken`.
@@ -73,7 +73,7 @@ pub fn signal_waiter() -> impl Fn(Duration) -> bool {
         libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
     }
     move |timeout| {
-        let limit = libc::timespec { tv_sec: timeout.as_secs() as libc::time_t, tv_nsec: timeout.subsec_nanos() as libc::c_long };
+        let limit = libc::timespec { tv_sec: timeout.as_secs().to::<libc::time_t>(), tv_nsec: timeout.subsec_nanos().to::<libc::c_long>() };
         // SAFETY: `set` and `limit` are live for the call; a null `siginfo` is allowed.
         let signal = unsafe { libc::sigtimedwait(&set, std::ptr::null_mut(), &limit) };
         signal > 0

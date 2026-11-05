@@ -1,6 +1,7 @@
 //! What resets or watches the engine's state: the timers of a held Enter and a manual correction, clearing the word,
 //! the settings, the focus and the layout.
 
+use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_config::settings_diagnostics::setting_change;
@@ -252,7 +253,7 @@ impl EngineCore {
         // Only a change *to* the layout the engine itself just selected is the
         // engine's own switch; the user switching away right after a wrong
         // correction is manual and must protect the retyped word.
-        let initiated_by_engine = engine_switch_ms.is_some_and(|elapsed| (elapsed as f64) <= ENGINE_SWITCH_GRACE_SECONDS * MILLISECONDS_PER_SECOND)
+        let initiated_by_engine = engine_switch_ms.is_some_and(|elapsed| elapsed.to::<f64>() <= ENGINE_SWITCH_GRACE_SECONDS * MILLISECONDS_PER_SECOND)
             && Some(group) == self._engine_switch_group;
         let respect = self.flag("detection.respect_manual_layout", true);
         // A layout that arrived together with another window is that window's

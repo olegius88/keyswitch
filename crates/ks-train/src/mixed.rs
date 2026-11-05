@@ -720,7 +720,7 @@ pub(crate) fn recipe_lines_above(messages: &Path, recipe: &Value, code_path: Opt
 /// `previous_line`: what stands on the line above a message: ("code", line), ("message", index) or ("above", index).
 pub(crate) fn recipe_previous_line(recipe: &Value, text: &str, index: usize, messages: usize, code_lines: usize, lines_above: usize) -> Option<(&'static str, usize)> {
     let value = draw(&format!("{}:prefix:{text}", recipe["seed"].as_str().unwrap_or("")));
-    if ((value % MIXED_DRAW_RESOLUTION) as f64) >= recipe.float_or("prefix_rate", 0.0) * MIXED_DRAW_RESOLUTION.to::<f64>() {
+    if (value % MIXED_DRAW_RESOLUTION).to::<f64>() >= recipe.float_or("prefix_rate", 0.0) * MIXED_DRAW_RESOLUTION.to::<f64>() {
         return None;
     }
     let half = value / MIXED_PREFIX_KINDS;
@@ -756,7 +756,7 @@ pub fn jobs_for(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Re
     for (index, text) in everyone.iter().enumerate() {
         let value = draw(&format!("{seed}:prefix:{text}"));
         let mut prefix = String::new();
-        if ((value % MIXED_DRAW_RESOLUTION) as f64) < prefix_rate * MIXED_DRAW_RESOLUTION.to::<f64>() {
+        if (value % MIXED_DRAW_RESOLUTION).to::<f64>() < prefix_rate * MIXED_DRAW_RESOLUTION.to::<f64>() {
             let half = value / MIXED_PREFIX_KINDS;
             let line = if !code.is_empty() && value % MIXED_PREFIX_KINDS == 0 {
                 &code[(half % code.len().to::<u64>()).to::<usize>()]

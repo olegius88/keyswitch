@@ -370,10 +370,10 @@ pub fn encode_model(file: &ModelFile<'_>) -> Result<Vec<u8>, String> {
     manifest_bytes.pop();
     let mut encoded = Vec::with_capacity(52 + manifest_bytes.len() + payload.len());
     encoded.extend_from_slice(b"KSLM");
-    encoded.extend_from_slice(&(KSLM_SCHEMA_VERSION as u16).to_le_bytes());
+    encoded.extend_from_slice(&KSLM_SCHEMA_VERSION.to::<u16>().to_le_bytes());
     encoded.extend_from_slice(&0_u16.to_le_bytes());
-    encoded.extend_from_slice(&(manifest_bytes.len() as u32).to_le_bytes());
-    encoded.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    encoded.extend_from_slice(&manifest_bytes.len().to::<u32>().to_le_bytes());
+    encoded.extend_from_slice(&payload.len().to::<u32>().to_le_bytes());
     encoded.extend_from_slice(&crc32(&payload).to_le_bytes());
     encoded.extend_from_slice(&Sha256::digest(&manifest_bytes));
     encoded.extend_from_slice(&manifest_bytes);

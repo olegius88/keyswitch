@@ -803,12 +803,12 @@ fn production_context<'a>(model: &Arc<LinearNgramModel>, sealed_test: &'a [Lexic
             return Err(format!("production context corpus {name:?} must not be empty"));
         }
         let cache = Arc::new(InvariantModel { delegate: model.clone(), cache: Mutex::default(), hits: AtomicU64::new(0) });
-        let corpus_models: [Arc<CorpusCache>; 2] = [Arc::new(CorpusCache::new(models[0].clone() as Arc<dyn LanguageScorer>)), Arc::new(CorpusCache::new(models[1].clone() as Arc<dyn LanguageScorer>))];
+        let corpus_models: [Arc<CorpusCache>; 2] = [Arc::new(CorpusCache::new(models[0].clone())), Arc::new(CorpusCache::new(models[1].clone()))];
         let references: Vec<&'a LexicalExample> = examples.iter().collect();
         for evaluation in &mut profiles {
             let profile = evaluation.profile;
-            let fixed: Vec<(i64, Arc<dyn LanguageScorer>)> = (0..2).map(|group| (group.to::<i64>(), Arc::new(FixedContext { delegate: corpus_models[group].clone() as Arc<dyn LanguageScorer>, profile }) as Arc<dyn LanguageScorer>)).collect();
-            let detector = LanguageDetector::new(fixed, Some(cache.clone() as Arc<dyn IntentClassifier>), protected.clone()).map_err(load_error)?;
+            let fixed: Vec<(i64, Arc<dyn LanguageScorer>)> = (0..2).map(|group| -> (i64, Arc<dyn LanguageScorer>) { (group.to::<i64>(), Arc::new(FixedContext { delegate: corpus_models[group].clone(), profile })) }).collect();
+            let detector = LanguageDetector::new(fixed, Some(cache.clone()), protected.clone()).map_err(load_error)?;
             let rows = map_rows(&references, workers, |example| policy_row(&detector, example, Some(&profile)))?;
             let all: Vec<&PolicyRow<'a>> = rows.iter().collect();
             evaluation.corpora.insert(name, corpus_evaluation(&all));
@@ -1270,8 +1270,8 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let snapshots: [Snapshot; 2] = [external::snapshot_of_model(&models[0], LOCALES[0])?, external::snapshot_of_model(&models[1], LOCALES[1])?];
     let stable = before == snapshots && (0..2).all(|group| models[group].speller.available() && models[group].speller.source() == snapshots[group].provenance.dictionary.path);
     let index = external::build_sealed_signature_index(&base_sealed)?;
-    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = vec![(0, models[0].clone() as Arc<dyn LanguageScorer>), (1, models[1].clone() as Arc<dyn LanguageScorer>)];
-    let detector = LanguageDetector::new(scorers, Some(model.clone() as Arc<dyn IntentClassifier>), protected.clone()).map_err(load_error)?;
+    let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = vec![(0, models[0].clone()), (1, models[1].clone())];
+    let detector = LanguageDetector::new(scorers, Some(model.clone()), protected.clone()).map_err(load_error)?;
     let safety = safety_policy(&detector, &whole.safety, &protected)?;
     let rows = &evidence.test_rows;
     let slice = |keep: &dyn Fn(&LexicalExample) -> bool| -> Vec<PredictionRow<'_>> { rows.iter().filter(|row| keep(row.example)).copied().collect() };

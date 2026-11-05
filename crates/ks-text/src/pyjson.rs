@@ -44,7 +44,7 @@ pub fn json_string(s: &str, ensure_ascii: bool) -> String {
             '\t' => out.push_str("\\t"),
             '\u{8}' => out.push_str("\\b"),
             '\u{c}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c.to::<u32>())),
+            c if c.to::<u32>() < 0x20 => out.push_str(&format!("\\u{:04x}", c.to::<u32>())),
             // With ensure_ascii everything outside space..~ is escaped, DEL included.
             c if ensure_ascii && !(' '..='~').contains(&c) => {
                 let mut units = [0u16; 2];

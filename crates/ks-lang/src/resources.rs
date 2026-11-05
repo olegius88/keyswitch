@@ -179,7 +179,7 @@ impl Resources {
         for (index, locale) in locales.iter().take(crate::constants::LAYOUT_GROUP_COUNT).enumerate() {
             models.push((index.to::<i64>(), self.engine_language_model(locale)?));
         }
-        let intent: Option<Arc<dyn crate::detector::IntentClassifier>> = self.intent_model().0.map(|model| model as _);
+        let intent: Option<Arc<dyn crate::detector::IntentClassifier>> = self.intent_model().0.map(|model| -> Arc<dyn crate::detector::IntentClassifier> { model });
         LanguageDetector::new(models, intent, self.protected_tokens())
     }
 }

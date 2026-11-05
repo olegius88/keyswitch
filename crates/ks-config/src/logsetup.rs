@@ -105,7 +105,7 @@ pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
 pub fn utc_now() -> LocalTime {
     let milliseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(after) => after.as_millis().to::<i64>(),
-        Err(before) => -(before.duration().as_millis() as i64),
+        Err(before) => -before.duration().as_millis().to::<i64>(),
     };
     utc_time(milliseconds)
 }

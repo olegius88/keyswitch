@@ -384,7 +384,7 @@ fn the_selection_source_connects_on_first_use_and_a_missing_bus_is_unsupported()
     let source_fake = Fake::new();
     let shared = source_fake.clone();
     let process: ProcessForWindow = Arc::new(|_| 0);
-    let mut source = AtspiSelectionReader::new(Box::new(move || Ok(Box::new(Shared(shared.clone())) as Box<dyn AtspiApi>)), process.clone());
+    let mut source = AtspiSelectionReader::new(Box::new(move || Ok(Box::new(Shared(shared.clone())))), process.clone());
     assert_eq!(source.write_selection(&SelectedText { text: String::new(), source: String::new() }, "x"), Ok(None), "before any read");
     source_fake.with(|tree| {
         tree.selections = Queue::of(&[1]);

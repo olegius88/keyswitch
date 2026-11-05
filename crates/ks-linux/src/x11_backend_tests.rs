@@ -1,5 +1,6 @@
 //! The backend over a fake server: the tests of the Python's `test_x11_backend.py` that pin a decision.
 
+use ks_cast::To as _;
 use super::*;
 use crate::xkb_keymap::{KeyMap, KeySyms, KeyType, TypeEntry};
 use ks_backend::KeyDisposition;
@@ -95,7 +96,7 @@ impl Fake {
 
     fn backend(self: &Arc<Self>) -> X11Backend {
         let api = self.clone();
-        X11Backend::new(Box::new(move || Ok(api.clone() as Arc<dyn X11Api>)), None)
+        X11Backend::new(Box::new(move || Ok(api.clone())), None)
     }
 }
 
@@ -325,7 +326,7 @@ fn the_group_count_is_clamped_and_the_filter_is_ignored() {
     let fake = Fake::new();
     let connector = |fake: &Arc<Fake>| -> Connector {
         let api = fake.clone();
-        Box::new(move || Ok(api.clone() as Arc<dyn X11Api>))
+        Box::new(move || Ok(api.clone()))
     };
     assert_eq!(X11Backend::with_group_count(1, connector(&fake), None).shared.group_count, 2);
     assert_eq!(X11Backend::with_group_count(9, connector(&fake), None).shared.group_count, 4);
@@ -761,7 +762,7 @@ impl SelectionSource for Source {
 fn selection_backend(fake: &Arc<Fake>, written: Option<bool>) -> X11Backend {
     let api = fake.clone();
     let factory: SelectionFactory = Box::new(move |_| Box::new(Source { written }));
-    let backend = X11Backend::new(Box::new(move || Ok(api.clone() as Arc<dyn X11Api>)), Some(factory));
+    let backend = X11Backend::new(Box::new(move || Ok(api.clone())), Some(factory));
     backend.shared.open().expect("open");
     backend
 }

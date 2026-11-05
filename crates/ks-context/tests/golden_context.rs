@@ -369,7 +369,7 @@ fn policy_decisions() {
             after_origin: after_origin(&args["after_origin"]),
             inside: args["inside"].as_bool().expect("flag"),
             before_origin: if args["before_origin"] == "planned_previous_reading" { BeforeOrigin::PlannedPreviousReading } else { BeforeOrigin::Field },
-            typed_ahead: args["has_typed_ahead"].as_bool().expect("flag").then_some(&typed_ahead as &dyn Fn() -> String),
+            typed_ahead: args["has_typed_ahead"].as_bool().expect("flag").then_some(&typed_ahead),
         };
         let result = policy
             .decide(

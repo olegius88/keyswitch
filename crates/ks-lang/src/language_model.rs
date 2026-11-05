@@ -87,7 +87,7 @@ impl Hasher for MixHasher {
         self.0 = mixed ^ (mixed >> 29);
     }
     fn write_u128(&mut self, value: u128) {
-        let mixed = ((value as u64) ^ ((value >> 64) as u64).rotate_left(23)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let mixed = (value.to::<u64>() ^ (value >> 64).to::<u64>().rotate_left(23)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         self.0 = mixed ^ (mixed >> 29);
     }
 }
@@ -207,7 +207,7 @@ impl GramCounts {
             }
             // The source counts are highly skewed. Logarithmic weighting keeps frequent words important without
             // erasing legitimate rare forms.
-            let log = (frequency.max(1) as f64).log2();
+            let log = frequency.max(1).to::<f64>().log2();
             let weight = ((log.to::<i64>() + 1).clamp(1, LANGUAGE_MODEL_MAX_GRAM_WEIGHT)).to::<u32>();
             codes.clear();
             codes.push(encode('^'));
@@ -512,7 +512,7 @@ impl LanguageModel {
         if frequency == 0 {
             return 0.0;
         }
-        (frequency as f64).ln_1p() / (self.maximum_bigram as f64).ln_1p()
+        frequency.to::<f64>().ln_1p() / self.maximum_bigram.to::<f64>().ln_1p()
     }
 
     /// Return the strongest score after dropping one likely typo character (`limit` at its default: no caller changes it).
@@ -568,7 +568,7 @@ impl LanguageModel {
         let mut naturalness = raw_naturalness;
         let mut lexical = 0.0;
         if exact {
-            let popularity = (frequency as f64).ln_1p() / (self.maximum as f64).ln_1p();
+            let popularity = frequency.to::<f64>().ln_1p() / self.maximum.to::<f64>().ln_1p();
             lexical = LANGUAGE_MODEL_EXACT_WORD_BASE_SCORE + LANGUAGE_MODEL_POPULARITY_WEIGHT * popularity;
         } else if spell_known {
             lexical = LANGUAGE_MODEL_SPELL_KNOWN_SCORE;

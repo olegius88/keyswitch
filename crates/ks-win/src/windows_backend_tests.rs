@@ -1,6 +1,7 @@
 //! The Python's tests of this logic (`test_windows_backend.py`, `test_windows_selection.py`, `test_input_integrity.py`,
 //! `test_input_delay.py`, and of `test_action_boundary.py` what needs no engine), driven by a fake API.
 
+use ks_cast::To as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Condvar, mpsc};
@@ -526,11 +527,11 @@ fn backend_with(api: &Arc<FakeWindowsAPI>, clock: Arc<dyn Clock>, script: Shared
             if unavailable {
                 return Err(failed("no UI Automation"));
             }
-            Ok(Box::new(FakeReader(Arc::clone(&script))) as Box<dyn SelectionReader>)
+            Ok(Box::new(FakeReader(Arc::clone(&script))))
         }),
         listener_start_timeout_seconds: KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
     };
-    WindowsBackend::with_parts(Arc::clone(api) as Arc<dyn WindowsAPI>, parts)
+    WindowsBackend::with_parts(api.clone(), parts)
 }
 
 fn backend(api: &Arc<FakeWindowsAPI>) -> WindowsBackend {
@@ -745,7 +746,7 @@ fn a_start_timeout_stops_the_native_hook() {
     let api = FakeWindowsAPI::plain();
     api.state().signal_ready = false;
     let parts = BackendParts { listener_start_timeout_seconds: 0.01, ..BackendParts::default() };
-    let subject = WindowsBackend::with_parts(Arc::clone(&api) as Arc<dyn WindowsAPI>, parts);
+    let subject = WindowsBackend::with_parts(api.clone(), parts);
     let error = subject.start(collecting(&collected())).unwrap_err();
     assert_eq!(message(&error), format!("Win32 hook не подтвердил запуск за {}", quantity(0.01, SECONDS)));
     assert_eq!(api.state().stop_calls, 1);
@@ -903,7 +904,7 @@ fn a_correction_deletes_switches_replays_shift_and_boundary() {
 fn the_layout_settles_before_the_keys_of_a_new_layout() {
     let api = FakeWindowsAPI::plain();
     let clock = FakeClock::stepping(0.0);
-    let subject = backend_with(&api, Arc::clone(&clock) as Arc<dyn Clock>, script(|_| {}));
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
     let strokes = [key_event()];
     subject.inject_correction(injection(&strokes, 1)).unwrap();
     assert_eq!(*clock.sleeps.lock().unwrap(), [WINDOWS_LAYOUT_SETTLE_SECONDS]);
@@ -1149,7 +1150,7 @@ fn keys_other_programs_inject_are_marked_and_replayed_as_theirs() {
 fn a_switch_timeout_and_an_already_selected_group() {
     let api = FakeWindowsAPI::plain();
     let clock = FakeClock::stepping(0.0);
-    let subject = backend_with(&api, Arc::clone(&clock) as Arc<dyn Clock>, script(|_| {}));
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
     subject.inner._switch_group(0).unwrap();
     assert!(api.requests().is_empty());
 
@@ -1544,7 +1545,7 @@ fn the_hook_measures_typed_keys_only() {
 fn the_hook_times_its_answer_and_counts_a_slow_one() {
     let api = FakeWindowsAPI::plain();
     let clock = FakeClock::stepping(0.0);
-    let subject = backend_with(&api, Arc::clone(&clock) as Arc<dyn Clock>, script(|_| {}));
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
     let seconds = INPUT_DELAY_SLOW_CALLBACK_MS.to::<f64>() / 1000.0;
     api.state().ticks = HOOK_KEY_TIME_MS;
     clock.perf.lock().unwrap().extend([0.0, seconds]);
@@ -2084,7 +2085,7 @@ fn without_alt_nothing_is_pressed_and_a_failed_mask_is_survived() {
 #[test]
 fn the_default_job_starter_runs_the_mask_off_the_hook_thread() {
     let api = FakeWindowsAPI::plain();
-    let subject = WindowsBackend::with_api(Arc::clone(&api) as Arc<dyn WindowsAPI>);
+    let subject = WindowsBackend::with_api(api.clone());
     let here = thread::current().id();
     let (sent, on_thread) = mpsc::channel();
     let sent = Mutex::new(sent);
@@ -2419,7 +2420,7 @@ mod golden {
         }
         let clock = FakeClock::stepping(scenario["step"].as_f64().unwrap());
         let reader = script(|_| {});
-        let subject = backend_with(&api, Arc::clone(&clock) as Arc<dyn Clock>, Arc::clone(&reader));
+        let subject = backend_with(&api, clock.clone(), Arc::clone(&reader));
         let events = collected();
         subject.set_listener(Some(collecting(&events)));
         if flag(&scenario["reenter"]) {

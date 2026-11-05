@@ -1,5 +1,6 @@
 //! The early switch, the typo correction and the bookkeeping of a finished correction.
 
+use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_context::context_policy::{caret_lag, typed_short_of};
@@ -63,7 +64,7 @@ impl EngineCore {
         let mut decision = {
             let indexes: Vec<(i64, &PrefixIndex)> = self._prefix_indexes.iter().enumerate().map(|(group, index)| (group.to::<i64>(), &**index)).collect();
             let scorers: Vec<(i64, &dyn PrefixScorer)> =
-                self.models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), &**model as &dyn PrefixScorer)).collect();
+                self.models.iter().enumerate().map(|(group, model)| -> (i64, &dyn PrefixScorer) { (group.to::<i64>(), &**model) }).collect();
             let texts: Vec<(i64, &str)> = alternatives.iter().map(|(group, text)| (*group, text.as_str())).collect();
             early_switch_decision(&indexes, &scorers, &original, &texts, source_group, &policy)
         };
@@ -187,7 +188,7 @@ impl EngineCore {
             }
         }
         typed_short_of(&field.before, &field.after, typed)
-            .map(|short| (pystr::slice(&field.before, None, Some(-(pystr::len(&short) as i64))).to_owned(), field.after.clone()))
+            .map(|short| (pystr::slice(&field.before, None, Some(-pystr::len(&short).to::<i64>())).to_owned(), field.after.clone()))
     }
 
     pub(crate) fn _decide_prefix(&self, baseline: EarlySwitchDecision, field: Option<&FieldContext>) -> EngineResult<(EarlySwitchDecision, f64)> {

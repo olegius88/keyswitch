@@ -168,7 +168,7 @@ fn counted_abbreviations(tools: &Tools, minimum: u64, dominance: f64) -> Vec<Str
             continue;
         }
         let keys = reading(token, 1);
-        if (count as f64) < dominance * tools.count("latin", &keys).to::<f64>() || tools.is_refused(&[token, &keys]) {
+        if count.to::<f64>() < dominance * tools.count("latin", &keys).to::<f64>() || tools.is_refused(&[token, &keys]) {
             continue;
         }
         abbreviations.push(token.to_owned());
@@ -624,7 +624,7 @@ fn revisit_followers(tools: &Tools) -> Vec<String> {
         .term("russian")
         .words()
         .filter(|word| pystr::len(word) <= TERM_REVISIT_FOLLOWER_MAX_LETTERS && pystr::isalpha(word))
-        .map(|word| (-(tools.count("russian", word) as i64), word))
+        .map(|word| (-tools.count("russian", word).to::<i64>(), word))
         .collect();
     words.sort_unstable();
     words.into_iter().take(TERM_REVISIT_FOLLOWERS).map(|entry| entry.1.to_owned()).collect()
@@ -735,7 +735,7 @@ pub fn term_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], op
             continue;
         }
         for size in TERM_HEAD_ENDING_LETTERS {
-            let piece = pystr::slice(&row.original, Some(-(size as i64)), None);
+            let piece = pystr::slice(&row.original, Some(-size.to::<i64>()), None);
             let folded = pystr::casefold(piece);
             if pystr::len(&row.original) < size + TERM_FRAGMENT_MIN_REST
                 || taken.get(&folded).copied().unwrap_or(0) >= per_piece

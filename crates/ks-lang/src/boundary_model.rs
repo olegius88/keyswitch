@@ -45,7 +45,7 @@ pub fn features(original: &str, alternative: &str, suffix_length: i64, source: &
         let letters = pystr::isalpha(text);
         result.insert(format!("{name}:letters"), f64::from(letters));
         result.insert(format!("{name}:known"), f64::from(letters && score.exact));
-        result.insert(format!("{name}:frequency"), (score.frequency as f64).ln_1p() / BOUNDARY_FEATURE_FREQUENCY_LOG_DIVISOR);
+        result.insert(format!("{name}:frequency"), score.frequency.to::<f64>().ln_1p() / BOUNDARY_FEATURE_FREQUENCY_LOG_DIVISOR);
         let bound = BOUNDARY_FEATURE_NGRAM_SCORE_BOUND;
         result.insert(format!("{name}:ngram"), clamped(score.ngram_score, -bound, bound) / bound);
         result.insert(format!("{name}:invalid"), score.invalid_ratio);

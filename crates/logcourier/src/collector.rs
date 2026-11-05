@@ -184,7 +184,7 @@ impl<'a> Collector<'a> {
             while offset < size && count < budget {
                 stream.seek(SeekFrom::Start(offset))?;
                 let mut data = Vec::new();
-                stream.by_ref().take((self.chunk_size as u64).min(size - offset)).read_to_end(&mut data)?;
+                stream.by_ref().take(self.chunk_size.to::<u64>().min(size - offset)).read_to_end(&mut data)?;
                 if data.is_empty() {
                     break;
                 }

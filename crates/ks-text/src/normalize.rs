@@ -88,7 +88,7 @@ fn decomposed(s: &str) -> Vec<char> {
 
 /// `unicodedata.normalize("NFD", s)`.
 pub fn nfd(s: &str) -> String {
-    if s.chars().all(|c| (c as u32) < 0xC0) {
+    if s.chars().all(|c| c.to::<u32>() < 0xC0) {
         return s.to_string();
     }
     decomposed(s).into_iter().collect()
@@ -96,7 +96,7 @@ pub fn nfd(s: &str) -> String {
 
 /// `unicodedata.normalize("NFC", s)`. Everything below U+0300 is already in NFC.
 pub fn nfc(s: &str) -> String {
-    if s.chars().all(|c| (c as u32) < 0x300) {
+    if s.chars().all(|c| c.to::<u32>() < 0x300) {
         return s.to_string();
     }
     let mut out: Vec<char> = Vec::with_capacity(s.len());

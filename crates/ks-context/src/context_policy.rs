@@ -213,7 +213,7 @@ pub fn ends_with_typed(text: &str, typed: &str) -> bool {
 /// typed at 40 ms a key into a GTK window of KDE Plasma kept its `e` in five of ten runs (27.10.2026).
 pub fn shown_ahead(before: &str, typed: &str, ahead: &str) -> usize {
     for shown in (2..=pystr::len(ahead)).rev() {
-        if before.ends_with(pystr::slice(ahead, None, Some(shown.to::<i64>()))) && ends_with_typed(pystr::slice(before, None, Some(-(shown as i64))), typed) {
+        if before.ends_with(pystr::slice(ahead, None, Some(shown.to::<i64>()))) && ends_with_typed(pystr::slice(before, None, Some(-shown.to::<i64>())), typed) {
             return shown;
         }
     }
@@ -229,8 +229,8 @@ pub fn shown_ahead(before: &str, typed: &str, ahead: &str) -> usize {
 pub fn typed_short_of(before: &str, after: &str, typed: &str) -> Option<String> {
     let most = FIELD_PENDING_MAX_CHARACTERS.min(pystr::len(typed).saturating_sub(1));
     for pending in 1..=most {
-        let shown = pystr::slice(typed, None, Some(-(pending as i64)));
-        if before.ends_with(shown) && !after.starts_with(pystr::slice(typed, Some(-(pending as i64)), None)) {
+        let shown = pystr::slice(typed, None, Some(-pending.to::<i64>()));
+        if before.ends_with(shown) && !after.starts_with(pystr::slice(typed, Some(-pending.to::<i64>()), None)) {
             return Some(shown.to_string());
         }
     }
@@ -759,7 +759,7 @@ impl ContextPolicy {
         let source_script = if baseline.source_group == 0 { "en" } else { "ru" };
         // Key space is the US rendering, so it is whichever side is Latin.
         let keys = if source_script == "en" { baseline.original.as_str() } else { alternative };
-        if (pystr::len(keys) as i64) < model.minimum_length {
+        if pystr::len(keys).to::<i64>() < model.minimum_length {
             return None;
         }
         if !word_shaped(&baseline.original) {

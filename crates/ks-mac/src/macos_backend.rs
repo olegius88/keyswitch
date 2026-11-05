@@ -13,6 +13,7 @@
 //! ignores that message keeps a dead tap and stops seeing the keyboard without any error, so the message is handled like
 //! any other event and the tap is switched back on.
 
+use ks_cast::To as _;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
@@ -194,7 +195,7 @@ pub fn modifier_pressed(keycode: u32, flags: u64) -> bool {
 }
 
 pub fn is_cyrillic(text: &str) -> bool {
-    text.chars().next().is_some_and(|first| (CYRILLIC_CODEPOINT_RANGE.0..=CYRILLIC_CODEPOINT_RANGE.1).contains(&(first as u32)))
+    text.chars().next().is_some_and(|first| (CYRILLIC_CODEPOINT_RANGE.0..=CYRILLIC_CODEPOINT_RANGE.1).contains(&first.to::<u32>()))
 }
 
 /// Name the English and the Russian layout, in the engine's group order.

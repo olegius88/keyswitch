@@ -103,7 +103,7 @@ fn refused_aliases(corpus: &Path, ledger: &Path) -> Result<BTreeSet<String>, Str
     }
     let manifest = read_json(&corpus.join("manifest.json"))?;
     if let Some(frozen_against) = manifest.get("metadata").and_then(|value| value.get("refused_test_aliases")).and_then(Value::as_u64) {
-        if (refused.len() as u64) < frozen_against {
+        if refused.len().to::<u64>() < frozen_against {
             return Err(format!("the fit would refuse {} test aliases and the corpus was frozen refusing {frozen_against}: the test ledger ({}) is missing or older than the corpus", refused.len(), ledger.display()));
         }
     }
@@ -196,12 +196,12 @@ pub fn load_inputs(root: &Path, resource_dir: &Path, corpus: &Path, options: Val
         source_rows.insert(split, rows);
     }
     let (intent, _) = resources.intent_model();
-    let intent: Option<Arc<dyn IntentClassifier>> = intent.map(|model: Arc<LinearNgramModel>| model as _);
+    let intent: Option<Arc<dyn IntentClassifier>> = intent.map(|model: Arc<LinearNgramModel>| -> Arc<dyn IntentClassifier> { model });
     let profiles: Vec<String> = options["profiles"].as_array().ok_or("profiles")?.iter().filter_map(Value::as_str).map(str::to_owned).collect();
     let mut detectors = HashMap::new();
     for profile in &profiles {
         let models = if profile == "reference_hunspell" { &lexicons_spelling } else { &portable };
-        let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| (group.to::<i64>(), model.clone() as Arc<dyn LanguageScorer>)).collect();
+        let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = models.iter().enumerate().map(|(group, model)| -> (i64, Arc<dyn LanguageScorer>) { (group.to::<i64>(), model.clone()) }).collect();
         detectors.insert(profile.clone(), LanguageDetector::new(scorers, intent.clone(), resources.protected_tokens()).map_err(|error| error.name.to_string())?);
     }
     let ortho = OrthoModel::load(&artifact_path(resource_dir), None, None, Some(resources)).map_err(|error| error.name.to_string())?;

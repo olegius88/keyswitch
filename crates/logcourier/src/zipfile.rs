@@ -51,9 +51,9 @@ impl ZipWriter {
             out.extend_from_slice(&0u16.to_le_bytes());
             out.extend_from_slice(&0x0021u16.to_le_bytes());
             out.extend_from_slice(&crc.to_le_bytes());
-            out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            out.extend_from_slice(&body.len().low::<u32>().to_le_bytes());
+            out.extend_from_slice(&data.len().low::<u32>().to_le_bytes());
+            out.extend_from_slice(&name.len().low::<u16>().to_le_bytes());
             out.extend_from_slice(&0u16.to_le_bytes());
         };
         self.output.extend_from_slice(b"PK\x03\x04");
@@ -76,7 +76,7 @@ impl ZipWriter {
         self.output.extend_from_slice(&[0u8; 4]);
         self.output.extend_from_slice(&self.entries.to_le_bytes());
         self.output.extend_from_slice(&self.entries.to_le_bytes());
-        self.output.extend_from_slice(&(self.central.len() as u32).to_le_bytes());
+        self.output.extend_from_slice(&self.central.len().low::<u32>().to_le_bytes());
         self.output.extend_from_slice(&start.to_le_bytes());
         self.output.extend_from_slice(&0u16.to_le_bytes());
         self.output

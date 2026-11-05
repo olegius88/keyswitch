@@ -101,7 +101,7 @@ impl InputContext {
             self.text = pystr::slice(&self.text, None, Some(-1)).to_string();
         } else if !event.character.is_empty() && (pystr::isprintable(&event.character) || pystr::isspace(&event.character)) {
             let joined = format!("{}{}", self.text, event.character);
-            self.text = pystr::slice(&joined, Some(-(CONTEXT_LIMIT as i64)), None).to_string();
+            self.text = pystr::slice(&joined, Some(-CONTEXT_LIMIT.to::<i64>()), None).to_string();
         } else {
             return;
         }
@@ -139,7 +139,7 @@ impl InputContext {
         let old = format!("{original}{boundary}");
         if !old.is_empty() && self.text.ends_with(&old) {
             let joined = format!("{}{replacement}{boundary}", &self.text[..self.text.len() - old.len()]);
-            self.text = pystr::slice(&joined, Some(-(CONTEXT_LIMIT as i64)), None).to_string();
+            self.text = pystr::slice(&joined, Some(-CONTEXT_LIMIT.to::<i64>()), None).to_string();
             self.updated_at = self.now();
             self.revision += 1;
         } else {

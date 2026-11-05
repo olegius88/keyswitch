@@ -63,7 +63,7 @@ mod native {
     fn rebuild_menu() {
         let mut guard = locked();
         let entries = menu_entries(&guard.state);
-        let (menu, target) = (guard.menu as Id, guard.target as Id);
+        let (menu, target) = (guard.menu.pointer_mut::<AnyObject>(), guard.target.pointer_mut::<AnyObject>());
         if menu.is_null() {
             return;
         }
@@ -107,8 +107,8 @@ mod native {
                         let mut builder = ClassBuilder::new(c"KeySwitchMenuTarget", class!(NSObject)).ok_or("не удалось создать класс-получатель для меню")?;
                         // SAFETY: the functions have the signatures of these selectors.
                         unsafe {
-                            builder.add_method(sel!(keySwitchMenuItem:), menu_item_chosen as extern "C-unwind" fn(_, _, _));
-                            builder.add_method(sel!(menuNeedsUpdate:), menu_needs_update as extern "C-unwind" fn(_, _, _));
+                            builder.add_method(sel!(keySwitchMenuItem:), { let method: extern "C-unwind" fn(_, _, _) = menu_item_chosen; method });
+                            builder.add_method(sel!(menuNeedsUpdate:), { let method: extern "C-unwind" fn(_, _, _) = menu_needs_update; method });
                         }
                         builder.register()
                     }
@@ -151,7 +151,7 @@ mod native {
             let item = {
                 let mut guard = locked();
                 guard.state = state;
-                guard.item as Id
+                guard.item.pointer_mut::<AnyObject>()
             };
             if item.is_null() {
                 return;
@@ -173,7 +173,7 @@ mod native {
 
         pub fn close(&self) {
             let mut guard = locked();
-            let item = std::mem::take(&mut guard.item) as Id;
+            let item = std::mem::take(&mut guard.item).pointer_mut::<AnyObject>();
             if item.is_null() {
                 return;
             }

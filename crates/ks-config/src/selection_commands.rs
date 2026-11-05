@@ -149,7 +149,7 @@ pub fn plan_selection(
             Ok(SelectionPlan { replacement, source_group: None, target_group: None })
         }
         SelectionCommand::Layout => {
-            let current = if 0 <= current_group && (current_group as usize) < layout_names.len() {
+            let current = if 0 <= current_group && current_group.to::<usize>() < layout_names.len() {
                 layout_names[current_group.to::<usize>()].as_str()
             } else {
                 ""
@@ -185,7 +185,7 @@ pub fn typing_runs(
     let mut runs: Vec<(i64, Vec<KeyChoice>)> = Vec::new();
     let mut group = start_group;
     for character in text.chars() {
-        let in_group = 0 <= group && (group as usize) < tables.len() && tables[group.to::<usize>()].contains_key(&character);
+        let in_group = 0 <= group && group.to::<usize>() < tables.len() && tables[group.to::<usize>()].contains_key(&character);
         if !in_group {
             match tables.iter().position(|table| table.contains_key(&character)) {
                 Some(index) => group = index.to::<i64>(),

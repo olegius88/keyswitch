@@ -160,14 +160,14 @@ extern "C-unwind" fn is_flipped(_this: &AnyObject, _selector: Sel) -> Bool {
 fn register_classes() -> Option<&'static AnyClass> {
     let mut flipped = ClassBuilder::new(c"KeySwitchFlippedView", class!(NSView))?;
     // SAFETY: the function has the signature of the selector.
-    unsafe { flipped.add_method(sel!(isFlipped), is_flipped as extern "C-unwind" fn(_, _) -> _) };
+    unsafe { flipped.add_method(sel!(isFlipped), { let method: extern "C-unwind" fn(_, _) -> _ = is_flipped; method }) };
     flipped.register();
     let mut target = ClassBuilder::new(c"KeySwitchSettingsTarget", class!(NSObject))?;
     // SAFETY: the functions have the signatures of these selectors.
     unsafe {
-        target.add_method(sel!(controlChanged:), control_changed as extern "C-unwind" fn(_, _, _));
-        target.add_method(sel!(buttonPressed:), button_pressed as extern "C-unwind" fn(_, _, _));
-        target.add_method(sel!(windowWillClose:), window_will_close as extern "C-unwind" fn(_, _, _));
+        target.add_method(sel!(controlChanged:), { let method: extern "C-unwind" fn(_, _, _) = control_changed; method });
+        target.add_method(sel!(buttonPressed:), { let method: extern "C-unwind" fn(_, _, _) = button_pressed; method });
+        target.add_method(sel!(windowWillClose:), { let method: extern "C-unwind" fn(_, _, _) = window_will_close; method });
     }
     Some(target.register())
 }

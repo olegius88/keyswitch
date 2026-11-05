@@ -58,7 +58,7 @@ impl Canvas {
     }
 
     fn put(&mut self, x: i32, y: i32, color: Rgba) {
-        if x >= 0 && y >= 0 && (x as usize) < self.size && (y as usize) < self.size {
+        if x >= 0 && y >= 0 && x.to::<usize>() < self.size && y.to::<usize>() < self.size {
             self.pixels[y.to::<usize>() * self.size + x.to::<usize>()] = color;
         }
     }

@@ -1,5 +1,6 @@
 //! The engine as the application keeps it: the worker thread and the calls made from other threads.
 
+use ks_cast::To as _;
 use super::logging::technical_event;
 use super::shared::{Command, CorrectionCallback, LearningPromptCallback, Next, QueueItem, RuleRequestCallback, SnapshotCallback};
 use super::*;
@@ -46,7 +47,7 @@ impl KeySwitchEngine {
             (None, Some(factory)) => Some(Arc::new(crate::context_access::PlatformFieldReader::new(factory, clock.clone()))),
             _ => None,
         };
-        let reader: Option<Arc<dyn FieldReader>> = context_reader.or_else(|| platform_reader.clone().map(|reader| reader as _));
+        let reader: Option<Arc<dyn FieldReader>> = context_reader.or_else(|| platform_reader.clone().map(|reader| -> Arc<dyn FieldReader> { reader }));
         let context_policy = ContextPolicy::new(resources, reader, EngineCore::known_of(&models), Some(clock.clone()));
         let prefix_indexes = models.iter().map(|model| resources.prefix_index(model)).collect();
         let core = EngineCore::from_parts(EngineParts {
@@ -260,7 +261,7 @@ impl KeySwitchEngine {
             return failed("Движок раскладки не запущен");
         }
         let target = alternate_layout_group(self.shared.current_group());
-        let Some(target) = target.filter(|target| 0 <= *target && (*target as usize) < self.shared.models_len) else {
+        let Some(target) = target.filter(|target| 0 <= *target && (*target).to::<usize>() < self.shared.models_len) else {
             return failed("Текущая раскладка EN/RU не определена");
         };
         if !self.shared.put_nowait(QueueItem::LayoutSelection(target)) {

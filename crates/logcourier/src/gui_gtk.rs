@@ -77,7 +77,7 @@ fn draft_of(app: &App) -> Result<(Config, String)> {
             sources: &app.sources,
             consent: widgets.consent.is_active(),
             auto: widgets.auto.is_active(),
-            interval: &(widgets.interval.value() as i64).to_string(),
+            interval: &widgets.interval.value().to::<i64>().to_string(),
         },
     )
 }
@@ -292,7 +292,7 @@ fn source_dialog(shared: &Shared, path: &Path) {
     let closing = dialog.clone();
     ok.connect_clicked(move |_| {
         let mut app = shared.borrow_mut();
-        match source_from(&file, &label.text(), &(rotations.value() as i64).to_string(), existing.is_active(), &app.sources) {
+        match source_from(&file, &label.text(), &rotations.value().to::<i64>().to_string(), existing.is_active(), &app.sources) {
             Ok(source) => {
                 app.sources.push(source);
                 refresh_sources(&app);

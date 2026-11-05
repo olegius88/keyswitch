@@ -4,6 +4,7 @@
 //! `AT_SPI_BUS_ADDRESS`), connects, and times calls out after `set_timeout`. The same is done here, and nothing else of
 //! libatspi is needed: every call is a method of `org.a11y.atspi.*` on a node.
 
+use ks_cast::To as _;
 use std::time::Duration;
 
 use zbus::blocking::Connection;
@@ -99,7 +100,7 @@ impl AtspiApi for ZbusAtspi {
         let (destination, path) = Self::target(node);
         let message = self
             .connection
-            .call_method(Some(destination), path, Some(INTERFACE_ACCESSIBLE), "GetChildAtIndex", &(index as i32))
+            .call_method(Some(destination), path, Some(INTERFACE_ACCESSIBLE), "GetChildAtIndex", &index.low::<i32>())
             .map_err(call_error)?;
         let (bus_name, path) = message.body().deserialize::<(String, OwnedObjectPath)>().map_err(call_error)?;
         // A null reference stands for no child.

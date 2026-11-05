@@ -98,7 +98,7 @@ pub fn create_window(class: &str, text: &str, style: u32, ex_style: u32, parent:
             rect.2,
             rect.3,
             parent,
-            id as *mut c_void,
+            id.pointer_mut::<c_void>(),
             hinstance(),
             null(),
         )
@@ -155,7 +155,7 @@ impl Fonts {
         let metrics = unsafe {
             let mut metrics: NONCLIENTMETRICSW = std::mem::zeroed();
             metrics.cbSize = (std::mem::size_of::<NONCLIENTMETRICSW>()).low::<u32>();
-            let filled = SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, metrics.cbSize, &mut metrics as *mut _ as *mut c_void, 0, dpi.bits::<u32>());
+            let filled = SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, metrics.cbSize, std::ptr::from_mut(&mut metrics).cast::<c_void>(), 0, dpi.bits::<u32>());
             if filled == 0 { None } else { Some(metrics) }
         };
         let (base, semibold) = match metrics {
@@ -193,7 +193,7 @@ impl Fonts {
             self.base, self.semibold, self.title, self.brand, self.frame, self.small, self.test, self.prompt_title, self.prompt_word,
             self.prompt_hint, self.mono,
         ] {
-            delete_object(font as HGDIOBJ);
+            delete_object(font);
         }
     }
 }
@@ -230,7 +230,7 @@ impl Brushes {
 
     pub fn destroy(&self) {
         for brush in [self.content, self.background, self.sidebar, self.field] {
-            delete_object(brush as HGDIOBJ);
+            delete_object(brush);
         }
     }
 }
@@ -243,7 +243,7 @@ pub fn text_width(font: HFONT, text: &str) -> i32 {
     // SAFETY: the device context is the screen's, released at once; the font is selected and put back.
     unsafe {
         let hdc = GetDC(null_mut());
-        let old = SelectObject(hdc, font as HGDIOBJ);
+        let old = SelectObject(hdc, font);
         let mut size = windows_sys::Win32::Foundation::SIZE { cx: 0, cy: 0 };
         GetTextExtentPoint32W(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut size);
         SelectObject(hdc, old);
@@ -262,7 +262,7 @@ pub fn wrapped_height(font: HFONT, text: &str, width: i32) -> i32 {
     // SAFETY: as in `text_width`; DT_CALCRECT only measures.
     unsafe {
         let hdc = GetDC(null_mut());
-        let old = SelectObject(hdc, font as HGDIOBJ);
+        let old = SelectObject(hdc, font);
         DrawTextW(hdc, wide_text.as_ptr(), wide_text.len().low::<i32>(), &mut rect, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_LEFT);
         SelectObject(hdc, old);
         ReleaseDC(null_mut(), hdc);
@@ -312,7 +312,7 @@ pub fn set_title_bar_dark(window: HWND, dark: bool) {
     let value: i32 = i32::from(dark);
     // SAFETY: the attribute's value is a BOOL of four bytes that lives through the call.
     unsafe {
-        DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE.to::<u32>(), &value as *const i32 as *const c_void, 4);
+        DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE.to::<u32>(), std::ptr::from_ref(&value).cast::<c_void>(), 4);
     }
 }
 
@@ -323,14 +323,14 @@ const STATE_MODIFIED: isize = 2;
 
 pub fn is_checked(window: HWND) -> bool {
     // SAFETY: reads the word this module stores in the window's user data.
-    unsafe { (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & STATE_CHECKED != 0 }
+    unsafe { GetWindowLongPtrW(window, GWLP_USERDATA).to::<isize>() & STATE_CHECKED != 0 }
 }
 
 pub fn set_checked(window: HWND, checked: bool) {
     // SAFETY: as above, and a repaint request.
     unsafe {
-        let state = (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & !STATE_CHECKED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if checked { STATE_CHECKED } else { 0 }) as _);
+        let state = GetWindowLongPtrW(window, GWLP_USERDATA).to::<isize>() & !STATE_CHECKED;
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if checked { STATE_CHECKED } else { 0 }).to::<isize>());
     }
     invalidate(window);
 }
@@ -339,8 +339,8 @@ pub fn set_checked(window: HWND, checked: bool) {
 pub fn set_modified(window: HWND, modified: bool) {
     // SAFETY: as above.
     unsafe {
-        let state = (GetWindowLongPtrW(window, GWLP_USERDATA) as isize) & !STATE_MODIFIED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if modified { STATE_MODIFIED } else { 0 }) as _);
+        let state = GetWindowLongPtrW(window, GWLP_USERDATA).to::<isize>() & !STATE_MODIFIED;
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if modified { STATE_MODIFIED } else { 0 }).to::<isize>());
     }
     invalidate(window);
 }
@@ -353,12 +353,12 @@ fn with_pen_and_brush(hdc: *mut c_void, pen_color: u32, pen_width: i32, brush: H
     // SAFETY: the pen is made, selected, used and deleted here; the previous objects are selected back.
     unsafe {
         let pen = CreatePen(PS_SOLID, pen_width, pen_color);
-        let old_pen = SelectObject(hdc, pen as HGDIOBJ);
-        let old_brush = SelectObject(hdc, brush as HGDIOBJ);
+        let old_pen = SelectObject(hdc, pen);
+        let old_brush = SelectObject(hdc, brush);
         draw();
         SelectObject(hdc, old_pen);
         SelectObject(hdc, old_brush);
-        DeleteObject(pen as HGDIOBJ);
+        DeleteObject(pen);
     }
 }
 
@@ -381,7 +381,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
     // SAFETY: draws into the device context the system gave for this paint; the font is selected and put back.
     unsafe {
         FillRect(hdc, &rect, brushes.content);
-        let old_font = SelectObject(hdc, font as HGDIOBJ);
+        let old_font = SelectObject(hdc, font);
         let (left, right, bottom) = (rect.left + 1, rect.left + 1 + size, top + size);
         let face = if checked && !radio { CreateSolidBrush(rgb(palette.accent)) } else { CreateSolidBrush(rgb(palette.field)) };
         let outline = if checked { rgb(palette.accent) } else { rgb(palette.muted) };
@@ -392,7 +392,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
                 Rectangle(hdc, left, top, right, bottom);
             }
         });
-        DeleteObject(face as HGDIOBJ);
+        DeleteObject(face);
         if checked {
             if radio {
                 let dot = CreateSolidBrush(rgb(palette.accent));
@@ -400,10 +400,10 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
                 with_pen_and_brush(hdc, rgb(palette.accent), 1, dot, || {
                     Ellipse(hdc, left + inset, top + inset, right - inset, bottom - inset);
                 });
-                DeleteObject(dot as HGDIOBJ);
+                DeleteObject(dot);
             } else {
                 let pen = CreatePen(PS_SOLID, scaled(2, dpi).max(2), 0x00ff_ffff);
-                let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+                let old_pen = SelectObject(hdc, pen);
                 let unit = size.to::<f32>() / 16.0;
                 let at = |x: f32, y: f32| ((left.to::<f32>() + x * unit).to::<i32>(), (top.to::<f32>() + y * unit).to::<i32>());
                 let (x1, y1) = at(3.5, 8.5);
@@ -413,7 +413,7 @@ pub fn draw_choice(item: &DRAWITEMSTRUCT, brushes: &Brushes, font: HFONT, dpi: i
                 LineTo(hdc, x2, y2);
                 LineTo(hdc, x3, y3);
                 SelectObject(hdc, old_pen);
-                DeleteObject(pen as HGDIOBJ);
+                DeleteObject(pen);
             }
         }
         SetBkMode(hdc, TRANSPARENT.bits::<i32>());
@@ -435,7 +435,7 @@ pub fn draw_navigation(item: &DRAWITEMSTRUCT, fill: HBRUSH, text_color: u32, fon
     // SAFETY: draws into the device context of this paint; the font is selected and put back.
     unsafe {
         FillRect(hdc, &rect, fill);
-        let old_font = SelectObject(hdc, font as HGDIOBJ);
+        let old_font = SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, text_color);
         rect.left += scaled(crate::constants::NAVIGATION_BUTTON_PADDING_X_PIXELS, dpi);
@@ -460,7 +460,7 @@ pub fn fill_rect(hdc: *mut c_void, rect: &RECT, brush: HBRUSH) {
 pub fn draw_label_text(hdc: *mut c_void, text: &str, rect: &mut RECT, font: HFONT, color: u32) {
     // SAFETY: the font is selected into the device context of this paint and put back.
     unsafe {
-        let old = SelectObject(hdc, font as HGDIOBJ);
+        let old = SelectObject(hdc, font);
         SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, color);
         draw_text(hdc, text, rect, DT_SINGLELINE | DT_LEFT | DT_NOPREFIX);
@@ -473,12 +473,12 @@ pub fn frame_rect(hdc: *mut c_void, rect: &RECT, color: u32) {
     // SAFETY: a pen made and deleted here; a null brush leaves the inside as it is.
     unsafe {
         let pen = CreatePen(PS_SOLID, 1, color);
-        let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+        let old_pen = SelectObject(hdc, pen);
         let old_brush = SelectObject(hdc, windows_sys::Win32::Graphics::Gdi::GetStockObject(windows_sys::Win32::Graphics::Gdi::NULL_BRUSH));
         Rectangle(hdc, rect.left, rect.top, rect.right, rect.bottom);
         SelectObject(hdc, old_pen);
         SelectObject(hdc, old_brush);
-        DeleteObject(pen as HGDIOBJ);
+        DeleteObject(pen);
     }
 }
 
@@ -580,7 +580,7 @@ pub fn list_view_setup(window: HWND, columns: &[(&str, i32)], dpi: i32) {
         column.mask = LVCF_TEXT | LVCF_WIDTH;
         column.cx = scaled(*width, dpi);
         column.pszText = text.as_mut_ptr();
-        send(window, LVM_INSERTCOLUMNW, index, (&column as *const LVCOLUMNW).to::<LPARAM>());
+        send(window, LVM_INSERTCOLUMNW, index, std::ptr::from_ref(&column).to::<LPARAM>());
     }
 }
 
@@ -603,9 +603,9 @@ pub fn list_view_set_rows(window: HWND, rows: &[Vec<String>]) {
             item.iSubItem = column.low::<i32>();
             item.pszText = text.as_mut_ptr();
             if column == 0 {
-                send(window, LVM_INSERTITEMW, 0, (&item as *const LVITEMW).to::<LPARAM>());
+                send(window, LVM_INSERTITEMW, 0, std::ptr::from_ref(&item).to::<LPARAM>());
             } else {
-                send(window, LVM_SETITEMTEXTW, index, (&item as *const LVITEMW).to::<LPARAM>());
+                send(window, LVM_SETITEMTEXTW, index, std::ptr::from_ref(&item).to::<LPARAM>());
             }
         }
     }
@@ -686,7 +686,7 @@ pub fn set_clipboard_text(owner: HWND, text: &str) -> bool {
         let block = GlobalAlloc(GMEM_MOVEABLE, bytes);
         let mut stored = false;
         if !block.is_null() {
-            let target = GlobalLock(block) as *mut u16;
+            let target = GlobalLock(block).cast::<u16>();
             if !target.is_null() {
                 std::ptr::copy_nonoverlapping(units.as_ptr(), target, units.len());
                 GlobalUnlock(block);

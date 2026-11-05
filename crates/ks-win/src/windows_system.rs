@@ -439,7 +439,7 @@ mod tests {
 
     fn manager(registry: &Arc<FakeRegistry>, command: &str, present: bool) -> WindowsAutostartManager {
         let exists: ExecutableCheck = Box::new(move |path| present && path == PRESENT);
-        WindowsAutostartManager::new(Some(Arc::clone(registry) as Arc<dyn WindowsRegistry>), Some(command.to_owned()), Some(exists))
+        WindowsAutostartManager::new(Some(registry.clone()), Some(command.to_owned()), Some(exists))
             .unwrap()
     }
 
@@ -536,7 +536,7 @@ mod tests {
         ]
         .map(|(name, path)| (name.to_owned(), path.to_owned()))
         .to_vec();
-        let catalog = WindowsApplicationCatalog::new(Some(Arc::clone(&registry) as Arc<dyn WindowsRegistry>)).unwrap();
+        let catalog = WindowsApplicationCatalog::new(Some(registry.clone())).unwrap();
         let applications = catalog.installed().unwrap();
         let identifiers: Vec<&str> = applications.iter().map(|item| item.identifier.as_str()).collect();
         assert_eq!(identifiers, ["notepad", "browser"]);

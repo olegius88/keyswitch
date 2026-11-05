@@ -155,7 +155,7 @@ pub fn load_onboard_unigrams(raw: &[u8], group: i64, minimum_length: usize, maxi
         if !(minimum_length..=maximum_length).contains(&normalized.chars().count()) || physical_signature(&normalized, group).is_empty() {
             continue;
         }
-        *frequencies.entry(normalized).or_insert(0) += (frequency as i64).max(1);
+        *frequencies.entry(normalized).or_insert(0) += frequency.to::<i64>().max(1);
     }
     let mut ranked: Vec<(String, i64)> = frequencies.into_iter().collect();
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -434,7 +434,7 @@ fn render_physical(signature: &str, group: i64) -> String {
 
 /// `_example_weight`.
 fn example_weight(frequency: i64) -> f64 {
-    1.0 + EXAMPLE_FREQUENCY_WEIGHT_CAP.min((frequency.max(1) as f64).ln_1p() / EXAMPLE_FREQUENCY_LOG_DIVISOR)
+    1.0 + EXAMPLE_FREQUENCY_WEIGHT_CAP.min(frequency.max(1).to::<f64>().ln_1p() / EXAMPLE_FREQUENCY_LOG_DIVISOR)
 }
 
 fn hard_negative_examples(token: &str, safety: bool) -> Vec<LexicalExample> {
@@ -667,7 +667,7 @@ pub fn decode_hard_negative_corpus(raw: &[u8], config: &Value, dataset: &Dataset
             return Err("hard-negative corpus contains duplicate signatures".to_owned());
         }
     }
-    if records_by_group.iter().enumerate().any(|(group, signatures)| signatures.len().to::<i64>() != words_by_group[&(group as i64)]) {
+    if records_by_group.iter().enumerate().any(|(group, signatures)| signatures.len().to::<i64>() != words_by_group[&group.to::<i64>()]) {
         return Err("hard-negative compact rows disagree with group counts".to_owned());
     }
     if signature_set_fingerprint(records.keys().map(String::as_str)) != physical_digest {

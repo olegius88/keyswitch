@@ -165,7 +165,7 @@ pub trait WaylandApi: Send + Sync {
 }
 
 pub fn is_cyrillic(text: &str) -> bool {
-    text.chars().next().is_some_and(|first| (0x0400..=0x04FF).contains(&(first as u32)))
+    text.chars().next().is_some_and(|first| (0x0400..=0x04FF).contains(&first.to::<u32>()))
 }
 
 /// Identify the English and Russian compositor layout indices by probing `KEY_Q`.
@@ -1068,7 +1068,7 @@ impl Inner {
         }
         self.deliver_inputs(&reselect, None, false)?;
         let final_group = final_group.unwrap_or(original_group);
-        if 0 <= final_group && (final_group as usize) < self.group_count() {
+        if 0 <= final_group && final_group.to::<usize>() < self.group_count() {
             self.switch_group_after_typing(final_group)?;
         }
         Ok(steps.is_some())
@@ -1207,7 +1207,7 @@ impl InputBackend for WaylandBackend {
     }
 
     fn switch_group(&self, group: i32) -> Result<(), BackendError> {
-        if !(0 <= group && (group as usize) < self.inner.group_count()) {
+        if !(0 <= group && group.to::<usize>() < self.inner.group_count()) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
         let _inject = lock(&self.inner.inject_lock);

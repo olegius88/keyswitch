@@ -258,7 +258,7 @@ fn verify_labels(root: &Path) -> Result<(), String> {
             continue;
         }
         let recognised = shaped.iter().filter(|word| knows(script, word)).count();
-        if (recognised as f64) < VERIFIED_MIN_KNOWN_SHARE * shaped.len().to::<f64>() {
+        if recognised.to::<f64>() < VERIFIED_MIN_KNOWN_SHARE * shaped.len().to::<f64>() {
             *counts.entry(format!("{script}:too_unfamiliar")).or_default() += 1;
             continue;
         }

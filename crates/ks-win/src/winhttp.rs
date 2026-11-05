@@ -117,7 +117,7 @@ mod native {
         let mut size: u32 = 0;
         // SAFETY: a null buffer with a zero size asks WinHTTP for the size it needs, in bytes.
         unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, null_mut(), &mut size) };
-        let mut buffer = vec![0u16; (size as usize).div_ceil(2).max(1)];
+        let mut buffer = vec![0u16; size.to::<usize>().div_ceil(2).max(1)];
         let mut size = (buffer.len() * 2).low::<u32>();
         // SAFETY: the buffer holds `size` bytes.
         check(unsafe { WinHttpQueryOption(request, WINHTTP_OPTION_URL, buffer.as_mut_ptr().cast(), &mut size) })?;
@@ -166,7 +166,7 @@ mod native {
                     handles.request,
                     WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                     null(),
-                    (&mut status as *mut u32).cast(),
+                    std::ptr::from_mut(&mut status).cast(),
                     &mut size,
                     null_mut(),
                 ))?;

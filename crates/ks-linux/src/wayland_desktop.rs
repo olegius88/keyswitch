@@ -158,7 +158,7 @@ pub fn encode_sway_ipc(message_type: u32, payload: &str) -> Vec<u8> {
     let body = payload.as_bytes();
     let mut frame = Vec::with_capacity(SWAY_IPC_HEADER_BYTES.to::<usize>() + body.len());
     frame.extend_from_slice(SWAY_IPC_MAGIC);
-    frame.extend_from_slice(&(body.len() as u32).to_ne_bytes());
+    frame.extend_from_slice(&body.len().low::<u32>().to_ne_bytes());
     frame.extend_from_slice(&message_type.to_ne_bytes());
     frame.extend_from_slice(body);
     frame
@@ -191,7 +191,7 @@ pub fn parse_sway_inputs(payload: &Value) -> (Vec<String>, i64) {
             continue;
         }
         let mut active = int_field(item, "xkb_active_layout_index", 0);
-        if !(0 <= active && (active as usize) < names.len()) {
+        if !(0 <= active && active.to::<usize>() < names.len()) {
             active = 0;
         }
         if names.len() > 1 {
@@ -310,7 +310,7 @@ pub fn parse_gnome_state(raw_json: &str) -> Result<DesktopSnapshot, DesktopParse
         .unwrap_or_default();
     // -1: the extension has not seen the current source applied yet; the layout is unknown till then.
     let mut current = int_field(&data, "current_layout", -1);
-    if !(0 <= current && (current as usize) < layouts.len()) {
+    if !(0 <= current && current.to::<usize>() < layouts.len()) {
         current = -1;
     }
     let mut window = None;

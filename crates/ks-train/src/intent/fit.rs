@@ -751,7 +751,7 @@ pub fn quantize(weights: &[(usize, f64)], dimension: usize) -> Quantized {
     let (mut values, mut support) = (vec![0_i16; dimension], vec![0_u8; dimension.div_ceil(8)]);
     let mut maximum_error = 0.0_f64;
     for (index, weight) in weights {
-        let quantized = (py_round(weight / scale) as i64).clamp(-QUANTIZED_LIMIT, QUANTIZED_LIMIT);
+        let quantized = py_round(weight / scale).to::<i64>().clamp(-QUANTIZED_LIMIT, QUANTIZED_LIMIT);
         values[*index] = quantized.to::<i16>();
         if quantized != 0 {
             support[index / 8] |= 1 << (index % 8);

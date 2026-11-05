@@ -465,7 +465,7 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
         }
         WM_DRAWITEM => {
             // SAFETY: for this message `lparam` points at the structure the system gave.
-            let item = unsafe { &*(lparam as *const DRAWITEMSTRUCT) };
+            let item = unsafe { &*lparam.pointer::<DRAWITEMSTRUCT>() };
             DIALOG.with(|slot| {
                 if let Some(dialog) = slot.borrow().as_ref() {
                     let radio = item.CtlID.to::<usize>() != ID_CASE;
@@ -478,12 +478,12 @@ unsafe extern "system" fn dialog_proc(window: HWND, message: u32, wparam: WPARAM
             let slot = slot.borrow();
             let Some(dialog) = slot.as_ref() else { return 0 };
             let palette = dialog.brushes.palette;
-            let hdc = wparam as HDC;
+            let hdc = wparam.pointer_mut::<std::ffi::c_void>();
             if message == WM_CTLCOLOREDIT {
                 w32::set_label_colors(hdc, palette.foreground.colorref(), palette.field.colorref());
                 return dialog.brushes.field.to::<LRESULT>();
             }
-            let control = lparam as HWND;
+            let control = lparam.pointer_mut::<std::ffi::c_void>();
             let color = if control == dialog.controls.problem {
                 palette.error
             } else if control == dialog.controls.hint {

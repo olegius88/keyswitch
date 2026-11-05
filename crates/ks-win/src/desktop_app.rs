@@ -90,7 +90,7 @@ fn post(action: Posted) {
     let window = WINDOW.load(Ordering::SeqCst);
     if window != 0 {
         // SAFETY: PostMessageW may be called from any thread; a window that is gone just fails the call.
-        unsafe { PostMessageW(window as HWND, WM_POSTED, 0, 0) };
+        unsafe { PostMessageW(window.pointer_mut::<std::ffi::c_void>(), WM_POSTED, 0, 0) };
     }
 }
 
@@ -608,7 +608,7 @@ fn engine_builder(
     let resources = ks_lang::Resources::new(resource_dir());
     Box::new(move || {
         let factory: ReaderFactory = Arc::new(|| {
-            WindowsFieldReader::new().map(|reader| Box::new(reader) as Box<dyn ks_backend::ManagedFieldReader>)
+            WindowsFieldReader::new().map(|reader| -> Box<dyn ks_backend::ManagedFieldReader> { Box::new(reader) })
         });
         KeySwitchEngine::new(
             settings,

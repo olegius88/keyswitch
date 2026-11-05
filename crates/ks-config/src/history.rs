@@ -228,7 +228,7 @@ impl HistoryStore {
         let mut rows: Vec<Row> = ks_text::pystr::splitlines(&text, false).into_iter().filter_map(Row::from_line).collect();
         if let Some(limit) = limit {
             // result[-limit:]: a limit of zero is "-0", the whole list.
-            if limit > 0 && (limit as usize) < rows.len() {
+            if limit > 0 && limit.to::<usize>() < rows.len() {
                 rows.drain(..rows.len() - limit.to::<usize>());
             }
         }

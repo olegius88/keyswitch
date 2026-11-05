@@ -124,7 +124,7 @@ extern "C" fn run_on_main_queue(context: *mut c_void) {
 
 fn post_to_main_queue(number: u64) {
     // SAFETY: the main queue lives as long as the process and the function takes the number as its context.
-    unsafe { dispatch_async_f(&raw const _dispatch_main_q, number as *mut c_void, run_on_main_queue) };
+    unsafe { dispatch_async_f(&raw const _dispatch_main_q, number.to::<usize>().pointer_mut::<c_void>(), run_on_main_queue) };
 }
 
 pub static MAIN_THREAD: MainThreadRunner = MainThreadRunner::new(is_main_thread, post_to_main_queue);
@@ -149,11 +149,11 @@ fn text(reference: CFRef) -> String {
     unsafe {
         // A field's text is as long as the field: a fixed buffer refused every value over about 255 Cyrillic characters.
         let needed = CFStringGetMaximumSizeForEncoding(CFStringGetLength(reference), CF_STRING_ENCODING_UTF8) + 1;
-        if needed > CF_STRING_MAX_BYTES as c_long {
+        if needed > CF_STRING_MAX_BYTES.to::<c_long>() {
             return String::new();
         }
         let mut buffer = vec![0u8; needed.max(1).to::<usize>()];
-        if !CFStringGetCString(reference, buffer.as_mut_ptr().cast(), buffer.len() as c_long, CF_STRING_ENCODING_UTF8) {
+        if !CFStringGetCString(reference, buffer.as_mut_ptr().cast(), buffer.len().to::<c_long>(), CF_STRING_ENCODING_UTF8) {
             return String::new();
         }
         let end = buffer.iter().position(|byte| *byte == 0).unwrap_or(buffer.len());
@@ -241,7 +241,7 @@ impl State {
             CFRelease(array);
             let mut table = locked(&self.sources);
             for reference in table.sources.values().chain(table.layouts.values()) {
-                CFRelease(*reference as CFRef);
+                CFRelease((*reference).pointer::<c_void>());
             }
             *table = found;
         }
@@ -373,7 +373,7 @@ impl MacAPI for NativeMacAPI {
                     source = locked(&state.sources).sources.get(&wanted).copied();
                 }
                 // SAFETY: the reference is retained in the table.
-                source.is_some_and(|source| unsafe { TISSelectInputSource(source as CFRef) } == 0)
+                source.is_some_and(|source| unsafe { TISSelectInputSource(source.pointer::<c_void>()) } == 0)
             },
             false,
             MACOS_LAYOUT_SWITCH_WAIT_SECONDS,
@@ -394,13 +394,13 @@ impl MacAPI for NativeMacAPI {
         let Some(layout) = layout else { return String::new() };
         // SAFETY: the layout data is retained in the table; the buffers outlive the call.
         unsafe {
-            let pointer = CFDataGetBytePtr(layout as CFRef);
+            let pointer = CFDataGetBytePtr(layout.pointer::<c_void>());
             if pointer.is_null() {
                 return String::new();
             }
-            let (mut dead, mut length) = (0u32, 0 as c_ulong);
+            let (mut dead, mut length) = (0u32, 0);
             let mut buffer = [0u16; UC_KEY_TRANSLATE_BUFFER_CHARACTERS];
-            let status = UCKeyTranslate(pointer, keycode.low::<u16>(), UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &mut dead, buffer.len() as c_ulong, &mut length, buffer.as_mut_ptr());
+            let status = UCKeyTranslate(pointer, keycode.low::<u16>(), UC_KEY_ACTION_DISPLAY, translate_modifiers(state), u32::from(LMGetKbdType()), UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, &mut dead, buffer.len().to::<c_ulong>(), &mut length, buffer.as_mut_ptr());
             if status != 0 || length == 0 {
                 return String::new();
             }
@@ -542,7 +542,7 @@ impl MacAPI for NativeMacAPI {
         let tap = self.state.tap.load(Ordering::SeqCst);
         if tap != 0 {
             // SAFETY: the tap is alive until `run_event_tap` clears the number.
-            unsafe { CGEventTapEnable(tap as CFRef, true) };
+            unsafe { CGEventTapEnable(tap.pointer::<c_void>(), true) };
         }
     }
 
@@ -683,7 +683,7 @@ impl NativeAccessibility {
     fn name(&self, name: &str) -> CFRef {
         let mut names = locked(&self.names);
         if let Some(known) = names.get(name) {
-            return *known as CFRef;
+            return (*known).pointer::<c_void>();
         }
         let Ok(text) = CString::new(name) else { return std::ptr::null() };
         // SAFETY: the created string is kept in the table for the life of this object.
@@ -700,7 +700,7 @@ impl NativeAccessibility {
         }
         let mut value: CFRef = std::ptr::null();
         // SAFETY: the element and the key are valid; the value is written by the call.
-        let status = unsafe { AXUIElementCopyAttributeValue(element as CFRef, key, &mut value) };
+        let status = unsafe { AXUIElementCopyAttributeValue(element.pointer::<c_void>(), key, &mut value) };
         if status == AX_SUCCESS { value } else { std::ptr::null() }
     }
 }
@@ -740,7 +740,7 @@ impl AccessibilityAPI for NativeAccessibility {
     fn release(&self, element: usize) {
         if element != 0 {
             // SAFETY: the caller owns the element it got from this object.
-            unsafe { CFRelease(element as CFRef) };
+            unsafe { CFRelease(element.pointer::<c_void>()) };
         }
     }
 }
@@ -753,7 +753,7 @@ impl SelectionAccessibilityAPI for NativeAccessibility {
         }
         let mut settable = false;
         // SAFETY: the element and the key are valid; the answer is written by the call.
-        let status = unsafe { AXUIElementIsAttributeSettable(element as CFRef, key, &mut settable) };
+        let status = unsafe { AXUIElementIsAttributeSettable(element.pointer::<c_void>(), key, &mut settable) };
         status == AX_SUCCESS && settable
     }
 
@@ -769,7 +769,7 @@ impl SelectionAccessibilityAPI for NativeAccessibility {
             if created.is_null() {
                 return false;
             }
-            let status = AXUIElementSetAttributeValue(element as CFRef, key, created);
+            let status = AXUIElementSetAttributeValue(element.pointer::<c_void>(), key, created);
             CFRelease(created);
             status == AX_SUCCESS
         }

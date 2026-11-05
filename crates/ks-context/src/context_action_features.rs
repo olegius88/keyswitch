@@ -65,7 +65,7 @@ fn count(text: &str) -> usize {
 
 /// `text[-n:]`.
 fn last(text: &str, n: usize) -> &str {
-    pystr::slice(text, Some(-(n as i64)), None)
+    pystr::slice(text, Some(-n.to::<i64>()), None)
 }
 
 /// `text[:n]`.
@@ -88,7 +88,7 @@ fn clamp_int(value: i64, bound: i64) -> i64 {
 
 /// `max(-bands, min(bands, math.floor(delta / width)))`.
 fn band(delta: f64, width: f64, bands: i64) -> i64 {
-    ((delta / width).floor().clamp(-(bands as f64), bands.to::<f64>())).to::<i64>()
+    ((delta / width).floor().clamp(-bands.to::<f64>(), bands.to::<f64>())).to::<i64>()
 }
 
 fn translate(text: &str, from: &str, to: &str) -> String {
@@ -238,7 +238,7 @@ fn characters(features: &mut FeatureMap, label: &str, text: &str, direction: &st
             let gram: String = padded[index..index + order].iter().collect();
             let name = format!("{label}:char:{direction}:{order}:{gram}");
             let found = features.get(&name).copied().unwrap_or(0.0);
-            features.insert(name, py_min(ACTION_FEATURE_CHARACTER_WEIGHT_CAP, found + 1.0 / (grams as f64).sqrt()));
+            features.insert(name, py_min(ACTION_FEATURE_CHARACTER_WEIGHT_CAP, found + 1.0 / grams.to::<f64>().sqrt()));
         }
     }
 }
@@ -264,7 +264,7 @@ fn word_score(features: &mut FeatureMap, label: &str, score: Option<&ks_lang::Wo
         ),
         (
             format!("{label}:logfrequency"),
-            (score.frequency.min(ACTION_FEATURE_FREQUENCY_CAP) as f64).ln_1p() / (ACTION_FEATURE_FREQUENCY_CAP as f64).ln_1p(),
+            score.frequency.min(ACTION_FEATURE_FREQUENCY_CAP).to::<f64>().ln_1p() / ACTION_FEATURE_FREQUENCY_CAP.to::<f64>().ln_1p(),
         ),
         (format!("{label}:exact:{}", flag(score.exact)), 1.0),
         (format!("{label}:spell_known:{}", flag(score.spell_known)), 1.0),
@@ -2164,7 +2164,7 @@ fn slip_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let english_near = english.max(nearest_count(&latin, "english", tables));
     let probability = match item.model_probability {
         None => "na".to_string(),
-        Some(probability) => (((probability * SLIP_PROBABILITY_BANDS.to::<f64>()).floor()).clamp(0.0, (SLIP_PROBABILITY_BANDS - 1).to::<f64>()) as i64).to_string(),
+        Some(probability) => (((probability * SLIP_PROBABILITY_BANDS.to::<f64>()).floor()).clamp(0.0, (SLIP_PROBABILITY_BANDS - 1).to::<f64>())).to::<i64>().to_string(),
     };
     let margin = match (item.ortho_score, item.ortho_threshold) {
         (Some(score), Some(threshold)) => band(score - threshold, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS).to_string(),
@@ -2212,7 +2212,7 @@ pub fn extract_baseline_features(item: &ContextEvidence) -> FeatureMap {
     const ORDERS: [usize; 3] = [1, 2, 3];
     let original = normalized(pystr::slice(&item.original, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS.to::<i64>())));
     let alternative = normalized(pystr::slice(&item.alternative, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS.to::<i64>())));
-    let before = normalized(pystr::slice(&item.field.before, Some(-(ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS as i64)), None));
+    let before = normalized(pystr::slice(&item.field.before, Some(-ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS.to::<i64>()), None));
     let after = normalized(pystr::slice(&item.field.after, None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS.to::<i64>())));
     let length = ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS.min(pystr::len(&original).max(pystr::len(&alternative)));
     let direction = item.source_group;
@@ -2273,7 +2273,7 @@ pub fn extract_baseline_features(item: &ContextEvidence) -> FeatureMap {
     for (token, sign) in [(&original, -1.0_f64), (&alternative, 1.0)] {
         let padded: Vec<char> = std::iter::once('^').chain(token.chars()).chain(std::iter::once('$')).collect();
         for order in ORDERS {
-            let scale = sign / (padded.len().saturating_sub(order).saturating_add(1).max(1) as f64).sqrt();
+            let scale = sign / padded.len().saturating_sub(order).saturating_add(1).max(1).to::<f64>().sqrt();
             for start in 0..(padded.len() + 1).saturating_sub(order) {
                 let gram: String = padded[start..start + order].iter().collect();
                 *features.entry(format!("char:{gram}")).or_insert(0.0) += scale;

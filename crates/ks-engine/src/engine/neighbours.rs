@@ -1,5 +1,6 @@
 //! A word and the words next to it: waiting for the next word, taking the kept words along, going back with it.
 
+use ks_cast::To as _;
 use super::logging::technical_event;
 use super::*;
 use ks_context::context_action_features::{cyrletter_question, resume_question, sign_token_asked, term_question, variable_question};
@@ -557,7 +558,7 @@ impl EngineCore {
         };
         let script = if plan.source_group == 0 { "en" } else { "ru" };
         let keys = if script == "en" { plan.original.as_str() } else { plan.replacement.as_str() };
-        if (pystr::len(keys) as i64) < ortho.minimum_length {
+        if pystr::len(keys).to::<i64>() < ortho.minimum_length {
             return false;
         }
         self.ortho_score(plan, before).is_some_and(|score| score.supported && score.total > *ortho.thresholds.get(script))
@@ -735,7 +736,7 @@ impl EngineCore {
             Some(field) => field.before.clone(),
             None => {
                 let cut = pystr::len(&plan.original) + pystr::len(&suffix);
-                pystr::slice(&self.context_policy.stream.text, None, Some(-(cut as i64))).to_owned()
+                pystr::slice(&self.context_policy.stream.text, None, Some(-cut.to::<i64>())).to_owned()
             }
         };
         let last_line = pystr::rsplit_sep(&before, "\n", 1).and_then(|parts| parts.last().copied()).unwrap_or(&before);

@@ -315,7 +315,7 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
         // A field the log shows unread (role unknown: the engine had only the keys it observed) is not read here either.
         let unread = decision.is_some_and(|decision| decision.get("role").and_then(Value::as_str) == Some("unknown"));
         field_ref.session.core.context_policy.reader =
-            Some(if unread { Arc::new(UnreadField) as Arc<dyn ks_backend::FieldReader> } else { Arc::new(CaretReader { backend: field_ref.session.backend.clone() }) });
+            Some(if unread { Arc::new(UnreadField) } else { Arc::new(CaretReader { backend: field_ref.session.backend.clone() }) });
         counts.add(if unread { "opening:unread" } else { "opening:read" });
         let mut kept = 0;
         if mode == "carry"

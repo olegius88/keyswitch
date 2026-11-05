@@ -239,7 +239,7 @@ pub fn extract_features(
     let alternative = normalize_token(evidence.alternative);
     let (original_length, alternative_length) = (pystr::len(&original), pystr::len(&alternative));
     let active_orders = orders.iter().filter(|&&order| (original_length + 2).to::<i64>() >= order || (alternative_length + 2).to::<i64>() >= order).count();
-    let order_scale = if active_orders > 0 { 1.0 / (active_orders as f64).sqrt() } else { 1.0 };
+    let order_scale = if active_orders > 0 { 1.0 / active_orders.to::<f64>().sqrt() } else { 1.0 };
     add_character_features(&original, evidence.source_group, -order_scale, &orders, &mut add);
     add_character_features(&alternative, evidence.target_group, order_scale, &orders, &mut add);
 
@@ -298,7 +298,7 @@ fn add_character_features(token: &str, group_number: i64, polarity: f64, orders:
             }
         }
         // math.sqrt of an exact integer.
-        let norm = (counts.iter().map(|item| item.1 * item.1).sum::<u64>() as f64).sqrt();
+        let norm = (counts.iter().map(|item| item.1 * item.1).sum::<u64>()).to::<f64>().sqrt();
         let prefix = format!("char:g{}:n{}:", group(group_number), order);
         let mut name = String::new();
         for (gram, count) in counts {

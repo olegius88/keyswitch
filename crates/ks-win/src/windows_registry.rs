@@ -67,7 +67,7 @@ fn query(key: &Key, name: &str) -> io::Result<RegistryValue> {
             RegQueryValueExW(key.0, name.as_ptr(), null(), &mut value_type, data.as_mut_ptr(), &mut size)
         };
         if status == ERROR_MORE_DATA {
-            let wanted = (size as usize).max(data.len() * 2);
+            let wanted = size.to::<usize>().max(data.len() * 2);
             data.resize(wanted, 0);
             continue;
         }

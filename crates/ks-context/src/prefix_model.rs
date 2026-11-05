@@ -68,13 +68,13 @@ pub fn features(item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> indexmap::In
         let evidence = side.index.completions(text);
         let score = side.model.score(text);
         put(format!("{name}:empty"), flag(evidence.completions == 0));
-        put(format!("{name}:completions"), (evidence.completions as f64).ln_1p() / PREFIX_V1_COMPLETIONS_LOG_DIVISOR.to::<f64>());
-        put(format!("{name}:frequency"), (evidence.maximum_frequency as f64).ln_1p() / PREFIX_V1_FREQUENCY_LOG_DIVISOR.to::<f64>());
+        put(format!("{name}:completions"), evidence.completions.to::<f64>().ln_1p() / PREFIX_V1_COMPLETIONS_LOG_DIVISOR.to::<f64>());
+        put(format!("{name}:frequency"), evidence.maximum_frequency.to::<f64>().ln_1p() / PREFIX_V1_FREQUENCY_LOG_DIVISOR.to::<f64>());
         put(format!("{name}:known"), flag(evidence.known || score.known));
         put(format!("{name}:invalid"), score.invalid_ratio);
         put(format!("{name}:ngram"), clamp(score.ngram_score, PREFIX_V1_NGRAM_SCORE_BOUND) / PREFIX_V1_NGRAM_SCORE_BOUND);
     }
-    let before = pystr::casefold(pystr::slice(&item.field.before, Some(-(PREFIX_V1_BEFORE_CONTEXT_CHARACTERS as i64)), None));
+    let before = pystr::casefold(pystr::slice(&item.field.before, Some(-PREFIX_V1_BEFORE_CONTEXT_CHARACTERS.to::<i64>()), None));
     let line = before.rsplit('\n').next().unwrap_or("");
     let comment = line.contains("//") || line.contains("/*") || line.contains('#');
     let syntax = line.chars().any(|c| "=;{}()[]$".contains(c));

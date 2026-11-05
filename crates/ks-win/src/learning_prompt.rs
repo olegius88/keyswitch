@@ -212,8 +212,8 @@ fn paint(window: HWND) {
             let card = w32::solid_brush(PROMPT_CARD);
             w32::fill_rect(hdc, &client, border);
             w32::fill_rect(hdc, &RECT { left: 1, top: 1, right: client.right - 1, bottom: client.bottom - 1 }, card);
-            w32::delete_object(border as _);
-            w32::delete_object(card as _);
+            w32::delete_object(border);
+            w32::delete_object(card);
             let left = 1 + scaled(LEARNING_PROMPT_CARD_PADDING_X_PIXELS, dpi);
             let mut top = 1 + scaled(LEARNING_PROMPT_CARD_PADDING_Y_PIXELS, dpi);
             let mut line = |text: &str, font, color: u32, height: i32, gap: i32| {

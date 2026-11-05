@@ -286,7 +286,7 @@ fn quote(value: &str) -> String {
     let mut result = String::new();
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"_.-~".contains(&byte) {
-            result.push(byte as char);
+            result.push(char::from(byte));
         } else {
             result.push_str(&format!("%{byte:02X}"));
         }

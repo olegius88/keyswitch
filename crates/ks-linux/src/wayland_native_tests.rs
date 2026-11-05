@@ -1,6 +1,7 @@
 //! What is testable of the Linux layer without a compositor: bit maps, the evdev byte layout, the Wayland wire protocol
 //! against a scripted compositor, libxkbcommon where it is installed, and the sway adapter against a scripted sway.
 
+use ks_cast::To as _;
 use super::*;
 
 fn temporary_path(name: &str) -> PathBuf {
@@ -52,7 +53,7 @@ fn the_wayland_socket_is_found_the_way_libwayland_finds_it() {
 }
 
 fn send_with_descriptor(stream: &UnixStream, bytes: &[u8], descriptor: RawFd) {
-    let mut io_vector = libc::iovec { iov_base: bytes.as_ptr() as *mut c_void, iov_len: bytes.len() };
+    let mut io_vector = libc::iovec { iov_base: bytes.as_ptr().cast_mut().cast::<c_void>(), iov_len: bytes.len() };
     // SAFETY: the space is the size the macro computes for one descriptor, and the pointers stay valid for the call.
     unsafe {
         let space = (libc::CMSG_SPACE((std::mem::size_of::<RawFd>()).low::<u32>())).to::<usize>();
@@ -61,11 +62,11 @@ fn send_with_descriptor(stream: &UnixStream, bytes: &[u8], descriptor: RawFd) {
         header.msg_iov = &mut io_vector;
         header.msg_iovlen = 1;
         header.msg_control = control.as_mut_ptr().cast::<c_void>();
-        header.msg_controllen = space as _;
+        header.msg_controllen = space.to::<usize>();
         let message = libc::CMSG_FIRSTHDR(&header);
         (*message).cmsg_level = libc::SOL_SOCKET;
         (*message).cmsg_type = libc::SCM_RIGHTS;
-        (*message).cmsg_len = libc::CMSG_LEN((std::mem::size_of::<RawFd>()).low::<u32>()) as _;
+        (*message).cmsg_len = libc::CMSG_LEN((std::mem::size_of::<RawFd>()).low::<u32>()).to::<usize>();
         libc::CMSG_DATA(message).cast::<RawFd>().write_unaligned(descriptor);
         assert!(libc::sendmsg(stream.as_raw_fd(), &header, 0) >= 0);
     }

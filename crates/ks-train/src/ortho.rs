@@ -262,7 +262,7 @@ pub(crate) fn channel_payload(gram_counts: &HashMap<String, i64>, order: usize, 
             *context_types.entry(drop_last(gram)).or_insert(0) += 1;
         }
     }
-    let uniform = -(alphabet as f64).ln();
+    let uniform = -alphabet.to::<f64>().ln();
     let unigram_total: i64 = gram_counts.iter().filter(|(gram, _)| gram.chars().count() == 1).map(|(_, count)| *count).sum();
     let mut logprob: HashMap<&str, f64> = HashMap::with_capacity(gram_counts.len());
     let mut backoff: BTreeMap<&str, f64> = BTreeMap::new();

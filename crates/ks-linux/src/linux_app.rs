@@ -306,7 +306,7 @@ pub fn engine_builder(
         let process = process_for_window;
         let factory: ReaderFactory = Arc::new(move || {
             let api = atspi_bus::connect().map_err(|error| error.failure())?;
-            Ok(Box::new(AtspiFieldReader::new(api, Some(process.clone()))) as Box<dyn ks_backend::ManagedFieldReader>)
+            Ok(Box::new(AtspiFieldReader::new(api, Some(process.clone()))))
         });
         KeySwitchEngine::new(
             settings,

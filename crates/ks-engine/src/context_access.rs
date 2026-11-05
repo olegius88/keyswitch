@@ -94,7 +94,7 @@ impl PlatformFieldReader {
         let mut result = Map::new();
         result.insert("attempts".into(), json!(state._retry_attempts));
         result.insert("limit".into(), json!(FIELD_READER_RETRY_DELAYS_SECONDS.len()));
-        let after = state._retry_after.map(|after| (ks_text::py_round((after - (self.clock)()) * MILLISECONDS_PER_SECOND) as i64).max(0));
+        let after = state._retry_after.map(|after| (ks_text::py_round((after - (self.clock)()) * MILLISECONDS_PER_SECOND)).to::<i64>().max(0));
         result.insert("after_ms".into(), json!(after));
         result
     }

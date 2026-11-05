@@ -47,7 +47,7 @@ unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi:
     header.bmiHeader = BITMAPINFOHEADER {
         biSize: (std::mem::size_of::<BITMAPINFOHEADER>()).low::<u32>(),
         biWidth: size.low::<i32>(),
-        biHeight: -(size as i32),
+        biHeight: -size.low::<i32>(),
         biPlanes: 1,
         biBitCount: 32,
         biCompression: BI_RGB,
@@ -60,7 +60,7 @@ unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi:
     let mut bits: *mut core::ffi::c_void = null_mut();
     // SAFETY: the header describes a 32-bit RGB bitmap; with DIB_RGB_COLORS no device context is read.
     let bitmap = unsafe { CreateDIBSection(null_mut(), &header, DIB_RGB_COLORS, &mut bits, null_mut(), 0) };
-    if bitmap.is_null() || bits.is_null() { None } else { Some((bitmap, bits as *mut u8)) }
+    if bitmap.is_null() || bits.is_null() { None } else { Some((bitmap, bits.cast::<u8>())) }
 }
 
 /// The glyphs of `text` in the badge font, white on black, as a coverage mask cropped to the ink.
@@ -89,8 +89,8 @@ fn glyph_ink(text: &str) -> Option<Ink> {
             DEFAULT_PITCH.to::<u32>(),
             face.as_ptr(),
         );
-        let old_bitmap = SelectObject(hdc, bitmap as _);
-        let old_font = SelectObject(hdc, font as _);
+        let old_bitmap = SelectObject(hdc, bitmap);
+        let old_font = SelectObject(hdc, font);
         std::ptr::write_bytes(bits, 0, size * size * 4);
         SetBkMode(hdc, TRANSPARENT.bits::<i32>());
         SetTextColor(hdc, 0x00FF_FFFF);
@@ -99,8 +99,8 @@ fn glyph_ink(text: &str) -> Option<Ink> {
         let coverage: Vec<u8> = pixels.chunks_exact(4).map(|pixel| pixel[1]).collect();
         SelectObject(hdc, old_font);
         SelectObject(hdc, old_bitmap);
-        DeleteObject(font as _);
-        DeleteObject(bitmap as _);
+        DeleteObject(font);
+        DeleteObject(bitmap);
         DeleteDC(hdc);
         crop_ink(&coverage, size)
     }
@@ -146,8 +146,8 @@ fn create_icon(state: &TrayState) -> Option<HICON> {
         let mask = CreateBitmap(target.low::<i32>(), target.low::<i32>(), 1, 1, null());
         let info = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
         let icon = CreateIconIndirect(&info);
-        DeleteObject(color as _);
-        DeleteObject(mask as _);
+        DeleteObject(color);
+        DeleteObject(mask);
         if icon.is_null() { None } else { Some(icon) }
     }
 }

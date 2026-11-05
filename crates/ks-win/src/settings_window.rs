@@ -522,7 +522,7 @@ impl Ui {
                 // SAFETY: fills the rectangle; `lparam` points at the structure the system gave for this message.
                 unsafe {
                     AdjustWindowRectExForDpi(&mut outer, WS_OVERLAPPEDWINDOW, 0, 0, dpi.bits::<u32>());
-                    let info = &mut *(lparam as *mut MINMAXINFO);
+                    let info = &mut *lparam.pointer_mut::<MINMAXINFO>();
                     info.ptMinTrackSize = POINT { x: outer.right - outer.left, y: outer.bottom - outer.top };
                 }
                 Some(0)
@@ -530,7 +530,7 @@ impl Ui {
             WM_DPICHANGED => {
                 let dpi = low_word(wparam).low::<i32>();
                 // SAFETY: for this message `lparam` points at the suggested rectangle.
-                let suggested = unsafe { *(lparam as *const RECT) };
+                let suggested = unsafe { *lparam.pointer::<RECT>() };
                 self.dpi.set(dpi);
                 self.release();
                 // SAFETY: the window is ours.
@@ -552,18 +552,18 @@ impl Ui {
                 Some(0)
             }
             WM_ERASEBKGND => {
-                self.erase_frame(wparam as HDC);
+                self.erase_frame(wparam.pointer_mut::<std::ffi::c_void>());
                 Some(1)
             }
-            WM_CTLCOLORSTATIC => self.frame_ctlcolor(wparam as HDC, lparam as HWND),
+            WM_CTLCOLORSTATIC => self.frame_ctlcolor(wparam.pointer_mut::<std::ffi::c_void>(), lparam.pointer_mut::<std::ffi::c_void>()),
             WM_DRAWITEM => {
                 // SAFETY: for this message `lparam` points at the structure the system gave.
-                let item = unsafe { &*(lparam as *const DRAWITEMSTRUCT) };
+                let item = unsafe { &*lparam.pointer::<DRAWITEMSTRUCT>() };
                 self.draw_item(item);
                 Some(1)
             }
             WM_COMMAND => {
-                self.command(low_word(wparam), high_word(wparam), lparam as HWND);
+                self.command(low_word(wparam), high_word(wparam), lparam.pointer_mut::<std::ffi::c_void>());
                 Some(0)
             }
             WM_TIMER if wparam == TIMER_CAPTURE => {
@@ -744,7 +744,7 @@ impl Ui {
             let pad = scaled(SIDEBAR_PADDING_X_PIXELS, dpi);
             let brush = w32::solid_brush(palette.sidebar_muted);
             w32::fill_rect(hdc, &RECT { left: pad, top: y, right: width - pad, bottom: y + 1 }, brush);
-            w32::delete_object(brush as _);
+            w32::delete_object(brush);
         }
     }
 
@@ -770,7 +770,7 @@ impl Ui {
                 let color = if selected { palette.accent } else { palette.sidebar };
                 let brush = w32::solid_brush(color);
                 w32::draw_navigation(item, brush, palette.sidebar_text.colorref(), resources.fonts.base, self.dpi.get());
-                w32::delete_object(brush as _);
+                w32::delete_object(brush);
             }
             Some(Action::Setting(_)) => w32::draw_choice(item, &resources.brushes, resources.fonts.base, self.dpi.get(), false),
             _ => {}
@@ -945,7 +945,7 @@ impl Ui {
             WM_ERASEBKGND => {
                 let brush = self.resources.borrow().as_ref().map(|resources| resources.brushes.content)?;
                 let rect = w32::client_rect(panel);
-                w32::fill_rect(wparam as HDC, &rect, brush);
+                w32::fill_rect(wparam.pointer_mut::<std::ffi::c_void>(), &rect, brush);
                 Some(1)
             }
             WM_PAINT => {
@@ -981,23 +981,23 @@ impl Ui {
             }
             WM_MOUSEWHEEL => {
                 let page = self.page_of(panel)?;
-                let notches = ((wparam >> 16).low::<u16>() as i16).to::<i32>();
+                let notches = ((wparam >> 16).low::<u16>()).bits::<i16>().to::<i32>();
                 let lines = -notches * WHEEL_STEPS_PER_NOTCH * scaled(PAGE_SCROLL_STEP_PIXELS, self.dpi.get()) / WHEEL_DELTA;
                 self.scroll_to(&page, page.scroll.get() + lines);
                 Some(0)
             }
             WM_COMMAND => {
-                self.command(low_word(wparam), high_word(wparam), lparam as HWND);
+                self.command(low_word(wparam), high_word(wparam), lparam.pointer_mut::<std::ffi::c_void>());
                 Some(0)
             }
             WM_NOTIFY => {
                 // SAFETY: for this message `lparam` points at a notification structure that starts with an NMHDR.
-                let header = unsafe { &*(lparam as *const NMHDR) };
+                let header = unsafe { &*lparam.pointer::<NMHDR>() };
                 Some(self.notify(header, lparam))
             }
             WM_DRAWITEM => {
                 // SAFETY: for this message `lparam` points at the structure the system gave.
-                let item = unsafe { &*(lparam as *const DRAWITEMSTRUCT) };
+                let item = unsafe { &*lparam.pointer::<DRAWITEMSTRUCT>() };
                 self.draw_item(item);
                 Some(1)
             }
@@ -1006,10 +1006,10 @@ impl Ui {
                 let resources = self.resources.borrow();
                 let resources = resources.as_ref()?;
                 let palette = resources.brushes.palette;
-                let hdc = wparam as HDC;
-                let control = lparam as HWND;
+                let hdc = wparam.pointer_mut::<std::ffi::c_void>();
+                let control = lparam.pointer_mut::<std::ffi::c_void>();
                 if message == WM_CTLCOLORSTATIC {
-                    let style = page.styles.borrow().get(&(control as isize)).copied().unwrap_or(LabelStyle::Normal);
+                    let style = page.styles.borrow().get(&control.to::<isize>()).copied().unwrap_or(LabelStyle::Normal);
                     let color = match style {
                         LabelStyle::Normal | LabelStyle::CardTitle | LabelStyle::PageTitle => palette.foreground,
                         LabelStyle::Muted | LabelStyle::PageSubtitle => palette.muted,
@@ -1099,7 +1099,7 @@ impl Ui {
         }
         if header.code == UDN_DELTAPOS {
             // SAFETY: for this notification `lparam` points at an NMUPDOWN.
-            let delta = unsafe { (*(lparam as *const NMUPDOWN)).iDelta };
+            let delta = unsafe { (*lparam.pointer::<NMUPDOWN>()).iDelta };
             let index = self.settings_controls.borrow().iter().position(|setting| setting.updown == header.hwndFrom);
             if let Some(index) = index {
                 // The arrow up (a negative delta in the control's terms, positions run the other way) raises the value.
@@ -1255,7 +1255,7 @@ impl Ui {
             unsafe { ShowWindow(setting.reset, if modified { SW_SHOW } else { SW_HIDE }) };
             if setting.spec.kind == ControlKind::Bool {
                 w32::set_modified(setting.title, modified);
-            } else if let Some(page) = self.pages.borrow().iter().flatten().find(|page| page.styles.borrow().contains_key(&(setting.title as isize))) {
+            } else if let Some(page) = self.pages.borrow().iter().flatten().find(|page| page.styles.borrow().contains_key(&setting.title.to::<isize>())) {
                 page.styles.borrow_mut().insert(
                     setting.title.to::<isize>(),
                     if modified { LabelStyle::CardTitleModified } else { LabelStyle::CardTitle },
@@ -1382,7 +1382,7 @@ impl Ui {
         let target = wide(&url);
         // SAFETY: both strings are NUL-terminated and outlive the call.
         let result = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(self.window, verb.as_ptr(), target.as_ptr(), null(), null(), 1) };
-        if (result as isize) <= 32 {
+        if result.to::<isize>() <= 32 {
             self.show_update_status("Не удалось открыть страницу выпуска");
         }
     }
@@ -1738,7 +1738,7 @@ fn layout_nodes(nodes: &mut [Node], x: i32, width: i32, mut y: i32, context: &mu
             Node::Label(label) => {
                 y += label.top;
                 let text = w32::text_of(label.hwnd);
-                let style = context.page.styles.borrow().get(&(label.hwnd as isize)).copied().unwrap_or(label.style);
+                let style = context.page.styles.borrow().get(&label.hwnd.to::<isize>()).copied().unwrap_or(label.style);
                 let height = w32::wrapped_height(label_font(context.fonts, style), &text, width - label.indent);
                 context.moves.push((label.hwnd, x + label.indent, y, width - label.indent, height));
                 y += height;
@@ -1874,7 +1874,7 @@ fn paint_nodes(nodes: &[Node], hdc: HDC, context: &PaintContext<'_>) {
                 let width = w32::text_width(context.frame_font, &title_text);
                 let brush = w32::solid_brush(context.palette.content);
                 w32::fill_rect(hdc, &RECT { left: text_rect.left, top: text_rect.top, right: text_rect.left + width, bottom: text_rect.bottom }, brush);
-                w32::delete_object(brush as _);
+                w32::delete_object(brush);
                 w32::draw_label_text(hdc, &title_text, &mut text_rect, context.frame_font, context.palette.foreground.colorref());
                 paint_nodes(children, hdc, context);
             }
@@ -1888,7 +1888,7 @@ fn paint_nodes(nodes: &[Node], hdc: HDC, context: &PaintContext<'_>) {
                     let brush = w32::solid_brush(context.palette.accent);
                     let marker = RECT { left: setting.marker.left, top: setting.marker.top - context.scroll, right: setting.marker.right, bottom: setting.marker.bottom - context.scroll };
                     w32::fill_rect(hdc, &marker, brush);
-                    w32::delete_object(brush as _);
+                    w32::delete_object(brush);
                 }
             }
             _ => {}
@@ -2077,8 +2077,8 @@ impl Builder<'_> {
         info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
         info.hwnd = self.panel;
         info.uId = tool.to::<usize>();
-        info.lpszText = text.as_ptr() as *mut u16;
-        w32::send(tooltip, TTM_ADDTOOLW, 0, (&info as *const TTTOOLINFOW).to::<LPARAM>());
+        info.lpszText = text.as_ptr().cast_mut();
+        w32::send(tooltip, TTM_ADDTOOLW, 0, std::ptr::from_ref(&info).to::<LPARAM>());
     }
 
     fn settings_section(&mut self, title: &str, specs: &[SettingSpec]) -> Node {

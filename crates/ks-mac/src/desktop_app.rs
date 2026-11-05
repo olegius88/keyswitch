@@ -318,7 +318,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let build: Build = {
         let (settings, history, learning, input) = (settings.clone(), history.clone(), learning.clone(), input.clone());
         Box::new(move || {
-            let factory: ReaderFactory = Arc::new(|| Ok(Box::new(MacFieldReader::new(NativeAccessibility::new())) as Box<dyn ks_backend::ManagedFieldReader>));
+            let factory: ReaderFactory = Arc::new(|| Ok(Box::new(MacFieldReader::new(NativeAccessibility::new()))));
             KeySwitchEngine::new(settings, history, input, Some(learning), BACKEND_LABEL, None, Some(factory), &resources, ks_context::input_context::monotonic_clock())
         })
     };

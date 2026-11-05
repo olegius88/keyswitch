@@ -1,3 +1,4 @@
+use ks_cast::To as _;
 // Generated from libxkbcommon's xkb_keysym_to_utf32 by the project's table generator; do not edit by hand.
 // Legacy keysyms below 0x10000 that are neither Latin-1 nor the special keys `special_keysym` handles.
 pub static KEYSYM_TABLE: [(u16, u16); 763] = [
@@ -147,7 +148,7 @@ pub fn keysym_to_utf32(keysym: u32) -> u32 {
         0xffaa..=0xffb9 | 0xffbd => keysym - 0xff80,
         0xffff => 0x7f,
         0..=0xffff => KEYSYM_TABLE
-            .binary_search_by_key(&(keysym as u16), |entry| entry.0)
+            .binary_search_by_key(&keysym.low::<u16>(), |entry| entry.0)
             .map_or(0, |index| u32::from(KEYSYM_TABLE[index].1)),
         _ => 0,
     }

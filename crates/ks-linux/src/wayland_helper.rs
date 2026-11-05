@@ -79,7 +79,7 @@ pub fn pack_frame(msg_type: u32, payload: &[u8]) -> io::Result<Vec<u8>> {
     }
     let mut frame = Vec::with_capacity(HELPER_FRAME_HEADER_BYTES.to::<usize>() + payload.len());
     frame.push(msg_type.low::<u8>());
-    frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    frame.extend_from_slice(&payload.len().low::<u32>().to_be_bytes());
     frame.extend_from_slice(payload);
     Ok(frame)
 }
@@ -603,7 +603,7 @@ impl<'a> WaylandInputHelper<'a> {
         let mut payload = Vec::with_capacity(MSG_KEY_SIZE);
         payload.extend_from_slice(&seq.to_be_bytes());
         payload.push(u8::from(pressed));
-        payload.extend_from_slice(&(code as u16).to_be_bytes());
+        payload.extend_from_slice(&code.low::<u16>().to_be_bytes());
         payload.extend_from_slice(&timestamp_ms.to_be_bytes());
         payload.push(flags.low::<u8>());
         self.send(HELPER_MSG_KEY, &payload)
@@ -1034,12 +1034,12 @@ impl HelperClient {
         let (req_id, slot) = self.shared.allocate_reply();
         let mut body = Vec::with_capacity(CMD_BATCH_HEADER_SIZE + items.len() * HELPER_EMIT_ITEM_BYTES.to::<usize>());
         body.extend_from_slice(&req_id.to_be_bytes());
-        body.extend_from_slice(&(items.len() as u16).to_be_bytes());
+        body.extend_from_slice(&items.len().low::<u16>().to_be_bytes());
         body.push(check.low::<u8>());
         body.extend_from_slice(&known_seq.unwrap_or(0).to_be_bytes());
         for &(pressed, keycode) in items {
             body.push(u8::from(pressed));
-            body.extend_from_slice(&(keycode as u16).to_be_bytes());
+            body.extend_from_slice(&keycode.low::<u16>().to_be_bytes());
         }
         self.shared.request(req_id, &slot, HELPER_CMD_EMIT_BATCH, &body)
     }
@@ -1047,7 +1047,7 @@ impl HelperClient {
     pub fn query_key_down(&self, keycode: u32) -> Result<bool, String> {
         let (req_id, slot) = self.shared.allocate_reply();
         let mut payload = req_id.to_be_bytes().to_vec();
-        payload.extend_from_slice(&(keycode as u16).to_be_bytes());
+        payload.extend_from_slice(&keycode.low::<u16>().to_be_bytes());
         Ok(self.shared.request(req_id, &slot, HELPER_CMD_QUERY_KEY_DOWN, &payload)? != 0)
     }
 
@@ -1055,7 +1055,7 @@ impl HelperClient {
         let (req_id, slot) = self.shared.allocate_reply();
         let mut payload = req_id.to_be_bytes().to_vec();
         payload.push(u8::from(enabled));
-        payload.extend_from_slice(&(repeat_delay_ms as u16).to_be_bytes());
+        payload.extend_from_slice(&repeat_delay_ms.low::<u16>().to_be_bytes());
         Ok(self.shared.request(req_id, &slot, HELPER_CMD_SET_GRAB, &payload)? != 0)
     }
 

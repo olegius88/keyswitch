@@ -144,7 +144,7 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
         for (index, &key) in row.iter().enumerate() {
             let mut near: Vec<char> = Vec::new();
             for position in [index.to::<i64>() - 1, index.to::<i64>() + 1] {
-                if 0 <= position && (position as usize) < row.len() {
+                if 0 <= position && position.to::<usize>() < row.len() {
                     near.push(row[position.to::<usize>()]);
                 }
             }
@@ -154,7 +154,7 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
             }
             if row_index + 1 < letter_rows.len() {
                 let below = letter_rows[row_index + 1];
-                near.extend([index.to::<i64>() - 1, index.to::<i64>()].into_iter().filter(|&position| 0 <= position && (position as usize) < below.len()).map(|position| below[position.to::<usize>()]));
+                near.extend([index.to::<i64>() - 1, index.to::<i64>()].into_iter().filter(|&position| 0 <= position && position.to::<usize>() < below.len()).map(|position| below[position.to::<usize>()]));
             }
             if ucd::isalpha(key) {
                 let mut letters: Vec<char> = near.into_iter().filter(|&c| ucd::isalpha(c)).collect();
@@ -211,7 +211,7 @@ impl TypoLexicon {
         for c in form.chars() {
             match self.alphabet.chars().position(|letter| letter == c) {
                 Some(place) => coded.push((place + 1).to::<u8>()),
-                None if (c as u32) < 256 => coded.push((c.to::<u32>()).to::<u8>()),
+                None if c.to::<u32>() < 256 => coded.push((c.to::<u32>()).to::<u8>()),
                 None => return None,
             }
         }
@@ -299,7 +299,7 @@ impl TypoLexicon {
         let filter_bits = payload[ends[1]..].to_vec();
         let mut starts: Vec<u32> = vec![0];
         starts.extend(forms.iter().enumerate().filter(|(_, byte)| usize::from(**byte) == TYPO_FORM_SEPARATOR).map(|(at, _)| (at + 1).to::<u32>()));
-        if starts.len() - 1 != weights.len() || (!forms.is_empty() && usize::from(forms[forms.len() - 1]) != TYPO_FORM_SEPARATOR) || (filter_bits.len() as i64) * 8 < bits {
+        if starts.len() - 1 != weights.len() || (!forms.is_empty() && usize::from(forms[forms.len() - 1]) != TYPO_FORM_SEPARATOR) || filter_bits.len().to::<i64>() * 8 < bits {
             return Err(LoadError::value("invalid typo frequency payload"));
         }
         let version_digest: String = Sha256::digest(&raw).iter().map(|byte| format!("{byte:02x}")).collect();
@@ -399,7 +399,7 @@ pub fn edits(word: &str, alphabet: &str, neighbours: &HashMap<char, String>) -> 
         }
     }
     for (position, &extra) in chars.iter().enumerate() {
-        let around = [position.to::<i64>() - 1, position.to::<i64>() + 1].into_iter().filter(|&index| 0 <= index && (index as usize) < chars.len()).map(|index| chars[index.to::<usize>()]);
+        let around = [position.to::<i64>() - 1, position.to::<i64>() + 1].into_iter().filter(|&index| 0 <= index && index.to::<usize>() < chars.len()).map(|index| chars[index.to::<usize>()]);
         if around.into_iter().any(|letter| extra == letter || neighbours.get(&letter).is_some_and(|near| near.contains(extra))) {
             found.push(Edit { operation: Operation::Deletion, position, letter: None });
         }

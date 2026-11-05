@@ -110,7 +110,7 @@ fn strip_underscores(text: &str) -> Option<String> {
                 return None;
             }
         } else {
-            out.push(b as char);
+            out.push(char::from(b));
         }
     }
     Some(out)
@@ -136,7 +136,7 @@ pub fn py_int(s: &str) -> Option<i128> {
     }
     let magnitude: u128 = if significant.is_empty() { 0 } else { significant.parse().ok()? };
     if negative {
-        if magnitude > 1u128 << 127 { None } else { Some((magnitude as i128).wrapping_neg()) }
+        if magnitude > 1u128 << 127 { None } else { Some(magnitude.to::<i128>().wrapping_neg()) }
     } else {
         i128::try_from(magnitude).ok()
     }

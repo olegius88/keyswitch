@@ -322,7 +322,7 @@ fn selection_is_read_only(automation: &ComPtr, selection: &ComPtr) -> Result<boo
 fn process_for_window(window: i64) -> i64 {
     let mut pid = 0u32;
     // SAFETY: `pid` is a valid place; a stale window leaves it 0.
-    unsafe { GetWindowThreadProcessId(window.to::<isize>() as _, &mut pid) };
+    unsafe { GetWindowThreadProcessId(window.to::<isize>().pointer_mut::<c_void>(), &mut pid) };
     i64::from(pid)
 }
 

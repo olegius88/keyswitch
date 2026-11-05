@@ -227,12 +227,12 @@ impl BigUint {
         let mut e = exp;
         while e > 0 {
             let step = e.min(1000);
-            value *= f64::from_bits(((1023 + step) as u64) << 52);
+            value *= f64::from_bits((1023 + step).bits::<u64>() << 52);
             e -= step;
         }
         while e < 0 {
             let step = (-e).min(1000);
-            value *= f64::from_bits(((1023 - step) as u64) << 52);
+            value *= f64::from_bits((1023 - step).bits::<u64>() << 52);
             e += step;
         }
         value
@@ -278,7 +278,7 @@ mod tests {
         for v in [0u128, 1, 2, 3, 15, 16, 17, 1 << 100, (1 << 100) - 1, a] {
             let r = big(v).isqrt();
             let n = {
-                let mut x = ((v as f64).sqrt()).to::<u128>();
+                let mut x = (v.to::<f64>().sqrt()).to::<u128>();
                 while x * x > v {
                     x -= 1;
                 }
