@@ -412,8 +412,12 @@ mod scenario {
         editor.virtual_key(VK_PAUSE)?;
         editor.expect("руддщ", 1, LONG)?;
         editor.pump(WINDOW_OPENS);
-        // Enter on the offer opens the rule window; nothing is stored yet.
+        // Enter on the offer opens the rule window, which takes the keyboard; nothing is stored yet.
         editor.virtual_key(VK_RETURN)?;
+        // SAFETY: takes nothing.
+        if !editor.pump_until(LONG, |editor| unsafe { GetForegroundWindow() } != editor.window) {
+            return Err("Enter on the offer opened no rule window".to_owned());
+        }
         editor.pump(WINDOW_OPENS);
         store.load().map_err(|error| format!("{error:?}"))?;
         if store.count() != 0 {
