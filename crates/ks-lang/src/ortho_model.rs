@@ -375,6 +375,7 @@ impl<'de> de::Deserialize<'de> for IntValue {
         struct IntVisitor;
         impl Visitor<'_> for IntVisitor {
             type Value = IntValue;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("an integer")
             }
@@ -404,6 +405,7 @@ impl<'de> de::Deserialize<'de> for IntList {
         struct ListVisitor;
         impl<'de> Visitor<'de> for ListVisitor {
             type Value = IntList;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a list of integers")
             }
@@ -431,6 +433,7 @@ impl<'de> DeserializeSeed<'de> for BackoffEntry<'_> {
 
 impl<'de> Visitor<'de> for BackoffEntry<'_> {
     type Value = ();
+    #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("invalid orthotactic backoff")
     }
@@ -459,6 +462,7 @@ impl<'de> DeserializeSeed<'de> for PushText<'_> {
 
 impl Visitor<'_> for PushText<'_> {
     type Value = ();
+    #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a string")
     }
@@ -475,6 +479,7 @@ impl<'de> de::Deserialize<'de> for BackoffList {
         struct ListVisitor;
         impl<'de> Visitor<'de> for ListVisitor {
             type Value = BackoffList;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a backoff list")
             }
@@ -493,6 +498,7 @@ impl<'de> de::Deserialize<'de> for RawChannel {
         struct ChannelVisitor;
         impl<'de> Visitor<'de> for ChannelVisitor {
             type Value = RawChannel;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("invalid orthotactic channel")
             }
@@ -549,6 +555,7 @@ impl<'de> de::Deserialize<'de> for ChannelMap {
         struct MapVisitor;
         impl<'de> Visitor<'de> for MapVisitor {
             type Value = ChannelMap;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a map of channels")
             }
@@ -578,6 +585,7 @@ impl<'de> de::Deserialize<'de> for Payload {
         struct PayloadVisitor;
         impl<'de> Visitor<'de> for PayloadVisitor {
             type Value = Payload;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("unsupported orthotactic artifact")
             }

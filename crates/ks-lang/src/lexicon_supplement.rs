@@ -63,6 +63,7 @@ impl<'de> de::Deserialize<'de> for RawWords {
         struct WordsVisitor;
         impl<'de> Visitor<'de> for WordsVisitor {
             type Value = RawWords;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a list of words")
             }
@@ -93,6 +94,7 @@ impl<'de> de::Deserialize<'de> for Element<'de> {
         struct ElementVisitor;
         impl<'de> Visitor<'de> for ElementVisitor {
             type Value = Element<'de>;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a list element")
             }
@@ -135,6 +137,7 @@ impl<'de> de::Deserialize<'de> for Supplement {
         struct SupplementVisitor;
         impl<'de> Visitor<'de> for SupplementVisitor {
             type Value = Supplement;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("invalid lexicon supplement")
             }

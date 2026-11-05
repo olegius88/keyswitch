@@ -759,6 +759,7 @@ struct PartsVisitor;
 impl<'de> Visitor<'de> for PartsVisitor {
     type Value = Parts;
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a JSON object")
     }
@@ -815,6 +816,7 @@ impl MetadataWalker<'_> {
 impl<'de> Visitor<'de> for MetadataWalker<'_> {
     type Value = bool;
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a JSON value")
     }
@@ -1003,7 +1005,7 @@ fn canonical_string(text: &[u8], at: &mut usize) -> Option<String> {
                         *at += 4;
                         let code = u32::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()?;
                         // Only the control characters Python has no short escape for, in lower case.
-                        if code >= 0x20 || matches!(code, 0x08 | 0x09 | 0x0a | 0x0c | 0x0d) || digits.iter().any(u8::is_ascii_uppercase) || digits[..2] != *b"00" {
+                        if code >= 0x20 || matches!(code, 0x08 | 0x09 | 0x0a | 0x0c | 0x0d) || digits.iter().any(u8::is_ascii_uppercase) {
                             return None;
                         }
                         decoded.push(code.to::<u8>());
@@ -1161,6 +1163,32 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 mod tests {
     use crate::constants::FNV1A64_OFFSET_BASIS;
     use super::*;
+
+    #[test]
+    fn a_status_as_a_dictionary_and_what_is_left_of_the_checks() {
+        let status = IntentModelStatus { available: false, path: Some(PathBuf::from("/x")), version: None, checksum: None, error: Some("e".to_owned()) };
+        assert_eq!(status.as_dict()["path"], "/x");
+        assert!(!is_canonical(br#""\u001F""#));
+        let same_size: serde_json::Map<String, Value> = (0..TRIGGERS.len()).map(|index| (index.to_string(), Value::Null)).collect();
+        assert!(validate_threshold_logits(&same_size).is_err());
+        let seventeen: String = (0..17).map(|index| format!("\"{index:02}\":1")).collect::<Vec<_>>().join(",");
+        assert_eq!(read_manifest(format!("{{{seventeen}}}").as_bytes()).err().unwrap().message, "KSLM manifest fields do not match schema");
+        let error = RefCell::new(Some(LoadError::value("first")));
+        let walker = MetadataWalker { error: &error, field: "f".to_owned(), depth: 99 };
+        assert!(!Visitor::visit_f64::<serde_json::Error>(walker, f64::INFINITY).unwrap());
+        assert_eq!(error.borrow().as_ref().unwrap().message, "first");
+    }
+
+    #[test]
+    fn a_model_is_found_or_says_why_not() {
+        let nothing = Path::new("/nonexistent-resources");
+        let (model, status) = LinearNgramModel::try_load_default(nothing, None);
+        assert!(model.is_none() && !status.available);
+        let real = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources");
+        let path = real.join("models/layout_intent_v1.ksm");
+        let (model, status) = LinearNgramModel::try_load_default(&real, Some(&path.to_string_lossy()));
+        assert!(model.is_some() && status.available);
+    }
 
     fn real_model() -> Vec<u8> {
         std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models/layout_intent_v1.ksm")).unwrap()

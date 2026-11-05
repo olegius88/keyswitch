@@ -185,6 +185,7 @@ impl<'de> DeserializeSeed<'de> for NameSeed<'_> {
         struct NameVisitor<'a>(&'a mut Names);
         impl Visitor<'_> for NameVisitor<'_> {
             type Value = Result<(), String>;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a string")
             }
@@ -207,6 +208,7 @@ impl<'de> Deserialize<'de> for Count {
         struct CountVisitor;
         impl<'de> Visitor<'de> for CountVisitor {
             type Value = Count;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a value")
             }
@@ -249,6 +251,7 @@ impl<'de> Deserialize<'de> for Counts {
         struct CountsVisitor;
         impl<'de> Visitor<'de> for CountsVisitor {
             type Value = Counts;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("an object of counts")
             }
@@ -319,6 +322,7 @@ struct TablesVisitor;
 
 impl<'de> Visitor<'de> for TablesVisitor {
     type Value = Option<Vec<(String, Counts)>>;
+    #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("an object")
     }
@@ -483,6 +487,7 @@ impl<'de> Deserialize<'de> for Weight {
         struct WeightVisitor;
         impl<'de> Visitor<'de> for WeightVisitor {
             type Value = Weight;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a value")
             }
@@ -530,6 +535,7 @@ impl<'de> Deserialize<'de> for Entry {
         const NONE: Weight = Weight { value: 0.0, integer: false, valid: false };
         impl<'de> Visitor<'de> for EntryVisitor {
             type Value = Entry;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a value")
             }
@@ -591,6 +597,7 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
         struct WeightsVisitor<'a>(&'a WeightSpec);
         impl<'de> Visitor<'de> for WeightsVisitor<'_> {
             type Value = Option<Weights>;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("an object of weights")
             }
@@ -711,6 +718,7 @@ impl<'de> DeserializeSeed<'de> for ArtifactSeed<'_> {
         struct ArtifactVisitor<'a>(&'a WeightSpec);
         impl<'de> Visitor<'de> for ArtifactVisitor<'_> {
             type Value = Option<Artifact>;
+            #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("an object")
             }
