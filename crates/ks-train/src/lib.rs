@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 pub mod artifact;
+pub mod base_corpus;
 pub mod boundary;
 pub mod captured;
 pub mod compare;
@@ -23,6 +24,7 @@ pub mod lookahead;
 pub mod messages;
 pub mod mixed;
 pub mod ortho;
+pub mod ortho_inputs;
 pub mod physical;
 pub mod prefix;
 pub mod rows;

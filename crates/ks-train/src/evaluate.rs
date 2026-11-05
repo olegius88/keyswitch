@@ -36,7 +36,7 @@ const PAIRS: [(Mode, &[(&str, &str, &str)]); 2] = [
 const MEMBERSHIP_IDENTITY_FIELDS: [&str; 3] = ["row_ids_sha256", "family_ids_sha256", "document_ids_sha256"];
 
 /// `script_group`: `"a" <= character.lower() <= "z"`, and the same for the Russian letters.
-fn script_group(character: char) -> Option<i64> {
+pub(crate) fn script_group(character: char) -> Option<i64> {
     let lowered = pystr::lower(character.encode_utf8(&mut [0_u8; 4]));
     let text = lowered.as_str();
     if ("a"..="z").contains(&text) {

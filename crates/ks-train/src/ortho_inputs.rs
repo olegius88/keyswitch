@@ -1,0 +1,621 @@
+//! What the orthotactic model counts, built from frozen sources (`context_corpus`, `ortho_corpus`, `ortho_known`,
+//! `ortho_web_lexicon`, `ortho_independent`, `wikisource_text`): tokens of the CC0 phrase snapshot in key space, the verdict
+//! of the reference dictionaries on every word a token can ask about, the web word forms, and the independent test sets.
+//! `--inputs` rebuilds each and compares it with the frozen file; `--freeze-inputs` writes a missing generation.
+use crate::corpus::{checksum, read_json};
+use crate::ortho::{self, KEYS, LEXICON, Row, other, read_rows, served, to_keys, visible, word_core};
+use crate::physical::{hex, hex_digest};
+use flate2::Compression;
+use flate2::read::MultiGzDecoder;
+use flate2::write::GzEncoder;
+use ks_lang::LanguageModel;
+use ks_lang::constants::ACRONYM_MIN_LETTERS;
+use ks_lang::ortho_model::{read_once, readings, stretch_readings};
+use ks_text::{normalize, pystr};
+use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+const SOURCE: &str = "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz";
+const SOURCE_SHA256: &str = "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793";
+const PHRASE_NAMESPACE: &str = "keyswitch:context-v2:phrases-20260905";
+const SPLIT_NAMESPACE: &str = "keyswitch:ortho-v1:served-split-g15";
+const DIRECTORY: &str = "model/ortho_v1";
+const PHRASES_PER_GROUP: usize = 4;
+const PHRASE_MIN_CHARACTERS: usize = 4;
+const PHRASE_MAX_CHARACTERS: usize = 512;
+const PHRASE_MIN_WORDS: usize = 2;
+const NEAR_DUPLICATE_MIN_WORDS: usize = 4;
+const NEAR_DUPLICATE_MAX_WORDS: usize = 40;
+const BUCKET_COUNT: u64 = 100;
+const TEST_SPLIT_CEILING: u64 = 55;
+const CHOICE_HEX_DIGITS: usize = 8;
+const MAXIMUM_TOKEN_CHARACTERS: usize = 32;
+const LEXICON_MIN_CHARACTERS: usize = 2;
+const MAXIMUM_LEXICON_WEIGHT: u32 = 32;
+const EVIDENCE_SCHEMA: i64 = 2;
+const CONTEXT_TYPO_MIN_CHARACTERS: usize = 5;
+const MIN_COLLAPSED_RUN: i64 = 2;
+const MIN_STRETCH_RUN: i64 = 2;
+const SCRIPTS: [&str; 2] = ["en", "ru"];
+const LEXICONS: [(&str, &str, &str, &str); 2] = [("en", "model/intent_v1/sources/en_US.lm", "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da", "en_US"), ("ru", "model/intent_v1/sources/ru_RU.lm", "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9", "ru_RU")];
+const CYRILLIC: &str = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+const CORPUS_CODE: [&str; 3] = ["crates/ks-train/src/ortho_inputs.rs", "crates/ks-train/src/ortho.rs", "crates/ks-text/src/layouts.rs"];
+const KNOWN_CODE: [&str; 1] = ["crates/ks-train/src/ortho_inputs.rs"];
+const WEB_SOURCE_SHA256: &str = "02bd7a202103a6b90c8f97617144ed230e3b4d51a08c28d2e029e1f0027917fa";
+const WEB_MIN_CHARACTERS: usize = 4;
+const WEB_SCHEMA: i64 = 1;
+const INDEPENDENT_SCHEMA: i64 = 2;
+const SET_NAME: &str = "wikipedia-en-averchenko-leskov-ru";
+const HISTORY: [(&str, &str); 2] = [("development-history/independent-common-voice-sentence-collector", "development-history/report-ortho-v1-71e34529bdd4.json"), ("development-history/independent-wikipedia-en-chekhov-ru", "development-history/report-ortho-v1-8723bff1344e.json")];
+const DEVELOPMENT_SETS: [&str; 1] = ["development-history/class-development-gorky-bulgakov-kuzmin"];
+const LOOKED_AT_WORDS: [&str; 43] = ["каеффф", "рсфср", "гыф", "фыва", "гифку", "тыща", "лдпр", "мацуи", "москва", "мда-а", "у-у", "а-б", "лут", "флуд", "фнаф", "ctrl", "oled", "gtk", "hfcs", "-тв", "тв-", "gtk-ключ", "а-бв", "ааа-ба", "абв", "квазимодо", "мцуис", "ну-ну", "тпште", "ура-а-а", "ф-привет", "фпревет", "сборки", "abab", "ahtop", "q-nj", "xyzzy", "zorblax", "ab-bb", "htop-", ".xyz", "dist", "гыр-гыр"];
+
+fn gz_write(raw: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(raw).map_err(|error| error.to_string())?;
+    encoder.finish().map_err(|error| error.to_string())
+}
+
+fn gz_read(path: &Path) -> Result<Vec<u8>, String> {
+    let mut raw = Vec::new();
+    MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_end(&mut raw).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(raw)
+}
+
+/// `Phrase` and `AssignedPhrase`, as far as the corpus reads them.
+pub struct Phrase {
+    pub identifier: i64,
+    pub locale: String,
+    pub text: String,
+}
+
+pub struct Assigned<'a> {
+    pub phrase: &'a Phrase,
+    pub group: String,
+}
+
+/// `load_source`.
+pub fn load_phrases(root: &Path) -> Result<Vec<Phrase>, String> {
+    let path = root.join(SOURCE);
+    if checksum(&path)? != SOURCE_SHA256 {
+        return Err("frozen CC0 source checksum mismatch".to_owned());
+    }
+    let raw = String::from_utf8(gz_read(&path)?).map_err(|error| error.to_string())?;
+    let mut phrases: BTreeMap<i64, Phrase> = BTreeMap::new();
+    for line in pystr::splitlines(&raw, true) {
+        let fields: Vec<&str> = line.strip_suffix('\n').unwrap_or(line).split('\t').collect();
+        let [identifier, language, text, _modified] = fields.as_slice() else { return Err("invalid CC0 TSV row".to_owned()) };
+        if *language != "eng" && *language != "rus" {
+            continue;
+        }
+        let number: i64 = identifier.parse().map_err(|_| "invalid CC0 source ID")?;
+        if number <= 0 || phrases.insert(number, Phrase { identifier: number, locale: (*language).to_owned(), text: (*text).to_owned() }).is_some() {
+            return Err("nonpositive or duplicate source ID".to_owned());
+        }
+    }
+    Ok(phrases.into_values().collect())
+}
+
+/// `assign`: identical and bounded single-token edits grouped; each group capped, by a hash, at a few phrases.
+pub fn assign(phrases: &[Phrase]) -> Vec<Assigned<'_>> {
+    let eligible: Vec<&Phrase> = phrases.iter().filter(|item| { let length = item.text.chars().count(); (PHRASE_MIN_CHARACTERS..=PHRASE_MAX_CHARACTERS).contains(&length) && crate::boundary::canonical_tokens(&item.text).len() >= PHRASE_MIN_WORDS && !item.text.contains('\0') }).collect();
+    let mut parents: Vec<usize> = (0..eligible.len()).collect();
+    fn root(parents: &mut [usize], mut index: usize) -> usize {
+        while index != parents[index] {
+            parents[index] = parents[parents[index]];
+            index = parents[index];
+        }
+        index
+    }
+    let mut signatures: HashMap<[u8; 32], usize> = HashMap::new();
+    for (index, item) in eligible.iter().enumerate() {
+        let words = crate::boundary::canonical_tokens(&item.text);
+        let mut variants = vec![words.clone()];
+        if (NEAR_DUPLICATE_MIN_WORDS..=NEAR_DUPLICATE_MAX_WORDS).contains(&words.len()) {
+            for offset in 0..words.len() {
+                let mut variant = words.clone();
+                variant.remove(offset);
+                variants.push(variant);
+            }
+        }
+        for variant in variants {
+            let key: [u8; 32] = Sha256::digest(hex_digest(&variant.join("\u{1f}")).as_bytes()).into();
+            match signatures.get(&key) {
+                Some(other) => {
+                    let (a, b) = (root(&mut parents, index), root(&mut parents, *other));
+                    if a != b {
+                        parents[a.max(b)] = a.min(b);
+                    }
+                }
+                None => {
+                    signatures.insert(key, index);
+                }
+            }
+        }
+    }
+    let mut grouped: BTreeMap<usize, Vec<&Phrase>> = BTreeMap::new();
+    for (index, item) in eligible.iter().enumerate() {
+        grouped.entry(root(&mut parents, index)).or_default().push(item);
+    }
+    let mut output = Vec::new();
+    for (group_index, mut members) in grouped {
+        let identifier = format!("tatoeba:{}", eligible[group_index].identifier);
+        members.sort_by_cached_key(|item| hex_digest(&format!("{PHRASE_NAMESPACE}:sample:{}", item.identifier)));
+        output.extend(members.into_iter().take(PHRASES_PER_GROUP).map(|phrase| Assigned { phrase, group: identifier.clone() }));
+    }
+    output.sort_by_key(|item| item.phrase.identifier);
+    output
+}
+
+/// `script_of`.
+fn script_of(token: &str) -> Option<&'static str> {
+    let lowered = pystr::casefold(&normalize::nfc(token));
+    let cyrillic = lowered.chars().any(|character| CYRILLIC.contains(character));
+    let latin = lowered.chars().any(|character| character.is_ascii_lowercase());
+    match (cyrillic, latin) {
+        (true, false) => Some("ru"),
+        (false, true) => Some("en"),
+        _ => None,
+    }
+}
+
+/// `shape_of`: case shape, which is what makes the abbreviation reading available.
+fn shape_of(token: &str, position: usize) -> &'static str {
+    let letters: Vec<char> = token.chars().filter(|character| pystr::isalpha(character.encode_utf8(&mut [0; 4]))).collect();
+    if letters.len() >= ACRONYM_MIN_LETTERS && letters.iter().all(|character| pystr::isupper(character.encode_utf8(&mut [0; 4]))) {
+        return "upper";
+    }
+    if token.chars().next().is_some_and(|first| pystr::isupper(first.encode_utf8(&mut [0; 4]))) {
+        return if position == 0 { "initial" } else { "inner" };
+    }
+    "lower"
+}
+
+fn split_of(group: &str) -> &'static str {
+    let digest = hex_digest(&format!("{SPLIT_NAMESPACE}:{group}"));
+    let bucket = u64::from_str_radix(&digest[..CHOICE_HEX_DIGITS], 16).expect("a digest") % BUCKET_COUNT;
+    if bucket < TEST_SPLIT_CEILING { "test" } else { "train" }
+}
+
+/// `read_lexicon`: unigrams of a frozen ARPA word list, refusing anything but the reviewed bytes.
+fn read_lexicon(root: &Path, relative: &str, expected: &str) -> Result<BTreeMap<String, i128>, String> {
+    let content = std::fs::read(root.join(relative)).map_err(|error| format!("{relative}: {error}"))?;
+    if hex(&Sha256::digest(&content)) != expected {
+        return Err(format!("frozen word list {relative} checksum mismatch"));
+    }
+    let text = String::from_utf8_lossy(&content);
+    let mut words = BTreeMap::new();
+    let mut section = false;
+    for line in pystr::splitlines(&text, false) {
+        if line == "\\1-grams:" {
+            section = true;
+            continue;
+        }
+        if line.starts_with('\\') {
+            section = false;
+            continue;
+        }
+        if !section || line.is_empty() {
+            continue;
+        }
+        let Some((count_text, payload)) = line.split_once(' ') else { continue };
+        if payload.starts_with('<') {
+            continue;
+        }
+        let Some(count) = ks_text::pynum::py_int(count_text) else { continue };
+        let token = pystr::casefold(payload);
+        if token.chars().count() >= LEXICON_MIN_CHARACTERS {
+            *words.entry(token).or_insert(0) += count;
+        }
+    }
+    Ok(words)
+}
+
+type WordLists = HashMap<&'static str, HashSet<String>>;
+
+fn word_lists(root: &Path) -> Result<WordLists, String> {
+    let mut lists = HashMap::new();
+    for (script, path, expected, _) in LEXICONS {
+        lists.insert(script, read_lexicon(root, path, expected)?.into_keys().collect());
+    }
+    Ok(lists)
+}
+
+/// `label`: the language a token was written in: its own alphabet, unless it is the sentence's language in the wrong layout.
+fn label(raw: &str, locale: &str, words: &WordLists) -> Result<Option<&'static str>, String> {
+    let Some(script) = script_of(raw) else { return Ok(None) };
+    let sentence = if locale == "rus" { "ru" } else { "en" };
+    if script == sentence {
+        return Ok(Some(script));
+    }
+    let keys = to_keys(raw)?;
+    let core = word_core(&keys, script);
+    let read = |text: &str| words[sentence].contains(&visible(text, sentence));
+    if (read(&keys) || read(&core)) && !words[script].contains(&visible(&core, script)) {
+        return Ok(Some(sentence));
+    }
+    Ok(Some(script))
+}
+
+fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> {
+    let mut counts: BTreeMap<(String, String), i64> = BTreeMap::new();
+    for (script, path, expected, _) in LEXICONS {
+        for (word, frequency) in read_lexicon(root, path, expected)? {
+            if script_of(&word) != Some(script) {
+                continue;
+            }
+            let keys = to_keys(&word)?;
+            if keys.is_empty() || keys.chars().count() > MAXIMUM_TOKEN_CHARACTERS {
+                continue;
+            }
+            let bits = 128 - (frequency.unsigned_abs()).leading_zeros();
+            let weight = i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1));
+            let entry = counts.entry((script.to_owned(), keys)).or_insert(0);
+            *entry = (*entry).max(weight);
+        }
+    }
+    Ok(counts)
+}
+
+type TokenRow = (String, String, String, BTreeMap<String, i64>);
+
+/// `rows`: one per (split, script, key sequence) with shape counts, then the word-list rows.
+fn corpus_rows(root: &Path) -> Result<Vec<TokenRow>, String> {
+    let phrases = load_phrases(root)?;
+    let lists = word_lists(root)?;
+    let mut counts: BTreeMap<(String, String, String), BTreeMap<String, i64>> = BTreeMap::new();
+    for assigned in assign(&phrases) {
+        let split = split_of(&assigned.group);
+        let text = normalize::nfc(&assigned.phrase.text);
+        for (position, raw) in pystr::split(&text).into_iter().enumerate() {
+            if raw.chars().count() > MAXIMUM_TOKEN_CHARACTERS {
+                continue;
+            }
+            let Some(script) = label(raw, &assigned.phrase.locale, &lists)? else { continue };
+            let keys = to_keys(raw)?;
+            if keys.is_empty() {
+                continue;
+            }
+            *counts.entry((split.to_owned(), script.to_owned(), keys)).or_default().entry(shape_of(raw, position).to_owned()).or_insert(0) += 1;
+        }
+    }
+    let mut rows: Vec<TokenRow> = counts.into_iter().map(|((split, script, keys), shapes)| (split, script, keys, shapes)).collect();
+    for ((script, keys), weight) in lexicon_rows(root)? {
+        rows.push((LEXICON.to_owned(), script, keys, BTreeMap::from([("lower".to_owned(), weight)])));
+    }
+    Ok(rows)
+}
+
+fn tokens_content(rows: &[TokenRow]) -> Vec<u8> {
+    let mut raw = Vec::new();
+    for (split, script, keys, shapes) in rows {
+        raw.extend(crate::artifact::canonical(&json!({"split": split, "script": script, "keys": keys, "shapes": shapes})));
+    }
+    raw
+}
+
+fn pretty(value: &Value) -> Vec<u8> {
+    (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
+}
+
+fn pins(root: &Path, files: &[&str]) -> Result<Map<String, Value>, String> {
+    files.iter().map(|file| Ok(((*file).to_owned(), json!(checksum(&root.join(file))?)))).collect()
+}
+
+/// `report` of `ortho_corpus`.
+fn corpus_receipt(root: &Path, rows: &[TokenRow], tokens_sha: &str) -> Result<Value, String> {
+    let (mut by_split, mut by_script, mut occurrences): (BTreeMap<&str, i64>, BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
+    for (split, script, _, shapes) in rows {
+        *by_split.entry(split).or_default() += 1;
+        *by_script.entry(format!("{split}:{script}")).or_default() += 1;
+        *occurrences.entry(format!("{split}:{script}")).or_default() += shapes.values().sum::<i64>();
+    }
+    let mut provenance = pins(root, &CORPUS_CODE)?;
+    provenance.extend(pins(root, &[SOURCE, "model/context_v2/corpus-receipt.json", LEXICONS[0].1, LEXICONS[1].1])?);
+    Ok(json!({
+        "schema_version": EVIDENCE_SCHEMA,
+        "namespace": SPLIT_NAMESPACE,
+        "description": "Key-space token types from the frozen CC0 phrase snapshot, stored whole with their punctuation, Russian commas and full stops on their own key; the frozen Onboard word lists follow as rows that only add characters to the counts. What the engine serves the model is derived per layout by `served`.",
+        "label_rule": "the alphabet of the token itself, except that a token in the other alphabet inside a sentence of a language, whose reading in that language is a word of its frozen word list while the token is no word of its own alphabet's list, is that language typed in the wrong layout; the reading is taken of the whole token and of its letter core in the layout it was typed in, and the token's own word is that core",
+        "split_rule": format!("context-v2 phrase groups (tools/context_corpus.py); bucket = int(sha256(namespace + ':' + group)[:{CHOICE_HEX_DIGITS}], 16) mod {BUCKET_COUNT}; test below {TEST_SPLIT_CEILING}, train otherwise"),
+        "lexicon_weight": format!("max(1, min({MAXIMUM_LEXICON_WEIGHT}, frequency.bit_length()))"),
+        "types_by_split": by_split,
+        "types_by_split_script": by_script,
+        "occurrences_by_split_script": occurrences,
+        "maximum_token_characters": MAXIMUM_TOKEN_CHARACTERS,
+        "tokens_sha256": tokens_sha,
+        "provenance": provenance,
+    }))
+}
+
+fn asked(keys: &str, direction: &str, result: &mut HashMap<&'static str, HashSet<String>>) {
+    let target_script = other(direction);
+    let (source, target) = readings(keys, direction);
+    let script_key = |name: &str| if name == "en" { "en" } else { "ru" };
+    result.get_mut(script_key(direction)).expect("a script").insert(visible(keys, direction));
+    for (text, script) in [(&source, direction), (&target, target_script)] {
+        if text.contains('-') {
+            result.get_mut(script_key(script)).expect("a script").extend(text.split('-').filter(|part| !part.is_empty()).map(str::to_owned));
+        }
+    }
+    if direction == "ru" && keys.chars().count() > 1 && keys.starts_with('.') {
+        result.get_mut("en").expect("a script").insert(keys[1..].to_owned());
+    }
+    if pystr::isalpha(&target) {
+        let set = result.get_mut(script_key(target_script)).expect("a script");
+        set.insert(target.clone());
+        let letters: Vec<char> = target.chars().collect();
+        if letters.len() >= CONTEXT_TYPO_MIN_CHARACTERS {
+            for index in 0..letters.len() {
+                let mut variant = letters.clone();
+                variant.remove(index);
+                set.insert(variant.into_iter().collect());
+            }
+        }
+    }
+}
+
+/// `queried`: every word the population filter and the token features ask a dictionary about for one served token.
+fn queried(keys: &str, direction: &str, result: &mut HashMap<&'static str, HashSet<String>>) {
+    let characters: Vec<char> = keys.chars().collect();
+    let (mut longest, mut run) = (0_i64, 0_i64);
+    for (index, character) in characters.iter().enumerate() {
+        run = if index > 0 && characters[index - 1] == *character { run + 1 } else { 1 };
+        longest = longest.max(run);
+    }
+    let mut variants: BTreeSet<String> = BTreeSet::from([keys.to_owned()]);
+    for minimum in MIN_STRETCH_RUN..=longest.max(MIN_STRETCH_RUN) {
+        for hyphens in [false, true] {
+            variants.extend(stretch_readings(keys, Some(MIN_COLLAPSED_RUN), Some(minimum), hyphens));
+        }
+    }
+    for variant in &variants {
+        asked(variant, direction, result);
+    }
+}
+
+fn empty_forms() -> HashMap<&'static str, HashSet<String>> {
+    HashMap::from([("en", HashSet::new()), ("ru", HashSet::new())])
+}
+
+/// `forms` of `ortho_known`.
+fn known_forms(rows: &[Row]) -> HashMap<&'static str, HashSet<String>> {
+    let mut result = empty_forms();
+    for row in rows {
+        if row.split == LEXICON {
+            continue;
+        }
+        let mut typed: Vec<(String, &str)> = SCRIPTS.iter().map(|direction| (row.keys.clone(), *direction)).collect();
+        if let Some(synthetic) = ortho::extra_key_variant(&row.script, &row.keys) {
+            typed.push((synthetic, other(&row.script)));
+        }
+        for (text, direction) in typed {
+            for token in served(&text, direction) {
+                if token.chars().all(|key| KEYS.contains(&key)) {
+                    queried(&token, direction, &mut result);
+                }
+            }
+        }
+    }
+    result
+}
+
+/// `reference_models`: the engine's models over the reference word lists and dictionaries of Layout Intent v1.
+fn reference_models(root: &Path) -> Result<HashMap<&'static str, LanguageModel>, String> {
+    let frozen = crate::intent::frozen_dictionaries(root)?;
+    let word_roots = [root.join("model/intent_v1/sources")];
+    let mut models = HashMap::new();
+    for (script, _, _, locale) in LEXICONS {
+        let supplement = ks_lang::lexicon_supplement::supplement_words(&root.join("resources"), locale).map_err(|error| error.name.to_string())?;
+        let speller = ks_hunspell::HunspellDictionary::in_roots(locale, std::slice::from_ref(&frozen));
+        let model = LanguageModel::load(locale, supplement.iter(), &word_roots, Box::new(speller));
+        if !model.speller.available() {
+            return Err(format!("no {script} speller: refusing to freeze a partial verdict"));
+        }
+        models.insert(script, model);
+    }
+    Ok(models)
+}
+
+/// `build` and `verdict`: only the known forms are kept: the answer for anything absent is "not known".
+fn verdict(models: &HashMap<&'static str, LanguageModel>, forms: HashMap<&'static str, HashSet<String>>) -> Value {
+    let mut payload = Map::new();
+    for script in SCRIPTS {
+        let mut known: Vec<&String> = forms[script].iter().filter(|word| models[script].score(word).known).collect();
+        known.sort();
+        payload.insert(script.to_owned(), json!(known));
+    }
+    Value::Object(payload)
+}
+
+fn known_receipt(root: &Path, payload: &Value, evidence_sha: &str, tokens: &Path) -> Result<Value, String> {
+    let config = read_json(&root.join("model/intent_v1/config.json"))?;
+    let hunspell = &config["external_evaluation"]["hunspell"];
+    let mut provenance = pins(root, &KNOWN_CODE)?;
+    provenance.insert("model/ortho_v1/tokens.jsonl.gz".to_owned(), json!(checksum(tokens)?));
+    for locale in ["en_US", "ru_RU"] {
+        let path = format!("resources/lexicon-supplement-{locale}.json");
+        if root.join(&path).is_file() {
+            provenance.insert(path.clone(), json!(checksum(&root.join(&path))?));
+        }
+    }
+    Ok(json!({
+        "schema_version": 1,
+        "description": "Whether the dictionary of each layout knows each token the engine can serve the orthotactic model, each half of a hyphenated reading and the word after a leading dot, frozen so a replay needs no speller. Absent means not known.",
+        "evidence_sha256": evidence_sha,
+        "tokens_sha256": checksum(tokens)?,
+        "hunspell": {"en_US": hunspell["en_US"], "ru_RU": hunspell["ru_RU"]},
+        "word_lists": {"en": LEXICONS[0].1, "ru": LEXICONS[1].1},
+        "known_by_script": {"en": payload["en"].as_array().map_or(0, Vec::len), "ru": payload["ru"].as_array().map_or(0, Vec::len)},
+        "scope": "LanguageModel.load(locale, supplement_words(locale)).score(token).known with the reference word lists and Hunspell dictionaries of Layout Intent v1, which is what the runtime means by `known`; a machine whose speller differs licenses more or fewer conversions than this evidence measured",
+        "provenance": provenance,
+    }))
+}
+
+/// `derive` of `ortho_web_lexicon`: `[form, rank]` of every lowercase Cyrillic word with enough letters, and of every compound.
+fn derive_web_forms(source: &Path) -> Result<Vec<u8>, String> {
+    if checksum(source)? != WEB_SOURCE_SHA256 {
+        return Err("web vocabulary source is not the pinned file".to_owned());
+    }
+    let raw = String::from_utf8(gz_read(source)?).map_err(|error| error.to_string())?;
+    let word = |text: &str| !text.is_empty() && text.chars().all(|character| ('а'..='я').contains(&character) || character == 'ё');
+    let mut forms = Vec::new();
+    for (rank, line) in raw.split('\n').skip(1).filter(|line| !line.is_empty()).enumerate() {
+        let form = line.split(' ').next().unwrap_or("");
+        let compound = form.contains('-') && form.split('-').all(word);
+        if (form.chars().count() >= WEB_MIN_CHARACTERS && word(form)) || compound {
+            forms.push(json!([form, rank]));
+        }
+    }
+    let mut text = ks_text::json_dumps(&json!({"schema_version": WEB_SCHEMA, "forms": forms}), &ks_text::JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), ..ks_text::JsonOptions::default() });
+    text.push('\n');
+    Ok(text.into_bytes())
+}
+
+fn read_set_rows(path: &Path) -> Result<Vec<Row>, String> {
+    read_rows(&String::from_utf8(gz_read(path)?).map_err(|error| error.to_string())?)
+}
+
+fn read_known(path: &Path) -> Result<HashMap<String, HashSet<String>>, String> {
+    let evidence: Value = serde_json::from_slice(&gz_read(path)?).map_err(|error| error.to_string())?;
+    Ok(evidence.as_object().ok_or("dictionary evidence")?.iter().map(|(script, words)| (script.clone(), words.as_array().map_or_else(HashSet::new, |words| words.iter().filter_map(Value::as_str).map(str::to_owned).collect()))).collect())
+}
+
+/// `seen`: served keys, every run read once, of every row of the snapshot and of every opened set, and of hand-written cases.
+fn seen(root: &Path) -> Result<HashSet<String>, String> {
+    let directory = root.join(DIRECTORY);
+    let mut sequences: Vec<String> = read_set_rows(&directory.join("tokens.jsonl.gz"))?.into_iter().filter(|row| row.split != LEXICON).map(|row| row.keys).collect();
+    for set in HISTORY.iter().map(|entry| entry.0).chain(DEVELOPMENT_SETS) {
+        sequences.extend(read_set_rows(&directory.join(set).join("tokens.jsonl.gz"))?.into_iter().map(|row| row.keys));
+    }
+    let mut written: BTreeSet<String> = ortho::AUTHORED_KEYS.iter().map(|keys| (*keys).to_owned()).collect();
+    for word in LOOKED_AT_WORDS {
+        written.insert(to_keys(word)?);
+    }
+    sequences.extend(written);
+    let mut result = HashSet::new();
+    for keys in &sequences {
+        for direction in SCRIPTS {
+            result.extend(served(keys, direction).iter().map(|token| read_once(token, MIN_STRETCH_RUN)));
+        }
+    }
+    Ok(result)
+}
+
+fn type_counts(labels: &BTreeMap<ortho::Label, bool>) -> BTreeMap<String, i64> {
+    let mut counted = BTreeMap::new();
+    for (label, negative) in labels {
+        *counted.entry(format!("{}:{}_types", label.0, if *negative { "negative" } else { "positive" })).or_insert(0) += 1;
+    }
+    counted
+}
+
+/// `population` of `ortho_independent`: the independent types and the count of those the development saw.
+fn independent_population(root: &Path, rows: &[Row], known: &HashMap<String, HashSet<String>>, minimum: usize) -> Result<(BTreeMap<ortho::Label, bool>, BTreeMap<String, i64>), String> {
+    let references: Vec<&Row> = rows.iter().collect();
+    let labels = ortho::population(&references, "test", known, minimum);
+    let excluded = seen(root)?;
+    let (mut kept, mut dropped) = (BTreeMap::new(), BTreeMap::new());
+    for (label, negative) in labels {
+        if excluded.contains(&read_once(&label.1, MIN_STRETCH_RUN)) {
+            *dropped.entry(format!("{}:{}_types", label.0, if negative { "negative" } else { "positive" })).or_insert(0) += 1;
+        } else {
+            kept.insert(label, negative);
+        }
+    }
+    Ok((kept, dropped))
+}
+
+fn report_line(differences: &mut usize, name: &str, equal: bool) {
+    println!("{name}: {}", if equal { "same" } else { "DIFFERS" });
+    *differences += usize::from(!equal);
+}
+
+/// Everything rebuilt from the frozen sources and compared with the frozen files. A digest of the code in a receipt written
+/// by the Python tools names files that are not in this tree, so the receipts are compared without their provenance.
+pub fn verify(root: &Path, web_source: Option<&Path>) -> Result<(), String> {
+    let directory = root.join(DIRECTORY);
+    let mut differences = 0;
+    let rows = corpus_rows(root)?;
+    let content = tokens_content(&rows);
+    report_line(&mut differences, "tokens", content == gz_read(&directory.join("tokens.jsonl.gz"))?);
+    let mut receipt = corpus_receipt(root, &rows, &checksum(&directory.join("tokens.jsonl.gz"))?)?;
+    let mut recorded = read_json(&directory.join("corpus-receipt.json"))?;
+    receipt["provenance"] = Value::Null;
+    recorded["provenance"] = Value::Null;
+    report_line(&mut differences, "corpus receipt", receipt == recorded);
+    let token_rows = read_set_rows(&directory.join("tokens.jsonl.gz"))?;
+    let models = reference_models(root)?;
+    let evidence = verdict(&models, known_forms(&token_rows));
+    report_line(&mut differences, "known evidence", evidence == serde_json::from_slice::<Value>(&gz_read(&directory.join("known-evidence.json.gz"))?).map_err(|error| error.to_string())?);
+    let mut known = known_receipt(root, &evidence, &checksum(&directory.join("known-evidence.json.gz"))?, &directory.join("tokens.jsonl.gz"))?;
+    let mut recorded_known = read_json(&directory.join("known-receipt.json"))?;
+    known["provenance"] = Value::Null;
+    recorded_known["provenance"] = Value::Null;
+    report_line(&mut differences, "known receipt", known == recorded_known);
+    report_line(&mut differences, "web lexicon receipt", read_json(&directory.join("web-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("web-lexicon-ru.json.gz"))?));
+    report_line(&mut differences, "prose lexicon receipt", read_json(&directory.join("prose-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("prose-lexicon-ru.json.gz"))?));
+    if let Some(source) = web_source {
+        report_line(&mut differences, "web lexicon from its source", derive_web_forms(source)? == gz_read(&directory.join("web-lexicon-ru.json.gz"))?);
+    }
+    for (set, report_path) in HISTORY {
+        let (folder, report) = (directory.join(set), read_json(&directory.join(report_path))?);
+        let receipt = read_json(&folder.join("receipt.json"))?;
+        let described = &report["independent_test"];
+        let counts: BTreeMap<String, Value> = report["corpus_test"]["counts"].as_object().ok_or("counts")?.iter().filter(|(name, _)| name.ends_with("negative_types") || name.ends_with("positive_types")).map(|(name, value)| (name.clone(), value.clone())).collect();
+        report_line(&mut differences, set, described["receipt_sha256"].as_str() == Some(&checksum(&folder.join("receipt.json"))?) && receipt["tokens_sha256"].as_str() == Some(&checksum(&folder.join("tokens.jsonl.gz"))?) && receipt["evidence_sha256"].as_str() == Some(&checksum(&folder.join("known-evidence.json.gz"))?) && described["source"] == receipt["source"] && json!(counts) == receipt["types"]);
+    }
+    let active = directory.join("independent");
+    let active_rows = read_set_rows(&active.join("tokens.jsonl.gz"))?;
+    let active_evidence = verdict(&models, {
+        let mut forms = empty_forms();
+        for row in &active_rows {
+            for direction in SCRIPTS {
+                for token in served(&row.keys, direction) {
+                    if token.chars().all(|key| KEYS.contains(&key)) {
+                        queried(&token, direction, &mut forms);
+                    }
+                }
+            }
+        }
+        forms
+    });
+    report_line(&mut differences, "independent evidence", active_evidence == serde_json::from_slice::<Value>(&gz_read(&active.join("known-evidence.json.gz"))?).map_err(|error| error.to_string())?);
+    let known_active = read_known(&active.join("known-evidence.json.gz"))?;
+    let minimum = read_json(&directory.join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+    let (kept, dropped) = independent_population(root, &active_rows, &known_active, minimum)?;
+    let recorded_set = read_json(&active.join("receipt.json"))?;
+    report_line(&mut differences, "independent set", recorded_set["set"].as_str() == Some(SET_NAME) && recorded_set["schema_version"].as_i64().is_some() && json!(type_counts(&kept)) == recorded_set["types"] && json!(dropped) == recorded_set["excluded_as_seen"] && recorded_set["tokens_sha256"].as_str() == Some(&checksum(&active.join("tokens.jsonl.gz"))?) && recorded_set["evidence_sha256"].as_str() == Some(&checksum(&active.join("known-evidence.json.gz"))?) && recorded_set["snapshot_tokens_sha256"].as_str() == Some(&checksum(&directory.join("tokens.jsonl.gz"))?));
+    let report = read_json(&directory.join("report.json"))?;
+    let outcome = ortho::independent_outcome(root, &kept, &known_active)?;
+    report_line(&mut differences, "independent test report", outcome == report["corpus_test"]);
+    let _ = INDEPENDENT_SCHEMA;
+    if differences != 0 {
+        return Err(format!("{differences} inputs of the orthotactic model differ from the frozen files"));
+    }
+    println!("the inputs of the orthotactic model reproduce");
+    Ok(())
+}
+
+/// A new generation: writes what is not there yet; a file that exists is never overwritten.
+pub fn freeze(root: &Path, output: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(output).map_err(|error| format!("{}: {error}", output.display()))?;
+    let (tokens, receipt) = (output.join("tokens.jsonl.gz"), output.join("corpus-receipt.json"));
+    if tokens.exists() || receipt.exists() {
+        return Err("do not overwrite a frozen split".to_owned());
+    }
+    let rows = corpus_rows(root)?;
+    std::fs::write(&tokens, gz_write(&tokens_content(&rows))?).map_err(|error| error.to_string())?;
+    std::fs::write(&receipt, pretty(&corpus_receipt(root, &rows, &checksum(&tokens)?)?)).map_err(|error| error.to_string())?;
+    let token_rows = read_set_rows(&tokens)?;
+    let models = reference_models(root)?;
+    let evidence = verdict(&models, known_forms(&token_rows));
+    let (evidence_path, known_path) = (output.join("known-evidence.json.gz"), output.join("known-receipt.json"));
+    std::fs::write(&evidence_path, gz_write(&crate::artifact::canonical(&evidence))?).map_err(|error| error.to_string())?;
+    std::fs::write(&known_path, pretty(&known_receipt(root, &evidence, &checksum(&evidence_path)?, &tokens)?)).map_err(|error| error.to_string())?;
+    let _: PathBuf = output.to_path_buf();
+    Ok(())
+}

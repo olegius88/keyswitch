@@ -18,7 +18,8 @@
 //! `ks-train carry --tree <root> --pair <file> --refit <head>... --output <file>`, `doctor --tree <root> [--corpus <folder>] [--ledger <folder>] [--stage <name>...]`,
 //! `supplement --tree <root> --verify | --input <file> [--output <file>] [--receipt <file>] [--removed-list <file>]`,
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
-//! `ks-train ortho --tree <root> --fit|--verify|--test|--promote [--output <folder>]`
+//! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs [--web-source <file>]|--freeze-inputs [--output <folder>]`
+//! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -109,6 +110,16 @@ fn main() {
         }
         return;
     }
+    if arguments.first().map(String::as_str) == Some("base") {
+        match base_command(&arguments) {
+            Ok(summary) => println!("{summary}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if arguments.first().map(String::as_str) == Some("detector") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
@@ -123,8 +134,16 @@ fn main() {
     }
     if arguments.first().map(String::as_str) == Some("ortho") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if arguments.iter().any(|argument| argument == "--inputs" || argument == "--freeze-inputs") {
+            let result = if arguments.iter().any(|argument| argument == "--inputs") { ks_train::ortho_inputs::verify(&root, option(&arguments, "--web-source").map(Path::new)) } else { ks_train::ortho_inputs::freeze(&root, Path::new(option(&arguments, "--output").expect("--output is required"))) };
+            if let Err(error) = result {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         let Some(action) = ["fit", "verify", "test", "promote"].into_iter().find(|name| arguments.iter().any(|argument| *argument == format!("--{name}"))) else {
-            eprintln!("--fit, --verify, --test or --promote");
+            eprintln!("--fit, --verify, --test, --promote, --inputs or --freeze-inputs");
             std::process::exit(2);
         };
         if let Err(error) = ks_train::ortho::command(&root, action, option(&arguments, "--output").map(Path::new)) {
@@ -445,5 +464,29 @@ fn small_command(arguments: &[String]) -> i32 {
             eprintln!("{error}");
             1
         }
+    }
+}
+
+/// `ks-train base freeze|reconcile|technical|merge|inventory`: the base of a context corpus, from pinned public sources.
+fn base_command(arguments: &[String]) -> Result<serde_json::Value, String> {
+    use ks_train::base_corpus as base;
+    let root = PathBuf::from(option(arguments, "--tree").ok_or("--tree is required")?);
+    let required = |name: &str| option(arguments, name).map(PathBuf::from).ok_or_else(|| format!("{name} is required"));
+    let exposures: Vec<PathBuf> = arguments.windows(2).filter(|pair| pair[0] == "--extra-exposure").map(|pair| root.join(&pair[1])).collect();
+    let size = |name: &str, default: usize| option(arguments, name).map_or(Ok(default), |value| value.parse().map_err(|_| format!("{name} takes a number")));
+    match arguments.get(1).map(String::as_str) {
+        Some("freeze") => {
+            let namespace = option(arguments, "--namespace").ok_or("--namespace is required")?;
+            let manifest = base::freeze_base(&root, &required("--source-root")?, &required("--output")?, &namespace, &exposures, size("--max-documents", base::DEFAULT_MAX_DOCUMENTS_PER_SOURCE)?, size("--max-sentences-per-document", base::DEFAULT_MAX_SENTENCES_PER_DOCUMENT)?)?;
+            Ok(serde_json::json!({"namespace": manifest["namespace"], "sampling": manifest["sampling"], "partitioning": manifest["partitioning"], "splits": manifest["splits"], "test_membership_sha256": manifest["test_membership_sha256"]}))
+        }
+        Some("reconcile") => base::reconcile(&root, &required("--corpus")?, &required("--source-root")?, &required("--report")?, option(arguments, "--output").map(PathBuf::from).as_deref()),
+        Some("technical") => base::freeze_technical(&root, &required("--source-directory")?, &required("--ud-corpus")?, &exposures, option(arguments, "--output").map(PathBuf::from).as_deref(), &required("--preview-report")?),
+        Some("merge") => {
+            let manifest = base::merge(&root, &required("--base")?, &required("--technical")?, &required("--output")?)?;
+            Ok(serde_json::json!({"test_membership_sha256": manifest["test_membership_sha256"], "partitioning": manifest["partitioning"], "alias_audit": manifest["alias_audit"]}))
+        }
+        Some("inventory") => base::prefix_inventory(&root, &option(arguments, "--corpus").map_or_else(|| root.join("model/prefix_v1"), PathBuf::from), &required("--output")?),
+        _ => Err("base freeze|reconcile|technical|merge|inventory".to_owned()),
     }
 }

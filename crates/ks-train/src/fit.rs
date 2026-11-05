@@ -422,6 +422,7 @@ fn featurize(inputs: &FitInputs, profile: &str, split: &str, frames: &[Frame]) -
 
 /// The features of frames, in their order, by `jobs` threads.
 fn columns_of(inputs: &FitInputs, vocabulary: &mut Vocabulary, profile: &str, split: &str, frames: &[Frame], keep_importance: f64, jobs: usize) -> Columns {
+    let started = std::time::Instant::now();
     let batches: Vec<&[Frame]> = frames.chunks(FRAMES_PER_TASK).collect();
     let next = AtomicUsize::new(0);
     let done: Mutex<Vec<Option<Chunk>>> = Mutex::new((0..batches.len()).map(|_| None).collect());
@@ -437,6 +438,7 @@ fn columns_of(inputs: &FitInputs, vocabulary: &mut Vocabulary, profile: &str, sp
             });
         }
     });
+    eprintln!("{profile}/{split}: features of {} frames in {:.1} s on {} threads", frames.len(), started.elapsed().as_secs_f64(), jobs.max(1));
     let mut columns = Columns::default();
     for chunk in done.into_inner().expect("the workers finished").into_iter().flatten() {
         let mapping: Vec<u32> = chunk.names.iter().map(|name| vocabulary.id(name)).collect();

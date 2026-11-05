@@ -36,6 +36,7 @@ jobs:
           cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --verify
           sudo apt-get update
           sudo apt-get install -y libhunspell-1.7-0
+          cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --inputs
           cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --preseal --output preseal.json
           cmp preseal.json model/intent_v1/holdout-v28-preseal.json

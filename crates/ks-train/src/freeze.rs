@@ -71,9 +71,9 @@ const RPM_SOURCES: [(&str, &str, &str, &str); 3] = [
 
 #[derive(Clone, Debug)]
 pub struct SurfaceToken {
-    identifier: String,
-    form: String,
-    lemmas: Vec<String>,
+    pub identifier: String,
+    pub form: String,
+    pub lemmas: Vec<String>,
     upos: String,
     features: String,
     misc: String,
@@ -86,16 +86,16 @@ pub struct Sentence {
     source: String,
     filename: String,
     text: Option<String>,
-    tokens: Vec<SurfaceToken>,
+    pub tokens: Vec<SurfaceToken>,
 }
 
 #[derive(Default)]
-struct Union {
-    parents: HashMap<String, String>,
+pub(crate) struct Union {
+    pub(crate) parents: HashMap<String, String>,
 }
 
 impl Union {
-    fn find(&mut self, value: &str) -> String {
+    pub(crate) fn find(&mut self, value: &str) -> String {
         let mut current = value.to_owned();
         self.parents.entry(current.clone()).or_insert_with(|| current.clone());
         let mut path = Vec::new();
@@ -110,7 +110,7 @@ impl Union {
         current
     }
 
-    fn join(&mut self, left: &str, right: &str) {
+    pub(crate) fn join(&mut self, left: &str, right: &str) {
         let (a, b) = (self.find(left), self.find(right));
         if a != b {
             if a > b {
@@ -122,12 +122,12 @@ impl Union {
     }
 }
 
-fn row_identifier(sentence: &Sentence, token: &SurfaceToken) -> String {
+pub(crate) fn row_identifier(sentence: &Sentence, token: &SurfaceToken) -> String {
     format!("{}:{}:{}:{}", sentence.source, sentence.filename, sentence.identifier, token.identifier)
 }
 
 /// `family_aliases`: surface and every annotated lemma are joined, including multiword components.
-fn family_aliases(token: &SurfaceToken, identifier: &str) -> Vec<String> {
+pub(crate) fn family_aliases(token: &SurfaceToken, identifier: &str) -> Vec<String> {
     let mut values: BTreeSet<String> = BTreeSet::new();
     values.insert(physical(&token.form));
     values.extend(token.lemmas.iter().map(|lemma| physical(lemma)));
@@ -200,7 +200,7 @@ fn surface_tokens(lines: &[Vec<String>]) -> Result<Vec<SurfaceToken>, String> {
 }
 
 /// `read_conllu`.
-fn read_conllu(path: &Path, source: &str) -> Result<Vec<Sentence>, String> {
+pub(crate) fn read_conllu(path: &Path, source: &str) -> Result<Vec<Sentence>, String> {
     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let mut document = format!("{source}:unmarked-file:{name}");
     let (mut document_serial, mut sentence_serial) = (0, 0);
@@ -328,7 +328,7 @@ fn collected(characters: &[char]) -> String {
 }
 
 /// `sentence_rows`.
-fn sentence_rows(sentence: &Sentence, families: &mut Union) -> Vec<CorpusRow> {
+pub(crate) fn sentence_rows(sentence: &Sentence, families: &mut Union) -> Vec<CorpusRow> {
     let (text, spans, alignment) = aligned_text(sentence);
     let mut rows = Vec::new();
     for (index, (token, (start, end))) in sentence.tokens.iter().zip(spans.iter().copied()).enumerate() {
@@ -537,7 +537,7 @@ fn lookalike_typo(sentence: &Sentence) -> bool {
 }
 
 /// `select_holdout_sentences`: sentences by hash in documents by hash.
-fn select_sentences(sentences: Vec<Sentence>, namespace: &str, max_documents: usize, max_sentences: usize, policy: bool) -> Result<(Vec<Sentence>, Value), String> {
+pub(crate) fn select_sentences(sentences: Vec<Sentence>, namespace: &str, max_documents: usize, max_sentences: usize, policy: bool) -> Result<(Vec<Sentence>, Value), String> {
     let mut sources: BTreeMap<String, BTreeMap<String, Vec<([u8; 32], usize)>>> = BTreeMap::new();
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
@@ -617,8 +617,8 @@ fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).display().to_string()
 }
 
-/// `exposed_families`: the physical forms of everything the repository has shown a model before.
-fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(HashSet<String>, BTreeMap<String, String>), String> {
+/// `exposed_families`: the physical forms of everything the repository has shown a model before, and the forms as written.
+pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(HashSet<String>, BTreeMap<String, String>, HashSet<String>), String> {
     let mut paths = vec![root.join("model/context_v1/scenarios.json")];
     let mut holdouts: Vec<PathBuf> = std::fs::read_dir(root.join("model/context_v1")).map_err(|error| error.to_string())?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| path.file_name().is_some_and(|name| name.to_string_lossy().starts_with("holdout") && name.to_string_lossy().ends_with(".json"))).collect();
     holdouts.sort();
@@ -626,33 +626,44 @@ fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(HashSet<Stri
     paths.push(root.join("model/context_v2/sources/lexical-evidence.json.gz"));
     paths.push(root.join("model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz"));
     paths.extend_from_slice(additional);
-    let mut exposed = HashSet::new();
+    let mut exposed = Exposed::default();
     let mut provenance = BTreeMap::new();
-    fn add(text: &str, expand: bool, exposed: &mut HashSet<String>) {
-        exposed.insert(physical(text));
+    #[derive(Default)]
+    struct Exposed {
+        physical: HashSet<String>,
+        forms: HashSet<String>,
+    }
+    impl Exposed {
+        fn insert(&mut self, form: &str) {
+            self.physical.insert(physical(form));
+            self.forms.insert(form.to_owned());
+        }
+    }
+    fn add(text: &str, expand: bool, exposed: &mut Exposed) {
+        exposed.insert(text);
         for token in words_of(text) {
-            exposed.insert(physical(token));
+            exposed.insert(token);
             if expand {
                 let letters: Vec<char> = token.chars().collect();
                 if (TYPO_SOURCE_MIN_CHARACTERS..=TYPO_SOURCE_MAX_CHARACTERS).contains(&letters.len()) {
                     for index in 1..letters.len() - 1 {
                         let mut deleted = letters.clone();
                         deleted.remove(index);
-                        exposed.insert(physical(&collected(&deleted)));
+                        exposed.insert(&collected(&deleted));
                         let mut doubled = letters.clone();
                         doubled.insert(index, letters[index]);
-                        exposed.insert(physical(&collected(&doubled)));
+                        exposed.insert(&collected(&doubled));
                     }
                     for index in 1..letters.len() - TRANSPOSE_TAIL_MARGIN_CHARACTERS {
                         let mut swapped = letters.clone();
                         swapped.swap(index, index + 1);
-                        exposed.insert(physical(&collected(&swapped)));
+                        exposed.insert(&collected(&swapped));
                     }
                 }
             }
         }
     }
-    fn walk(value: &Value, expand: bool, exposed: &mut HashSet<String>) {
+    fn walk(value: &Value, expand: bool, exposed: &mut Exposed) {
         match value {
             Value::String(text) => add(text, expand, exposed),
             Value::Array(items) => items.iter().for_each(|child| walk(child, expand, exposed)),
@@ -703,7 +714,7 @@ fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(HashSet<Stri
             walk(&serde_json::from_slice(&bytes).map_err(|error| error.to_string())?, expand, &mut exposed);
         }
     }
-    Ok((exposed, provenance))
+    Ok((exposed.physical, provenance, exposed.forms))
 }
 
 fn update_aliases(set: &mut HashSet<String>, form: &str) {
@@ -740,7 +751,7 @@ pub fn load_exclusions(root: &Path, base: &Path, ud_origin: &Path, technical_ori
         prior_test_aliases.extend(string_items(&record["alias_sha256"]));
         provenance.insert(path.display().to_string(), checksum(&path)?);
     }
-    let (exposed, sources) = exposed_families(root, extra_exposure)?;
+    let (exposed, sources, _) = exposed_families(root, extra_exposure)?;
     let forms_path = root.join("model/context_v3/historical-code-forms.json");
     let mut historical: BTreeSet<String> = string_items(&read_json(&forms_path)?["forms"]).into_iter().collect();
     historical.extend(exposed.iter().cloned());
@@ -856,12 +867,13 @@ fn holdout_rows(sentences: &[Sentence], exclusions: &Exclusions) -> Result<(Vec<
 
 #[derive(Clone)]
 pub struct Command {
-    name: String,
-    owners: Vec<String>,
+    pub name: String,
+    pub paths: Vec<String>,
+    pub owners: Vec<String>,
 }
 
 fn commands_from(paths: BTreeMap<String, BTreeSet<String>>) -> Vec<Command> {
-    paths.into_iter().map(|(name, owners)| Command { name, owners: owners.into_iter().collect() }).collect()
+    paths.into_iter().map(|(name, owners)| Command { name, paths: Vec::new(), owners: owners.into_iter().collect() }).collect()
 }
 
 /// `COMMAND_PATH`: `(?:usr/)?s?bin/([a-z]{3,16})`, full match.
@@ -885,9 +897,10 @@ fn package_section(item: &str) -> bool {
 }
 
 /// `read_commands`: the executables a Contents index lists.
-fn read_commands(contents: &Path) -> Result<Vec<Command>, String> {
+pub(crate) fn read_commands(contents: &Path) -> Result<Vec<Command>, String> {
     let file = std::fs::File::open(contents).map_err(|error| error.to_string())?;
     let mut owners: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut paths: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for line in std::io::BufReader::new(MultiGzDecoder::new(file)).lines() {
         let line = line.map_err(|error| error.to_string())?;
         let trimmed = pystr::rstrip(&line);
@@ -898,9 +911,14 @@ fn read_commands(contents: &Path) -> Result<Vec<Command>, String> {
         if !items.iter().all(|item| package_section(item)) {
             return Err("invalid package ownership in selected Contents row".to_owned());
         }
+        paths.entry(name.to_owned()).or_default().insert(path.to_owned());
         owners.entry(name.to_owned()).or_default().extend(items.iter().map(|item| (*item).to_owned()));
     }
-    Ok(commands_from(owners))
+    let mut commands = commands_from(owners);
+    for command in &mut commands {
+        command.paths = paths.remove(&command.name).unwrap_or_default().into_iter().collect();
+    }
+    Ok(commands)
 }
 
 /// The entries of a tar archive: (name, bytes).
@@ -1231,7 +1249,7 @@ fn rpm_source(directory: &Path) -> Result<Technical, String> {
 }
 
 /// `holdout_inventory`: pinned treebank files of the new sources, verified by SHA-256 and git blob hash.
-fn holdout_inventory(source_root: &Path, pins: &[(&str, &str)]) -> Result<(Vec<(String, PathBuf)>, Vec<Value>), String> {
+pub(crate) fn source_inventory(source_root: &Path, pins: &[(&str, &str)]) -> Result<(Vec<(String, PathBuf)>, Vec<Value>), String> {
     let mut paths = Vec::new();
     let mut metadata = Vec::new();
     for (source, commit) in pins {
@@ -1378,7 +1396,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         }
         chosen
     };
-    let (paths, sources) = if pins.is_empty() { (Vec::new(), Vec::new()) } else { holdout_inventory(source_root, &pins)? };
+    let (paths, sources) = if pins.is_empty() { (Vec::new(), Vec::new()) } else { source_inventory(source_root, &pins)? };
     let exclusions = load_exclusions(request.root, request.base, request.ud_origin, request.technical_origin, request.prefix_inventory, request.lexicon, &request.extra_exposure, request.ledger)?;
     let mut sentences = Vec::new();
     for (source, path) in &paths {

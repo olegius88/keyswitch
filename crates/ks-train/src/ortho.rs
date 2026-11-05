@@ -23,10 +23,10 @@ use std::sync::{Arc, LazyLock};
 const DIRECTORY: &str = "model/ortho_v1";
 const NAMESPACE: &str = "keyswitch:ortho-v1:candidate15";
 const SYNTHESIS_NAMESPACE: &str = "keyswitch:ortho-v1:extra-key-synthesis";
-const AUTHORED_KEYS: [&str; 25] = [".dist", "aghbdtn", "ayfath", "bild", "cjpdjy", "const", "ctdjlyz", "edtlvktybt", "ghbdtn", "ghtdtn", "gjdnjhyyj", "gthtc,jhre", "healthcheck", "hotfix", "htgjcn", "htop", "kubectl", "nginx", "npm", "qwerty", "rkfbdfnehf", "webjs", "websocket", "xfnbr", "z-nj"];
+pub(crate) const AUTHORED_KEYS: [&str; 25] = [".dist", "aghbdtn", "ayfath", "bild", "cjpdjy", "const", "ctdjlyz", "edtlvktybt", "ghbdtn", "ghtdtn", "gjdnjhyyj", "gthtc,jhre", "healthcheck", "hotfix", "htgjcn", "htop", "kubectl", "nginx", "npm", "qwerty", "rkfbdfnehf", "webjs", "websocket", "xfnbr", "z-nj"];
 const TRAIN: &str = "train";
 const TEST: &str = "test";
-const LEXICON: &str = "lexicon";
+pub(crate) const LEXICON: &str = "lexicon";
 const EVIDENCE_SCHEMA: i64 = 2;
 const VERSION_HASH_CHARACTERS: usize = 12;
 const CHOICE_HEX_DIGITS: usize = 8;
@@ -58,10 +58,10 @@ const WORD_JOINERS: &str = "'’-‐‑_@/\\=";
 
 #[derive(Clone)]
 pub struct Row {
-    split: String,
-    script: String,
-    keys: String,
-    shapes: Vec<(String, i64)>,
+    pub split: String,
+    pub script: String,
+    pub keys: String,
+    pub shapes: Vec<(String, i64)>,
 }
 
 impl Row {
@@ -70,13 +70,13 @@ impl Row {
     }
 }
 
-type Label = (String, String, String);
+pub(crate) type Label = (String, String, String);
 
 fn is_alpha(character: char) -> bool {
     pystr::isalpha(character.encode_utf8(&mut [0; 4]))
 }
 
-static KEYS: LazyLock<HashSet<char>> = LazyLock::new(|| (33..127_u8).map(char::from).collect());
+pub(crate) static KEYS: LazyLock<HashSet<char>> = LazyLock::new(|| (33..127_u8).map(char::from).collect());
 static LETTERS_EN: LazyLock<HashSet<char>> = LazyLock::new(|| KEYS.iter().copied().filter(|key| is_alpha(*key)).collect());
 static LETTERS_RU: LazyLock<HashSet<char>> = LazyLock::new(|| KEYS.iter().copied().filter(|key| pystr::isalpha(&pair().translate(&key.to_string(), "us", "ru").expect("layouts"))).collect());
 
@@ -84,7 +84,7 @@ fn letter_keys(layout: &str) -> &'static HashSet<char> {
     if layout == "en" { &LETTERS_EN } else { &LETTERS_RU }
 }
 
-fn other(script: &str) -> &'static str {
+pub(crate) fn other(script: &str) -> &'static str {
     if script == "en" { "ru" } else { "en" }
 }
 
@@ -99,7 +99,7 @@ fn visible_key(key: char, layout: &str) -> String {
     pair().translate(&key.to_string(), "us", "ru").expect("layouts")
 }
 
-fn visible(keys: &str, layout: &str) -> String {
+pub(crate) fn visible(keys: &str, layout: &str) -> String {
     keys.chars().map(|key| visible_key(key, layout)).collect()
 }
 
@@ -150,7 +150,7 @@ pub fn served(keys: &str, layout: &str) -> Vec<String> {
 }
 
 /// `word_core`: the letters of the token in this layout, for counting rather than for serving.
-fn word_core(keys: &str, layout: &str) -> String {
+pub(crate) fn word_core(keys: &str, layout: &str) -> String {
     let characters: Vec<char> = keys.chars().collect();
     let keep = letter_keys(layout);
     let (mut start, mut end) = (0, characters.len());
@@ -164,7 +164,7 @@ fn word_core(keys: &str, layout: &str) -> String {
 }
 
 /// `extra_key_variant`: the keys of a train word typed in the other layout with one stray key.
-fn extra_key_variant(script: &str, keys: &str) -> Option<String> {
+pub(crate) fn extra_key_variant(script: &str, keys: &str) -> Option<String> {
     let base = word_core(keys, script);
     let length = base.chars().count();
     if length + 1 < TYPO_MIN_CHARACTERS || !pystr::isalpha(&visible(&base, script)) || AUTHORED_KEYS.contains(&base.as_str()) {
@@ -688,7 +688,7 @@ fn fitted_weights(samples: &BTreeMap<&'static str, Vec<Vec<f64>>>, labels: &BTre
 }
 
 /// `population`: (direction, served keys, shape) -> is it a negative, for what the engine serves the model.
-fn population(rows: &[&Row], split: &str, known: &HashMap<String, HashSet<String>>, minimum: usize) -> BTreeMap<Label, bool> {
+pub(crate) fn population(rows: &[&Row], split: &str, known: &HashMap<String, HashSet<String>>, minimum: usize) -> BTreeMap<Label, bool> {
     let mut labels = BTreeMap::new();
     for row in rows {
         if row.split != split {
@@ -853,7 +853,7 @@ fn web_weight(rank: i64) -> i64 {
 }
 
 /// `to_keys`: the physical keys a typist pressed to produce this token.
-fn to_keys(token: &str) -> Result<String, String> {
+pub(crate) fn to_keys(token: &str) -> Result<String, String> {
     let lowered = pystr::casefold(&ks_text::normalize::nfc(token));
     let cyrillic = lowered.chars().any(|character| "абвгдеёжзийклмнопрстуфхцчшщъыьэюя".contains(character));
     let latin = lowered.chars().any(|character| character.is_ascii_lowercase());
@@ -910,18 +910,34 @@ fn load_inputs(root: &Path) -> Result<Inputs, String> {
     if read_json(&directory.join("known-receipt.json"))?["evidence_sha256"].as_str() != Some(checksum(&directory.join("known-evidence.json.gz"))?.as_str()) {
         return Err("dictionary evidence does not match its receipt".to_owned());
     }
-    let mut rows = Vec::new();
-    for line in gz_text(&directory.join("tokens.jsonl.gz"))?.lines() {
-        let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
-        let text = |name: &str| row[name].as_str().map(str::to_owned).ok_or_else(|| format!("a token row without {name}"));
-        let shapes = row["shapes"].as_object().ok_or("a token row without shapes")?.iter().map(|(name, value)| (name.clone(), value.as_i64().unwrap_or(0))).collect();
-        rows.push(Row { split: text("split")?, script: text("script")?, keys: text("keys")?, shapes });
-    }
+    let rows = read_rows(&gz_text(&directory.join("tokens.jsonl.gz"))?)?;
     let evidence: Value = serde_json::from_str(&gz_text(&directory.join("known-evidence.json.gz"))?).map_err(|error| error.to_string())?;
     let known = evidence.as_object().ok_or("dictionary evidence")?.iter().map(|(script, words)| (script.clone(), words.as_array().map_or_else(HashSet::new, |words| words.iter().filter_map(Value::as_str).map(str::to_owned).collect()))).collect();
     let identifier = Arc::new(IdentifierLexicon::load(&root.join("resources/identifiers.json")).map_err(|error| error.name.to_string())?);
     let web = web_rows(root, &settings)?;
     Ok(Inputs { rows, known, identifier, web, settings })
+}
+
+/// The rows of a token file.
+pub(crate) fn read_rows(text: &str) -> Result<Vec<Row>, String> {
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
+        let field = |name: &str| row[name].as_str().map(str::to_owned).ok_or_else(|| format!("a token row without {name}"));
+        let shapes = row["shapes"].as_object().ok_or("a token row without shapes")?.iter().map(|(name, value)| (name.clone(), value.as_i64().unwrap_or(0))).collect();
+        rows.push(Row { split: field("split")?, script: field("script")?, keys: field("keys")?, shapes });
+    }
+    Ok(rows)
+}
+
+/// The installed model on an independent set, with the verdict of that set's own dictionary evidence.
+pub(crate) fn independent_outcome(root: &Path, labels: &BTreeMap<Label, bool>, known: &HashMap<String, HashSet<String>>) -> Result<Value, String> {
+    let lexicon = Arc::new(IdentifierLexicon::load(&root.join("resources/identifiers.json")).map_err(|error| error.name.to_string())?);
+    let identifier: Identifier = Arc::new(move |token: &str| lexicon.contains(token));
+    let table = known.clone();
+    let word: KnownWord = Arc::new(move |script: &str, text: &str| table[script].contains(text));
+    let model = OrthoModel::load(&root.join(DIRECTORY).join("candidate.json"), Some(identifier), Some(word), None).map_err(|error| error.name.to_string())?;
+    Ok(outcome(&model, labels))
 }
 
 /// `outcome`: false conversions and recall, counted by type.
