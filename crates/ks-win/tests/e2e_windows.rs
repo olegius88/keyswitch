@@ -59,6 +59,7 @@ mod scenario {
     const START_ATTEMPTS: u32 = 4;
     const PROBE_ATTEMPTS: u32 = 3;
     const SURFACE_CLOSES: u64 = 1_000;
+    const PROGRAM_SETTLES: u64 = 1_500;
 
     /// A key as a person's: no mark of this program on it.
     fn user(pressed: bool) -> NativeInput {
@@ -346,8 +347,16 @@ mod scenario {
         Ok(())
     }
 
+    /// A copy left running holds the single instance and its own settings: this one would leave at once and nothing would
+    /// answer the keys.
     fn start(binary: &Path, root: &Path) -> Result<Child, String> {
-        Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())
+        let _ = Command::new("taskkill").args(["/IM", "KeySwitch.exe", "/F"]).output();
+        let mut child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
+        std::thread::sleep(Duration::from_millis(PROGRAM_SETTLES));
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Err(format!("the program left at once: {status}"));
+        }
+        Ok(child)
     }
 
     fn history_of(root: &Path) -> Result<Vec<(String, String)>, String> {
