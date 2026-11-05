@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.66.2 — 2026-11-05
+
 - macOS: the program from the published archive starts. `packaging/build-macos.sh` left out `keyswitch.windows_ui_model`, which the settings window imports on every platform, and did not carry Tk, so every archive so far crashed at start: `--diagnose`, the only thing the build ran, stops short of those imports, and the checks on a Mac ran from the sources. The build keeps the module and the Tk plugin, and CI and the release workflow open and close the window of the packaged program on both architectures.
 - macOS: autostart works. A compiled program reports a `python3` beside it that does not exist, so the launch agent named that file with `-m keyswitch` and never started. The entry point of the build names its own binary, and the build's window check fails if the agent's program is missing.
 
