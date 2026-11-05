@@ -128,6 +128,20 @@ extern "C-unwind" fn control_changed(_this: &AnyObject, _selector: Sel, sender: 
     }));
 }
 
+/// Closing the window hides it, or ends the program when the setting says so and nothing else is left to reach it.
+extern "C-unwind" fn window_will_close(_this: &AnyObject, _selector: Sel, _notification: *mut AnyObject) {
+    run_on_main(Box::new(|| {
+        let keep = with_ui(|ui| setting_is_on(ui, "general.close_to_tray") && setting_is_on(ui, "appearance.show_indicator"));
+        if keep == Some(false) {
+            quit();
+        }
+    }));
+}
+
+fn setting_is_on(ui: &Ui, path: &str) -> bool {
+    ui.services.settings.get(path).as_ref().is_none_or(truthy)
+}
+
 extern "C-unwind" fn button_pressed(_this: &AnyObject, _selector: Sel, sender: *mut AnyObject) {
     // SAFETY: the sender is the button AppKit passes for the time of this call.
     let tag: isize = unsafe { msg_send![sender, tag] };
@@ -148,6 +162,7 @@ fn register_classes() -> Option<&'static AnyClass> {
     unsafe {
         target.add_method(sel!(controlChanged:), control_changed as extern "C-unwind" fn(_, _, _));
         target.add_method(sel!(buttonPressed:), button_pressed as extern "C-unwind" fn(_, _, _));
+        target.add_method(sel!(windowWillClose:), window_will_close as extern "C-unwind" fn(_, _, _));
     }
     Some(target.register())
 }
@@ -446,6 +461,7 @@ pub fn create(services: Arc<Services>) {
             let allocated: Id = msg_send![class!(NSWindow), alloc];
             let window: Id = msg_send![allocated, initWithContentRect: rect(200.0, 200.0, WINDOW_WIDTH, WINDOW_HEIGHT), styleMask: STYLE_TITLED_CLOSABLE_MINIATURIZABLE, backing: BUFFERED, defer: true];
             let _: () = msg_send![window, setReleasedWhenClosed: false];
+            let _: () = msg_send![window, setDelegate: target];
             let _: () = msg_send![window, setTitle: string("KeySwitch")];
             let allocated: Id = msg_send![class!(NSTabView), alloc];
             let tabs: Id = msg_send![allocated, initWithFrame: rect(0.0, 0.0, WINDOW_WIDTH, WINDOW_HEIGHT)];
@@ -481,6 +497,7 @@ pub fn create(services: Arc<Services>) {
             ui.refresh_status();
             ui.refresh_exclusions();
             ui.refresh_rules();
+            apply_theme(&ui.services.settings.get("appearance.theme").unwrap_or(Value::Null));
             UI.with(|slot| *slot.borrow_mut() = Some(ui));
         }
     });
@@ -591,6 +608,63 @@ pub fn show(page: Option<&'static str>) {
         ui.refresh_history();
         ui.refresh_rules();
     });
+}
+
+/// The program's windows in the chosen appearance; "system" leaves it to macOS.
+fn apply_theme(theme: &Value) {
+    let name = match theme.as_str() {
+        Some("light") => Some("NSAppearanceNameAqua"),
+        Some("dark") => Some("NSAppearanceNameDarkAqua"),
+        _ => None,
+    };
+    objc2::rc::autoreleasepool(|_| {
+        // SAFETY: messages on the main thread; a nil appearance means the system's.
+        unsafe {
+            let appearance: Id = match name {
+                Some(name) => msg_send![class!(NSAppearance), appearanceNamed: string(name)],
+                None => std::ptr::null_mut(),
+            };
+            let application: Id = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![application, setAppearance: appearance];
+        }
+    });
+}
+
+/// A setting changed elsewhere (the menu bar item, a reset) shows in its control.
+pub fn apply_setting(path: &str, value: &Value) {
+    with_ui(|ui| {
+        for (spec, control) in ui.specs.iter().zip(ui.controls.iter().copied()) {
+            if path != "*" && spec.path != path {
+                continue;
+            }
+            let stored = if path == "*" { ui.services.settings.get(&spec.path) } else { Some(value.clone()) };
+            // SAFETY: messages on the main thread to a live control of this window.
+            unsafe {
+                match spec.kind {
+                    ControlKind::Bool => {
+                        let on: isize = stored.as_ref().is_some_and(truthy).into();
+                        let _: () = msg_send![control, setState: on];
+                    }
+                    ControlKind::Choice => {
+                        let _: () = msg_send![control, selectItemWithTitle: string(&control_text(spec, stored.as_ref()))];
+                    }
+                    _ => {
+                        let _: () = msg_send![control, setStringValue: string(&control_text(spec, stored.as_ref()))];
+                    }
+                }
+            }
+        }
+        if path == "*" || path.starts_with("exclusions.") {
+            ui.refresh_exclusions();
+        }
+        if path == "*" || path == "appearance.theme" {
+            apply_theme(&ui.services.settings.get("appearance.theme").unwrap_or(Value::Null));
+        }
+    });
+}
+
+pub fn refresh_history() {
+    with_ui(|ui| ui.refresh_history());
 }
 
 pub fn refresh_status() {

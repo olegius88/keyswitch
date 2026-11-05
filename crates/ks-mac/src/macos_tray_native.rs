@@ -10,7 +10,7 @@ mod native {
     use std::sync::{Arc, Mutex, OnceLock};
 
     use ks_ui::tray_model::{MenuEntry, TrayAction, TrayState, menu_entries};
-    use objc2::runtime::{AnyObject, ClassBuilder, Sel};
+    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
     use objc2::{class, msg_send, sel};
 
     use crate::macos_objc::{Id, string};
@@ -98,13 +98,19 @@ mod native {
     impl StatusItem {
         pub fn start(handler: Handler, state: TrayState) -> Result<StatusItem, String> {
             objc2::rc::autoreleasepool(|_| {
-                let mut builder = ClassBuilder::new(c"KeySwitchMenuTarget", class!(NSObject)).ok_or("не удалось создать класс-получатель для меню")?;
-                // SAFETY: the functions have the signatures of these selectors.
-                unsafe {
-                    builder.add_method(sel!(keySwitchMenuItem:), menu_item_chosen as extern "C-unwind" fn(_, _, _));
-                    builder.add_method(sel!(menuNeedsUpdate:), menu_needs_update as extern "C-unwind" fn(_, _, _));
-                }
-                let target_class = builder.register();
+                // The item can come back after its setting was turned off and on; a class registers once.
+                let target_class = match AnyClass::get(c"KeySwitchMenuTarget") {
+                    Some(registered) => registered,
+                    None => {
+                        let mut builder = ClassBuilder::new(c"KeySwitchMenuTarget", class!(NSObject)).ok_or("не удалось создать класс-получатель для меню")?;
+                        // SAFETY: the functions have the signatures of these selectors.
+                        unsafe {
+                            builder.add_method(sel!(keySwitchMenuItem:), menu_item_chosen as extern "C-unwind" fn(_, _, _));
+                            builder.add_method(sel!(menuNeedsUpdate:), menu_needs_update as extern "C-unwind" fn(_, _, _));
+                        }
+                        builder.register()
+                    }
+                };
                 // SAFETY: messages on the main thread to AppKit's shared objects and the objects made here, kept for the life of the program.
                 unsafe {
                     let application: Id = msg_send![class!(NSApplication), sharedApplication];

@@ -23,6 +23,7 @@ use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
 use crate::macos_native::{NativeAccessibility, run_on_main};
 use crate::macos_objc::{Id, beep, notify};
+use crate::macos_system::MacAutostartManager;
 use crate::macos_tray_native::StatusItem;
 use crate::settings_window;
 
@@ -40,6 +41,7 @@ pub struct Services {
 struct App {
     services: Arc<Services>,
     tray: Option<StatusItem>,
+    autostart: MacAutostartManager,
     closing: bool,
 }
 
@@ -105,6 +107,66 @@ fn sync_tray() {
             tray.update(state);
         }
     });
+}
+
+fn sync_autostart() {
+    with_app(|app| {
+        let settings = &app.services.settings;
+        let requested = setting_bool(settings, "general.autostart", true);
+        match app.autostart.set_enabled(requested, setting_bool(settings, "general.start_hidden", true)) {
+            Ok(()) => {
+                let status = app.autostart.status();
+                if requested && status.target_missing {
+                    logsetup::warning(LOGGER, &format!("Команда автозагрузки указывает на отсутствующий файл: {}", status.command.unwrap_or_default()));
+                    run_on_main(Box::new(|| settings_window::show_error("Автозагрузка указывает на другую папку; переключите её заново.")));
+                }
+            }
+            Err(error) => {
+                logsetup::warning(LOGGER, &format!("Не удалось настроить автозагрузку: {error}"));
+                run_on_main(Box::new(move || settings_window::show_error(&format!("Автозагрузка: {error}"))));
+            }
+        }
+    });
+}
+
+/// The menu bar item follows its setting; without it the window is the only way back in.
+fn sync_indicator() {
+    let shown = with_app(|app| {
+        let requested = setting_bool(&app.services.settings, "appearance.show_indicator", true);
+        if requested && app.tray.is_none() {
+            match StatusItem::start(Arc::new(tray_action), tray_state(&app.services)) {
+                Ok(tray) => app.tray = Some(tray),
+                Err(error) => logsetup::error(LOGGER, &error),
+            }
+        } else if !requested {
+            if let Some(tray) = app.tray.take() {
+                tray.close();
+                return false;
+            }
+        }
+        true
+    });
+    if shown == Some(false) {
+        settings_window::show(None);
+    }
+}
+
+fn apply_setting(path: &str, value: &Value) {
+    settings_window::apply_setting(path, value);
+    match path {
+        "*" => {
+            with_app(|app| app.services.history.set_limit(history_limit(&app.services.settings.get("history.limit").unwrap_or(Value::Null))));
+            sync_autostart();
+            sync_indicator();
+        }
+        "general.autostart" | "general.start_hidden" => sync_autostart(),
+        "appearance.show_indicator" => sync_indicator(),
+        "history.limit" => {
+            with_app(|app| app.services.history.set_limit(history_limit(value)));
+        }
+        _ => {}
+    }
+    sync_tray();
 }
 
 fn toggle(services: &Services, path: &str, default: bool) {
@@ -243,19 +305,19 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input });
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
-    let handler = Arc::new(tray_action);
-    let tray = match StatusItem::start(handler, tray_state(&services)) {
-        Ok(tray) => Some(tray),
-        Err(error) => {
-            logsetup::error(LOGGER, &error);
-            None
-        }
-    };
-    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), tray, closing: false }));
+    let autostart = MacAutostartManager::new(None, None);
+    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), tray: None, autostart, closing: false }));
     settings_window::create(services.clone());
-    let _ = settings.subscribe(Arc::new(|_path: &str, _value: &Value| {
-        run_on_main(Box::new(sync_tray));
+    let showing = setting_bool(&settings, "appearance.show_indicator", true);
+    if showing {
+        sync_indicator();
+    }
+    sync_autostart();
+    let _ = settings.subscribe(Arc::new(|path: &str, value: &Value| {
+        let (path, value) = (path.to_owned(), value.clone());
+        run_on_main(Box::new(move || apply_setting(&path, &value)));
     }));
+    services.history.subscribe(Arc::new(|| run_on_main(Box::new(settings_window::refresh_history))));
     attach_engine(&services);
     if !no_engine {
         let _ = engine.start(Arc::new(|error: &str| {
@@ -264,7 +326,8 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
             run_on_main(Box::new(move || settings_window::show_error(&error)));
         }));
     }
-    if !hidden {
+    // Without the item in the menu bar the window is the only way in, whatever the arguments.
+    if !hidden || !showing {
         settings_window::show(None);
     }
     // SAFETY: AppKit's run loop on the main thread; it serves the main dispatch queue the input sources are read on.
