@@ -22,7 +22,7 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
-//! `ks-train retired boundary-v1|context-v2 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
+//! `ks-train retired boundary-v1|context-v2|ortho-v2 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -291,6 +291,8 @@ fn retired_command(arguments: &[String]) -> i32 {
         Some("boundary-v1") => retired::boundary_v1::verify(&root),
         Some("context-v2") if replaying => retired::context_v2::replay(&root),
         Some("context-v2") => retired::context_v2::verify(&root),
+        Some("ortho-v2") if replaying => retired::ortho_v2::replay(&root),
+        Some("ortho-v2") => retired::ortho_v2::verify(&root),
         Some("context-corpus") => retired::context_v2::verify_corpus_receipt(&root),
         other => Err(format!("unknown retired family: {other:?}")),
     };

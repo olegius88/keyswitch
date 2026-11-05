@@ -2,14 +2,13 @@
 //! rejected context-v2 and what they were built from.
 use crate::ortho_inputs::{Assigned, assign, load_phrases};
 use crate::physical::{hex, hex_digest, pair};
+use ks_engine::unicode_category::category;
 use ks_text::pyjson::json_string;
 use ks_text::{pystr, ucd};
-use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::OnceLock;
 
 const AFTER_MAX: usize = 128;
 const BEFORE_MAX: usize = 512;
@@ -95,13 +94,8 @@ fn lexical_holdout(family: &str) -> bool {
     draw(&format!("focus-holdout:{family}")) % LEXICAL_HOLDOUT_MODULUS == 0
 }
 
-fn is_mark(character: char) -> bool {
-    static MARK: OnceLock<Regex> = OnceLock::new();
-    !character.is_ascii() && MARK.get_or_init(|| Regex::new(r"^\p{M}$").expect("a pattern")).is_match(character.encode_utf8(&mut [0; 4]))
-}
-
 fn attached(character: Option<char>) -> bool {
-    character.is_some_and(|character| ucd::isalnum(character) || "_'’-‑".contains(character) || is_mark(character))
+    character.is_some_and(|character| ucd::isalnum(character) || "_'’-‑".contains(character) || category(character).starts_with('M'))
 }
 
 fn is_token_letter(character: char) -> bool {

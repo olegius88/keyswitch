@@ -204,7 +204,7 @@ pub fn assignment_report(phrases: &[Phrase]) -> serde_json::Map<String, Value> {
 }
 
 /// `script_of`.
-fn script_of(token: &str) -> Option<&'static str> {
+pub(crate) fn script_of(token: &str) -> Option<&'static str> {
     let lowered = pystr::casefold(&normalize::nfc(token));
     let cyrillic = lowered.chars().any(|character| CYRILLIC.contains(character));
     let latin = lowered.chars().any(|character| character.is_ascii_lowercase());
@@ -216,7 +216,7 @@ fn script_of(token: &str) -> Option<&'static str> {
 }
 
 /// `shape_of`: case shape, which is what makes the abbreviation reading available.
-fn shape_of(token: &str, position: usize) -> &'static str {
+pub(crate) fn shape_of(token: &str, position: usize) -> &'static str {
     let letters: Vec<char> = token.chars().filter(|character| pystr::isalpha(character.encode_utf8(&mut [0; 4]))).collect();
     if letters.len() >= ACRONYM_MIN_LETTERS && letters.iter().all(|character| pystr::isupper(character.encode_utf8(&mut [0; 4]))) {
         return "upper";
@@ -234,7 +234,7 @@ fn split_of(group: &str) -> &'static str {
 }
 
 /// `read_lexicon`: unigrams of a frozen ARPA word list, refusing anything but the reviewed bytes.
-fn read_lexicon(root: &Path, relative: &str, expected: &str) -> Result<BTreeMap<String, i128>, String> {
+pub(crate) fn read_lexicon(root: &Path, relative: &str, expected: &str) -> Result<BTreeMap<String, i128>, String> {
     let content = std::fs::read(root.join(relative)).map_err(|error| format!("{relative}: {error}"))?;
     if hex(&Sha256::digest(&content)) != expected {
         return Err(format!("frozen word list {relative} checksum mismatch"));

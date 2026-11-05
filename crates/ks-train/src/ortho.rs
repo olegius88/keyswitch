@@ -185,9 +185,9 @@ pub(crate) fn extra_key_variant(script: &str, keys: &str) -> Option<String> {
     Some(output)
 }
 
-type Counts = HashMap<String, HashMap<String, i64>>;
+pub(crate) type Counts = HashMap<String, HashMap<String, i64>>;
 
-fn empty_counts() -> Counts {
+pub(crate) fn empty_counts() -> Counts {
     SCRIPTS.iter().map(|script| ((*script).to_owned(), HashMap::new())).collect()
 }
 
@@ -247,12 +247,12 @@ fn drop_first(gram: &str) -> &str {
     characters.as_str()
 }
 
-fn quantise(value: f64, scale: i64) -> i64 {
+pub(crate) fn quantise(value: f64, scale: i64) -> i64 {
     py_round(value * scale as f64) as i64
 }
 
 /// `channel_payload` over `fit_channel`: interpolated absolute discounting, quantised as the artifact stores it.
-fn channel_payload(gram_counts: &HashMap<String, i64>, order: usize, discount: f64, scale: i64) -> Value {
+pub(crate) fn channel_payload(gram_counts: &HashMap<String, i64>, order: usize, discount: f64, scale: i64) -> Value {
     let alphabet = gram_counts.keys().filter(|gram| gram.chars().count() == 1).count();
     let (mut context_total, mut context_types): (HashMap<&str, i64>, HashMap<&str, i64>) = Default::default();
     for (gram, count) in gram_counts {
@@ -297,7 +297,7 @@ fn channel_payload(gram_counts: &HashMap<String, i64>, order: usize, discount: f
     })
 }
 
-fn shape_channel(observed: &Counts, scale: i64) -> Value {
+pub(crate) fn shape_channel(observed: &Counts, scale: i64) -> Value {
     let mut result = Map::new();
     for script in SCRIPTS {
         let counter = &observed[script];
@@ -841,7 +841,7 @@ fn build(inputs: &Inputs, ties: &mut Ties, scratch: &Path) -> Result<Value, Stri
     Ok(Value::Object(payload))
 }
 
-fn gz_text(path: &Path) -> Result<String, String> {
+pub(crate) fn gz_text(path: &Path) -> Result<String, String> {
     let mut text = String::new();
     MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_string(&mut text).map_err(|error| error.to_string())?;
     Ok(text)
