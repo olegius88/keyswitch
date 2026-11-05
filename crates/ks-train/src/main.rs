@@ -10,6 +10,10 @@
 //! `ks-train promote --tree <root> --candidate <folder> --prefix-candidate <folder> --corpus <folder> --report <file> --released <folder> --devchat <folder> [--check-only] [--jobs N]`
 //! `ks-train boundary --tree <root> --freeze|--train|--test|--verify|--promote [--directory <folder>] [--output <folder>]`
 //! `ks-train engine boundary|prefix --tree <root> [--verify|--refresh-runtime|--output <file>] [--jobs N]`
+//! `ks-train messages --out <dir> [--so <zst> --tatoeba <dir>] [--taiga <dir>]`, `terms --messages <dir> --out <file>`, `alnum --messages <dir> [--members <file>...] --out <file>`,
+//! `short --leipzig <dir> --out <file>`, `sources --manifest <file> --messages <dir> --tatoeba <dir>`,
+//! `select --messages <file> [--members <file>...] --class <name> --development-share R --out <dir> [--prefix P] [--only-ids <file>]`,
+//! `devchat-messages --comments <dir> --dump <zst> --out <dir> [--earlier <file>...]` (each with `--tree <root>`)
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -74,6 +78,18 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if matches!(arguments.first().map(String::as_str), Some("messages" | "terms" | "alnum" | "short" | "sources" | "select" | "devchat-messages")) {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+        match ks_train::messages::command(&arguments, &root, &resources) {
+            Ok(result) => println!("{}", ks_text::json_dumps(&result, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() })),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
     }
     if arguments.first().map(String::as_str) == Some("engine") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));

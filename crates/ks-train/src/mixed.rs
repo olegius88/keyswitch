@@ -686,6 +686,52 @@ fn lines_above(messages: &Path, recipe: &Value) -> Result<Vec<String>, String> {
     Ok(chosen.into_iter().take(pool.int("count") as usize).map(|entry| entry.1).collect())
 }
 
+/// `recipe_messages`, for the tool that says whose text a recipe types.
+pub(crate) fn jobs_recipe_messages(messages: &Path, recipe: &Value) -> Result<Vec<(String, i64)>, String> {
+    recipe_messages(messages, recipe)
+}
+
+/// `lines_above` with the ids of the pool's messages, and how many code lines a recipe has to draw from.
+pub(crate) fn recipe_lines_above(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Result<(Vec<(String, i64)>, usize), String> {
+    let mut above = Vec::new();
+    if let Some(pool) = recipe.get("lines_above").filter(|pool| pool.as_object().is_some_and(|table| !table.is_empty())) {
+        let kinds: BTreeSet<String> = string_list(&pool["kinds"]).into_iter().collect();
+        let (seed, mix) = (pool["seed"].as_str().unwrap_or(""), pool["mix"].as_str().unwrap_or(""));
+        let path = messages.parent().ok_or("messages outside a folder")?.join(pool["messages"].as_str().unwrap_or(""));
+        let mut chosen: Vec<(String, String, i64)> = Vec::new();
+        for line in gz_lines(&path)? {
+            let row: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
+            if row["kind"].as_str().is_some_and(|kind| kinds.contains(kind)) && row["mix"].as_str() == Some(mix) {
+                let text = row["text"].as_str().unwrap_or("").to_owned();
+                chosen.push((hex_digest(&format!("{seed}:{text}")), text, row["qid"].as_i64().unwrap_or(0)));
+            }
+        }
+        chosen.sort();
+        above = chosen.into_iter().take(pool.int("count") as usize).map(|entry| (entry.1, entry.2)).collect();
+    }
+    let code = match code_path {
+        Some(path) if recipe.float_or("prefix_rate", 0.0) != 0.0 => gz_lines(path)?.len().min(MIXED_PREFIX_CODE_LINES),
+        _ => 0,
+    };
+    Ok((above, code))
+}
+
+/// `previous_line`: what stands on the line above a message: ("code", line), ("message", index) or ("above", index).
+pub(crate) fn recipe_previous_line(recipe: &Value, text: &str, index: usize, messages: usize, code_lines: usize, lines_above: usize) -> Option<(&'static str, usize)> {
+    let value = draw(&format!("{}:prefix:{text}", recipe["seed"].as_str().unwrap_or("")));
+    if ((value % MIXED_DRAW_RESOLUTION) as f64) >= recipe.float_or("prefix_rate", 0.0) * MIXED_DRAW_RESOLUTION as f64 {
+        return None;
+    }
+    let half = value / MIXED_PREFIX_KINDS;
+    if code_lines != 0 && value % MIXED_PREFIX_KINDS == 0 {
+        return Some(("code", (half % code_lines as u64) as usize));
+    }
+    if lines_above != 0 {
+        return Some(("above", (half % lines_above as u64) as usize));
+    }
+    Some(("message", ((half + index as u64 + 1) % messages as u64) as usize))
+}
+
 /// `jobs_for`: the recipe's messages, typos and previous lines, and one job per mode.
 pub fn jobs_for(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Result<Vec<Job>, String> {
     let everyone: Vec<String> = recipe_messages(messages, recipe)?.into_iter().map(|entry| entry.0).collect();

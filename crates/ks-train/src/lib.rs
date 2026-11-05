@@ -18,6 +18,7 @@ pub mod heads;
 pub mod historical;
 pub mod kernel;
 pub mod lookahead;
+pub mod messages;
 pub mod mixed;
 pub mod physical;
 pub mod prefix;
