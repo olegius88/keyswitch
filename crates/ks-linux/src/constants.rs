@@ -41,7 +41,6 @@ pub const ATSPI_STATE_EDITABLE: u32 = 7;
 pub const ATSPI_STATE_FOCUSED: u32 = 12;
 pub const ATSPI_ROLE_PASSWORD_TEXT: u32 = 40;
 
-pub const HUNSPELL_LIBRARY_NAMES: [&str; 4] = ["libhunspell-1.7.so.0", "libhunspell-1.7.so", "libhunspell.so.0", "libhunspell.so"];
 
 pub const APP_ID: &str = "io.github.olegius88.KeySwitch";
 pub const APP_NAME: &str = "KeySwitch";

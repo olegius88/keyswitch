@@ -8,9 +8,7 @@
 //! module both read it from.
 #![forbid(unsafe_code)]
 
-mod harness;
-
-use harness::{key_of_char, Bundle, CaretReader, PhysicalKey, Session, UnreadField, KEYS, PAUSE_KEYCODE};
+use ks_replay::harness::{key_of_char, Bundle, CaretReader, PhysicalKey, Session, UnreadField, KEYS, PAUSE_KEYCODE};
 use ks_backend::constants::SHIFT_MASK;
 use ks_backend::KeyEvent;
 use ks_engine::engine::Update;

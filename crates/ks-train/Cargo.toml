@@ -4,10 +4,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "ks-train"
+path = "src/main.rs"
+
 [dependencies]
 ks-text.workspace = true
+ks-backend.workspace = true
+ks-config.workspace = true
 ks-lang.workspace = true
+ks-context.workspace = true
+ks-engine.workspace = true
+ks-hunspell.workspace = true
+ks-replay.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+flate2.workspace = true
+# The captured question files are xz: decoded here, in Rust.
+lzma-rs = "0.3"
 
 [dev-dependencies]
 flate2.workspace = true

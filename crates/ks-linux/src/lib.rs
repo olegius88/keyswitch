@@ -11,7 +11,7 @@ pub mod xkb_keymap;
 pub mod atspi_bus;
 pub mod atspi_context;
 pub mod atspi_caret;
-pub mod spellcheck;
+pub use ks_hunspell as spellcheck;
 pub mod system;
 pub mod wayland_desktop;
 pub mod wayland_constants;

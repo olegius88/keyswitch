@@ -29,7 +29,7 @@ use std::sync::OnceLock;
 
 pub use crate::input_context::FieldContext;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ContextAction {
     Keep,
     Convert,
@@ -77,6 +77,15 @@ impl AfterOrigin {
 pub enum BeforeOrigin {
     Field,
     PlannedPreviousReading,
+}
+
+impl BeforeOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BeforeOrigin::Field => "field",
+            BeforeOrigin::PlannedPreviousReading => "planned_previous_reading",
+        }
+    }
 }
 
 /// Characters that mark a path, an address or an identifier inside a token.

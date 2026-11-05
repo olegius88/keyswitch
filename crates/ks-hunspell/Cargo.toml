@@ -1,0 +1,10 @@
+[package]
+name = "ks-hunspell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ks-lang.workspace = true
+# Hunspell is opened at run time: a program runs without it and answers as with no speller.
+libloading = "0.8"

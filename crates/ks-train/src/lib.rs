@@ -1,10 +1,24 @@
-//! The numeric core of the context model's training: sparse AdaGrad softmax over packed rows, the mass that selects
-//! features, the epoch and threshold selection, and the artifact's bytes. Corpus and curricula build on it.
+//! Training of the context action model: the corpus frames and curricula, the features, sparse AdaGrad softmax over packed
+//! rows, the epoch and threshold selection, the artifact's bytes and the seal. A fit builds the same candidate as the
+//! Python trainer did, to the bit, so that a model can be retrained without Python.
 #![forbid(unsafe_code)]
 
 pub mod artifact;
+pub mod captured;
+pub mod corpus;
+pub mod curricula;
+pub mod evidence;
+pub mod fit;
+pub mod heads;
+pub mod historical;
 pub mod kernel;
+pub mod lookahead;
+pub mod physical;
+pub mod prefix;
+pub mod rows;
 pub mod selection;
+pub mod spans;
+pub mod tools;
 
 pub const ACTIONS: usize = 4;
 pub const FEATURE_MASS_TOLERANCE: f64 = 1e-9;

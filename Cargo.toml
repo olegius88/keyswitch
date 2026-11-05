@@ -15,6 +15,8 @@ ks-config = { path = "crates/ks-config" }
 ks-lang = { path = "crates/ks-lang" }
 ks-context = { path = "crates/ks-context" }
 ks-engine = { path = "crates/ks-engine" }
+ks-hunspell = { path = "crates/ks-hunspell" }
+ks-replay = { path = "crates/ks-replay" }
 # float_roundtrip: Python parses a JSON number to the nearest double, and serde_json by default may not.
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
@@ -43,3 +45,9 @@ panic = "unwind"
 strip = false
 debug-assertions = true
 overflow-checks = true
+
+# A fit reads millions of frames: the same code, as fast as it goes, and every float the same as under `parity`.
+[profile.train]
+inherits = "parity"
+debug-assertions = false
+overflow-checks = false

@@ -13,7 +13,8 @@ use ks_lang::SpellChecker;
 use ks_lang::resources::SpellerFactory;
 use ks_lang::spellcheck::{check_argument, find_dictionary};
 
-use crate::constants::HUNSPELL_LIBRARY_NAMES;
+/// The names the library goes by, newest first.
+const HUNSPELL_LIBRARY_NAMES: [&str; 4] = ["libhunspell-1.7.so.0", "libhunspell-1.7.so", "libhunspell.so.0", "libhunspell.so"];
 
 type Create = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void;
 type Destroy = unsafe extern "C" fn(*mut c_void);

@@ -76,6 +76,7 @@ struct EditorState {
     application: String,
     enter: Option<KeyEvent>,
     delivered: Option<String>,
+    corrections: usize,
 }
 
 /// Model editing and submission before the passive observer sees a key.
@@ -84,13 +85,18 @@ pub struct Backend {
 }
 
 impl Backend {
-    fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
+    pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: 0 }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// How many corrections were injected.
+    pub fn corrections(&self) -> usize {
+        self.lock().corrections
     }
 
     pub fn text(&self) -> Vec<char> {
@@ -229,6 +235,7 @@ impl InputBackend for Backend {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError> {
         let mut state = self.lock();
+        state.corrections += 1;
         let word = injection.strokes;
         let count = word.len() + injection.trailing.len() + usize::from(injection.boundary.is_some()) + injection.late.len();
         if state.caret < count {
@@ -304,22 +311,22 @@ impl FieldReader for UnreadField {
 
 /// `_Clock`: the seconds as a shared atomic, read by the engine and by the text it observes.
 #[derive(Clone)]
-struct FakeClock(Arc<AtomicU64>);
+pub struct FakeClock(Arc<AtomicU64>);
 
 impl FakeClock {
-    fn new() -> FakeClock {
+    pub fn new() -> FakeClock {
         FakeClock(Arc::new(AtomicU64::new(FAKE_CLOCK_START_SECONDS.to_bits())))
     }
 
-    fn now(&self) -> f64 {
+    pub fn now(&self) -> f64 {
         f64::from_bits(self.0.load(Ordering::Relaxed))
     }
 
-    fn advance(&self, seconds: f64) {
+    pub fn advance(&self, seconds: f64) {
         self.0.store((self.now() + seconds).to_bits(), Ordering::Relaxed);
     }
 
-    fn read(&self) -> Clock {
+    pub fn read(&self) -> Clock {
         let clock = self.clone();
         Arc::new(move || clock.now())
     }
