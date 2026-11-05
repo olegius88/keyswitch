@@ -118,6 +118,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_tooltip_names_the_program() {
+        assert!(TrayState::default().title().starts_with("KeySwitch"));
+    }
+
+    #[test]
     fn the_menu_has_the_shape_of_the_python_one() {
         let entries = menu_entries(&TrayState { group: 1, ..TrayState::default() });
         assert_eq!(entries.len(), 13);

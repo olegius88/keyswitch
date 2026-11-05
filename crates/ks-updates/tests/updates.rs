@@ -731,3 +731,38 @@ fn automatic_checks_follow_the_setting_and_can_be_stopped() {
     assert_eq!(constants::UPDATE_CHECK_INITIAL_DELAY, Duration::from_secs(30));
     assert_eq!(constants::UPDATE_CHECK_INTERVAL, Duration::from_secs(21_600));
 }
+
+#[test]
+fn names_of_targets_and_phases() {
+    for (target, name) in [
+        (UpdateTarget::WindowsX64, "windows-x64"),
+        (UpdateTarget::WindowsArm64, "windows-arm64"),
+        (UpdateTarget::WindowsX86, "windows-x86"),
+        (UpdateTarget::UbuntuAmd64, "ubuntu-amd64"),
+    ] {
+        assert_eq!(target.value(), name);
+    }
+    for (phase, name) in [
+        (UpdatePhase::Idle, "idle"),
+        (UpdatePhase::Checking, "checking"),
+        (UpdatePhase::Current, "current"),
+        (UpdatePhase::Available, "available"),
+        (UpdatePhase::Downloading, "downloading"),
+        (UpdatePhase::Installing, "installing"),
+        (UpdatePhase::Error, "error"),
+    ] {
+        assert_eq!(phase.value(), name);
+    }
+    let _ = detect_build_update_target();
+}
+
+#[test]
+fn an_empty_string_field_and_an_odd_installer_name() {
+    let directory = temp_dir("odd-names");
+    std::fs::write(directory.join("KeySwitch-Setup-1.0.0.exe"), "x").unwrap();
+    std::fs::write(directory.join("KeySwitch-Setup-1.0.0-x64.exe"), "x").unwrap();
+    remove_previous_installers(&directory, "keep").unwrap();
+    assert!(directory.join("KeySwitch-Setup-1.0.0.exe").exists() && !directory.join("KeySwitch-Setup-1.0.0-x64.exe").exists());
+    assert!(unlink_if_exists(&directory).is_err());
+    assert!(unlink_if_exists(&directory.join("nothing")).is_ok());
+}

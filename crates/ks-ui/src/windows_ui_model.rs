@@ -846,6 +846,47 @@ mod tests {
     use super::*;
     use ks_config::config::default_settings;
 
+    #[test]
+    fn python_truth_and_python_text_of_every_kind_of_value() {
+        for (value, truth, text) in [
+            (json!(null), false, "None"),
+            (json!(0), false, "0"),
+            (json!(2.5), true, "2.5"),
+            (json!(""), false, ""),
+            (json!(["a"]), true, r#"["a"]"#),
+            (json!({}), false, "{}"),
+            (json!(true), true, "True"),
+            (json!(false), false, "False"),
+        ] {
+            assert_eq!(truthy(&value), truth, "{value}");
+            assert_eq!(py_str(&value), text, "{value}");
+        }
+    }
+
+    #[test]
+    fn controls_lists_rows_and_colours() {
+        let plain = SettingSpec { path: "a".to_owned(), title: "t".to_owned(), description: "d".to_owned(), kind: Int, choices: Vec::new(), minimum: 1.0, maximum: 9.0, step: 1.0 };
+        assert_eq!(control_text(&plain, Some(&json!(3))), "3");
+        assert_eq!(parse_number(&plain, "nan").map(|(_, text)| text), Some("9".to_owned()));
+        assert!(string_list(Some(&json!("a"))).is_empty() && string_list(None).is_empty());
+        assert_eq!(with_word(vec!["a".to_owned()], " "), None);
+        assert_eq!(catalog_label("Name", "id"), "Name — id");
+        let row = history_row(&HistoryEntry::with_timestamp("now".to_owned(), "a", "b", "app", 0.5));
+        assert_eq!(row[4], "0.50");
+        assert_eq!(rule_row(&LearnedRule::new("ghbdtn", 0, 1))[0], "ghbdtn");
+        assert!(locations_text("s", "h", "r", "l").contains("Журнал: l"));
+        assert!(!palette(false).dark && palette(true).dark);
+    }
+
+    #[test]
+    fn a_build_without_updates_does_nothing_when_asked() {
+        let updates = NoUpdates { version: "1".to_owned() };
+        updates.subscribe(std::sync::Arc::new(|_| {}));
+        assert!(!updates.check(true, true) && !updates.install_available());
+        updates.installation_failed(&"x");
+        assert_eq!(updates.snapshot().current_version, "1");
+    }
+
     fn find<'a>(specs: &'a [SettingSpec], path: &str) -> &'a SettingSpec {
         specs.iter().find(|spec| spec.path == path).unwrap()
     }
