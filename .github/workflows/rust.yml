@@ -3,6 +3,7 @@ name: Rust
 on:
   push:
     branches: [rust]
+    tags: ["v*"]
   pull_request:
     branches: [rust]
   workflow_dispatch:
@@ -226,3 +227,25 @@ jobs:
             target/release/logcourier
             target/release/logcourier.exe
           retention-days: 14
+
+  publish:
+    # A tag becomes a pre-release, never the latest release: the update check of every installed program reads the latest
+    # one. Dropping the two flags below is the decision that this build replaces the published one.
+    name: Publish the files of a tag
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, windows-installer, deb, macos, logcourier]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd assets && sha256sum -- * > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" assets/* --title "KeySwitch ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md --prerelease --latest=false

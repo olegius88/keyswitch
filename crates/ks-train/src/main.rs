@@ -7,7 +7,7 @@
 //! `ks-train devchat --tree <root> --split dev|test --directory <folder> --candidate <file> [--released <file>] [--baseline <file>] --output <file> [--ledger <folder>] [--jobs N]`
 //! `ks-train compare --tree <root> --corpus <folder> --artifact NAME=PATH... [--output <file>] [--jobs N]`
 //! `ks-train verify --tree <root> [--receipt <file> --artifact <file> --prefix <file> --evidence-only] [--report <file>]`
-//! `ks-train promote --tree <root> --candidate <folder> --prefix-candidate <folder> --corpus <folder> --report <file> --released <folder> --devchat <folder> [--check-only] [--jobs N]`
+//! `ks-train promote --tree <root> --candidate <folder> --prefix-candidate <folder> --corpus <folder> --report <file> --released <folder> --devchat <folder> [--field-root <tree>] [--check-only] [--jobs N]`
 //! `ks-train boundary --tree <root> --freeze|--train|--test|--verify|--promote [--directory <folder>] [--output <folder>]`
 //! `ks-train engine boundary|prefix --tree <root> [--verify|--refresh-runtime|--output <file>] [--jobs N]`
 //! `ks-train messages --out <dir> [--so <zst> --tatoeba <dir>] [--taiga <dir>]`, `terms --messages <dir> --out <file>`, `alnum --messages <dir> [--members <file>...] --out <file>`,
@@ -317,6 +317,7 @@ fn cycle_command(arguments: &[String]) -> i32 {
         })(),
         _ => {
             let (candidate, prefix_candidate, corpus, report, released, devchat) = (required("--candidate"), required("--prefix-candidate"), required("--corpus"), required("--report"), required("--released"), required("--devchat"));
+            let field_root = option(arguments, "--field-root").map_or_else(|| root.clone(), PathBuf::from);
             ks_train::promote::promote(&ks_train::promote::PromoteRequest {
                 root: &root,
                 candidate: &candidate,
@@ -324,6 +325,7 @@ fn cycle_command(arguments: &[String]) -> i32 {
                 corpus: &corpus,
                 report: &report,
                 released_rows: &released,
+                field_root: &field_root,
                 devchat_directory: &devchat,
                 ledger: &ledger,
                 devchat_ledger: &devchat_ledger,

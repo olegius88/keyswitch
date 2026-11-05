@@ -30,6 +30,8 @@ pub struct PromoteRequest<'a> {
     pub corpus: &'a Path,
     pub report: &'a Path,
     pub released_rows: &'a Path,
+    /// The tree whose private folder holds the owner's typing; the tree itself unless it is elsewhere.
+    pub field_root: &'a Path,
     pub devchat_directory: &'a Path,
     pub ledger: &'a Path,
     pub devchat_ledger: &'a Path,
@@ -84,7 +86,7 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
             failures.push("the tests, with the candidate pair installed".to_owned());
         }
         let mut field = Command::new("cargo");
-        field.current_dir(&scratch).args(["run", "--profile", "parity", "--bin", "field-gate", "--", "--root"]).arg(root).arg("--released").arg(request.released_rows);
+        field.current_dir(&scratch).args(["run", "--profile", "parity", "--bin", "field-gate", "--", "--root"]).arg(request.field_root).arg("--released").arg(request.released_rows);
         if !run(&mut field, "the owner's typing against the last release") {
             failures.push("the owner's typing: a word the last release got right comes out wrong, or the field regression gate could not run".to_owned());
         }
