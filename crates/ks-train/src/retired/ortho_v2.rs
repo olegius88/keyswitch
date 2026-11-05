@@ -187,7 +187,7 @@ fn hunspell_block(root: &Path) -> Result<Value, String> {
 
 /// The runtime's meaning of `known`: the frozen frequency list or Hunspell, in the dictionaries the config pins.
 fn spellers(root: &Path) -> Result<BTreeMap<&'static str, std::sync::Arc<LanguageModel>>, String> {
-    let models = super::reference_models(root, true)?;
+    let models = super::lexicons(root, true)?;
     Ok([("en", models[0].clone()), ("ru", models[1].clone())].into_iter().collect())
 }
 

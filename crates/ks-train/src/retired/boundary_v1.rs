@@ -113,7 +113,7 @@ fn rows(root: &Path, test: bool) -> Result<Vec<Row>, String> {
 type Encoded = Vec<(Row, Vec<IndexMap<String, f64>>)>;
 
 fn encoded(root: &Path, data: Vec<Row>) -> Result<Encoded, String> {
-    let models = reference_models(root, false)?;
+    let models = reference_models(root)?;
     Ok(data
         .into_iter()
         .map(|row| {

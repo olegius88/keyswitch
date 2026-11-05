@@ -471,3 +471,115 @@ pub fn command(root: &Path, resources: &Arc<Resources>, which: &str, verify: boo
     println!("{which} engine gates hold");
     Ok(())
 }
+
+const CONTEXT_V2_ROWS_PER_LOCALE: usize = 64;
+const CONTEXT_V2_MAX_REPORTED_FAILURES: usize = 12;
+const CONTEXT_V2_PHRASE_MIN: usize = 8;
+const CONTEXT_V2_PHRASE_MAX: usize = 96;
+const CONTEXT_V2_PUNCTUATION: &str = ".,!?'’-:;()";
+
+/// `select_phrases` of the context-v2 replay: hash-ranked distinct groups of the old test partition, before any scoring.
+fn context_v2_phrases<'a>(rows: &'a [crate::ortho_inputs::Assigned<'a>]) -> Vec<&'a crate::ortho_inputs::Assigned<'a>> {
+    let fits = |row: &crate::ortho_inputs::Assigned<'_>| {
+        let english = row.phrase.locale == "eng";
+        row.phrase.text.chars().all(|character| {
+            let letter = if english { character.is_ascii_alphabetic() } else { ('А'..='Я').contains(&character) || ('а'..='я').contains(&character) || character == 'Ё' || character == 'ё' };
+            letter || ks_text::ucd::isspace(character) || CONTEXT_V2_PUNCTUATION.contains(character)
+        })
+    };
+    let mut eligible: Vec<&crate::ortho_inputs::Assigned<'a>> = rows
+        .iter()
+        .filter(|row| row.split == "test" && (CONTEXT_V2_PHRASE_MIN..=CONTEXT_V2_PHRASE_MAX).contains(&row.phrase.text.chars().count()) && fits(row))
+        .collect();
+    eligible.sort_by_cached_key(|row| hex_digest(&format!("engine-replay:{}", row.phrase.identifier)));
+    let mut selected = Vec::new();
+    for locale in ["eng", "rus"] {
+        let mut seen = std::collections::HashSet::new();
+        let unique = eligible.iter().filter(|row| row.phrase.locale == locale && seen.insert(row.group.as_str())).copied();
+        selected.extend(unique.take(CONTEXT_V2_ROWS_PER_LOCALE));
+    }
+    selected
+}
+
+/// `replay`: the keys of a phrase over the model editor, the glyphs following the layout the engine leaves.
+fn context_v2_replay(text: &str, target: i32, initial: i32, setting: &str, policy: &mut Option<ContextPolicy>, resources: &Arc<Resources>, models: &Lexicons, boundary: Arc<BoundaryPolicy>, folder: &Path) -> Result<(String, usize), String> {
+    let backend = Arc::new(Backend::new("TestEditor", initial, Vec::new()));
+    let settings = vec![("detection.context_policy", json!(setting)), ("detection.early_switch", json!(false)), ("detection.learning", json!(false)), ("general.keep_history", json!(false)), ("diagnostics.technical_logging", json!(false))];
+    let mut engine = engine(Parts { resources, models, policy: policy.take().ok_or("one engine at a time")?, reader: Arc::new(UnreadField), boundary: Some(boundary), prefix: None, indexes: Vec::new(), settings, backend: backend.clone(), folder })?;
+    let (own, other) = if target == 0 { ("us", "ru") } else { ("ru", "us") };
+    for (offset, desired) in text.chars().enumerate() {
+        let serial = FIRST_KEY_SERIAL + offset;
+        let alternate = other_of(desired, own, other);
+        let characters = if target == 0 { [desired, alternate] } else { [alternate, desired] };
+        let group = backend.group();
+        let observed = characters[group as usize];
+        let pressed = KeyEvent {
+            pressed: true,
+            keycode: serial as u32,
+            key_name: if observed == ' ' { "space".to_owned() } else { observed.to_string() },
+            character: observed.to_string(),
+            characters: characters.iter().map(char::to_string).collect(),
+            group,
+            state: if ks_text::ucd::isupper(desired) { ks_backend::constants::SHIFT_MASK } else { 0 },
+            timestamp: serial as i64,
+            ..KeyEvent::default()
+        };
+        backend.type_key(&pressed);
+        engine.core._handle(Arc::new(pressed.clone())).map_err(|error| format!("{error:?}"))?;
+        engine.core._handle(Arc::new(KeyEvent { pressed: false, ..pressed })).map_err(|error| format!("{error:?}"))?;
+    }
+    let injections = backend.corrections().len();
+    let (typed, returned) = engine.finish();
+    *policy = Some(returned);
+    Ok((typed, injections))
+}
+
+/// `evaluate_context_engine`: the three variants of the rejected context-v2 on today's engine: the detector alone, the
+/// frozen v1 and the candidate. A regression over an observed test, never a promotion.
+pub fn context_v2_report(root: &Path, resources: &Arc<Resources>, scratch: &Path) -> Result<Value, String> {
+    let phrases = crate::ortho_inputs::load_phrases(root)?;
+    let assigned = crate::ortho_inputs::assign(&phrases);
+    let selected = context_v2_phrases(&assigned);
+    if selected.len() != CONTEXT_V2_ROWS_PER_LOCALE * 2 {
+        return Err("insufficient independent phrase groups".to_owned());
+    }
+    let models = crate::retired::reference_models(root)?;
+    let directory = root.join("model/context_v2");
+    let boundary = Arc::new(BoundaryPolicy::load(&root.join("resources/models/boundary-v2.json")).map_err(|error| error.name.to_string())?);
+    let (mut results, mut examples) = (Map::new(), Map::new());
+    for (name, artifact) in [("detector", None), ("v1", Some("baseline-context-v1.json")), ("candidate", Some("candidate.json"))] {
+        let mut policy = ContextPolicy::with_ortho(resources, None, shared_of(resources, &models), None);
+        policy.model = match artifact {
+            Some(file) => Some(ContextModel::load_artifact(&directory.join(file), &resources.resource_dir().join("models")).map_err(|error| error.name.to_string())?),
+            None => None,
+        };
+        let mut policy = Some(policy);
+        let setting = if artifact.is_some() { "assist" } else { "off" };
+        let mut counts: BTreeMap<&str, i64> = BTreeMap::new();
+        let mut failures = Vec::new();
+        for row in &selected {
+            let target = i32::from(row.phrase.locale != "eng");
+            let text = format!("{} ", row.phrase.text);
+            for initial in [target, 1 - target] {
+                let (actual, injections) = context_v2_replay(&text, target, initial, setting, &mut policy, resources, &models, boundary.clone(), scratch)?;
+                let correct = initial == target;
+                let same = actual == text;
+                *counts.entry("rows").or_insert(0) += 1;
+                *counts.entry(if correct { "initially_correct" } else { "initially_wrong" }).or_insert(0) += 1;
+                *counts.entry(if correct { "preserved_correct" } else { "exactly_restored" }).or_insert(0) += i64::from(same);
+                *counts.entry("changed_correct").or_insert(0) += i64::from(correct && !same);
+                *counts.entry("length_mismatches").or_insert(0) += i64::from(actual.chars().count() != text.chars().count());
+                *counts.entry("injections").or_insert(0) += injections as i64;
+                if !same && failures.len() < CONTEXT_V2_MAX_REPORTED_FAILURES {
+                    failures.push(json!({"source_id": row.phrase.identifier, "initially_correct": correct, "expected": text, "actual": actual}));
+                }
+            }
+        }
+        results.insert(name.to_owned(), json!(counts));
+        examples.insert(name.to_owned(), json!(failures));
+    }
+    let number = |variant: &str, field: &str| results[variant][field].as_i64().unwrap_or(0);
+    let passed = number("candidate", "length_mismatches") == 0 && number("candidate", "changed_correct") <= number("v1", "changed_correct") && number("candidate", "exactly_restored") >= number("v1", "exactly_restored");
+    let ids: Vec<i64> = selected.iter().map(|row| row.phrase.identifier).collect();
+    Ok(json!({"schema_version": 1, "source_ids": ids, "results": results, "examples": examples, "promotion_passed": passed}))
+}

@@ -18,7 +18,7 @@ pub const LOCALES: [&str; 2] = ["en_US", "ru_RU"];
 
 /// The reference lexicons of the rejected generations: the pinned Onboard word lists, without the packaged supplements
 /// that came later. With `spelling`, the reference morphology too, checked against the digests the config pins.
-pub fn reference_models(root: &Path, spelling: bool) -> Result<Vec<Arc<LanguageModel>>, String> {
+pub fn lexicons(root: &Path, spelling: bool) -> Result<Vec<Arc<LanguageModel>>, String> {
     let config = read_json(&root.join("model/intent_v1/config.json"))?;
     let languages = &config["sources"]["languages"];
     let dictionaries = &config["external_evaluation"]["hunspell"];
@@ -46,6 +46,11 @@ pub fn reference_models(root: &Path, spelling: bool) -> Result<Vec<Arc<LanguageM
         models.push(Arc::new(model));
     }
     Ok(models)
+}
+
+/// The portable lexicons of the replays.
+pub fn reference_models(root: &Path) -> Result<Vec<Arc<LanguageModel>>, String> {
+    lexicons(root, false)
 }
 
 /// A JSON object read from a file, or a refusal.

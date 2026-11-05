@@ -23,7 +23,7 @@
 //! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train gates --tree <root>`
-//! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
+//! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -307,6 +307,17 @@ fn retired_command(arguments: &[String]) -> i32 {
         Some("ortho-v2") => retired::ortho_v2::verify(&root),
         Some("prefix-v1") if replaying => retired::prefix_v1::replay(&root),
         Some("prefix-v1") => retired::prefix_v1::verify(&root),
+        Some("context-engine") => (|| {
+            let resources = ks_lang::Resources::new(root.join("resources"));
+            let scratch = std::env::temp_dir().join(format!("keyswitch-context-engine-{}", std::process::id()));
+            let report = ks_train::engine_reports::context_v2_report(&root, &resources, &scratch);
+            let _ = std::fs::remove_dir_all(&scratch);
+            let report = report?;
+            if let Some(path) = option(arguments, "--output") {
+                std::fs::write(path, ks_train::train_json(&report)).map_err(|error| error.to_string())?;
+            }
+            Ok(serde_json::json!({"results": report["results"], "promotion_passed": report["promotion_passed"]}))
+        })(),
         Some("context-corpus") => retired::context_v2::verify_corpus_receipt(&root),
         other => Err(format!("unknown retired family: {other:?}")),
     };

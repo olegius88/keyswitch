@@ -12,6 +12,23 @@ path = "src/lib.rs"
 name = "keyswitch"
 path = "src/main.rs"
 
+# The end-to-end tests run GTK on the main thread and say themselves when they have nothing to drive.
+[[test]]
+name = "e2e_x11"
+harness = false
+
+[[test]]
+name = "e2e_package"
+harness = false
+
+[[test]]
+name = "e2e_tray"
+harness = false
+
+[[test]]
+name = "e2e_atspi"
+harness = false
+
 [dependencies]
 ks-backend.workspace = true
 ks-config.workspace = true
