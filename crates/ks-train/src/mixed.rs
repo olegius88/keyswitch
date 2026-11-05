@@ -1114,9 +1114,16 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
         ["candidate", "released", "baseline"].iter().all(|name| recorded[*name]["sha256"] == pairs[*name]["sha256"] && recorded[*name]["model_version"] == pairs[*name]["model_version"])
     };
     let mut pins = crate::fit::provenance(request.root, &request.root.join("model/context_v3/recipe.json"))?;
-    for (messages, _, _) in &files {
-        pins.insert(format!("messages/{}", messages.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()), content_checksum(messages)?);
+    // Every message file of the folder, whichever split is read: a development result and the test it allows pin the same.
+    let mut folder: Vec<PathBuf> = std::fs::read_dir(directory).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path()).filter(|path| {
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        name.starts_with("devchat-") && name.ends_with(".jsonl.gz")
+    }).collect();
+    folder.sort();
+    for path in folder {
+        pins.insert(format!("messages/{}", path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()), content_checksum(&path)?);
     }
+    pins.insert("model/context_v3/devchat-test-batches.json".to_owned(), crate::corpus::checksum(&request.root.join("model/context_v3/devchat-test-batches.json"))?);
     let pins = serde_json::to_value(pins).map_err(|error| error.to_string())?;
     let accesses = ledger_records(request.ledger, ".access.json")?;
     let read_anything = |access: &Value| access["test_membership"]["messages"].as_array().is_some_and(|items| !items.is_empty());
