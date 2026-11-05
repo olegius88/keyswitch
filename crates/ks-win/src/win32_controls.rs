@@ -336,7 +336,7 @@ pub fn set_checked(window: HWND, checked: bool) {
     // SAFETY: as above, and a repaint request.
     unsafe {
         let state = GetWindowLongPtrW(window, GWLP_USERDATA).to::<isize>() & !STATE_CHECKED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if checked { STATE_CHECKED } else { 0 }).to::<isize>());
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if checked { STATE_CHECKED } else { 0 }).to());
     }
     invalidate(window);
 }
@@ -346,7 +346,7 @@ pub fn set_modified(window: HWND, modified: bool) {
     // SAFETY: as above.
     unsafe {
         let state = GetWindowLongPtrW(window, GWLP_USERDATA).to::<isize>() & !STATE_MODIFIED;
-        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if modified { STATE_MODIFIED } else { 0 }).to::<isize>());
+        SetWindowLongPtrW(window, GWLP_USERDATA, (state | if modified { STATE_MODIFIED } else { 0 }).to());
     }
     invalidate(window);
 }

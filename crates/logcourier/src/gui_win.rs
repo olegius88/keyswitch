@@ -1,5 +1,6 @@
 //! The settings window and the tray icon on Windows, in plain Win32. The worker and short tasks run on threads of their
 //! own and hand their results to this thread through the window's message queue.
+#![expect(unsafe_code, reason = "calls into Win32")]
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -10,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{COLOR_WINDOW, DEFAULT_GUI_FONT, GetStockObject, GetSysColorBrush, HBRUSH, HFONT, UpdateWindow};
+use windows_sys::Win32::Graphics::Gdi::{COLOR_WINDOW, DEFAULT_GUI_FONT, GetStockObject, GetSysColorBrush, HFONT, UpdateWindow};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
@@ -25,13 +26,13 @@ use windows_sys::Win32::UI::Controls::{
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus};
 use windows_sys::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW};
-use windows_sys::Win32::UI::WindowsAndMessaging::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::{WM_APP, PostMessageW, CreateWindowExW, WS_CHILD, WS_VISIBLE, SendMessageW, WM_SETFONT, WS_TABSTOP, BS_PUSHBUTTON, BS_AUTOCHECKBOX, BM_SETCHECK, ES_AUTOHSCROLL, WS_EX_CLIENTEDGE, GetDlgItem, GetWindowTextLengthW, GetWindowTextW, SetWindowTextW, BM_GETCHECK, MessageBoxW, MB_ICONWARNING, MB_OK, MB_YESNOCANCEL, MB_DEFBUTTON3, IDYES, IDNO, ShowWindow, SW_SHOW, SW_HIDE, GetClientRect, MoveWindow, SW_SHOWNORMAL, SetForegroundWindow, SetTimer, KillTimer, PostQuitMessage, BN_CLICKED, CBN_SELCHANGE, CB_GETCURSEL, EN_CHANGE, CB_RESETCONTENT, CB_ADDSTRING, CB_SETCURSEL, MB_ICONINFORMATION, MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2, LoadIconW, CreatePopupMenu, AppendMenuW, MF_STRING, GetCursorPos, TrackPopupMenu, TPM_RIGHTBUTTON, WM_NULL, DestroyMenu, WS_EX_DLGMODALFRAME, WS_POPUP, WS_CAPTION, WS_SYSMENU, ES_NUMBER, MSG, GetMessageW, IsDialogMessageW, TranslateMessage, DispatchMessageW, DestroyWindow, WM_COMMAND, WM_CLOSE, DefWindowProcW, WM_CTLCOLORSTATIC, WM_SIZE, WM_NOTIFY, WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONUP, WM_CONTEXTMENU, WM_TIMER, WM_DESTROY, WNDPROC, WNDCLASSW, LoadCursorW, IDC_ARROW, RegisterClassW, WS_EX_CONTROLPARENT, WS_CLIPSIBLINGS, ES_PASSWORD, WS_VSCROLL, CBS_DROPDOWNLIST, ES_MULTILINE, ES_READONLY, ES_AUTOVSCROLL, WS_OVERLAPPEDWINDOW, WS_CLIPCHILDREN, CW_USEDEFAULT, SetWindowPos, SWP_NOMOVE, SWP_NOZORDER, MB_ICONERROR, RegisterWindowMessageW};
 
 use crate::catalog::{current_catalog, verify_connection};
 use crate::config::{Config, Source, data_directory, load_config, private_directory, save_config};
-use crate::constants::*;
+use crate::constants::{DEFAULT_ROTATIONS, MAX_INTERVAL_MINUTES, CONFIG_MAX_BYTES};
 use crate::error::{Error, Result};
-use crate::gui_model::*;
+use crate::gui_model::{draft, Form, reset_warning, summary, EVENTS_LOG_MAX_LINES, tray_tooltip, group_label, autostart_command, SOURCE_NOTE, source_from, CONNECTION_INTRO, SOURCES_NOTE, delivery_note, WINDOW_TITLE_PREFIX};
 use crate::secrets::{read_token, redact, store_token, token_bot_id};
 use crate::service::Service;
 use crate::store::Store;
@@ -93,7 +94,7 @@ fn wide(text: &str) -> Vec<u16> {
 /// Runs a closure on the window's thread.
 fn post(action: Posted) {
     POSTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(action);
-    let window = WINDOW.load(Ordering::SeqCst) as HWND;
+    let window = WINDOW.load(Ordering::SeqCst).pointer_mut::<std::ffi::c_void>();
     // SAFETY: posting to a window that has gone is reported by the return value, which does not matter while closing.
     unsafe { PostMessageW(window, WM_POSTED, 0, 0) };
 }
@@ -114,6 +115,7 @@ struct App {
     event_lines: VecDeque<String>,
     last_message: String,
     exiting: bool,
+    #[expect(clippy::option_option, reason = "no answer yet, the user cancelled, the user chose")]
     source_result: Option<Option<Source>>,
     source_path: String,
     font: HFONT,
@@ -135,7 +137,7 @@ fn instance() -> HINSTANCE {
 fn scale(window: HWND, value: i32) -> i32 {
     // SAFETY: a plain query about a window of this thread.
     let dpi = unsafe { GetDpiForWindow(window) };
-    value * if dpi == 0 { 96 } else { dpi as i32 } / 96
+    value * if dpi == 0 { 96 } else { dpi.bits::<i32>() } / 96
 }
 
 struct Spot {
@@ -150,8 +152,8 @@ fn control(parent: HWND, class: &str, text: &str, style: u32, extra: u32, id: i3
     let at = |value| scale(parent, value);
     // SAFETY: the strings are NUL-terminated and outlive the call; the parent is a window of this thread.
     unsafe {
-        let made = CreateWindowExW(extra, class.as_ptr(), text.as_ptr(), WS_CHILD | WS_VISIBLE | style, at(spot.x), at(spot.y), at(spot.w), at(spot.h), parent, id as usize as HMENU, instance(), null());
-        SendMessageW(made, WM_SETFONT, font as usize, 1);
+        let made = CreateWindowExW(extra, class.as_ptr(), text.as_ptr(), WS_CHILD | WS_VISIBLE | style, at(spot.x), at(spot.y), at(spot.w), at(spot.h), parent, id.to::<usize>().pointer_mut::<std::ffi::c_void>(), instance(), null());
+        SendMessageW(made, WM_SETFONT, font.to::<usize>(), 1);
         made
     }
 }
@@ -161,18 +163,18 @@ fn label(parent: HWND, text: &str, spot: Spot, font: HFONT) -> HWND {
 }
 
 fn button(parent: HWND, text: &str, id: i32, spot: Spot, font: HFONT) -> HWND {
-    control(parent, "BUTTON", text, WS_TABSTOP | BS_PUSHBUTTON as u32, 0, id, spot, font)
+    control(parent, "BUTTON", text, WS_TABSTOP | BS_PUSHBUTTON.to::<u32>(), 0, id, spot, font)
 }
 
 fn check(parent: HWND, text: &str, id: i32, on: bool, spot: Spot, font: HFONT) -> HWND {
-    let made = control(parent, "BUTTON", text, WS_TABSTOP | BS_AUTOCHECKBOX as u32, 0, id, spot, font);
+    let made = control(parent, "BUTTON", text, WS_TABSTOP | BS_AUTOCHECKBOX.to::<u32>(), 0, id, spot, font);
     // SAFETY: a message to the control just made.
     unsafe { SendMessageW(made, BM_SETCHECK, usize::from(on), 0) };
     made
 }
 
 fn edit(parent: HWND, text: &str, style: u32, id: i32, spot: Spot, font: HFONT) -> HWND {
-    control(parent, "EDIT", text, WS_TABSTOP | ES_AUTOHSCROLL as u32 | style, WS_EX_CLIENTEDGE, id, spot, font)
+    control(parent, "EDIT", text, WS_TABSTOP | ES_AUTOHSCROLL.to::<u32>() | style, WS_EX_CLIENTEDGE, id, spot, font)
 }
 
 fn item(page: HWND, id: i32) -> HWND {
@@ -184,9 +186,9 @@ fn text_of(window: HWND) -> String {
     // SAFETY: the buffer holds the length asked for plus the terminator.
     unsafe {
         let length = GetWindowTextLengthW(window);
-        let mut buffer = vec![0u16; length as usize + 1];
-        let copied = GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len() as i32);
-        String::from_utf16_lossy(&buffer[..copied.max(0) as usize])
+        let mut buffer = vec![0u16; length.to::<usize>() + 1];
+        let copied = GetWindowTextW(window, buffer.as_mut_ptr(), buffer.len().low::<i32>());
+        String::from_utf16_lossy(&buffer[..copied.max(0).to::<usize>()])
     }
 }
 
@@ -300,11 +302,10 @@ impl App {
             self.error("Сначала разрешите передачу текста логов на вкладке «Отправка».");
             return;
         }
-        if self.save() {
-            if let Some(service) = &self.service {
+        if self.save()
+            && let Some(service) = &self.service {
                 service.send_now();
             }
-        }
     }
 
     fn reset_group(&mut self) {
@@ -340,12 +341,12 @@ impl App {
         // SAFETY: the rectangles are written by the calls; the windows belong to this thread.
         unsafe {
             let mut client: RECT = std::mem::zeroed();
-            GetClientRect(self.window, &mut client);
+            GetClientRect(self.window, &raw mut client);
             let bar = scale(self.window, 24);
             MoveWindow(self.status, 8, client.bottom - bar, client.right - 16, bar, 1);
             MoveWindow(self.tabs, 0, 0, client.right, client.bottom - bar, 1);
             let mut area = RECT { left: 0, top: 0, right: client.right, bottom: client.bottom - bar };
-            SendMessageW(self.tabs, TCM_ADJUSTRECT, 0, &mut area as *mut RECT as isize);
+            SendMessageW(self.tabs, TCM_ADJUSTRECT, 0, std::ptr::from_mut(&mut area).to::<isize>());
             for page in self.pages {
                 MoveWindow(page, area.left, area.top, area.right - area.left, area.bottom - area.top, 1);
             }
@@ -363,11 +364,11 @@ impl App {
                     let mut text = wide(cell);
                     let mut entry: LVITEMW = std::mem::zeroed();
                     entry.mask = LVIF_TEXT;
-                    entry.iItem = row as i32;
-                    entry.iSubItem = column as i32;
+                    entry.iItem = row.low::<i32>();
+                    entry.iSubItem = column.low::<i32>();
                     entry.pszText = text.as_mut_ptr();
                     let message = if column == 0 { LVM_INSERTITEMW } else { LVM_SETITEMTEXTW };
-                    SendMessageW(table, message, row, &entry as *const LVITEMW as isize);
+                    SendMessageW(table, message, row, std::ptr::from_ref(&entry).to::<isize>());
                 }
             }
         }
@@ -379,11 +380,11 @@ impl App {
         let mut from = -1isize;
         loop {
             // SAFETY: a plain message to a control of this thread; the wide index -1 starts the search.
-            let next = unsafe { SendMessageW(table, LVM_GETNEXTITEM, from as usize, LVNI_SELECTED as isize) };
+            let next = unsafe { SendMessageW(table, LVM_GETNEXTITEM, from.bits::<usize>(), LVNI_SELECTED.to::<isize>()) };
             if next < 0 {
                 break;
             }
-            selected.push(next as usize);
+            selected.push(next.bits::<usize>());
             from = next;
         }
         for row in selected.into_iter().rev() {
@@ -405,8 +406,8 @@ impl App {
             let all: Vec<&str> = self.event_lines.iter().map(String::as_str).collect();
             set_text(self.events, &all.join("\r\n"));
             // SAFETY: plain messages scrolling the edit control of this thread to its end.
-            unsafe { SendMessageW(self.events, EM_LINESCROLL, 0, self.event_lines.len() as isize) };
-            self.last_message = message.to_owned();
+            unsafe { SendMessageW(self.events, EM_LINESCROLL, 0, self.event_lines.len().bits::<isize>()) };
+            message.clone_into(&mut self.last_message);
         }
         tray(self.window, NIM_MODIFY, Some(&tray_tooltip(message)));
     }
@@ -480,7 +481,7 @@ impl App {
                 }
             }
             // Another group or token: what was allowed for the old one is no longer allowed.
-            ID_CHAT | ID_TOKEN if code == EN_CHANGE as u32 => set_checked(item(self.delivery_page(), ID_CONSENT), false),
+            ID_CHAT | ID_TOKEN if code == EN_CHANGE.to::<u32>() => set_checked(item(self.delivery_page(), ID_CONSENT), false),
             _ => {}
         }
         true
@@ -490,13 +491,13 @@ impl App {
 fn local_parts(seconds: f64) -> (u16, u16, u16, u16, u16, u16) {
     use windows_sys::Win32::Foundation::{FILETIME, SYSTEMTIME};
     use windows_sys::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
-    let ticks = ((seconds + 11_644_473_600.0) * 10_000_000.0) as u64;
-    let file = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
+    let ticks = ((seconds + 11_644_473_600.0) * 10_000_000.0).to::<u64>();
+    let file = FILETIME { dwLowDateTime: ticks.low::<u32>(), dwHighDateTime: (ticks >> 32).to::<u32>() };
     // SAFETY: the structures are written by the calls.
     unsafe {
         let (mut utc, mut local): (SYSTEMTIME, SYSTEMTIME) = (std::mem::zeroed(), std::mem::zeroed());
-        FileTimeToSystemTime(&file, &mut utc);
-        SystemTimeToTzSpecificLocalTime(null(), &utc, &mut local);
+        FileTimeToSystemTime(&raw const file, &raw mut utc);
+        SystemTimeToTzSpecificLocalTime(null(), &raw const utc, &raw mut local);
         (local.wDay, local.wMonth, local.wYear, local.wHour, local.wMinute, local.wSecond)
     }
 }
@@ -542,7 +543,7 @@ fn find_groups(app: &mut App) {
             SendMessageW(combo, CB_RESETCONTENT, 0, 0);
             for group in &groups {
                 let text = wide(&group_label(group));
-                SendMessageW(combo, CB_ADDSTRING, 0, text.as_ptr() as isize);
+                SendMessageW(combo, CB_ADDSTRING, 0, text.as_ptr().to::<isize>());
             }
             SendMessageW(combo, CB_SETCURSEL, 0, 0);
         }
@@ -619,11 +620,11 @@ fn autostart_enabled() -> bool {
     // SAFETY: the buffers are written by the calls and the key is closed before returning.
     unsafe {
         let mut opened: HKEY = null_mut();
-        if RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_READ, &mut opened) != 0 {
+        if RegOpenKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, KEY_READ, &raw mut opened) != 0 {
             return false;
         }
         let (mut kind, mut size) = (0u32, 0u32);
-        let found = RegQueryValueExW(opened, name.as_ptr(), null(), &mut kind, null_mut(), &mut size);
+        let found = RegQueryValueExW(opened, name.as_ptr(), null(), &raw mut kind, null_mut(), &raw mut size);
         RegCloseKey(opened);
         found == 0 && kind == REG_SZ && size > 2
     }
@@ -641,15 +642,12 @@ fn set_autostart(enabled: bool) -> Result<()> {
     // SAFETY: the strings are NUL-terminated, the sizes are theirs, and the key is closed before returning.
     unsafe {
         let mut opened: HKEY = null_mut();
-        if RegCreateKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, null(), 0, KEY_SET_VALUE, null(), &mut opened, null_mut()) != 0 {
+        if RegCreateKeyExW(HKEY_CURRENT_USER, key.as_ptr(), 0, null(), 0, KEY_SET_VALUE, null(), &raw mut opened, null_mut()) != 0 {
             return Err(Error::Os("OSError"));
         }
-        let code = match &value {
-            Some(value) => RegSetValueExW(opened, name.as_ptr(), 0, REG_SZ, value.as_ptr().cast(), (value.len() * 2) as u32),
-            None => {
-                let code = RegDeleteValueW(opened, name.as_ptr());
-                if code == 2 { 0 } else { code }
-            }
+        let code = if let Some(value) = &value { RegSetValueExW(opened, name.as_ptr(), 0, REG_SZ, value.as_ptr().cast(), (value.len() * 2).low::<u32>()) } else {
+            let code = RegDeleteValueW(opened, name.as_ptr());
+            if code == 2 { 0 } else { code }
         };
         RegCloseKey(opened);
         if code != 0 {
@@ -663,18 +661,18 @@ fn tray(window: HWND, action: u32, tip: Option<&str>) {
     // SAFETY: the structure is filled for this window and read during the call; the icon is this program's own resource.
     unsafe {
         let mut data: NOTIFYICONDATAW = std::mem::zeroed();
-        data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        data.cbSize = size_of::<NOTIFYICONDATAW>().low::<u32>();
         data.hWnd = window;
         data.uID = 1;
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         data.uCallbackMessage = WM_TRAY;
-        data.hIcon = LoadIconW(instance(), 1 as *const u16);
+        data.hIcon = LoadIconW(instance(), 1_usize.pointer::<u16>());
         let mut text = data.szTip;
         for (slot, unit) in text.iter_mut().zip(tip.unwrap_or("LogCourier — личный сборщик логов").encode_utf16().take(120)) {
             *slot = unit;
         }
         data.szTip = text;
-        Shell_NotifyIconW(action, &data);
+        Shell_NotifyIconW(action, &raw const data);
     }
 }
 
@@ -684,10 +682,10 @@ fn tray_menu(window: HWND) {
         let menu = CreatePopupMenu();
         for (id, title) in [(ID_MENU_OPEN, "Открыть настройки"), (ID_MENU_SEND, "Отправить сейчас"), (ID_MENU_PAUSE, "Приостановить автосбор"), (ID_MENU_EXIT, "Выход")] {
             let text = wide(title);
-            AppendMenuW(menu, MF_STRING, id as usize, text.as_ptr());
+            AppendMenuW(menu, MF_STRING, id.to::<usize>(), text.as_ptr());
         }
         let mut point = POINT { x: 0, y: 0 };
-        GetCursorPos(&mut point);
+        GetCursorPos(&raw mut point);
         SetForegroundWindow(window);
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, point.x, point.y, 0, window, null());
         PostMessageW(window, WM_NULL, 0, 0);
@@ -702,14 +700,14 @@ fn choose_file(window: HWND) -> Option<String> {
     // SAFETY: the structure points to buffers that outlive the call.
     unsafe {
         let mut dialog: OPENFILENAMEW = std::mem::zeroed();
-        dialog.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;
+        dialog.lStructSize = size_of::<OPENFILENAMEW>().low::<u32>();
         dialog.hwndOwner = window;
         dialog.lpstrFilter = filter.as_ptr();
         dialog.lpstrFile = buffer.as_mut_ptr();
-        dialog.nMaxFile = buffer.len() as u32;
+        dialog.nMaxFile = buffer.len().low::<u32>();
         dialog.lpstrTitle = title.as_ptr();
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-        if GetOpenFileNameW(&mut dialog) == 0 {
+        if GetOpenFileNameW(&raw mut dialog) == 0 {
             return None;
         }
     }
@@ -739,7 +737,7 @@ fn add_source(window: HWND) {
     label(dialog, "Название", Spot { x: 12, y: 44, w: 80, h: 20 }, font);
     edit(dialog, &name, 0, ID_LABEL, Spot { x: 100, y: 42, w: 400, h: 24 }, font);
     label(dialog, "Ротаций", Spot { x: 12, y: 76, w: 80, h: 20 }, font);
-    edit(dialog, &DEFAULT_ROTATIONS.to_string(), ES_NUMBER as u32, ID_ROTATIONS, Spot { x: 100, y: 74, w: 80, h: 24 }, font);
+    edit(dialog, &DEFAULT_ROTATIONS.to_string(), ES_NUMBER.to::<u32>(), ID_ROTATIONS, Spot { x: 100, y: 74, w: 80, h: 24 }, font);
     check(dialog, "Включить уже существующие записи и ротации", ID_EXISTING, false, Spot { x: 100, y: 104, w: 400, h: 22 }, font);
     label(dialog, SOURCE_NOTE, Spot { x: 12, y: 132, w: 490, h: 48 }, font);
     button(dialog, "OK", ID_OK, Spot { x: 320, y: 190, w: 86, h: 28 }, font);
@@ -747,10 +745,10 @@ fn add_source(window: HWND) {
     // SAFETY: a standard message loop for the dialog; the owner is enabled again before returning.
     unsafe {
         let mut message: MSG = std::mem::zeroed();
-        while with_app(|app| app.source_result.is_none()).unwrap_or(false) && GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
-            if IsDialogMessageW(dialog, &message) == 0 {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+        while with_app(|app| app.source_result.is_none()).unwrap_or(false) && GetMessageW(&raw mut message, null_mut(), 0, 0) > 0 {
+            if IsDialogMessageW(dialog, &raw const message) == 0 {
+                TranslateMessage(&raw const message);
+                DispatchMessageW(&raw const message);
             }
         }
         EnableWindow(window, 1);
@@ -768,7 +766,7 @@ fn add_source(window: HWND) {
 unsafe extern "system" fn source_proc(dialog: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match message {
         WM_COMMAND => {
-            let id = (wparam & 0xFFFF) as i32;
+            let id = (wparam & 0xFFFF).low::<i32>();
             if id == ID_OK {
                 let label = text_of(item(dialog, ID_LABEL));
                 let rotations = text_of(item(dialog, ID_ROTATIONS));
@@ -796,13 +794,13 @@ unsafe extern "system" fn source_proc(dialog: HWND, message: u32, wparam: WPARAM
 /// The pages only pass their controls' commands on to the main window.
 unsafe extern "system" fn page_proc(page: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if message == WM_COMMAND {
-        let window = WINDOW.load(Ordering::SeqCst) as HWND;
+        let window = WINDOW.load(Ordering::SeqCst).pointer_mut::<std::ffi::c_void>();
         // SAFETY: the main window outlives its pages.
         return unsafe { SendMessageW(window, WM_COMMAND, wparam, lparam) };
     }
     if message == WM_CTLCOLORSTATIC {
         // SAFETY: the system colour brush needs no release.
-        return unsafe { GetSysColorBrush(COLOR_WINDOW as i32) } as LRESULT;
+        return (unsafe { GetSysColorBrush(COLOR_WINDOW.to::<i32>()) }).to::<LRESULT>();
     }
     // SAFETY: the default handling of a message of this window.
     unsafe { DefWindowProcW(page, message, wparam, lparam) }
@@ -822,7 +820,7 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
             0
         }
         WM_COMMAND => {
-            let (id, code) = ((wparam & 0xFFFF) as i32, ((wparam >> 16) & 0xFFFF) as u32);
+            let (id, code) = ((wparam & 0xFFFF).low::<i32>(), ((wparam >> 16) & 0xFFFF).low::<u32>());
             if with_app(|app| app.command(id, code)) == Some(false) {
                 add_source(window);
             }
@@ -831,17 +829,17 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
         WM_NOTIFY => {
             // SAFETY: for WM_NOTIFY the parameter points to a header valid during the message.
             let header = unsafe { &*lparam.pointer::<NMHDR>() };
-            if header.idFrom == ID_TABS as usize && header.code == TCN_SELCHANGE {
+            if header.idFrom == ID_TABS.to::<usize>() && header.code == TCN_SELCHANGE {
                 with_app(|app| {
                     // SAFETY: a plain message to a control of this thread.
                     let index = unsafe { SendMessageW(app.tabs, TCM_GETCURSEL, 0, 0) };
-                    app.show_page(index.max(0) as usize);
+                    app.show_page(index.max(0).bits::<usize>());
                 });
             }
             0
         }
         WM_TRAY => {
-            match lparam as u32 {
+            match lparam.low::<u32>() {
                 WM_LBUTTONUP | WM_LBUTTONDBLCLK => {
                     with_app(|app| app.reveal());
                 }
@@ -866,7 +864,7 @@ unsafe extern "system" fn window_proc(window: HWND, message: u32, wparam: WPARAM
             0
         }
         _ => {
-            if message == TASKBAR_CREATED.load(Ordering::SeqCst) as u32 && message != 0 {
+            if message == TASKBAR_CREATED.load(Ordering::SeqCst).low::<u32>() && message != 0 {
                 tray(window, NIM_ADD, None);
                 return 0;
             }
@@ -883,11 +881,11 @@ fn register_class(name: &str, procedure: WNDPROC) {
         let mut class: WNDCLASSW = std::mem::zeroed();
         class.lpfnWndProc = procedure;
         class.hInstance = instance();
-        class.hIcon = LoadIconW(instance(), 1 as *const u16);
+        class.hIcon = LoadIconW(instance(), 1_usize.pointer::<u16>());
         class.hCursor = LoadCursorW(null_mut(), IDC_ARROW);
-        class.hbrBackground = (COLOR_WINDOW + 1) as usize as HBRUSH;
+        class.hbrBackground = (COLOR_WINDOW + 1).to::<usize>().pointer_mut::<std::ffi::c_void>();
         class.lpszClassName = name.as_ptr();
-        RegisterClassW(&class);
+        RegisterClassW(&raw const class);
     }
 }
 
@@ -905,13 +903,13 @@ fn insert_tab(tabs: HWND, index: usize, title: &str) {
         let mut entry: TCITEMW = std::mem::zeroed();
         entry.mask = TCIF_TEXT;
         entry.pszText = text.as_mut_ptr();
-        SendMessageW(tabs, TCM_INSERTITEMW, index, &entry as *const TCITEMW as isize);
+        SendMessageW(tabs, TCM_INSERTITEMW, index, std::ptr::from_ref(&entry).to::<isize>());
     }
 }
 
 fn build(root: PathBuf, config: Config, window: HWND) -> App {
     // SAFETY: a stock object needs no release.
-    let font = unsafe { GetStockObject(DEFAULT_GUI_FONT) } as HFONT;
+    let font = unsafe { GetStockObject(DEFAULT_GUI_FONT) };
     let tabs = control(window, "SysTabControl32", "", WS_CLIPSIBLINGS | WS_TABSTOP, 0, ID_TABS, Spot { x: 0, y: 0, w: 10, h: 10 }, font);
     for (index, title) in ["Telegram", "Файлы", "Отправка", "Состояние"].iter().enumerate() {
         insert_tab(tabs, index, title);
@@ -921,11 +919,11 @@ fn build(root: PathBuf, config: Config, window: HWND) -> App {
     let page = pages[0];
     label(page, CONNECTION_INTRO, Spot { x: 12, y: 10, w: 780, h: 110 }, font);
     label(page, "Токен", Spot { x: 12, y: 130, w: 150, h: 20 }, font);
-    edit(page, "", ES_PASSWORD as u32, ID_TOKEN, Spot { x: 170, y: 128, w: 620, h: 24 }, font);
+    edit(page, "", ES_PASSWORD.to::<u32>(), ID_TOKEN, Spot { x: 170, y: 128, w: 620, h: 24 }, font);
     check(page, "Сохранить токен в системном хранилище секретов", ID_PERSIST, true, Spot { x: 170, y: 156, w: 620, h: 22 }, font);
     label(page, "ID группы (Chat ID)", Spot { x: 12, y: 186, w: 150, h: 20 }, font);
     edit(page, &config.chat_id, 0, ID_CHAT, Spot { x: 170, y: 184, w: 240, h: 24 }, font);
-    control(page, "COMBOBOX", "", WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST as u32, 0, ID_GROUPS, Spot { x: 420, y: 184, w: 370, h: 200 }, font);
+    control(page, "COMBOBOX", "", WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST.to::<u32>(), 0, ID_GROUPS, Spot { x: 420, y: 184, w: 370, h: 200 }, font);
     label(page, "Имя устройства", Spot { x: 12, y: 218, w: 150, h: 20 }, font);
     edit(page, &config.device_name, 0, ID_DEVICE, Spot { x: 170, y: 216, w: 620, h: 24 }, font);
     button(page, "Найти группы", ID_FIND, Spot { x: 12, y: 254, w: 180, h: 30 }, font);
@@ -938,14 +936,14 @@ fn build(root: PathBuf, config: Config, window: HWND) -> App {
     let table = control(page, "SysListView32", "", WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS, WS_EX_CLIENTEDGE, ID_TABLE, Spot { x: 12, y: 70, w: 780, h: 330 }, font);
     // SAFETY: the column structures and strings outlive each message.
     unsafe {
-        SendMessageW(table, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT as isize);
+        SendMessageW(table, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT.to::<isize>());
         for (index, (title, width)) in [("Название", 180), ("Файл", 380), ("Ротаций", 70), ("Старые записи", 110)].iter().enumerate() {
             let mut text = wide(title);
             let mut column: LVCOLUMNW = std::mem::zeroed();
             column.mask = LVCF_TEXT | LVCF_WIDTH;
             column.cx = scale(window, *width);
             column.pszText = text.as_mut_ptr();
-            SendMessageW(table, LVM_INSERTCOLUMNW, index, &column as *const LVCOLUMNW as isize);
+            SendMessageW(table, LVM_INSERTCOLUMNW, index, std::ptr::from_ref(&column).to::<isize>());
         }
     }
     button(page, "Добавить файл", ID_ADD, Spot { x: 12, y: 410, w: 160, h: 30 }, font);
@@ -958,7 +956,7 @@ fn build(root: PathBuf, config: Config, window: HWND) -> App {
     check(page, "Запускать при входе в Windows, сразу в трее", ID_AUTOSTART, autostart_enabled(), Spot { x: 12, y: 58, w: 780, h: 22 }, font);
     let autostart_note = label(page, "Применяется сразу. Полный выход — через меню трея → «Выход».", Spot { x: 32, y: 82, w: 760, h: 20 }, font);
     label(page, "Интервал отправки, мин", Spot { x: 12, y: 110, w: 180, h: 20 }, font);
-    edit(page, &config.interval_minutes.to_string(), ES_NUMBER as u32, ID_INTERVAL, Spot { x: 200, y: 108, w: 90, h: 24 }, font);
+    edit(page, &config.interval_minutes.to_string(), ES_NUMBER.to::<u32>(), ID_INTERVAL, Spot { x: 200, y: 108, w: 90, h: 24 }, font);
     label(page, &delivery_note(), Spot { x: 12, y: 140, w: 780, h: 250 }, font);
     button(page, "Сохранить", ID_SAVE, Spot { x: 12, y: 396, w: 140, h: 30 }, font);
     button(page, "Отправить сейчас", ID_SEND, Spot { x: 160, y: 396, w: 170, h: 30 }, font);
@@ -967,7 +965,7 @@ fn build(root: PathBuf, config: Config, window: HWND) -> App {
 
     let page = pages[3];
     let summary_label = label(page, "Нет отправленных архивов.", Spot { x: 12, y: 10, w: 780, h: 104 }, font);
-    let events = control(page, "EDIT", "", WS_VSCROLL | ES_MULTILINE as u32 | ES_READONLY as u32 | ES_AUTOVSCROLL as u32, WS_EX_CLIENTEDGE, 0, Spot { x: 12, y: 120, w: 780, h: 300 }, font);
+    let events = control(page, "EDIT", "", WS_VSCROLL | ES_MULTILINE.to::<u32>() | ES_READONLY.to::<u32>() | ES_AUTOVSCROLL.to::<u32>(), WS_EX_CLIENTEDGE, 0, Spot { x: 12, y: 120, w: 780, h: 300 }, font);
     label(page, &format!("Локальные настройки и очередь: {}\r\nЖурнал состояния не содержит токенов и фрагментов исходных логов.", root.display()), Spot { x: 12, y: 426, w: 780, h: 40 }, font);
 
     let status = label(window, "Отправка только после вашего разрешения", Spot { x: 8, y: 0, w: 10, h: 20 }, font);
@@ -982,27 +980,27 @@ fn message_loop(window: HWND) -> i32 {
     // SAFETY: a standard message loop of this thread.
     unsafe {
         let mut message: MSG = std::mem::zeroed();
-        while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
+        while GetMessageW(&raw mut message, null_mut(), 0, 0) > 0 {
             let page = with_app(|app| {
                 // SAFETY: a plain message to a control of this thread.
-                let index = SendMessageW(app.tabs, TCM_GETCURSEL, 0, 0).max(0) as usize;
+                let index = SendMessageW(app.tabs, TCM_GETCURSEL, 0, 0).max(0).bits::<usize>();
                 app.pages.get(index).copied().unwrap_or(window)
             })
             .unwrap_or(window);
-            if IsDialogMessageW(page, &message) == 0 {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
+            if IsDialogMessageW(page, &raw const message) == 0 {
+                TranslateMessage(&raw const message);
+                DispatchMessageW(&raw const message);
             }
         }
-        message.wParam as i32
+        message.wParam.low::<i32>()
     }
 }
 
 fn start_ui() {
     // SAFETY: the structure is read during the call.
     unsafe {
-        let controls = INITCOMMONCONTROLSEX { dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32, dwICC: ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
-        InitCommonControlsEx(&controls);
+        let controls = INITCOMMONCONTROLSEX { dwSize: size_of::<INITCOMMONCONTROLSEX>().low::<u32>(), dwICC: ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES };
+        InitCommonControlsEx(&raw const controls);
     }
     register_class(CLASS, Some(window_proc));
     register_class(PAGE_CLASS, Some(page_proc));
@@ -1032,16 +1030,13 @@ pub fn run(minimized: bool) -> i32 {
             return 0;
         }
     }
-    let config = match load_config(&root) {
-        Ok(config) => config,
-        Err(_) => {
-            message_box(null_mut(), &format!("Не удалось прочитать {}.\r\nФайл оставлен без изменений; автоматическая отправка не запущена.", root.join("config.json").display()), "LogCourier", MB_ICONERROR | MB_OK);
-            return 1;
-        }
+    let config = if let Ok(config) = load_config(&root) { config } else {
+        message_box(null_mut(), &format!("Не удалось прочитать {}.\r\nФайл оставлен без изменений; автоматическая отправка не запущена.", root.join("config.json").display()), "LogCourier", MB_ICONERROR | MB_OK);
+        return 1;
     };
     start_ui();
     let window = new_window();
-    WINDOW.store(window as isize, Ordering::SeqCst);
+    WINDOW.store(window.to::<isize>(), Ordering::SeqCst);
     let mut app = build(root.clone(), config.clone(), window);
     let mut token = std::env::var("LOGCOURIER_BOT_TOKEN").unwrap_or_default();
     if token.is_empty() && !config.bot_id.is_empty() {
@@ -1066,7 +1061,7 @@ pub fn run(minimized: bool) -> i32 {
     tray(window, NIM_ADD, None);
     let created = wide("TaskbarCreated");
     // SAFETY: the name is NUL-terminated.
-    TASKBAR_CREATED.store(unsafe { RegisterWindowMessageW(created.as_ptr()) } as usize, Ordering::SeqCst);
+    TASKBAR_CREATED.store((unsafe { RegisterWindowMessageW(created.as_ptr()) }).to::<usize>(), Ordering::SeqCst);
     if !minimized || config.bot_id.is_empty() {
         // SAFETY: plain calls on the main window of this thread.
         unsafe {
@@ -1082,7 +1077,7 @@ pub fn run(minimized: bool) -> i32 {
 pub fn smoke_test(output: Option<&Path>) -> Result<i32> {
     start_ui();
     let window = new_window();
-    WINDOW.store(window as isize, Ordering::SeqCst);
+    WINDOW.store(window.to::<isize>(), Ordering::SeqCst);
     let app = build(std::env::temp_dir().join("logcourier-self-test"), Config::default(), window);
     app.layout();
     app.show_page(3);

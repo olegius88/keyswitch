@@ -1,4 +1,5 @@
 //! The bot's token: its shape, its removal from any text, and the system's secret store. There is no plaintext fallback.
+#![cfg_attr(windows, expect(unsafe_code, reason = "keeps the token in the Windows credential store"))]
 use crate::error::{Error, Result};
 
 pub const SERVICE: &str = "LogCourier.Telegram";
@@ -48,6 +49,7 @@ const NOT_STORED: &str = "Токен не сохранён: системное �
 
 #[cfg(windows)]
 mod platform {
+    use ks_cast::To as _;
     use std::ptr::null_mut;
 
     use windows_sys::Win32::Foundation::{ERROR_NOT_FOUND, GetLastError};
@@ -66,7 +68,7 @@ mod platform {
         let name = wide(target);
         let mut found: *mut CREDENTIALW = null_mut();
         // SAFETY: the name is NUL-terminated and `found` receives a block CredFree releases below.
-        if unsafe { CredReadW(name.as_ptr(), CRED_TYPE_GENERIC, 0, &mut found) } == 0 {
+        if unsafe { CredReadW(name.as_ptr(), CRED_TYPE_GENERIC, 0, &raw mut found) } == 0 {
             // SAFETY: reads this thread's last error.
             return if unsafe { GetLastError() } == ERROR_NOT_FOUND { Ok(None) } else { Err(()) };
         }
@@ -82,8 +84,8 @@ mod platform {
                 }
                 String::from_utf16_lossy(std::slice::from_raw_parts(credential.UserName, length))
             };
-            let blob = std::slice::from_raw_parts(credential.CredentialBlob, credential.CredentialBlobSize as usize);
-            let units: Vec<u16> = blob.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+            let blob = std::slice::from_raw_parts(credential.CredentialBlob, credential.CredentialBlobSize.to::<usize>());
+            let units: Vec<u16> = blob.as_chunks::<2>().0.iter().map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
             let value = String::from_utf16_lossy(&units);
             CredFree(found.cast());
             Credential { user, value }
@@ -102,23 +104,23 @@ mod platform {
             credential.UserName = owner.as_mut_ptr();
             credential.Comment = comment.as_mut_ptr();
             credential.CredentialBlob = blob.as_mut_ptr();
-            credential.CredentialBlobSize = blob.len() as u32;
+            credential.CredentialBlobSize = blob.len().low::<u32>();
             credential.Persist = CRED_PERSIST_ENTERPRISE;
-            CredWriteW(&credential, 0)
+            CredWriteW(&raw const credential, 0)
         };
         if result == 0 { Err(()) } else { Ok(()) }
     }
 
     /// The token stored by the Python `keyring` library or by this program: under the service for its last
     /// user, under `user@service` for the earlier ones.
-    pub fn read(service: &str, user: &str) -> Result<Option<String>, ()> {
+    pub(super) fn read(service: &str, user: &str) -> Result<Option<String>, ()> {
         match read_one(service)? {
             Some(found) if found.user == user => Ok(Some(found.value)),
             _ => Ok(read_one(&format!("{user}@{service}"))?.map(|found| found.value)),
         }
     }
 
-    pub fn write(service: &str, user: &str, value: &str) -> Result<(), ()> {
+    pub(super) fn write(service: &str, user: &str, value: &str) -> Result<(), ()> {
         if let Some(existing) = read_one(service)? {
             write_one(&format!("{}@{service}", existing.user), &existing.user, &existing.value)?;
         }

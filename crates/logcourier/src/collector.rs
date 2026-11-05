@@ -1,4 +1,5 @@
 //! Reads the new bytes of the log files into the queue, with the read position in the same transaction.
+#![cfg_attr(windows, expect(unsafe_code, reason = "asks Win32 which file a handle holds"))]
 use ks_cast::To as _;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -55,7 +56,7 @@ fn identity_of(file: &File) -> Result<String> {
         // SAFETY: the handle is the open file's and the structure is written by the call.
         let info = unsafe {
             let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-            if GetFileInformationByHandle(file.as_raw_handle(), &mut info) == 0 {
+            if GetFileInformationByHandle(file.as_raw_handle(), &raw mut info) == 0 {
                 return Err(Error::Os("OSError"));
             }
             info
