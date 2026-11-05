@@ -12,3 +12,6 @@ serde_json.workspace = true
 [dev-dependencies]
 # The golden files are gz-compressed; the tests read them (default miniz_oxide backend, no C code).
 flate2.workspace = true
+
+[lints]
+workspace = true

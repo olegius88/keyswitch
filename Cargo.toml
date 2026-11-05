@@ -9,6 +9,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/olegius88/keyswitch"
 
 [workspace.dependencies]
+ks-cast = { path = "crates/ks-cast" }
 ks-backend = { path = "crates/ks-backend" }
 ks-text = { path = "crates/ks-text" }
 ks-config = { path = "crates/ks-config" }
@@ -26,6 +27,58 @@ sha2 = "0.10"
 miniz_oxide = "0.8"
 flate2 = "1"
 windows-sys = "0.61"
+
+# The strictest rules the compiler and Clippy have. What is left out is about documents and size, not about types.
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_code = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unused_qualifications = "warn"
+unused_lifetimes = "warn"
+unused_import_braces = "warn"
+non_ascii_idents = "warn"
+unreachable_pub = "warn"
+explicit_outlives_requirements = "warn"
+meta_variable_misuse = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)", "cfg(coverage_nightly)"] }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_many_lines = "allow"
+struct_excessive_bools = "allow"
+fn_params_excessive_bools = "allow"
+similar_names = "allow"
+# Numbers change type only through ks-cast, which says what happens to a value that does not fit.
+as_conversions = "warn"
+# A value that may be missing is handled, not assumed: a release build aborts on a panic, and the program holds the keyboard.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+get_unwrap = "warn"
+# A new variant must be looked at wherever the type is matched.
+wildcard_enum_match_arm = "warn"
+# Exceptions name their reason, and stop compiling when they stop being needed.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+undocumented_unsafe_blocks = "warn"
+fn_to_numeric_cast_any = "warn"
+mem_forget = "warn"
+rc_mutex = "warn"
+float_cmp_const = "warn"
+lossy_float_literal = "warn"
+try_err = "warn"
+unneeded_field_pattern = "warn"
+dbg_macro = "warn"
 
 # Size is what this port is for: the smallest code that is still fast enough for one keystroke at a time.
 [profile.release]
@@ -45,6 +98,13 @@ panic = "unwind"
 strip = false
 debug-assertions = true
 overflow-checks = true
+
+# What the coverage run measures: the tests and the replays at a speed they finish, with the checks of `parity`. No link-time
+# optimisation: it only costs time here.
+[profile.coverage]
+inherits = "parity"
+opt-level = 2
+lto = "off"
 
 # A fit reads millions of frames: the same code, as fast as it goes, and every float the same as under `parity`.
 [profile.train]

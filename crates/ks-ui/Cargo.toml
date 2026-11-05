@@ -15,3 +15,6 @@ ks-context.workspace = true
 ks-engine.workspace = true
 ks-updates = { path = "../ks-updates" }
 serde_json.workspace = true
+
+[lints]
+workspace = true

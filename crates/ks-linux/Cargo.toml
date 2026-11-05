@@ -58,3 +58,6 @@ gdk-x11 = { package = "gdk4-x11", version = "0.11" }
 glib-unix = "0.22"
 gio-unix = "0.22"
 ks-updates = { path = "../ks-updates" }
+
+[lints]
+workspace = true

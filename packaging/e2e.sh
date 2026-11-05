@@ -5,6 +5,8 @@ set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 package="${1:-}"
+# The coverage run builds under its own profile; everywhere else these are the release builds.
+cargo_profile=(--profile "${KS_E2E_PROFILE:-release}")
 
 # GTK 4 does not use GTK_USE_PORTAL=0 to disable its settings portal, and libadwaita has its own client.
 # https://docs.gtk.org/gtk4/running.html#gdk-debug
@@ -25,16 +27,16 @@ in_x_server() {
 }
 
 cd "$project_dir"
-cargo test --release -p ks-linux --no-run
-GTK_A11Y=none in_x_server cargo test --release -p ks-linux --test e2e_x11
-dbus-run-session -- cargo test --release -p ks-linux --test e2e_tray
+cargo test "${cargo_profile[@]}" -p ks-linux --no-run
+GTK_A11Y=none in_x_server cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_x11
+dbus-run-session -- cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_tray
 
 runtime="$(mktemp -d)"
 trap 'rm -rf -- "$runtime"' EXIT
-XDG_RUNTIME_DIR="$runtime" in_x_server cargo test --release -p ks-linux --test e2e_atspi
+XDG_RUNTIME_DIR="$runtime" in_x_server cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_atspi
 
 if [[ -n "$package" ]]; then
     staging="$runtime/package"
     dpkg-deb --extract "$package" "$staging"
-    KEYSWITCH_RESOURCES="$staging/usr/lib/keyswitch/resources" KS_E2E_BINARY="$staging/usr/bin/keyswitch" GTK_A11Y=none in_x_server cargo test --release -p ks-linux --test e2e_package
+    KEYSWITCH_RESOURCES="$staging/usr/lib/keyswitch/resources" KS_E2E_BINARY="$staging/usr/bin/keyswitch" GTK_A11Y=none in_x_server cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_package
 fi

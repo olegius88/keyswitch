@@ -16,3 +16,6 @@ sha2.workspace = true
 [dev-dependencies]
 # The golden files are gz-compressed; the tests read them.
 flate2.workspace = true
+
+[lints]
+workspace = true

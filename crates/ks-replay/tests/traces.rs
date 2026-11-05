@@ -1,7 +1,7 @@
 //! The engine against what the previous engine did in its own tests: hotkeys, undo, selection commands, rules, focus
 //! changes, foreign input, hook gaps, the queue, sensitive fields, typo correction and backend failures. Optimised
 //! builds only: a debug build takes minutes over the same traces.
-#![cfg(not(debug_assertions))]
+#![cfg(any(not(debug_assertions), coverage))]
 
 use std::process::Command;
 

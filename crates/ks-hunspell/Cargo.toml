@@ -11,3 +11,6 @@ libloading = "0.8"
 
 [dev-dependencies]
 ks-config.workspace = true
+
+[lints]
+workspace = true
