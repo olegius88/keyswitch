@@ -17,6 +17,7 @@ pub mod fit;
 pub mod freeze;
 pub mod heads;
 pub mod historical;
+pub mod intent;
 pub mod kernel;
 pub mod lookahead;
 pub mod messages;

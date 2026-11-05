@@ -101,6 +101,14 @@ fn main() {
     if matches!(arguments.first().map(String::as_str), Some("carry" | "doctor" | "supplement" | "apt-build" | "apt-verify")) {
         std::process::exit(small_command(&arguments));
     }
+    if arguments.first().map(String::as_str) == Some("intent") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if let Err(error) = ks_train::intent::command(&root, &arguments) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if arguments.first().map(String::as_str) == Some("detector") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));

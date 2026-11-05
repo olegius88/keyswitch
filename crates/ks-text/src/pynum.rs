@@ -662,3 +662,35 @@ mod tests {
         assert_eq!(log_base(8.0, 2.0).map(|v| (v * 1e12).round()), Some(3e12));
     }
 }
+
+/// `float.hex()`.
+pub fn float_hex(x: f64) -> String {
+    if x.is_nan() {
+        return "nan".to_owned();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "inf".to_owned() } else { "-inf".to_owned() };
+    }
+    let bits = x.to_bits();
+    let sign = if bits >> 63 == 1 { "-" } else { "" };
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & ((1_u64 << 52) - 1);
+    if exponent == 0 && fraction == 0 {
+        return format!("{sign}0x0.0p+0");
+    }
+    let (lead, power) = if exponent == 0 { (0, -1022) } else { (1, exponent - 1023) };
+    format!("{sign}0x{lead}.{fraction:013x}p{power:+}")
+}
+
+#[cfg(test)]
+mod float_hex_tests {
+    use super::float_hex;
+
+    #[test]
+    fn as_python_writes_it() {
+        assert_eq!(float_hex(1.0), "0x1.0000000000000p+0");
+        assert_eq!(float_hex(-0.1), "-0x1.999999999999ap-4");
+        assert_eq!(float_hex(0.0), "0x0.0p+0");
+        assert_eq!(float_hex(5e-324), "0x0.0000000000001p-1022");
+    }
+}
