@@ -548,3 +548,35 @@ pub fn archive(root: &Path, write: bool) -> Result<(), String> {
     println!("{} archived files are as recorded", files.len());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stanza_gives_one_value_for_a_field() {
+        let stanza = "# URIs: https://commented.example/\nTypes: deb\nURIs: https://example.org/\nSuites: stable unstable\n";
+        assert_eq!(stanza_field(stanza, "URIs").unwrap(), "https://example.org/");
+        assert!(stanza_field(stanza, "Suites").unwrap_err().contains("exactly one"), "a field may not carry two values");
+        assert!(stanza_field(stanza, "Components").unwrap_err().contains("missing"), "a missing field is named");
+    }
+
+    #[test]
+    fn the_shipped_source_is_usable_and_the_key_holds_no_secret() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let sources = read_sources(&root).unwrap();
+        assert!(sources.uri.starts_with("https://") && sources.uri.ends_with('/'));
+        let stanza = std::fs::read_to_string(root.join(SOURCES_STANZA)).unwrap();
+        assert!(!stanza.lines().any(|line| line == "Enabled: no"));
+        let key = std::fs::read_to_string(root.join("packaging/keyswitch-archive-keyring.asc")).unwrap();
+        assert!(key.contains("BEGIN PGP PUBLIC KEY BLOCK") && !key.contains("PRIVATE KEY BLOCK"));
+    }
+
+    #[test]
+    fn a_repository_of_no_packages_is_refused() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let folder = std::env::temp_dir().join(format!("keyswitch-apt-test-{}", std::process::id()));
+        assert!(apt_build(&root, &folder, &[], None).unwrap_err().contains("at least one package"));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}

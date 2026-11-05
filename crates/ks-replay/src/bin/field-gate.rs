@@ -262,3 +262,98 @@ fn main() {
     println!("field regression gate: {}", if passed { "passed" } else { "NOT passed" });
     std::process::exit(i32::from(!passed));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TIME: &str = "2026-10-15 10:00:00,000";
+    const LATER: &str = "2026-10-15 10:00:01,000";
+
+    fn row(index: i64, shown: &str) -> Row {
+        Row { stream: 0, index, time: TIME.to_owned(), typed: "ghbdtn".to_owned(), other: "привет".to_owned(), intended: "привет".to_owned(), shown: shown.to_owned(), owner_labelled: false, version: "0.0.0".to_owned(), waits: false }
+    }
+
+    fn owned() -> Row {
+        Row { owner_labelled: true, ..row(0, "x") }
+    }
+
+    fn verdict(name: &str, by: &str) -> Value {
+        json!({"verdict": name, "typed": "ghbdtn", "by": by, "date": "2026-10-16", "reason_code": "garbage-in-prompt", "reason": "a reason"})
+    }
+
+    fn battery(rows: Vec<Row>) -> BTreeMap<String, Rows> {
+        BTreeMap::from([("pc".to_owned(), rows.into_iter().map(|row| ((row.stream, row.index), row)).collect())])
+    }
+
+    #[test]
+    fn the_reading_the_log_implies_holds_without_a_verdict() {
+        assert_eq!(target(&row(0, "ghbdtn"), None).as_deref(), Some("привет"));
+    }
+
+    #[test]
+    fn a_verdict_reads_the_word_in_either_layout_it_was_typed() {
+        assert_eq!(target(&row(0, "x"), Some(&verdict(KEEP, "llm"))).as_deref(), Some("ghbdtn"));
+        assert_eq!(target(&row(0, "x"), Some(&verdict("convert", "llm"))).as_deref(), Some("привет"));
+        // The same word typed in the other layout by another tree: the verdict names the same text.
+        let swapped = Row { typed: "привет".to_owned(), other: "ghbdtn".to_owned(), ..row(0, "x") };
+        assert_eq!(target(&swapped, Some(&verdict(KEEP, "llm"))).as_deref(), Some("ghbdtn"));
+        assert_eq!(target(&swapped, Some(&verdict("convert", "llm"))).as_deref(), Some("привет"));
+        assert_eq!(target(&row(0, "x"), Some(&verdict("ambiguous", "llm"))), None);
+    }
+
+    #[test]
+    fn only_the_owner_reads_a_word_the_owner_labelled_otherwise() {
+        // A verdict of a model against the owner's own label, or taking the word out, counts for nothing.
+        assert!(owner_overruled(&owned(), &verdict(KEEP, "llm")));
+        assert_eq!(target(&owned(), Some(&verdict(KEEP, "llm"))).as_deref(), Some("привет"));
+        assert!(owner_overruled(&owned(), &verdict("ambiguous", "llm")));
+        assert_eq!(target(&owned(), Some(&verdict("ambiguous", "llm"))).as_deref(), Some("привет"));
+        assert_eq!(target(&owned(), Some(&verdict(KEEP, OWNER))).as_deref(), Some("ghbdtn"));
+        assert_eq!(target(&owned(), Some(&verdict("ambiguous", OWNER))), None);
+        // A verdict that agrees with the owner's label needs nobody.
+        assert_eq!(target(&owned(), Some(&verdict("convert", "llm"))).as_deref(), Some("привет"));
+        assert!(!owner_overruled(&owned(), &verdict("convert", "llm")));
+    }
+
+    #[test]
+    fn a_word_the_owner_labelled_and_a_verdict_overrules_is_listed_for_the_owner() {
+        let released = battery(vec![Row { owner_labelled: true, ..row(0, "привет") }]);
+        let verdicts = Verdicts::from([(("pc".to_owned(), 0, TIME.to_owned()), verdict(KEEP, "llm"))]);
+        let result = compare(&released, &released, &verdicts);
+        assert_eq!((result.needs_owner, result.released_right, result.verdicts_used), (1, 1, 0));
+    }
+
+    #[test]
+    fn a_word_the_release_got_right_and_the_candidate_breaks_is_counted_and_listed() {
+        let later = |shown: &str| Row { time: LATER.to_owned(), ..row(1, shown) };
+        let other_stream = Row { stream: 1, ..row(0, "привет") };
+        let released = battery(vec![row(0, "привет"), later("ghbdtn"), other_stream.clone()]);
+        let candidate = battery(vec![row(0, "ghbdtn"), later("привет"), other_stream]);
+        let result = compare(&released, &candidate, &Verdicts::new());
+        assert_eq!((result.rows, result.excluded, result.released_right, result.candidate_right, result.fixed.len(), result.broken.len()), (3, 0, 2, 2, 1, 1));
+        assert_eq!(result.broken[0]["candidate"], json!("ghbdtn"));
+        // The first word of its stream the trees typed differently; the next one may only follow from it.
+        assert_eq!(result.broken[0]["first_divergence"], json!(true));
+        assert_eq!(result.fixed[0]["first_divergence"], json!(false));
+    }
+
+    #[test]
+    fn a_verdict_that_decides_a_word_is_counted() {
+        let later = Row { time: LATER.to_owned(), ..row(1, "ghbdtn") };
+        let released = battery(vec![row(0, "ghbdtn"), later]);
+        let verdicts = Verdicts::from([(("pc".to_owned(), 0, TIME.to_owned()), verdict(KEEP, "llm")), (("pc".to_owned(), 0, LATER.to_owned()), verdict("ambiguous", "llm"))]);
+        let result = compare(&released, &released, &verdicts);
+        assert_eq!((result.rows, result.excluded, result.released_right, result.verdicts_used), (1, 1, 1, 1));
+    }
+
+    #[test]
+    fn a_word_asked_about_at_a_pause_and_typed_on_is_right_as_typed_or_in_the_layout_it_was_finished_in() {
+        let waiting = |index: i64, time: &str, shown: &str, typed: &str, other: &str, intended: &str| Row { index, time: time.to_owned(), shown: shown.to_owned(), typed: typed.to_owned(), other: other.to_owned(), intended: intended.to_owned(), waits: true, ..row(0, "") };
+        let released = battery(vec![waiting(0, TIME, "Ф", "Ф", "A", "A"), waiting(1, LATER, "сд", "сд", "cl", "сд")]);
+        let candidate = battery(vec![waiting(0, TIME, "A", "Ф", "A", "A"), waiting(1, LATER, "cl", "сд", "cl", "сд")]);
+        let result = compare(&released, &candidate, &Verdicts::new());
+        assert_eq!((result.released_right, result.candidate_right, result.broken.len(), result.fixed.len()), (2, 1, 1, 0));
+        assert_eq!((&result.broken[0]["candidate"], &result.broken[0]["waits"]), (&json!("cl"), &json!(true)));
+    }
+}
