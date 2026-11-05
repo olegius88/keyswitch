@@ -337,9 +337,11 @@ fn toolchain_checks(root: &Path, toolchain: &Value, registry: &str) -> Result<Ve
         Ok(())
     };
     for (field, files) in seal::TOOLCHAIN_FILES {
+        if field == "spellcheck_sha256" {
+            compare("preseal_receipt_sha256", seal::preseal_receipt_path(registry).and_then(|path| seal::sha256_file(&root.join(path))), true)?;
+        }
         compare(field, seal::digest_files(root, files), field == "protected_tokens_sha256")?;
     }
-    compare("preseal_receipt_sha256", seal::preseal_receipt_path(registry).and_then(|path| seal::sha256_file(&root.join(path))), true)?;
     let constants: Vec<&str> = seal::CONSTANTS_FILES.iter().copied().filter(|file| root.join(file).is_file()).collect();
     compare("constants_sha256", seal::digest_files(root, &constants), false)?;
     Ok(checks)

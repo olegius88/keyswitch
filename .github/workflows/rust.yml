@@ -34,6 +34,14 @@ jobs:
           cargo test --release -p ks-train
           cargo run --release -p ks-train --bin ks-train -- boundary --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --verify
+          sudo apt-get update
+          sudo apt-get install -y libhunspell-1.7-0
+          cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --verify
+          cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --preseal --output preseal.json
+          cmp preseal.json model/intent_v1/holdout-v28-preseal.json
+          cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --freeze --output development.json
+          cmp development.json model/intent_v1/unknown-typo-development-v28.json
+          cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --evaluate --strict --output strict.json
       - name: Windows code type-checks for every architecture
         run: |
           for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do

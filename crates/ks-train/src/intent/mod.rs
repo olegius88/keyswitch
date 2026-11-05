@@ -91,11 +91,12 @@ pub fn frozen_dictionaries(root: &Path) -> Result<std::path::PathBuf, String> {
     Ok(frozen)
 }
 
-/// The runtime language models over the frozen dictionaries.
+/// The runtime language models over the frozen word lists and dictionaries, whatever the system has installed.
 pub fn runtime_models(root: &Path) -> Result<(std::sync::Arc<ks_lang::Resources>, [std::sync::Arc<ks_lang::LanguageModel>; 2]), String> {
     let frozen = frozen_dictionaries(root)?;
-    let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller_in(vec![frozen]));
-    let load = |locale: &str| std::sync::Arc::new(resources.language_model(locale, std::iter::empty::<&str>()));
+    let roots = [root.join("model/intent_v1/sources")];
+    let resources = ks_lang::Resources::new(root.join("resources"));
+    let load = |locale: &str| std::sync::Arc::new(ks_lang::LanguageModel::load(locale, std::iter::empty::<&str>(), &roots, Box::new(ks_hunspell::HunspellDictionary::in_roots(locale, std::slice::from_ref(&frozen)))));
     let models = [load("en_US"), load("ru_RU")];
     Ok((resources, models))
 }
