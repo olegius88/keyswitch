@@ -20,7 +20,6 @@ ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
 ks-ui = { path = "../ks-ui" }
-ks-updates = { path = "../ks-updates" }
 serde_json.workspace = true
 
 # AppKit has no C interface: objc2 sends the messages. Everything else (CoreGraphics, Carbon, Accessibility, CoreFoundation)

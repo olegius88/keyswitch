@@ -86,13 +86,14 @@ const PAGES: [(&str, &str); 10] = [
 // The actions of the plain buttons, by their tags.
 const ACTION_SAVE_EXCLUSIONS: isize = 1;
 const ACTION_REFRESH_HISTORY: isize = 2;
-const ACTION_CHECK_UPDATES: isize = 3;
+const RELEASES_PAGE: &str = "https://github.com/olegius88/keyswitch/releases";
+const UPDATES_NOTE: &str = "На macOS обновление ставится вручную: скачайте архив со страницы выпусков и замените им приложение в папке «Программы». Разрешение на управление компьютером при этом сохранится.";
+const ACTION_OPEN_RELEASES: isize = 3;
 const ACTION_ADD_RULE: isize = 4;
 const ACTION_CLEAR_RULES: isize = 5;
 const ACTION_OPEN_LOGS: isize = 6;
 const ACTION_RESET_SETTINGS: isize = 7;
 const ACTION_QUIT: isize = 8;
-const ACTION_INSTALL_UPDATE: isize = 9;
 
 struct Ui {
     services: Arc<Services>,
@@ -106,7 +107,6 @@ struct Ui {
     words: Id,
     history: Id,
     rules: Id,
-    updates: Id,
     prompt: Id,
     prompt_text: Id,
 }
@@ -261,7 +261,7 @@ impl Ui {
         unsafe {
             match spec.kind {
                 ControlKind::Bool => {
-                    control = msg_send![class!(NSButton), checkboxWithTitle: string(&spec.title), target: self.target, action: sel!(controlChanged:)];
+                    control = msg_send![class!(NSButton), checkboxWithTitle: string(mac_wording(&spec.title)), target: self.target, action: sel!(controlChanged:)];
                     let _: () = msg_send![control, setButtonType: BUTTON_TYPE_SWITCH];
                     let on: isize = stored.as_ref().is_some_and(truthy).into();
                     let _: () = msg_send![control, setState: on];
@@ -269,7 +269,7 @@ impl Ui {
                     y += 24.0;
                 }
                 ControlKind::Choice => {
-                    y += label(page, &spec.title, y, false) + 2.0;
+                    y += label(page, mac_wording(&spec.title), y, false) + 2.0;
                     let allocated: Id = msg_send![class!(NSPopUpButton), alloc];
                     control = msg_send![allocated, initWithFrame: rect(MARGIN, y, 320.0, 26.0), pullsDown: false];
                     for (_, title) in &spec.choices {
@@ -281,7 +281,7 @@ impl Ui {
                     y += 28.0;
                 }
                 ControlKind::Int | ControlKind::Float | ControlKind::Text => {
-                    y += label(page, &spec.title, y, false) + 2.0;
+                    y += label(page, mac_wording(&spec.title), y, false) + 2.0;
                     control = msg_send![class!(NSTextField), textFieldWithString: string(&control_text(spec, stored.as_ref()))];
                     let width = if spec.kind == ControlKind::Text { 320.0 } else { 100.0 };
                     let _: () = msg_send![control, setFrame: rect(MARGIN, y, width, 24.0)];
@@ -389,10 +389,6 @@ impl Ui {
         set_area(self.rules, &lines.join("\n"));
     }
 
-    fn refresh_updates(&self) {
-        let view = update_view(&self.services.updates.snapshot());
-        set_label(self.updates, &format!("{}\n{}\n{}", view.version, view.status, view.progress));
-    }
 
     fn save_exclusions(&self) {
         let lines = |view: Id| -> Vec<String> { area_text(view).lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect() };
@@ -412,17 +408,10 @@ fn action(tag: isize) {
         ACTION_REFRESH_HISTORY => {
             with_ui(|ui| ui.refresh_history());
         }
-        ACTION_CHECK_UPDATES => {
-            with_ui(|ui| {
-                ui.services.updates.check(false, false);
-                ui.refresh_updates();
-            });
-        }
-        ACTION_INSTALL_UPDATE => {
-            with_ui(|ui| {
-                ui.services.updates.install_available();
-                ui.refresh_updates();
-            });
+        ACTION_OPEN_RELEASES => {
+            if let Err(error) = std::process::Command::new("open").arg(RELEASES_PAGE).status() {
+                alert_later(format!("Страница выпусков не открылась: {error}"));
+            }
         }
         ACTION_ADD_RULE => rule_editor(None),
         ACTION_CLEAR_RULES => {
@@ -473,7 +462,6 @@ pub fn create(services: Arc<Services>) {
                 words: std::ptr::null_mut(),
                 history: std::ptr::null_mut(),
                 rules: std::ptr::null_mut(),
-                updates: std::ptr::null_mut(),
                 prompt: std::ptr::null_mut(),
                 prompt_text: std::ptr::null_mut(),
             };
@@ -493,10 +481,20 @@ pub fn create(services: Arc<Services>) {
             ui.refresh_status();
             ui.refresh_exclusions();
             ui.refresh_rules();
-            ui.refresh_updates();
             UI.with(|slot| *slot.borrow_mut() = Some(ui));
         }
     });
+}
+
+/// The shared descriptions call these things by their Windows names.
+fn mac_wording(title: &str) -> &str {
+    match title {
+        "Запускать вместе с Windows" => "Запускать при входе в систему",
+        "Запускать свёрнутым в трей" => "Запускать свёрнутым в строку меню",
+        "Закрывать окно в трей" => "Закрывать окно в строку меню",
+        "Показывать индикатор в области уведомлений" => "Показывать индикатор в строке меню",
+        other => other,
+    }
 }
 
 fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
@@ -546,16 +544,9 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
             y += 450.0;
         }
         "updates" => {
-            // SAFETY: messages on the main thread; the label stays alive as a subview of the page.
-            unsafe {
-                ui.updates = msg_send![class!(NSTextField), wrappingLabelWithString: string("")];
-                let _: () = msg_send![ui.updates, setFrame: rect(MARGIN, y, PAGE_WIDTH - 2.0 * MARGIN, 60.0)];
-            }
-            add(page, ui.updates);
-            y += 68.0;
-            y = ui.add_specs(page, &update_settings(), y);
-            button(page, target, "Проверить сейчас", ACTION_CHECK_UPDATES, MARGIN, y, 170.0);
-            button(page, target, "Установить сейчас", ACTION_INSTALL_UPDATE, MARGIN + 180.0, y, 170.0);
+            y += label(page, &format!("Установлена версия {VERSION}"), y, false) + 6.0;
+            y += label(page, UPDATES_NOTE, y, true) + 10.0;
+            button(page, target, "Открыть страницу выпусков", ACTION_OPEN_RELEASES, MARGIN, y, 240.0);
             y += 36.0;
         }
         "maintenance" => {
@@ -599,7 +590,6 @@ pub fn show(page: Option<&'static str>) {
         ui.refresh_status();
         ui.refresh_history();
         ui.refresh_rules();
-        ui.refresh_updates();
     });
 }
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
-use ks_config::history::{HistoryStore, data_dir, history_limit};
+use ks_config::history::{HistoryStore, history_limit};
 use ks_config::indicator::normalize_indicator_style;
 use ks_config::learning::LearningStore;
 use ks_config::logsetup;
@@ -13,31 +13,27 @@ use ks_engine::KeySwitchEngine;
 use ks_engine::context_access::ReaderFactory;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_ui::tray_model::{TrayAction, TrayState};
-use ks_ui::windows_ui_model::{NoUpdates, truthy};
-use ks_updates::{UpdateController, UpdateManager};
+use ks_ui::windows_ui_model::truthy;
 use objc2::{class, msg_send};
 use serde_json::Value;
 
 use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS};
-use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, VERSION, resource_dir};
+use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, resource_dir};
 use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
 use crate::macos_native::{NativeAccessibility, run_on_main};
-use crate::macos_objc::{Id, beep};
+use crate::macos_objc::{Id, beep, notify};
 use crate::macos_tray_native::StatusItem;
 use crate::settings_window;
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ENGINE_STOP_WAIT_SECONDS: u64 = 5;
-const UPDATE_CHECK_INITIAL_DELAY_SECONDS: u64 = 30;
-const UPDATE_CHECK_INTERVAL_SECONDS: u64 = 6 * 3600;
 
 pub struct Services {
     pub settings: Arc<SettingsStore>,
     pub history: Arc<HistoryStore>,
     pub learning: Arc<LearningStore>,
     pub engine: Arc<DeferredEngine>,
-    pub updates: Arc<dyn UpdateController>,
     pub backend: Arc<dyn InputBackend>,
 }
 
@@ -166,9 +162,20 @@ fn attach_engine(services: &Arc<Services>) {
                 settings_window::refresh_status();
             }));
         }));
-        engine.subscribe_corrections(Arc::new(|_plan| {
-            run_on_main(Box::new(|| {
-                let sound = with_app(|app| setting_bool(&app.services.settings, "general.sound", false)).unwrap_or(false);
+        engine.subscribe_corrections(Arc::new(|plan| {
+            let title = if plan.case_fix() { "Регистр исправлен" } else { "Раскладка исправлена" };
+            let message = format!("{}  →  {}", plan.original, plan.replacement);
+            run_on_main(Box::new(move || {
+                let Some((notifications, sound)) = with_app(|app| {
+                    let settings = &app.services.settings;
+                    (setting_bool(settings, "general.notifications", true), setting_bool(settings, "general.sound", false))
+                }) else {
+                    return;
+                };
+                if notifications {
+                    logsetup::info(LOGGER, &format!("{title}: {message}"));
+                    notify(title, &message);
+                }
                 if sound {
                     beep();
                 }
@@ -199,18 +206,6 @@ fn ensure_permission(backend: &MacBackend) {
     }
     logsetup::info(LOGGER, PERMISSION_GRANTED_MESSAGE);
     println!("{PERMISSION_GRANTED_MESSAGE}");
-}
-
-fn update_checks(services: Arc<Services>) {
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(UPDATE_CHECK_INITIAL_DELAY_SECONDS));
-        loop {
-            if setting_bool(&services.settings, "updates.check_automatically", true) {
-                services.updates.check(true, false);
-            }
-            std::thread::sleep(std::time::Duration::from_secs(UPDATE_CHECK_INTERVAL_SECONDS));
-        }
-    });
 }
 
 pub fn run(hidden: bool, no_engine: bool) -> i32 {
@@ -245,14 +240,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let post: Post = Arc::new(|action| run_on_main(action));
     let enabled = setting_bool(&settings, "enabled", true);
     let engine = DeferredEngine::new(build, learning.clone(), enabled, post, true);
-    let updates: Arc<dyn UpdateController> = match UpdateManager::with_opener(VERSION, data_dir().join("updates"), Arc::new(ks_updates::http_curl::CurlOpener)) {
-        Ok(manager) => Arc::new(manager),
-        Err(error) => {
-            logsetup::warning(LOGGER, &format!("Обновления недоступны: {error}"));
-            Arc::new(NoUpdates { version: VERSION.to_owned() })
-        }
-    };
-    let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), updates, backend: input });
+    let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input });
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
     let handler = Arc::new(tray_action);
@@ -276,7 +264,6 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
             run_on_main(Box::new(move || settings_window::show_error(&error)));
         }));
     }
-    update_checks(services);
     if !hidden {
         settings_window::show(None);
     }

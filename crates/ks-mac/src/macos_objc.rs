@@ -2,7 +2,7 @@
 //! messages, and those are written once here.
 use std::ffi::{CStr, CString, c_char};
 
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{class, msg_send};
 
 pub type Id = *mut AnyObject;
@@ -81,4 +81,25 @@ pub fn open_path(path: &str) -> bool {
             opened
         }
     })
+}
+
+/// A correction shown in Notification Center. Older than its replacement, which would ask for a permission of its own
+/// first; where the system no longer has it nothing is shown.
+pub fn notify(title: &str, message: &str) {
+    let (Some(kind), Some(center_kind)) = (AnyClass::get(c"NSUserNotification"), AnyClass::get(c"NSUserNotificationCenter")) else {
+        return;
+    };
+    objc2::rc::autoreleasepool(|_| {
+        // SAFETY: messages on the main thread; the notification is released once the centre holds it.
+        unsafe {
+            let notification: Id = msg_send![kind, new];
+            let _: () = msg_send![notification, setTitle: string(title)];
+            let _: () = msg_send![notification, setInformativeText: string(message)];
+            let center: Id = msg_send![center_kind, defaultUserNotificationCenter];
+            if !center.is_null() {
+                let _: () = msg_send![center, deliverNotification: notification];
+            }
+            let _: () = msg_send![notification, release];
+        }
+    });
 }
