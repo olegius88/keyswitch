@@ -14,6 +14,8 @@ apt_keyring_path="$(sed -nE 's/^Signed-By:[[:space:]]+([^[:space:]]+)$/\1/p' "$a
 gnome_uuid="keyswitch@io.github.olegius88.KeySwitch"
 : "${SOURCE_DATE_EPOCH:=$(git -C "$project_dir" log -1 --format=%ct)}"
 
+# No package without the evidence of its models, and never with a rejected one.
+cargo run --release --quiet -p ks-train --bin ks-train --manifest-path "$project_dir/Cargo.toml" -- gates --tree "$project_dir" > /dev/null
 cargo build --release -p ks-linux --manifest-path "$project_dir/Cargo.toml"
 
 package_root="$(mktemp -d)"

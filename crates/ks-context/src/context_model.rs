@@ -461,6 +461,9 @@ impl ContextModel {
         if weights.entries == 0 || weights.entries > spec.max_entries {
             return Err(LoadError::value(spec.table_error));
         }
+        if feature_version == BASELINE_FEATURE_VERSION && weights.entries > crate::constants::MAX_CONTEXT_MODEL_FEATURES {
+            return Err(LoadError::value(spec.table_error));
+        }
         if let Some(message) = weights.refusal {
             return Err(LoadError::value(message));
         }

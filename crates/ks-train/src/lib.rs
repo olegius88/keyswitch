@@ -16,6 +16,7 @@ pub mod evaluate;
 pub mod evidence;
 pub mod fit;
 pub mod freeze;
+pub mod gates;
 pub mod heads;
 pub mod historical;
 pub mod intent;

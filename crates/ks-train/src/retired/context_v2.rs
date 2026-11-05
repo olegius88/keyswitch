@@ -445,8 +445,9 @@ pub fn verify(root: &Path) -> Result<Value, String> {
     if active_digest == artifact {
         return Err("research candidate must not replace the shipping model".to_owned());
     }
+    super::feature_two::verify(root)?;
     Ok(json!({
-        "historical_evidence_verified": true, "current_runtime_verified": false, "scope": SCOPE, "generation_ref": "80534ec",
+        "historical_evidence_verified": true, "current_runtime_verified": false, "feature_two_compatible": true, "scope": SCOPE, "generation_ref": "80534ec",
         "schema_version": 1, "candidate": seal["model_version"], "promotion_passed": false, "engine_promotion_passed": false,
         "rejected_candidate_not_active": true, "active_artifact_sha256": active_digest, "artifact_sha256": seal["artifact_sha256"],
         "corpus_rows": seal["audit"]["rows"],

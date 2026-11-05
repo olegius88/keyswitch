@@ -663,6 +663,35 @@ mod tests {
     }
 }
 
+/// The inverse of `float.hex()`: exactly the forms it writes, nothing else.
+pub fn float_fromhex(text: &str) -> Option<f64> {
+    let (negative, body) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let magnitude = match body {
+        "inf" => f64::INFINITY,
+        "nan" => f64::NAN,
+        "0x0.0p+0" => 0.0,
+        _ => {
+            let (digits, exponent) = body.strip_prefix("0x")?.split_once('p')?;
+            let (lead, fraction) = digits.split_once('.')?;
+            let exponent: i64 = exponent.parse().ok()?;
+            if fraction.len() != 13 {
+                return None;
+            }
+            let fraction = u64::from_str_radix(fraction, 16).ok()?;
+            let bits = match lead {
+                "1" => (u64::try_from(exponent + 1023).ok()? << 52) | fraction,
+                "0" => fraction,
+                _ => return None,
+            };
+            f64::from_bits(bits)
+        }
+    };
+    Some(if negative { -magnitude } else { magnitude })
+}
+
 /// `float.hex()`.
 pub fn float_hex(x: f64) -> String {
     if x.is_nan() {

@@ -184,13 +184,16 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     run(root, "the trainer", "cargo", &["build", "--profile", "train", "-p", "ks-train"])?;
     let trainer = root.join("target/train/ks-train");
     let trainer = trainer.to_string_lossy().into_owned();
-    run(root, "the receipt of the installed pair", &trainer, &["verify", "--tree", &tree])?;
+    run(root, "the evidence of every installed and rejected model", &trainer, &["gates", "--tree", &tree])?;
     run(root, "the boundary model reproduces", &trainer, &["boundary", "--tree", &tree, "--verify"])?;
     run(root, "the orthotactic model reproduces", &trainer, &["ortho", "--tree", &tree, "--verify"])?;
     run(root, "the inputs of the orthotactic model reproduce", &trainer, &["ortho", "--tree", &tree, "--inputs"])?;
     run(root, "the layout-intent model reproduces", &trainer, &["intent", "--tree", &tree, "--verify"])?;
     run(root, "the strict evaluation of the layout-intent model", &trainer, &["intent", "--tree", &tree, "--evaluate", "--strict", "--output", "/dev/null"])?;
     run(root, "the files of retired families", &trainer, &["archive", "--tree", &tree])?;
+    for family in ["boundary-v1", "context-v2", "ortho-v2", "prefix-v1"] {
+        run(root, "a rejected or retired model replays", &trainer, &["retired", family, "--tree", &tree, "--replay"])?;
+    }
     run(root, "the boundary regressions", "dbus-run-session", &["--", &trainer, "engine", "boundary", "--tree", &tree, "--refresh-runtime"])?;
     run(root, "the prefix replay", "dbus-run-session", &["--", &trainer, "engine", "prefix", "--tree", &tree, "--refresh-runtime"])?;
     if let (Some(field_root), Some(released)) = (&options.field_root, &options.field_released) {

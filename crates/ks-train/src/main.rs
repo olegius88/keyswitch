@@ -22,7 +22,8 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
-//! `ks-train retired boundary-v1|context-v2|ortho-v2 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
+//! `ks-train gates --tree <root>`
+//! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
@@ -120,6 +121,17 @@ fn main() {
         if let Err(error) = ks_train::typo_evaluation::command(&request, &resources) {
             eprintln!("{error}");
             std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("gates") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        match ks_train::gates::run(&root) {
+            Ok(report) => println!("{}", ks_text::json_dumps(&report, &JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), ..JsonOptions::default() })),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
         }
         return;
     }
@@ -293,6 +305,8 @@ fn retired_command(arguments: &[String]) -> i32 {
         Some("context-v2") => retired::context_v2::verify(&root),
         Some("ortho-v2") if replaying => retired::ortho_v2::replay(&root),
         Some("ortho-v2") => retired::ortho_v2::verify(&root),
+        Some("prefix-v1") if replaying => retired::prefix_v1::replay(&root),
+        Some("prefix-v1") => retired::prefix_v1::verify(&root),
         Some("context-corpus") => retired::context_v2::verify_corpus_receipt(&root),
         other => Err(format!("unknown retired family: {other:?}")),
     };

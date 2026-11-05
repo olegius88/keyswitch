@@ -3,7 +3,9 @@
 pub mod boundary_v1;
 pub mod context_frames;
 pub mod context_v2;
+pub mod feature_two;
 pub mod ortho_v2;
+pub mod prefix_v1;
 pub mod sources;
 
 use crate::corpus::{checksum, read_json};

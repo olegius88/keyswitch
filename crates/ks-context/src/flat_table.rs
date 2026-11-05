@@ -741,9 +741,17 @@ impl<'de> DeserializeSeed<'de> for ArtifactSeed<'_> {
 
 /// Reads an artifact file of at most `limit` bytes: `None` where the JSON is no object. The size check is the file's
 /// length, made before it is read.
+const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+
 pub fn load_artifact(path: &Path, limit: usize, too_large: &str, spec: &WeightSpec) -> Result<(Option<Artifact>, u64), LoadError> {
     let length = std::fs::metadata(path).map_err(|error| LoadError::os(&error, path))?.len();
-    let reader = open_limited(path, limit, too_large)?;
+    use std::io::BufRead;
+    let mut reader = open_limited(path, limit, too_large)?;
+    // A byte-order mark does not change what the file says: `json.loads` of bytes skips it too.
+    let mark = reader.fill_buf().map_err(|error| LoadError::os(&error, path))?.starts_with(UTF8_BOM);
+    if mark {
+        reader.consume(UTF8_BOM.len());
+    }
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     let artifact = ArtifactSeed(spec).deserialize(&mut deserializer).map_err(|error| json_error(&error))?;
     deserializer.end().map_err(|error| json_error(&error))?;
