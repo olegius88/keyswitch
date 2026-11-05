@@ -1,4 +1,5 @@
 //! The macOS application entry point: the command line, the permission and the diagnostics.
+use crate::constants::SOURCE_AX;
 use std::path::{Path, PathBuf};
 
 use ks_backend::InputBackend;
@@ -10,7 +11,6 @@ use crate::macos_backend::MacBackend;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PERMISSION_REQUEST_MESSAGE: &str = "KeySwitch нужен доступ к клавиатуре. Открываю «Конфиденциальность и безопасность» → «Универсальный доступ»: включите там KeySwitch, и программа продолжит сама.";
 pub const PERMISSION_GRANTED_MESSAGE: &str = "Доступ получен, KeySwitch начинает работу.";
-const SOURCE_AX: &str = "macos-ax";
 const USAGE: &str = "usage: keyswitch [-h] [--hidden] [--diagnose] [--version]\n";
 
 /// The `resources` folder of the bundle (`Contents/Resources/resources`), beside the executable in a build tree, or the
