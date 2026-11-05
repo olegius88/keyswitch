@@ -519,7 +519,12 @@ impl TypoCorrector {
         Self::new(lexicons, TypoPolicy::default())
     }
 
-    fn lexicon(&self, locale: &str) -> Option<&TypoLexicon> {
+    /// The keys beside each key of a locale's layout.
+    pub fn neighbours_of(&self, locale: &str) -> &HashMap<char, String> {
+        &self.neighbours.iter().find(|entry| entry.0 == locale).expect("neighbours of every list").1
+    }
+
+    pub fn lexicon(&self, locale: &str) -> Option<&TypoLexicon> {
         self.lexicons.iter().find(|entry| entry.0 == locale).map(|entry| &entry.1)
     }
 
@@ -582,39 +587,44 @@ impl TypoCorrector {
     /// The noisy-channel choice among the candidates: each scores the logarithm of its count plus that of the sum of its
     /// slips' probabilities; the best is taken when it is frequent enough and clear enough of the rest.
     pub fn decide(&self, candidates: &[Candidate], capital: bool) -> TypoJudgement {
-        if candidates.is_empty() {
-            return TypoJudgement::bare(Reason::NoCandidate);
-        }
-        let totals: Vec<f64> = candidates
-            .iter()
-            .map(|candidate| {
-                let slips: Vec<f64> = candidate.edits.iter().map(|edit| self.policy.log_probability(edit.operation)).collect();
-                candidate.weight as f64 / TYPO_COUNT_LOG_SCALE as f64 + log_sum(&slips)
-            })
-            .collect();
-        // `max(range(n), key=lambda index: (totals[index], candidates[index].word))`: the first of equal keys.
-        let mut best = 0;
-        for index in 1..candidates.len() {
-            let better = totals[index] > totals[best] || (totals[index] == totals[best] && candidates[index].word > candidates[best].word);
-            if better {
-                best = index;
-            }
-        }
-        let others: Vec<f64> = totals.iter().enumerate().filter(|(index, _)| *index != best).map(|(_, &total)| total).collect();
-        let margin = if others.is_empty() { f64::INFINITY } else { totals[best] - log_sum(&others) };
-        let chosen = &candidates[best];
-        let edit = ks_text::max_by_key_first(chosen.edits.iter(), |edit| self.policy.log_probability(edit.operation)).copied().expect("a candidate has an edit");
-        let word = if capital { format!("{}{}", pystr::upper(pystr::slice(&chosen.word, None, Some(1))), pystr::slice(&chosen.word, Some(1), None)) } else { chosen.word.clone() };
-        let choice = TypoChoice { word, edit, weight: chosen.weight, candidates: candidates.len(), margin };
-        let reason = if chosen.weight < self.policy.minimum_weight() {
-            Reason::Rare
-        } else if margin < ks_text::log(self.policy.posterior_ratio).expect("a positive ratio") {
-            Reason::Ambiguous
-        } else {
-            Reason::Corrected
-        };
-        TypoJudgement { reason, choice: Some(choice), candidates: candidates.len() }
+        decide_under(&self.policy, candidates, capital)
     }
+}
+
+/// `TypoCorrector.decide` under any policy: the candidates do not depend on it, so the measurement tool scores one list under many.
+pub fn decide_under(policy: &TypoPolicy, candidates: &[Candidate], capital: bool) -> TypoJudgement {
+    if candidates.is_empty() {
+        return TypoJudgement::bare(Reason::NoCandidate);
+    }
+    let totals: Vec<f64> = candidates
+        .iter()
+        .map(|candidate| {
+            let slips: Vec<f64> = candidate.edits.iter().map(|edit| policy.log_probability(edit.operation)).collect();
+            candidate.weight as f64 / TYPO_COUNT_LOG_SCALE as f64 + log_sum(&slips)
+        })
+        .collect();
+    // `max(range(n), key=lambda index: (totals[index], candidates[index].word))`: the first of equal keys.
+    let mut best = 0;
+    for index in 1..candidates.len() {
+        let better = totals[index] > totals[best] || (totals[index] == totals[best] && candidates[index].word > candidates[best].word);
+        if better {
+            best = index;
+        }
+    }
+    let others: Vec<f64> = totals.iter().enumerate().filter(|(index, _)| *index != best).map(|(_, &total)| total).collect();
+    let margin = if others.is_empty() { f64::INFINITY } else { totals[best] - log_sum(&others) };
+    let chosen = &candidates[best];
+    let edit = ks_text::max_by_key_first(chosen.edits.iter(), |edit| policy.log_probability(edit.operation)).copied().expect("a candidate has an edit");
+    let word = if capital { format!("{}{}", pystr::upper(pystr::slice(&chosen.word, None, Some(1))), pystr::slice(&chosen.word, Some(1), None)) } else { chosen.word.clone() };
+    let choice = TypoChoice { word, edit, weight: chosen.weight, candidates: candidates.len(), margin };
+    let reason = if chosen.weight < policy.minimum_weight() {
+        Reason::Rare
+    } else if margin < ks_text::log(policy.posterior_ratio).expect("a positive ratio") {
+        Reason::Ambiguous
+    } else {
+        Reason::Corrected
+    };
+    TypoJudgement { reason, choice: Some(choice), candidates: candidates.len() }
 }
 
 fn log_sum(values: &[f64]) -> f64 {

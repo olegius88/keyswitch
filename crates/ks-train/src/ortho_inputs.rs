@@ -536,7 +536,7 @@ fn report_line(differences: &mut usize, name: &str, equal: bool) {
 
 /// Everything rebuilt from the frozen sources and compared with the frozen files. A digest of the code in a receipt written
 /// by the Python tools names files that are not in this tree, so the receipts are compared without their provenance.
-pub fn verify(root: &Path, web_source: Option<&Path>) -> Result<(), String> {
+pub fn verify(root: &Path) -> Result<(), String> {
     let directory = root.join(DIRECTORY);
     let mut differences = 0;
     let rows = corpus_rows(root)?;
@@ -558,9 +558,6 @@ pub fn verify(root: &Path, web_source: Option<&Path>) -> Result<(), String> {
     report_line(&mut differences, "known receipt", known == recorded_known);
     report_line(&mut differences, "web lexicon receipt", read_json(&directory.join("web-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("web-lexicon-ru.json.gz"))?));
     report_line(&mut differences, "prose lexicon receipt", read_json(&directory.join("prose-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("prose-lexicon-ru.json.gz"))?));
-    if let Some(source) = web_source {
-        report_line(&mut differences, "web lexicon from its source", derive_web_forms(source)? == gz_read(&directory.join("web-lexicon-ru.json.gz"))?);
-    }
     for (set, report_path) in HISTORY {
         let (folder, report) = (directory.join(set), read_json(&directory.join(report_path))?);
         let receipt = read_json(&folder.join("receipt.json"))?;
@@ -617,5 +614,399 @@ pub fn freeze(root: &Path, output: &Path) -> Result<(), String> {
     std::fs::write(&evidence_path, gz_write(&crate::artifact::canonical(&evidence))?).map_err(|error| error.to_string())?;
     std::fs::write(&known_path, pretty(&known_receipt(root, &evidence, &checksum(&evidence_path)?, &tokens)?)).map_err(|error| error.to_string())?;
     let _: PathBuf = output.to_path_buf();
+    Ok(())
+}
+
+const PROSE_LEADING: &str = "—–-«»\"'„“” ";
+const PROSE_DUMP: &str = "ruwikisource-20260901";
+const PROSE_FILES: [(&str, &str); 4] = [("pages-articles.xml.bz2", "900444fd4dea093a918908390ec93130575fa530dddbec327c89313a65f7fc81"), ("page.sql.gz", "4fc8ee33447f4c864086afbbbb492e46486224dbd176e37f22933dac6a2b5b5d"), ("categorylinks.sql.gz", "356b33624d80ca13f82ce3dc50fbab53229d42bae96ed70019e792e564150a7e"), ("linktarget.sql.gz", "5927a112017995d8632f971fe45653e79abb9ff584ea72be5447483dc29149de")];
+const PROSE_CATEGORY: &str = "Проза_по_авторам";
+const RUSSIAN_WRITERS: &str = "Писатели_на_русском_языке";
+const EXCLUDED_AUTHORS: [&str; 3] = ["Антон_Павлович_Чехов", "Николай_Семёнович_Лесков", "Аркадий_Тимофеевич_Аверченко"];
+const PRE_REFORM_PAGE: &str = "/ДО";
+const LAST_DEATH_YEAR: i64 = 1925;
+const CATEGORY_DEPTH: i64 = 3;
+const WORDS_SCALE: f64 = 1_000_000_000.0;
+const ARTICLE_NAMESPACE: i64 = 0;
+const CATEGORY_NAMESPACE: i64 = 14;
+const AUTHOR_NAMESPACE: i64 = 102;
+
+fn compiled(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("a valid pattern")
+}
+
+/// `wikitext_sentences`: the sentences of a Wikisource page, without templates, notes, headings and back matter.
+pub fn wikitext_sentences(content: &str) -> Vec<String> {
+    static PATTERNS: std::sync::LazyLock<[regex::Regex; 9]> = std::sync::LazyLock::new(|| [compiled(r"(?s)<!--.*?-->"), compiled(r"(?is)<ref[^>/]*/>|<ref[^>]*>.*?</ref>"), compiled(r"\{\{[^{}]*\}\}"), compiled(r"(?s)\{\|.*?\|\}"), compiled(r"(?m)^==+\s*(Примечания|Комментарии|См\. также|Ссылки)\s*==+|\[\[Категория:"), compiled(r"__[A-Z]+__"), compiled(r"\[\[(?:[^|\]]*\|)?([^\]]*)\]\]"), compiled(r"\[(?:https?:)?//\S+\s*([^\]]*)\]"), compiled(r"<[^>]+>")]);
+    static HEADING: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| compiled(r"^=+.*=+$"));
+    let [comment, reference, template, table, back, magic, link, external, tag] = &*PATTERNS;
+    let mut text = reference.replace_all(&comment.replace_all(content, ""), "").into_owned();
+    loop {
+        let next = template.replace_all(&text, "").into_owned();
+        if next == text {
+            break;
+        }
+        text = next;
+    }
+    text = table.replace_all(&text, "").into_owned();
+    if let Some(found) = back.find(&text) {
+        text.truncate(found.start());
+    }
+    let without_magic = magic.replace_all(&text, "");
+    let without_links = link.replace_all(&without_magic, "$1");
+    text = external.replace_all(&without_links, "$1").into_owned();
+    text = crate::messages::unescape(&tag.replace_all(&text.replace("'''", "").replace("''", ""), ""));
+    let mut sentences = Vec::new();
+    for line in pystr::splitlines(&text, false) {
+        let line = pystr::strip(pystr::lstrip_chars(pystr::strip(line), "*#:;"));
+        if line.is_empty() || HEADING.is_match(line) {
+            continue;
+        }
+        let characters: Vec<char> = line.chars().collect();
+        let (mut start, mut index) = (0, 0);
+        let mut parts: Vec<String> = Vec::new();
+        while index < characters.len() {
+            let is_space = |character: char| pystr::isspace(character.encode_utf8(&mut [0; 4]));
+            if index > 0 && is_space(characters[index]) && ".!?…".contains(characters[index - 1]) {
+                let mut end = index;
+                while end < characters.len() && is_space(characters[end]) {
+                    end += 1;
+                }
+                if characters.get(end).is_some_and(|next| "—–«\"([".contains(*next) || next.is_ascii_uppercase() || ('А'..='Я').contains(next) || *next == 'Ё') {
+                    parts.push(characters[start..index].iter().collect());
+                    start = end;
+                    index = end;
+                    continue;
+                }
+            }
+            index += 1;
+        }
+        parts.push(characters[start..].iter().collect());
+        sentences.extend(parts.iter().map(|part| pystr::strip_chars(part, PROSE_LEADING).to_owned()).filter(|sentence| !sentence.is_empty()));
+    }
+    sentences
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum SqlValue {
+    Null,
+    Number(i64),
+    Text(Vec<u8>),
+}
+
+impl SqlValue {
+    fn number(&self) -> i64 {
+        if let SqlValue::Number(value) = self { *value } else { 0 }
+    }
+
+    fn text(&self) -> String {
+        if let SqlValue::Text(value) = self { String::from_utf8_lossy(value).into_owned() } else { String::new() }
+    }
+}
+
+fn sql_field(line: &[u8], mut index: usize) -> (SqlValue, usize) {
+    if line[index] != b'\'' {
+        let mut end = index;
+        while !matches!(line[end], b',' | b')') {
+            end += 1;
+        }
+        let token = std::str::from_utf8(&line[index..end]).unwrap_or("");
+        let value = if token == "NULL" { SqlValue::Null } else { token.parse().map_or_else(|_| SqlValue::Text(token.as_bytes().to_vec()), SqlValue::Number) };
+        return (value, end);
+    }
+    index += 1;
+    let mut chunk = Vec::new();
+    while line[index] != b'\'' {
+        if line[index] == b'\\' {
+            index += 1;
+            chunk.push(match line[index] {
+                b'n' => b'\n',
+                b't' => b'\t',
+                b'r' => b'\r',
+                b'0' => 0,
+                b'Z' => 0x1a,
+                other => other,
+            });
+        } else {
+            chunk.push(line[index]);
+        }
+        index += 1;
+    }
+    (SqlValue::Text(chunk), index + 1)
+}
+
+/// `sql_rows`: the rows of a MediaWiki SQL dump of a table, by the column names of its CREATE TABLE statement.
+fn sql_rows(path: &Path, table: &str, wanted: &[&str], mut each: impl FnMut(&[SqlValue])) -> Result<(), String> {
+    use std::io::BufRead;
+    let (create, start) = (format!("CREATE TABLE `{table}` (").into_bytes(), format!("INSERT INTO `{table}` VALUES ").into_bytes());
+    let mut reader = std::io::BufReader::new(MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?));
+    let mut columns: Vec<String> = Vec::new();
+    let mut declaring = false;
+    let mut line = Vec::new();
+    let mut places: Vec<usize> = Vec::new();
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).map_err(|error| error.to_string())? == 0 {
+            break;
+        }
+        if line.starts_with(&create) {
+            declaring = true;
+        } else if declaring && line.first().is_some_and(|byte| byte.is_ascii_whitespace()) && line.iter().any(|byte| *byte == b'`') && String::from_utf8_lossy(&line).trim_start().starts_with('`') {
+            let text = String::from_utf8_lossy(&line);
+            if let Some(name) = text.trim_start().strip_prefix('`').and_then(|rest| rest.split('`').next()) {
+                columns.push(name.to_owned());
+            }
+        } else if line.starts_with(&start) {
+            declaring = false;
+            if places.is_empty() {
+                for name in wanted {
+                    places.push(columns.iter().position(|column| column == name).ok_or_else(|| format!("{table} has no column {name}"))?);
+                }
+            }
+            let mut index = start.len();
+            let mut row: Vec<SqlValue> = Vec::with_capacity(columns.len());
+            let mut picked: Vec<SqlValue> = vec![SqlValue::Null; places.len()];
+            while index < line.len() {
+                if line[index] != b'(' {
+                    index += 1;
+                    continue;
+                }
+                index += 1;
+                row.clear();
+                loop {
+                    let (value, next) = sql_field(&line, index);
+                    row.push(value);
+                    let closing = line[next] == b')';
+                    index = next + 1;
+                    if closing {
+                        break;
+                    }
+                }
+                for (slot, place) in picked.iter_mut().zip(&places) {
+                    slot.clone_from(&row[*place]);
+                }
+                each(&picked);
+            }
+        } else {
+            declaring = declaring && !line.starts_with(b")");
+        }
+    }
+    Ok(())
+}
+
+fn xml_text(raw: &str) -> String {
+    raw.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#039;", "'").replace("&#13;", "\r").replace("&#10;", "\n").replace("&#9;", "\t").replace("&amp;", "&")
+}
+
+/// `articles`: (page id, revision id, wikitext) of the wanted pages of a pages-articles dump.
+fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, String)) -> Result<(), String> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::with_capacity(1 << 20, bzip2_rs::DecoderReader::new(std::io::BufReader::new(std::fs::File::open(path).map_err(|error| error.to_string())?)));
+    let mut line = String::new();
+    let (mut page, mut revision): (Option<i64>, Option<i64>) = (None, None);
+    let mut in_revision = false;
+    let mut text: Option<String> = None;
+    let value = |line: &str, tag: &str| -> Option<i64> { pystr::strip(line).strip_prefix(&format!("<{tag}>"))?.strip_suffix(&format!("</{tag}>"))?.parse().ok() };
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).map_err(|error| error.to_string())? == 0 {
+            return Ok(());
+        }
+        if let Some(body) = text.as_mut() {
+            match line.find("</text>") {
+                Some(end) => {
+                    body.push_str(&line[..end]);
+                    let content = xml_text(&std::mem::take(body));
+                    text = None;
+                    if let (Some(id), Some(number)) = (page, revision) {
+                        if wanted.contains(&id) {
+                            each(id, number, content);
+                        }
+                    }
+                }
+                None => body.push_str(&line),
+            }
+            continue;
+        }
+        let trimmed = pystr::strip(&line);
+        if trimmed == "<page>" {
+            (page, revision, in_revision) = (None, None, false);
+        } else if trimmed == "<revision>" {
+            in_revision = true;
+        } else if page.is_none() && !in_revision {
+            page = value(&line, "id");
+        } else if in_revision && revision.is_none() && value(&line, "id").is_some() {
+            revision = value(&line, "id");
+        } else if trimmed.starts_with("<text") {
+            if trimmed.ends_with("/>") {
+                if let (Some(id), Some(number)) = (page, revision) {
+                    if wanted.contains(&id) {
+                        each(id, number, String::new());
+                    }
+                }
+                continue;
+            }
+            let start = line.find('>').map_or(0, |place| place + 1);
+            match line[start..].find("</text>") {
+                Some(end) => {
+                    let content = xml_text(&line[start..start + end]);
+                    if let (Some(id), Some(number)) = (page, revision) {
+                        if wanted.contains(&id) {
+                            each(id, number, content);
+                        }
+                    }
+                }
+                None => text = Some(line[start..].to_owned()),
+            }
+        }
+    }
+}
+
+fn prose_token(raw: &str) -> &str {
+    let word = |character: char| character == '-' || character == '_' || pystr::isalnum(character.encode_utf8(&mut [0; 4]));
+    pystr::strip_chars(raw.trim_start_matches(|character| !word(character)).trim_end_matches(|character| !word(character)), "-")
+}
+
+fn russian_form(token: &str) -> bool {
+    !token.is_empty() && token.chars().all(|character| ('а'..='я').contains(&character) || character == 'ё')
+}
+
+/// `derive` of `ortho_prose_lexicon`: the forms of the selected public-domain pages and what they were selected from.
+pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), String> {
+    for (name, digest) in PROSE_FILES {
+        if checksum(&directory.join(format!("{PROSE_DUMP}-{name}")))? != digest {
+            return Err(format!("{PROSE_DUMP}-{name} is not the pinned dump file"));
+        }
+    }
+    let file = |name: &str| directory.join(format!("{PROSE_DUMP}-{name}"));
+    let mut titles: HashMap<i64, (i64, String, bool)> = HashMap::new();
+    let mut order: Vec<i64> = Vec::new();
+    sql_rows(&file("page.sql.gz"), "page", &["page_id", "page_namespace", "page_title", "page_is_redirect"], |row| {
+        order.push(row[0].number());
+        titles.insert(row[0].number(), (row[1].number(), row[2].text(), row[3].number() != 0));
+    })?;
+    let by_title: HashMap<(i64, String), i64> = titles.iter().map(|(page, (namespace, title, _))| ((*namespace, title.clone()), *page)).collect();
+    let mut targets: HashMap<i64, String> = HashMap::new();
+    sql_rows(&file("linktarget.sql.gz"), "linktarget", &["lt_id", "lt_namespace", "lt_title"], |row| {
+        if row[1].number() == CATEGORY_NAMESPACE {
+            targets.insert(row[0].number(), row[2].text());
+        }
+    })?;
+    let mut members: HashMap<String, Vec<(i64, String)>> = HashMap::new();
+    let mut parents: HashMap<i64, Vec<String>> = HashMap::new();
+    sql_rows(&file("categorylinks.sql.gz"), "categorylinks", &["cl_target_id", "cl_from", "cl_type"], |row| {
+        if let Some(category) = targets.get(&row[0].number()) {
+            members.entry(category.clone()).or_default().push((row[1].number(), row[2].text()));
+            parents.entry(row[1].number()).or_default().push(category.clone());
+        }
+    })?;
+    let death = compiled(r"^Умершие_в_(\d+)_году$");
+    let mut died: HashMap<String, i64> = HashMap::new();
+    for page in &order {
+        let (namespace, title, redirect) = &titles[page];
+        let empty = Vec::new();
+        let categories = parents.get(page).unwrap_or(&empty);
+        let year = categories.iter().find_map(|category| death.captures(category).and_then(|found| found[1].parse::<i64>().ok()));
+        if let (AUTHOR_NAMESPACE, false, Some(year), true) = (*namespace, *redirect, year, categories.iter().any(|category| category == RUSSIAN_WRITERS)) {
+            died.insert(title.clone(), year);
+        }
+    }
+    let missing = (ARTICLE_NAMESPACE, String::new(), true);
+    let mut authors: BTreeMap<String, String> = BTreeMap::new();
+    for (page, kind) in members.get(PROSE_CATEGORY).into_iter().flatten() {
+        let (namespace, category, _) = titles.get(page).unwrap_or(&missing);
+        if kind != "subcat" || *namespace != CATEGORY_NAMESPACE {
+            continue;
+        }
+        let Some(own) = by_title.get(&(CATEGORY_NAMESPACE, category.clone())) else { continue };
+        for parent in parents.get(own).into_iter().flatten() {
+            if died.get(parent).copied().unwrap_or(LAST_DEATH_YEAR + 1) <= LAST_DEATH_YEAR && !EXCLUDED_AUTHORS.contains(&parent.as_str()) {
+                authors.insert(category.clone(), parent.clone());
+            }
+        }
+    }
+    let mut chosen: HashMap<i64, (String, String)> = HashMap::new();
+    for (category, author) in &authors {
+        let mut frontier = vec![(category.clone(), 0)];
+        let mut seen: HashSet<String> = HashSet::from([category.clone()]);
+        while let Some((current, depth)) = frontier.pop() {
+            for (page, kind) in members.get(&current).into_iter().flatten() {
+                let (namespace, title, redirect) = titles.get(page).unwrap_or(&missing);
+                if kind == "page" && *namespace == ARTICLE_NAMESPACE && !redirect && !title.ends_with(PRE_REFORM_PAGE) {
+                    chosen.entry(*page).or_insert_with(|| (category.clone(), author.clone()));
+                } else if kind == "subcat" && *namespace == CATEGORY_NAMESPACE && depth < CATEGORY_DEPTH && !seen.contains(title) {
+                    seen.insert(title.clone());
+                    frontier.push((title.clone(), depth + 1));
+                }
+            }
+        }
+    }
+    let header = compiled(r"(?s)\{\{Отексте(.*?)\n\}\}");
+    let field = compiled(r"\|\s*([А-ЯЁA-Z]+)\s*=\s*([^|\n]*)");
+    let pre_reform = compiled("[ѣѢіІѳѲѵѴ]");
+    let wanted: HashSet<i64> = chosen.keys().copied().collect();
+    let mut pages: BTreeMap<String, (i64, String)> = BTreeMap::new();
+    let mut dropped: BTreeMap<&str, i64> = BTreeMap::new();
+    articles(&file("pages-articles.xml.bz2"), &wanted, |page, revision, content| {
+        let (_, author) = &chosen[&page];
+        let mut fields: HashMap<String, String> = HashMap::new();
+        if let Some(found) = header.captures(&content) {
+            for pair in field.captures_iter(&found[1]) {
+                fields.insert(pair[1].to_owned(), pair[2].to_owned());
+            }
+        }
+        let named = |name: &str| fields.get(name).map_or("", |value| pystr::strip(value));
+        if pre_reform.is_match(&content) {
+            *dropped.entry("pre-reform spelling").or_insert(0) += 1;
+        } else if !named("ПЕРЕВОДЧИК").is_empty() {
+            *dropped.entry("translation").or_insert(0) += 1;
+        } else if !named("АВТОР").is_empty() && !fields["АВТОР"].contains(&author.replace('_', " ")) {
+            *dropped.entry("another author").or_insert(0) += 1;
+        } else {
+            pages.insert(titles[&page].1.replace('_', " "), (revision, content));
+        }
+    })?;
+    let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+    let mut words = 0_i64;
+    for (_, content) in pages.values() {
+        for sentence in wikitext_sentences(content) {
+            for raw in pystr::split(&sentence) {
+                let token = prose_token(raw);
+                if !token.chars().any(|character| pystr::isalpha(character.encode_utf8(&mut [0; 4]))) {
+                    continue;
+                }
+                words += 1;
+                let compound = token.contains('-') && token.split('-').all(russian_form);
+                if (token.chars().count() >= WEB_MIN_CHARACTERS && russian_form(token)) || compound {
+                    *counts.entry(token.to_owned()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let table: BTreeMap<String, i64> = counts.into_iter().map(|(form, count)| { let rounded = ks_text::py_round(count as f64 * WORDS_SCALE / words as f64) as i64; let bits = i64::BITS - rounded.leading_zeros(); (form, i64::from(bits.min(MAXIMUM_LEXICON_WEIGHT).max(1))) }).collect();
+    let listed: String = pages.iter().map(|(title, (revision, _))| format!("{title}\t{revision}\n")).collect();
+    let author_years: BTreeMap<String, i64> = authors.values().collect::<BTreeSet<_>>().into_iter().map(|author| (author.replace('_', " "), died[author])).collect();
+    Ok((table, json!({"authors": author_years, "pages": pages.len(), "pages_sha256": hex_digest(&listed), "left_out": dropped, "words": words})))
+}
+
+/// `verify` of the two lexicons whose sources are too large for the repository.
+pub fn verify_lexicon_sources(root: &Path, web: Option<&Path>, prose: Option<&Path>) -> Result<(), String> {
+    let directory = root.join(DIRECTORY);
+    let mut differences = 0;
+    if let Some(source) = web {
+        report_line(&mut differences, "web lexicon from its source", derive_web_forms(source)? == gz_read(&directory.join("web-lexicon-ru.json.gz"))?);
+    }
+    if let Some(source) = prose {
+        let (table, summary) = derive_prose(source)?;
+        let recorded: Value = serde_json::from_slice(&gz_read(&directory.join("prose-lexicon-ru.json.gz"))?).map_err(|error| error.to_string())?;
+        report_line(&mut differences, "prose lexicon from its source", json!(table) == recorded["forms"]);
+        let receipt = read_json(&directory.join("prose-lexicon-receipt.json"))?;
+        for name in ["authors", "pages", "pages_sha256", "left_out", "words"] {
+            report_line(&mut differences, name, summary[name] == receipt[name]);
+        }
+    }
+    if differences != 0 {
+        return Err(format!("{differences} lexicon checks differ"));
+    }
     Ok(())
 }

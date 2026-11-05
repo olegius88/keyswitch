@@ -18,8 +18,9 @@
 //! `ks-train carry --tree <root> --pair <file> --refit <head>... --output <file>`, `doctor --tree <root> [--corpus <folder>] [--ledger <folder>] [--stage <name>...]`,
 //! `supplement --tree <root> --verify | --input <file> [--output <file>] [--receipt <file>] [--removed-list <file>]`,
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
-//! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs [--web-source <file>]|--freeze-inputs [--output <folder>]`
+//! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs|--lexicon-sources [--web-source <file>] [--prose-source <folder>]|--freeze-inputs [--output <folder>]`
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
+//! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
@@ -111,6 +112,16 @@ fn main() {
         }
         return;
     }
+    if arguments.first().map(String::as_str) == Some("typo-evaluation") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::new(root.join("resources"));
+        let request = ks_train::typo_evaluation::Request { root: &root, measurement: arguments.get(1).expect("synthetic, clean, field or all"), messages: Path::new(option(&arguments, "--messages").expect("--messages is required")), manifest: Path::new(option(&arguments, "--manifest").unwrap_or(".t/field/manifest.json")), out: Path::new(option(&arguments, "--out").expect("--out is required")), tune: arguments.iter().any(|argument| argument == "--tune"), local_offset_seconds: option(&arguments, "--utc-offset").map_or(0, |value| value.parse().expect("seconds")) };
+        if let Err(error) = ks_train::typo_evaluation::command(&request, &resources) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if arguments.first().map(String::as_str) == Some("archive") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         if let Err(error) = ks_train::small_tools::archive(&root, arguments.iter().any(|argument| argument == "--write")) {
@@ -152,8 +163,15 @@ fn main() {
     }
     if arguments.first().map(String::as_str) == Some("ortho") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if arguments.iter().any(|argument| argument == "--lexicon-sources") {
+            if let Err(error) = ks_train::ortho_inputs::verify_lexicon_sources(&root, option(&arguments, "--web-source").map(Path::new), option(&arguments, "--prose-source").map(Path::new)) {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         if arguments.iter().any(|argument| argument == "--inputs" || argument == "--freeze-inputs") {
-            let result = if arguments.iter().any(|argument| argument == "--inputs") { ks_train::ortho_inputs::verify(&root, option(&arguments, "--web-source").map(Path::new)) } else { ks_train::ortho_inputs::freeze(&root, Path::new(option(&arguments, "--output").expect("--output is required"))) };
+            let result = if arguments.iter().any(|argument| argument == "--inputs") { ks_train::ortho_inputs::verify(&root) } else { ks_train::ortho_inputs::freeze(&root, Path::new(option(&arguments, "--output").expect("--output is required"))) };
             if let Err(error) = result {
                 eprintln!("{error}");
                 std::process::exit(1);

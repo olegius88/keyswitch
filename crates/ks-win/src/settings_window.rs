@@ -1628,21 +1628,24 @@ impl Ui {
         let probe = self.services.backend.probe();
         let ready = self.services.engine.ready();
         let snapshot = self.services.engine.snapshot();
-        let (intent, context, prefix) = if ready {
-            // The models are the engine's; what it exposes to the window is the last model that answered.
-            (
-                json!({"loaded": true}),
-                Map::from_iter([("loaded".to_owned(), json!(true)), ("model".to_owned(), json!(snapshot.context_model))]),
-                Map::from_iter([("loaded".to_owned(), json!(true))]),
-            )
-        } else {
-            let status = if snapshot.last_error.is_empty() { LOADING_ACTION.to_owned() } else { snapshot.last_error.clone() };
-            (
-                json!({"status": status}),
-                Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
-                Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
-            )
+        let built = if ready { self.services.engine.engine().ok() } else { None };
+        let guard = built.as_ref().map(|engine| engine.core());
+        let (intent, context, prefix) = match guard.as_ref().and_then(|guard| guard.as_ref()) {
+            Some(core) => (
+                core.intent_model_status.as_dict(),
+                Map::from_iter([("available".to_owned(), json!(core.context_policy.model.is_some())), ("status".to_owned(), json!(core.context_policy.status))]),
+                Map::from_iter([("available".to_owned(), json!(core.prefix_model.is_some())), ("status".to_owned(), json!(core.prefix_model.as_ref().map_or_else(String::new, |model| model.version().to_owned())))]),
+            ),
+            None => {
+                let status = if snapshot.last_error.is_empty() { LOADING_ACTION.to_owned() } else { snapshot.last_error.clone() };
+                (
+                    json!({"status": status}),
+                    Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
+                    Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
+                )
+            }
         };
+        drop(guard);
         let input = DiagnosticsInput {
             version: crate::windows_app::VERSION.to_owned(),
             available: probe.available,

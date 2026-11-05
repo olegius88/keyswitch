@@ -36,6 +36,7 @@ pub mod selection;
 pub mod small_tools;
 pub mod spans;
 pub mod tools;
+pub mod typo_evaluation;
 pub mod typo_frequency;
 
 pub const ACTIONS: usize = 4;
@@ -48,4 +49,9 @@ pub const EPOCH_NET_BENEFIT_TOLERANCE: i64 = 2;
 /// A record a person opens to read: indented, keys sorted, and a final newline.
 pub fn train_json(value: &serde_json::Value) -> Vec<u8> {
     (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
+}
+
+/// The same, keys in the order they were written.
+pub fn train_json_unsorted(value: &serde_json::Value) -> Vec<u8> {
+    (ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), ..ks_text::JsonOptions::default() }) + "\n").into_bytes()
 }
