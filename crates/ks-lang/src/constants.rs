@@ -194,5 +194,3 @@ pub const KSLM_FINGERPRINT_ENTRY_BYTES: usize = 8;
 pub const KSLM_MAX_DIMENSION_LOG2: u32 = 21;
 pub const KSLM_MAX_DIMENSION: i64 = 1 << KSLM_MAX_DIMENSION_LOG2;
 pub const SHA256_HEX_CHARACTERS: usize = 64;
-pub const INT64_MIN: i128 = -(1 << 63);
-pub const UINT64_MAX: i128 = (1 << 64) - 1;

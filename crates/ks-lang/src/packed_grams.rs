@@ -8,7 +8,6 @@
 
 use ks_cast::To as _;
 use crate::constants::{PACKED_GRAM_KEY_BYTES, PACKED_GRAM_LAST_CODE, PACKED_GRAM_MAX_CHARACTERS, PACKED_GRAM_MIN_ENTRIES};
-use crate::ortho_model::OrthoModel;
 use crate::tables::{TableBuilder, WordTable};
 
 #[derive(Clone, Debug)]

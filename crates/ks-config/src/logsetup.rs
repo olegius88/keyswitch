@@ -163,7 +163,7 @@ fn platform_description() -> String {
     }
     let os = std::env::consts::OS;
     let mut name = os.to_string();
-    name.get_mut(0..1).into_iter().for_each(|first| first.make_ascii_uppercase());
+    name.get_mut(0..1).into_iter().for_each(str::make_ascii_uppercase);
     format!("{name}-{}", std::env::consts::ARCH)
 }
 
@@ -597,7 +597,7 @@ mod tests {
     fn format_codes_it_does_not_know_stay_as_they_are() {
         let time = record("x").time;
         assert_eq!(strftime("%% %q %", &time), "% %q %");
-        assert_eq!(utc_now().year >= 2026, true);
+        assert!(utc_now().year >= 2026);
     }
 
     #[test]

@@ -108,7 +108,7 @@ mod tests {
     }
 
     impl Client for &Stub {
-        fn bot_id(&self) -> &str {
+        fn bot_id(&self) -> &'static str {
             "1"
         }
         fn call(&self, _method: &str, _params: Value) -> Result<Value> {

@@ -317,3 +317,108 @@ fn list_and_fetch_save_what_the_catalog_names_and_nothing_else() {
     group.files.borrow_mut().iter_mut().for_each(|file| file.1.push(0));
     assert!(fetch_or_list_with(&group, "fetch", CHAT, options(all)).is_err());
 }
+
+/// The scripted group for the service's thread.
+#[derive(Clone)]
+struct SharedGroup(Arc<std::sync::Mutex<Group>>);
+
+impl Client for SharedGroup {
+    fn bot_id(&self) -> &str {
+        BOT
+    }
+    fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.0.lock().unwrap().call(method, params)
+    }
+    fn send_document(&self, chat_id: &str, filename: &str, data: &[u8], caption: &str) -> Result<Value> {
+        self.0.lock().unwrap().send_document(chat_id, filename, data, caption)
+    }
+    fn download(&self, file_id: &str, limit: usize) -> Result<Vec<u8>> {
+        self.0.lock().unwrap().download(file_id, limit)
+    }
+}
+
+#[test]
+fn the_service_says_what_stops_it_sends_when_asked_and_stops_when_told() {
+    use logcourier::service::{MakeClient, Notify, Service};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    let dir = Dir::new();
+    let log = dir.0.join("app.log");
+    append(&log, "2026-11-04 12:00:00,000 0.66.1 INFO keyswitch: a\n");
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = heard.clone();
+    let notify: Notify = Arc::new(move |message, _stats| sink.lock().unwrap().push(message));
+    let group = SharedGroup(Arc::new(Mutex::new(Group::default())));
+    let failing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (shared, stop_making) = (group.clone(), failing.clone());
+    let make: MakeClient = Arc::new(move |_token| {
+        if stop_making.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Error::telegram_with("slow down", 3, 429));
+        }
+        let client: Box<dyn Client> = Box::new(shared.clone());
+        Ok(client)
+    });
+    let wait = |text: &str| {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(20) {
+            if heard.lock().unwrap().iter().any(|message| message.contains(text)) {
+                heard.lock().unwrap().clear();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("never heard {text:?}: {:?}", heard.lock().unwrap());
+    };
+    let mut settings = config(&log);
+    settings.sources[0].include_existing = true;
+    settings.consent = false;
+    settings.auto_send = false;
+    let service = Service::start_with(dir.0.join("data"), settings.clone(), "1:token".to_owned(), notify, make);
+    wait("выключена");
+    settings.auto_send = true;
+    service.update(settings.clone(), "1:token".to_owned());
+    wait("разрешение");
+    settings.consent = true;
+    service.update(settings.clone(), String::new());
+    wait("Настройте");
+    service.reset(false);
+    wait("Настройте");
+    service.update(settings.clone(), "1:token".to_owned());
+    wait("Ожидание отправки");
+    service.send_now();
+    wait("архивов");
+    service.update(settings.clone(), "1:token".to_owned());
+    service.send_now();
+    wait("Новых архивов");
+    failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    append(&log, "2026-11-04 12:00:01,000 0.66.1 INFO keyswitch: b\n");
+    service.send_now();
+    wait("slow down");
+    service.send_now();
+    wait("Повтор через");
+    assert!(!service.is_finished());
+    service.stop();
+    let started = Instant::now();
+    while !service.is_finished() && started.elapsed() < Duration::from_secs(20) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(service.is_finished());
+}
+
+#[test]
+fn a_service_whose_queue_cannot_open_says_so() {
+    use logcourier::service::{Notify, Service};
+    use std::sync::Mutex;
+    let dir = Dir::new();
+    let blocked = dir.0.join("file");
+    std::fs::write(&blocked, "").unwrap();
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = heard.clone();
+    let notify: Notify = Arc::new(move |message, _stats| sink.lock().unwrap().push(message));
+    let service = Service::start(blocked.join("data"), Config::default(), String::new(), notify);
+    let started = std::time::Instant::now();
+    while !service.is_finished() && started.elapsed().as_secs() < 20 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(heard.lock().unwrap()[0].contains("очередь"));
+}

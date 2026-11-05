@@ -256,11 +256,8 @@ mod tests {
         assert!(source.validate().is_err());
         assert!(!hex32("abc") && !hex32(&"z".repeat(32)) && hex32(&"a".repeat(32)));
         assert!(!digits_after("", false, 5) && !digits_after("123456", false, 5) && !digits_after("1a", false, 5) && digits_after("0", false, 5) && !digits_after("0", true, 5) && digits_after("1", true, 5));
-        let mut config = Config::default();
-        config.device_id = "x".to_owned();
-        assert!(config.validate().is_err());
-        config = Config::default();
-        config.device_name = " ".to_owned();
+        assert!(Config { device_id: "x".to_owned(), ..Config::default() }.validate().is_err());
+        let mut config = Config { device_name: " ".to_owned(), ..Config::default() };
         assert!(config.validate().is_err());
         config.device_name = "д".repeat(MAX_DEVICE_NAME_CHARACTERS + 1);
         assert!(config.validate().is_err());

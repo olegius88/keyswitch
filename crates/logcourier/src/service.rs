@@ -18,10 +18,12 @@ use crate::rate_limit::{Cancelled, RateLimitedClient};
 use crate::reset::reset_group;
 use crate::secrets::redact;
 use crate::store::{RESET_KEY, Store};
-use crate::telegram::Telegram;
+use crate::telegram::{Client, Telegram};
 use crate::timeutil::{monotonic, now_seconds};
 
 pub type Notify = Arc<dyn Fn(String, Value) + Send + Sync>;
+/// Makes the client of a token: Telegram itself, or what a test stands in for it.
+pub type MakeClient = Arc<dyn Fn(&str) -> Result<Box<dyn Client>> + Send + Sync>;
 
 struct Shared {
     config: Config,
@@ -47,6 +49,11 @@ fn locked(shared: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
 
 impl Service {
     pub fn start(root: PathBuf, config: Config, token: String, notify: Notify) -> Service {
+        Self::start_with(root, config, token, notify, Arc::new(|token| Ok(Box::new(Telegram::new(token)?))))
+    }
+
+    /// The service over the given client.
+    pub fn start_with(root: PathBuf, config: Config, token: String, notify: Notify, make: MakeClient) -> Service {
         let next_send = monotonic() + config.interval_minutes.to::<f64>() * SECONDS_PER_MINUTE;
         let shared = Arc::new((
             Mutex::new(Shared { config, token, manual: false, manual_pending: false, reset_request: None, next_send, revision: 0, woken: false }),
@@ -54,7 +61,7 @@ impl Service {
         ));
         let stopping = Arc::new(AtomicBool::new(false));
         let (worker_shared, worker_stopping) = (shared.clone(), stopping.clone());
-        let thread = std::thread::Builder::new().name("LogCourier-worker".to_owned()).spawn(move || run(&root, &worker_shared, &worker_stopping, &notify)).ok();
+        let thread = std::thread::Builder::new().name("LogCourier-worker".to_owned()).spawn(move || run(&root, &worker_shared, &worker_stopping, &notify, &make)).ok();
         Service { shared, stopping, thread: Mutex::new(thread) }
     }
 
@@ -103,6 +110,7 @@ struct Worker<'a> {
     shared: &'a Arc<(Mutex<Shared>, Condvar)>,
     stopping: &'a Arc<AtomicBool>,
     notify: &'a Notify,
+    make: &'a MakeClient,
     retry_at: f64,
     failures: i32,
 }
@@ -130,7 +138,7 @@ impl Worker<'_> {
         }
         if resetting {
             let cancelled = self.cancelled(revision);
-            let client = RateLimitedClient::new(Telegram::new(token)?, store, &config.chat_id, cancelled.clone());
+            let client = RateLimitedClient::new((self.make)(token)?, store, &config.chat_id, cancelled.clone());
             let notify = self.notify.clone();
             let progress = |text: &str| notify(text.to_owned(), store.stats(&destination).unwrap_or(Value::Null));
             let message = reset_group(store, config, &client, reset.unwrap_or(false), &cancelled, &progress)?;
@@ -196,7 +204,7 @@ impl Worker<'_> {
                     Err(error) => return Err(error),
                 }
             }
-            let client = RateLimitedClient::new(Telegram::new(token)?, store, &config.chat_id, cancelled.clone());
+            let client = RateLimitedClient::new((self.make)(token)?, store, &config.chat_id, cancelled.clone());
             message = deliver(store, config, &client, &cancelled)?;
             if !warnings.is_empty() {
                 message.push(' ');
@@ -215,7 +223,7 @@ impl Worker<'_> {
     }
 }
 
-fn run(root: &std::path::Path, shared: &Arc<(Mutex<Shared>, Condvar)>, stopping: &Arc<AtomicBool>, notify: &Notify) {
+fn run(root: &std::path::Path, shared: &Arc<(Mutex<Shared>, Condvar)>, stopping: &Arc<AtomicBool>, notify: &Notify, make: &MakeClient) {
     let store = match Store::open(root) {
         Ok(store) => store,
         Err(error) => {
@@ -223,7 +231,7 @@ fn run(root: &std::path::Path, shared: &Arc<(Mutex<Shared>, Condvar)>, stopping:
             return;
         }
     };
-    let mut worker = Worker { store: &store, shared, stopping, notify, retry_at: 0.0, failures: 0 };
+    let mut worker = Worker { store: &store, shared, stopping, notify, make, retry_at: 0.0, failures: 0 };
     while !stopping.load(Ordering::SeqCst) {
         let (config, token, reset, revision) = {
             let mut state = locked(&shared.0);

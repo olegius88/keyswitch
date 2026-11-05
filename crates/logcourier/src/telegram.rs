@@ -124,6 +124,21 @@ pub trait Client {
     fn download(&self, file_id: &str, limit: usize) -> Result<Vec<u8>>;
 }
 
+impl Client for Box<dyn Client> {
+    fn bot_id(&self) -> &str {
+        (**self).bot_id()
+    }
+    fn call(&self, method: &str, params: Value) -> Result<Value> {
+        (**self).call(method, params)
+    }
+    fn send_document(&self, chat_id: &str, filename: &str, data: &[u8], caption: &str) -> Result<Value> {
+        (**self).send_document(chat_id, filename, data, caption)
+    }
+    fn download(&self, file_id: &str, limit: usize) -> Result<Vec<u8>> {
+        (**self).download(file_id, limit)
+    }
+}
+
 pub struct Telegram {
     bot_id: String,
     token: String,
