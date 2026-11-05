@@ -591,3 +591,72 @@ fn typo_correction() {
     }
     failures.finish("typo");
 }
+
+/// Every shape of text a caller can hand over, in a grid: the answers are the recorded tests' business, this one says that
+/// no combination stops the program, and that a prediction is always a number between 0 and 1.
+#[test]
+fn every_shape_of_text_gets_an_answer() {
+    let Some((_, models)) = paths() else { return };
+    let tables = TermTables::load(&models).expect("tables");
+    let model = ContextModel::load(&models).expect("the context model");
+    let words = [
+        "", "a", "я", "A", "Я", "the", "The", "THE", "да", "Да", "ДА", "ghbdtn", "привет", "Привет", "ПРИВЕТ", "[f", "х", "б", "ю", "ж", "э", ",", ".", ";", "'", "[", "]", "{", "}", "1", "12", "1.", "1,", "z1", "а1", "A1", "a-b", "a_b",
+        "да-да", "\"a", "«а", "aя", "яa", "%", "&", "#", "ё", "Ё", ".net", "c++", "123456789012", "abcdefghijklmnopqrstuvwxyz", "кто-то", "ab12cd34ef56gh78", "a1b2c3d4e5f6", "Ъ", "ъ",
+    ];
+    let befores = ["", " ", "текст ", "text ", "Текст. ", "a_b(", "x = ", "\"", "1 ", "ABC ", "а\n", "Да: ", "foo.", "http://", "«", "123 ", "да ", "the ", "слово, ", "ghbdtn "];
+    let afters = ["", " ", "текст", "text", "1", "12", "+", "a b", "\n", ".", ", да", "x".repeat(200).leak(), "+=", "%"];
+    let origins = [AfterOrigin::None, AfterOrigin::Field, AfterOrigin::PlannedNextConversion, AfterOrigin::KeptNextWord];
+    let score = |known: bool, frequency: i64| WordScore { value: 0.5, known, frequency, gram_ratio: 0.5, exact: known, spell_known: !known, ngram_score: -2.0, invalid_ratio: 0.1, raw_ngram_score: -2.0 };
+    let mut index = 0_usize;
+    for original in words {
+        for alternative in words {
+            for before in befores {
+                index += 1;
+                let bit = |shift: usize| (index >> shift) & 1 == 1;
+                let after = afters[index % afters.len()];
+                let field = FieldContext {
+                    application: "app".to_string(),
+                    field_id: "1".to_string(),
+                    before: before.to_string(),
+                    after: after.to_string(),
+                    role: [FieldRole::Text, FieldRole::Code, FieldRole::Search, FieldRole::Terminal, FieldRole::Unknown][index % 5],
+                    selection: false,
+                    sensitive: false,
+                    source: "test".to_string(),
+                };
+                let item = ContextEvidence {
+                    original: original.to_string(),
+                    alternative: alternative.to_string(),
+                    source_group: i64::from(bit(0)),
+                    field,
+                    trigger: ks_lang::intent_model::TRIGGERS[index % ks_lang::intent_model::TRIGGERS.len()].as_str().to_string(),
+                    baseline_convert: bit(1),
+                    source_known: bit(2),
+                    target_known: bit(3),
+                    score_delta: if bit(4) { 1.5 } else { -1.5 },
+                    source_score: bit(5).then(|| score(bit(6), 5)),
+                    target_score: bit(6).then(|| score(bit(7), 500)),
+                    model_probability: bit(7).then_some(0.7),
+                    model_threshold: bit(7).then_some(0.5),
+                    literal_tail: if bit(8) { "'s".to_string() } else { String::new() },
+                    ortho_score: bit(9).then_some(0.2),
+                    ortho_threshold: bit(9).then_some(0.1),
+                    boundary_text: if bit(10) { " ".to_string() } else { String::new() },
+                    after_origin: origins[index % origins.len()],
+                    before_origin: if bit(11) { BeforeOrigin::PlannedPreviousReading } else { BeforeOrigin::Field },
+                    source_identifier: bit(12),
+                    target_identifier: bit(13),
+                    source_typo: bit(14),
+                    target_typo: bit(15),
+                    source_opening: bit(1),
+                    target_opening: bit(2),
+                    inside: bit(3),
+                    term_counts_dropped: bit(4),
+                };
+                let _ = questions(&item, &tables);
+                let probability = model.predict(&item).probability;
+                assert!((0.0..=1.0).contains(&probability), "{item:?}: {probability}");
+            }
+        }
+    }
+}
