@@ -322,13 +322,15 @@ extern "C" fn on_event(_proxy: CFRef, event_type: u32, event: *mut c_void, _info
 
 impl MacAPI for NativeMacAPI {
     fn input_sources(&self) -> Result<Vec<String>, MacBackendError> {
+        // Read first: a guard made inside the call's arguments would live through the call and its closure.
+        let known = locked(&self.state.sources).order.clone();
         let state = self.state.clone();
         MAIN_THREAD.call(
             move || {
                 state.refresh_sources()?;
                 Ok(locked(&state.sources).order.clone())
             },
-            Ok(locked(&self.state.sources).order.clone()),
+            Ok(known),
             MACOS_MAIN_THREAD_WAIT_SECONDS,
         )
     }
