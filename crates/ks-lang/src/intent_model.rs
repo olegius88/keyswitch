@@ -1073,7 +1073,7 @@ fn model_float(value: &Value, field: &str) -> Result<f64, LoadError> {
         Value::Number(number) => number.as_f64().expect("a JSON number reads as f64"),
         Value::Null | Value::Bool(_) | Value::String(_) | Value::Array(_) | Value::Object(_) => return Err(LoadError::value(format!("{field} must be numeric"))),
     };
-    if !parsed.is_finite() || parsed.abs() > INTENT_MAX_MODEL_FLOAT_MAGNITUDE {
+    if parsed.abs() > INTENT_MAX_MODEL_FLOAT_MAGNITUDE {
         return Err(LoadError::value(format!("{field} must be finite and bounded")));
     }
     Ok(parsed)
@@ -1140,17 +1140,6 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
         return Err(format_error(format!("{field} exceeds JSON nesting limit")));
     }
     match value {
-        Value::Number(number) if number.is_i64() || number.is_u64() => {
-            let integer = number.as_i64().map_or_else(|| i128::from(number.as_u64().expect("an integer")), i128::from);
-            if !(INT64_MIN..=UINT64_MAX).contains(&integer) {
-                return Err(format_error(format!("{field} integer is out of range")));
-            }
-        }
-        Value::Number(number) => {
-            if !number.as_f64().is_some_and(f64::is_finite) {
-                return Err(format_error(format!("{field} must be finite")));
-            }
-        }
         Value::Array(items) => {
             for item in items {
                 validated_json_value(item, &format!("{field}[]"), depth + 1)?;
@@ -1161,7 +1150,8 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
                 validated_json_value(item, &format!("{field}.{key}"), depth + 1)?;
             }
         }
-        Value::Null | Value::Bool(_) | Value::String(_) => {}
+        // A JSON number is finite, and an integer the reader took fits 64 bits.
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
     Ok(())
 }
@@ -1171,6 +1161,112 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 mod tests {
     use crate::constants::FNV1A64_OFFSET_BASIS;
     use super::*;
+
+    fn real_model() -> Vec<u8> {
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models/layout_intent_v1.ksm")).unwrap()
+    }
+
+    fn message(data: Vec<u8>) -> String {
+        LinearNgramModel::from_bytes(data, None).err().unwrap().message
+    }
+
+    #[test]
+    fn a_damaged_container_says_what_is_wrong() {
+        let good = real_model();
+        assert!(LinearNgramModel::from_bytes(good.clone(), None).is_ok());
+        let changed = |at: usize, bytes: &[u8]| {
+            let mut data = good.clone();
+            data[at..at + bytes.len()].copy_from_slice(bytes);
+            data
+        };
+        assert_eq!(message(changed(0, b"XXXX")), "invalid KSLM magic");
+        assert!(message(changed(4, &[99, 0])).starts_with("unsupported KSLM schema"));
+        assert_eq!(message(changed(6, &[1, 0])), "unsupported KSLM header flags");
+        assert_eq!(message(changed(8, &[0, 0, 0, 0])), "invalid KSLM manifest length");
+        assert_eq!(message(changed(12, &[0, 0, 0, 0])), "invalid KSLM payload length");
+        assert_eq!(message(changed(12, &[0xff, 0xff, 0xff, 0x7f])), "invalid KSLM payload length");
+        assert_eq!(message(changed(20, &[0xff; 32])), "KSLM manifest checksum mismatch");
+        assert_eq!(message(good[..good.len() - 1].to_vec()), "KSLM file length does not match header");
+        let last = good.len() - 1;
+        assert_eq!(message(changed(last, &[good[last] ^ 1])), "KSLM payload CRC32 mismatch");
+        let manifest = u32::from_le_bytes(good[8..12].try_into().unwrap()).to::<usize>();
+        let mut other = good.clone();
+        other[HEADER_SIZE + manifest] ^= 1;
+        let crc = crc32(&other[HEADER_SIZE + manifest..]);
+        other[16..20].copy_from_slice(&crc.to_le_bytes());
+        assert!(LinearNgramModel::from_bytes(other, None).is_err());
+    }
+
+    #[test]
+    fn canonical_json_is_what_python_writes_and_nothing_else() {
+        for text in ["{}", "[]", "0", "-1", "1.5", "true", "false", "null", r#"{"a":1}"#, r#"[1,"x\n\r\t\b\f\"\\","\u0001"]"#, r#"{"a":[],"b":{}}"#] {
+            assert!(is_canonical(text.as_bytes()), "{text}");
+        }
+        for text in ["", " {}", "{} ", r#"{"b":1,"a":2}"#, r#"{"a" 1}"#, r#"{"a":1 "b":2}"#, "[1 2]", "tru", "01", "-", "-01", "1.50", "\"\u{1}\"", r#""\u000a""#, r#""\u00AB""#, r#""\u00ab""#, r#""\u0020""#, r#""\u0100""#, r#""\q""#, r#""\u12""#, r#""\uzzzz""#, "x", "{1:2}", r#"{"a":}"#, "[,]", "\"abc", "\"a\\", "[1,", r#"{"a":1,"#] {
+            assert!(!is_canonical(text.as_bytes()), "{text}");
+        }
+        assert!(!is_canonical(b"\"\xff\""));
+    }
+
+    #[test]
+    fn the_manifest_is_refused_field_by_field() {
+        let refused = |text: &str| read_manifest(text.as_bytes()).err().unwrap().message;
+        assert_eq!(refused(r#"{"a":1}"#), "KSLM manifest fields do not match schema");
+        let deep = format!("{{\"a\":1,\"metadata\":{}1{}}}", "[".repeat(20), "]".repeat(20));
+        assert!(refused(&deep).contains("exceeds JSON nesting limit"));
+        let objects = format!("{{\"metadata\":{}1{}}}", "{\"a\":".repeat(20), "}".repeat(20));
+        assert!(refused(&objects).contains("exceeds JSON nesting limit"));
+        assert!(read_manifest(b"[1]").is_err());
+        assert!(read_manifest(b"\xff").is_err());
+        let error = RefCell::new(None);
+        let walker = MetadataWalker { error: &error, field: "f".to_owned(), depth: 0 };
+        assert!(!Visitor::visit_f64::<serde_json::Error>(walker, f64::INFINITY).unwrap());
+        assert!(error.borrow().is_some());
+        assert!(validated_json_value(&serde_json::json!(1), "f", INTENT_METADATA_MAX_DEPTH + 1).is_err());
+    }
+
+    #[test]
+    fn numbers_and_tables_of_the_manifest() {
+        use serde_json::json;
+        assert!(model_float(&json!(1e300), "f").is_err() && model_float(&json!("x"), "f").is_err() && model_float(&json!(1.0), "f").is_ok());
+        assert_eq!(manifest_int(&json!(u64::MAX), "f").unwrap(), i128::from(u64::MAX));
+        assert!(manifest_int(&json!(1.5), "f").is_err());
+        let map = |value: Value| value.as_object().cloned().unwrap();
+        assert!(validate_threshold_logits(&map(json!({"a": 1}))).is_err());
+        let every: serde_json::Map<String, Value> = TRIGGERS.iter().map(|trigger| (trigger.as_str().to_owned(), json!({"x": 1, "y": 2}))).collect();
+        assert!(validate_threshold_logits(&every).is_err());
+        let names: Vec<&str> = LAYOUT_DIRECTIONS.iter().map(|direction| direction.as_str()).collect();
+        assert!(validate_platt_calibration(&map(json!({"a": 1, "b": 2}))).is_err());
+        let wrong = map(json!({names[0]: {"a": 1, "b": 2}, names[1]: {"a": 1, "b": 2}}));
+        assert!(validate_platt_calibration(&wrong).is_err());
+        let no_bias = map(json!({names[0]: {"scale": 1, "b": 2}, names[1]: {"a": 1, "b": 2}}));
+        assert!(validate_platt_calibration(&no_bias).is_err());
+    }
+
+    #[test]
+    fn a_status_says_what_it_can() {
+        let mut status = IntentModelStatus { available: true, path: None, version: Some("v".to_owned()), checksum: None, error: None };
+        assert_eq!(status.summary(), "v");
+        status.available = false;
+        status.error = Some("broken".to_owned());
+        assert_eq!(status.summary(), "недоступна: broken");
+        status.error = None;
+        assert!(status.summary().starts_with("недоступна: "));
+    }
+
+    #[test]
+    fn a_tilde_is_the_home_folder_and_a_relative_path_is_taken_from_here() {
+        assert_eq!(expanduser("plain"), PathBuf::from("plain"));
+        if std::env::var_os("HOME").is_some() {
+            assert_eq!(expanduser("~"), PathBuf::from(std::env::var_os("HOME").unwrap()));
+            assert!(expanduser("~/x").ends_with("x"));
+        }
+        assert!(load_resolved(Path::new("no-such-model.ksm")).is_err());
+        let big = std::env::temp_dir().join(format!("ks-big-model-{}", std::process::id()));
+        std::fs::write(&big, vec![0_u8; KSLM_MAX_CONTAINER_BYTES + 1]).unwrap();
+        assert!(read_bounded(&big).is_err());
+        std::fs::remove_file(big).unwrap();
+    }
 
     #[test]
     fn crc_and_fnv_match_the_references() {
