@@ -23,7 +23,7 @@ mod scenario {
     use ks_config::config::SettingsStore;
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
-    use ks_win::constants::{VK_BACK, VK_END, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT};
+    use ks_win::constants::{VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT};
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
     use ks_win::windows_native::NativeWindowsAPI;
     use serde_json::{Value, json};
@@ -31,7 +31,7 @@ mod scenario {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, LoadKeyboardLayoutW, SetFocus};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GetClientRect, GetWindowTextLengthW, GetWindowTextW, IsZoomed, MSG, MoveWindow, PM_REMOVE,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GetClientRect, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, IsZoomed, MSG, MoveWindow, PM_REMOVE,
         PeekMessageW, RegisterClassW, SW_MAXIMIZE, SW_SHOW, ShowWindow, TranslateMessage, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
     };
 
@@ -58,6 +58,7 @@ mod scenario {
     const WINDOW_OPENS: u64 = 1_000;
     const START_ATTEMPTS: u32 = 4;
     const PROBE_ATTEMPTS: u32 = 3;
+    const SURFACE_CLOSES: u64 = 1_000;
 
     /// A key as a person's: no mark of this program on it.
     fn user(pressed: bool) -> NativeInput {
@@ -174,6 +175,17 @@ mod scenario {
             self.pump_until(milliseconds, |_| false);
         }
 
+        /// A system surface can hold the foreground of a fresh session (seen on the Arm runner: search, the web host):
+        /// nothing typed reaches a window until Escape closes it.
+        fn close_surface_over_this(&self) -> Result<(), String> {
+            // SAFETY: takes nothing.
+            if unsafe { GetForegroundWindow() } != self.window {
+                self.virtual_key(VK_ESCAPE)?;
+                self.pump(SURFACE_CLOSES);
+            }
+            Ok(())
+        }
+
         fn activate(&self) {
             self.api.activate_window(self.window as isize as i64);
             // SAFETY: the edit control belongs to this thread.
@@ -246,6 +258,9 @@ mod scenario {
         /// Foreground and focus can both hold while injected keys still go nowhere: a lone space proves the field receives.
         fn probe(&self) -> Result<(), String> {
             for _ in 0..PROBE_ATTEMPTS {
+                self.activate();
+                self.pump(PHASE_START);
+                self.close_surface_over_this()?;
                 self.activate();
                 self.pump(PHASE_START);
                 self.scans(&[SCAN_SPACE])?;

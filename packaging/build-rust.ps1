@@ -115,6 +115,7 @@ Copy-Item -LiteralPath (Join-Path $FrozenDirectory "en_US.lm") -Destination $Mod
 Copy-Item -LiteralPath (Join-Path $FrozenDirectory "ru_RU.lm") -Destination $ModelStage
 Copy-Item -LiteralPath (Join-Path $FrozenDirectory "COPYRIGHT.onboard-data") -Destination (Join-Path $ResourceStage "licenses\COPYRIGHT.onboard-data.txt")
 Copy-Item -LiteralPath (Join-Path $ProjectDirectory "LICENSE") -Destination (Join-Path $ResourceStage "licenses\LICENSE.KeySwitch.txt")
+Copy-Item -LiteralPath (Join-Path $ProjectDirectory "packaging\third-party-licenses\windows.txt") -Destination (Join-Path $ResourceStage "licenses\third-party-rust.txt")
 # What was copied is what was checked.
 Assert-Frozen -Path (Join-Path $ModelStage "en_US.lm") -Policy $EnglishPolicy -Label "staged English language model"
 Assert-Frozen -Path (Join-Path $ModelStage "ru_RU.lm") -Policy $RussianPolicy -Label "staged Russian language model"

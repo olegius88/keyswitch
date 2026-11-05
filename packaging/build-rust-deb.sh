@@ -29,7 +29,7 @@ install -d "$package_root/DEBIAN" "$package_root$(dirname "$apt_sources_path")" 
 
 sed -e "s/@VERSION@/$version/g" -e "s/@ARCHITECTURE@/$architecture/g" \
     "$project_dir/packaging/debian/control.in" > "$package_root/DEBIAN/control"
-printf '%s\n' "$apt_sources_path" > "$package_root/DEBIAN/conffiles"
+printf '%s\n' "$apt_sources_path" "$apt_keyring_path" > "$package_root/DEBIAN/conffiles"
 install -m 0644 "$apt_sources" "$package_root$apt_sources_path"
 install -m 0644 "$apt_keyring" "$package_root$apt_keyring_path"
 
@@ -46,6 +46,8 @@ install -m 0644 "$project_dir/packaging/io.github.olegius88.KeySwitch.desktop" "
 install -m 0644 "$project_dir/packaging/gnome-shell/$gnome_uuid/metadata.json" "$project_dir/packaging/gnome-shell/$gnome_uuid/extension.js" \
     "$package_root/usr/share/gnome-shell/extensions/$gnome_uuid/"
 install -m 0644 "$project_dir/packaging/debian/copyright" "$project_dir/README.md" "$package_root/usr/share/doc/keyswitch/"
+install -m 0644 "$project_dir/packaging/third-party-licenses/linux.txt" "$package_root/usr/share/doc/keyswitch/licenses/third-party-rust.txt"
+install -m 0644 "$project_dir/model/intent_v1/sources/COPYRIGHT.onboard-data" "$package_root/usr/share/doc/keyswitch/licenses/copyright.onboard-data"
 install -m 0644 "$project_dir/packaging/debian/lintian-overrides" "$package_root/usr/share/lintian/overrides/keyswitch"
 sed "s/@VERSION@/$version/g" "$project_dir/packaging/debian/changelog.in" | gzip -n -9 > "$package_root/usr/share/doc/keyswitch/changelog.gz"
 gzip -n -9 -c "$project_dir/packaging/keyswitch.1" > "$package_root/usr/share/man/man1/keyswitch.1.gz"

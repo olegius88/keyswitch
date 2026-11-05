@@ -38,6 +38,7 @@ jobs:
           sudo apt-get install -y libhunspell-1.7-0
           cargo run --release -p ks-train --bin ks-train -- archive --tree "$PWD"
           cargo run --release -p ks-train --bin ks-train -- gates --tree "$PWD"
+          cargo run --release -p ks-train --bin ks-train -- licenses --tree "$PWD" --verify
           for family in boundary-v1 context-v2 ortho-v2 prefix-v1; do
             cargo run --release -p ks-train --bin ks-train -- retired "$family" --tree "$PWD" --replay > /dev/null
           done
@@ -135,6 +136,8 @@ jobs:
         run: cargo test -p ks-linux
       - name: Build
         run: packaging/build-rust-deb.sh out
+      - name: What the package holds
+        run: cargo run --release -p ks-train --bin ks-train -- deb-check --tree "$PWD" "$(ls out/keyswitch_*.deb)"
       - name: The real tests in a private X server, and the package itself
         run: packaging/e2e.sh "$(ls out/keyswitch_*.deb)"
       - name: Install and start

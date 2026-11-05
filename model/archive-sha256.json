@@ -232,6 +232,7 @@
   "model/context_v2/candidate-seal.json": "03878d1d8fcc0a79295b5f63acfa06f097a2b99931a1f98eb6060c7d0370a53a",
   "model/context_v2/candidate.json": "55f0d735de8751f3f414d569b6e1eb2bbb294303d8fe01f2fde66c3fadecfeb1",
   "model/context_v2/compatibility/README.md": "cd23decf07097c8c4ac7535ea5c6de7f31adb8393004b77284fe940c2678ef53",
+  "model/context_v2/compatibility/feature-two-observations.json.gz": "4ea2fc825347ea1f5e3b18643406f21511945caad0558a98adec3339acbc3dd4",
   "model/context_v2/compatibility/feature-two-probes.json": "d33382c8ab0e78708835158f4fb2a9bae35bf56025b318f623743d4b9f6d47a7",
   "model/context_v2/compatibility/generation-sources/model/intent_v1/config.json": "76fde35bec793c2c1d6a168753e28cb1cb0c62ac63fa1da40a6d36c85c7fd532",
   "model/context_v2/compatibility/generation-sources/src/keyswitch/resources/models/boundary-v2.json": "6685e02734f0451a91278fa577b37c7a25a2aa692c7a91c9a979fdbb045b7cf5",

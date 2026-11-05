@@ -22,7 +22,7 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
-//! `ks-train gates --tree <root>`
+//! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
@@ -119,6 +119,25 @@ fn main() {
         let resources = ks_lang::Resources::new(root.join("resources"));
         let request = ks_train::typo_evaluation::Request { root: &root, measurement: arguments.get(1).expect("synthetic, clean, field or all"), messages: Path::new(option(&arguments, "--messages").expect("--messages is required")), manifest: Path::new(option(&arguments, "--manifest").unwrap_or(".t/field/manifest.json")), out: Path::new(option(&arguments, "--out").expect("--out is required")), tune: arguments.iter().any(|argument| argument == "--tune"), local_offset_seconds: option(&arguments, "--utc-offset").map_or(0, |value| value.parse().expect("seconds")) };
         if let Err(error) = ks_train::typo_evaluation::command(&request, &resources) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("deb-check") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        match ks_train::deb_check::verify(&root, Path::new(arguments.last().expect("the package"))) {
+            Ok(line) => println!("{line}"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("licenses") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if let Err(error) = ks_train::licenses::command(&root, arguments.iter().any(|argument| argument == "--verify")) {
             eprintln!("{error}");
             std::process::exit(1);
         }

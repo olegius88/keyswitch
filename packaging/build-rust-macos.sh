@@ -40,6 +40,10 @@ strip -x "$bundle/Contents/MacOS/$app_name"
 (cd "$project_dir/resources" && find . -type f ! -path './wayland-input/*' ! -name style.css -print0 \
     | xargs -0 tar -cf - ) | tar -xf - -C "$bundle/Contents/Resources/resources"
 cp "$frozen_model_sources/en_US.lm" "$frozen_model_sources/ru_RU.lm" "$bundle/Contents/Resources/resources/models/"
+mkdir -p "$bundle/Contents/Resources/licenses"
+cp "$project_dir/LICENSE" "$bundle/Contents/Resources/licenses/LICENSE.KeySwitch.txt"
+cp "$frozen_model_sources/COPYRIGHT.onboard-data" "$bundle/Contents/Resources/licenses/COPYRIGHT.onboard-data.txt"
+cp "$project_dir/packaging/third-party-licenses/macos.txt" "$bundle/Contents/Resources/licenses/third-party-rust.txt"
 
 cat > "$bundle/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

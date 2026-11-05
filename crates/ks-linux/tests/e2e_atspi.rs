@@ -19,10 +19,10 @@ const PREFIX: &str = "ранее вставлено ghbdtn";
 const SUFFIX: &str = " после курсора";
 const STAGES: u32 = 3;
 const PASSWORD_STAGE: u32 = 2;
-const SELECTION_CHARACTERS: i32 = 5;
-const INITIAL_PREPARE: u64 = 300;
-const PREPARE_SETTLE: u64 = 200;
-const START_READ: u64 = 200;
+const SELECTION_CHARACTERS: i32 = 3;
+const INITIAL_PREPARE: u64 = 600;
+const PREPARE_SETTLE: u64 = 300;
+const START_READ: u64 = 100;
 const READ_DEADLINE: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
 const ANSWER_WAIT: u64 = 15_000;
@@ -114,7 +114,7 @@ fn run() -> Result<(), String> {
             answer = receiver.try_recv().ok();
             answer.is_some()
         });
-        let field = answer.ok_or("the reader did not answer")??;
+        let field = answer.ok_or("the reader did not answer")?.map_err(|error| format!("{error}; the entry's selection is {:?}", entry.selection_bounds()))?;
         let holds = match stage {
             0 => field.before == PREFIX && field.after == SUFFIX,
             1 => field.selection && field.before.is_empty() && field.after.is_empty(),
