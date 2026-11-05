@@ -226,7 +226,7 @@ pub fn scaled_bgra(canvas: &Canvas, target: usize) -> Vec<u8> {
                     count += 1;
                 }
             }
-            let color = |channel: usize| if alpha == 0 { 0 } else { ((sums[channel] + alpha / 2) / alpha).low::<u8>() };
+            let color = |channel: usize| (sums[channel] + alpha / 2).checked_div(alpha).unwrap_or(0).low::<u8>();
             out.extend_from_slice(&[color(2), color(1), color(0), ((alpha + count / 2) / count.max(1)).low::<u8>()]);
         }
     }

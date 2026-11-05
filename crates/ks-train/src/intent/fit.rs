@@ -486,6 +486,7 @@ fn direction_of(example: &LexicalExample) -> usize {
     usize::from(example.source_group != 0)
 }
 
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn greater(left: &[f64], right: &[f64]) -> bool {
     for (a, b) in left.iter().zip(right) {
         if a != b {
@@ -533,6 +534,7 @@ fn next_up(value: f64) -> f64 {
 }
 
 /// `_direction_operating_curve`.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn direction_curve(selected: &[Scored<'_>], direction: usize, maximum_false_positives: i64) -> Result<Vec<Point>, String> {
     let mut ordered: Vec<&Scored<'_>> = selected.iter().filter(|item| item.direction == direction).collect();
     if ordered.is_empty() {

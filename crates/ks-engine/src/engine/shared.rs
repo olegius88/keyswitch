@@ -191,7 +191,8 @@ impl Shared {
                 .values()
                 .map(|value| match value {
                     Value::String(text) => Hotkey::new(text),
-                    other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => Hotkey::new(&other.to_string()),
+                    other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) |
+Value::Object(_)) => Hotkey::new(&other.to_string()),
                 })
                 .collect(),
             _ => Vec::new(),

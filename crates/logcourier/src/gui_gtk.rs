@@ -513,6 +513,7 @@ fn start(application: &gtk::Application, root: PathBuf, config: Config, minimize
 }
 
 #[must_use]
+#[expect(clippy::mem_forget, reason = "the application stays held until the process ends")]
 pub fn run(minimized: bool) -> i32 {
     let root = data_directory();
     let _ = private_directory(&root);

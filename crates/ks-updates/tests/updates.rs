@@ -1,5 +1,6 @@
 //! The behaviour contract of the updater, over a fake opener (the cases of the Python tests that matter).
 
+#![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_cast::To as _;
 use std::collections::VecDeque;
 use std::fmt::Display;
@@ -105,6 +106,7 @@ fn release_payload(version: &str, target: UpdateTarget, content: &[u8]) -> Value
     })
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "the signature a fake response has")]
 fn json_response(value: &Value) -> io::Result<FakeResponse> {
     Ok(FakeResponse::new(value.to_string().as_bytes(), LATEST_RELEASE_URL).0)
 }

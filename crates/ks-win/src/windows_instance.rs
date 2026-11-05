@@ -11,6 +11,7 @@ pub trait WindowsInstanceAPI {
 }
 
 #[cfg(windows)]
+#[cfg_attr(windows, expect(clippy::unnecessary_wraps, reason = "other systems answer with the error"))]
 fn native_api() -> Result<Box<dyn WindowsInstanceAPI>, WindowsSystemError> {
     Ok(Box::new(NativeWindowsInstanceAPI::new()))
 }

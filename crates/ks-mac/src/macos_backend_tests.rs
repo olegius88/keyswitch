@@ -1,7 +1,7 @@
 //! `tests/test_macos_backend.py`: the decision half of the macOS backend over a fake of the system.
 
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Condvar};
+use std::sync::Condvar;
 
 use super::*;
 use crate::macos_context::SelectionAfter;

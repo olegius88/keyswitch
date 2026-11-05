@@ -1,4 +1,5 @@
 //! Collection and delivery against a scripted Telegram.
+#![expect(clippy::panic, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::Write;

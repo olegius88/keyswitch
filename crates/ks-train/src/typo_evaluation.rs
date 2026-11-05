@@ -113,7 +113,8 @@ fn messages(directory: &Path, name: &str) -> Result<Vec<(String, String)>, Strin
         .iter()
         .map(|line| {
             let item: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
-            let qid = match &item["qid"] { Value::String(text) => text.clone(), other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string() };
+            let qid = match &item["qid"] { Value::String(text) => text.clone(), other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) |
+Value::Object(_)) => other.to_string() };
             Ok((qid, item["text"].as_str().unwrap_or("").to_owned()))
         })
         .collect()

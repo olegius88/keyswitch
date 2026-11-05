@@ -174,7 +174,7 @@ fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
         Value::Null => "None".to_owned(),
-        other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
+        other @ (Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_)) => other.to_string(),
     }
 }
 

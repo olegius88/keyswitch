@@ -1,5 +1,6 @@
 //! What a release may not lose: the floors of the installed pair's receipt and of the engine replays. A new pair raises them
 //! by hand in `tests/data/quality_floors.json`, on purpose.
+#![expect(clippy::panic, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_train::corpus::read_json;
 use serde_json::Value;
 use std::path::{Path, PathBuf};

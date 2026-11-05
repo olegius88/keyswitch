@@ -1174,7 +1174,7 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::{FNV1A64_OFFSET_BASIS};
+    use crate::constants::FNV1A64_OFFSET_BASIS;
     use super::*;
 
     #[test]

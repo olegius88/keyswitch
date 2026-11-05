@@ -222,6 +222,7 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
     });
     match value {
         Value::Object(map) => map,
+        #[expect(clippy::unreachable, reason = "the defaults are a literal object above")]
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => unreachable!("the defaults are an object"),
     }
 });

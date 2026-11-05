@@ -977,7 +977,8 @@ fn load_members(path: &Path) -> Result<Vec<Member>, String> {
         // `str(row["question"])`.
         let question = match &row["question"] {
             Value::String(text) => text.clone(),
-            other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
+            other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) |
+Value::Object(_)) => other.to_string(),
         };
         members.push(Member { text: row["text"].as_str().unwrap_or("").to_owned(), question: hex_digest(&format!("{DEVCHAT_NAMESPACE}:{question}")), mix: row["mix"].as_str().unwrap_or("").to_owned() });
     }

@@ -16,6 +16,7 @@ pub fn string(text: &str) -> Id {
 }
 
 /// The characters of an `NSString`.
+#[cfg_attr(target_os = "macos", expect(clippy::not_unsafe_ptr_arg_deref, reason = "the reference is an object the system handed over"))]
 pub fn text_of(reference: Id) -> String {
     if reference.is_null() {
         return String::new();

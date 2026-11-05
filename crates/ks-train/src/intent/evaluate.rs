@@ -231,6 +231,7 @@ fn quality_evidence(value: Option<&Value>) -> bool {
 }
 
 /// `_runtime_decision_parameters_match`: shipped thresholds and veto bound to every signed selection record.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn runtime_parameters_match(model: &LinearNgramModel, manifest: &Value, config: &FitConfig) -> bool {
     let walk = || -> Option<bool> {
         let thresholds = exact(manifest.get("thresholds"), &TRIGGER_NAMES)?;
@@ -1060,6 +1061,7 @@ fn median(samples: &[f64]) -> f64 {
     if ordered.len() % 2 == 1 { ordered[middle] } else { f64::midpoint(ordered[middle - 1], ordered[middle]) }
 }
 
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn coverage_statistics(rows: &[&PredictionRow<'_>]) -> Result<Value, String> {
     let values: Vec<f64> = rows.iter().map(|row| row.coverage).collect();
     if values.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value)) {

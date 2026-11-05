@@ -57,7 +57,8 @@ fn int_of(value: &Value) -> i64 {
     // `int(...)`: the battery holds numbers here, and a boolean counts.
     match value {
         Value::Bool(flag) => i64::from(*flag),
-        other @ Value::Null | other @ Value::Number(_) | other @ Value::String(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.as_i64().unwrap_or(0),
+        other @ (Value::Null | Value::Number(_) | Value::String(_) | Value::Array(_) |
+Value::Object(_)) => other.as_i64().unwrap_or(0),
     }
 }
 

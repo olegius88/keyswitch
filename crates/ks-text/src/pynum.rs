@@ -12,6 +12,7 @@ use crate::ucd;
 /// `repr(x)` and `str(x)` of a float: the shortest text that parses back to `x`, in Python's layout
 /// (`1e+16`, `1.5e-07`, `0.0001`, `inf`, `nan`, `-0.0`).
 #[must_use]
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn float_repr(x: f64) -> String {
     if x.is_nan() {
         return "nan".to_string();
@@ -206,6 +207,7 @@ pub fn py_float(s: &str) -> Option<f64> {
 /// Python result is an `int`).
 /// `CPython`'s recipe: round half away, then fix up the exact halves.
 #[must_use]
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn py_round(x: f64) -> f64 {
     let rounded = x.round();
     let rounded = if (x - rounded).abs() == 0.5 { 2.0 * (x / 2.0).round() } else { rounded };
@@ -309,6 +311,7 @@ pub enum FsumError {
 }
 
 /// `math.fsum`: Shewchuk's exactly rounded sum, a port of `CPython`'s `math_fsum`.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn fsum(values: &[f64]) -> Result<f64, FsumError> {
     let mut partials: Vec<f64> = Vec::new();
     let mut special_sum = 0.0f64;

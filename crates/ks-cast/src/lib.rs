@@ -5,7 +5,15 @@
 //!   or the smallest one; a float loses its fraction, and `NaN` becomes zero; a large integer becomes the nearest float.
 //! - [`To::low`]: the low bits of an integer, for hashes and packed values, where dropping the rest is the point.
 //! - [`To::bits`]: the same bits read with the other sign, as a system handle or status is.
-#![expect(clippy::as_conversions, reason = "this module is the only place allowed to convert with `as`")]
+#![expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    trivial_numeric_casts,
+    reason = "this crate is the only place allowed to convert with `as`"
+)]
 
 /// The nearest value of type `T`.
 pub trait Nearest<T> {

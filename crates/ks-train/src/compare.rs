@@ -3,7 +3,7 @@
 use crate::corpus::{CALIBRATION, DEVELOPMENT};
 use crate::fit::{Columns, FeatureSet, FitInputs, build_features_of_splits};
 use crate::fit::NoStages;
-use crate::{ACTIONS};
+use crate::ACTIONS;
 use ks_context::constants::{ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX};
 use ks_context::context_action_features::FeatureMap;
 use ks_context::context_model::{ContextModel, softmax};

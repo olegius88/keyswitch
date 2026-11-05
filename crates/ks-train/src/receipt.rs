@@ -49,6 +49,7 @@ fn sha(value: &Value) -> Result<&str, String> {
     value.as_str().filter(|text| text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))).ok_or_else(|| "invalid SHA256".to_owned())
 }
 
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn calibration_counts(row: &Value, policy: &Value) -> Result<(), String> {
     let number = |name: &str| count(&row[name], name);
     let (rows, possible, right, wrong) = (number("rows")?, number("convert_rows")?, number("converted_correctly")?, number("false_conversions")?);

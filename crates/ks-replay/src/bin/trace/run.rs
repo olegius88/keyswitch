@@ -73,6 +73,7 @@ struct Difference {
     detail: String,
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "callers return its answer as they return no difference")]
 fn differ(cause: impl Into<String>, detail: impl Into<String>) -> Option<Difference> {
     Some(Difference { cause: cause.into(), detail: detail.into() })
 }

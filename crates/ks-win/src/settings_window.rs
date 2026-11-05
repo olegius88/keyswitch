@@ -1585,7 +1585,8 @@ impl Ui {
                 }
                 Err(error) => match error {
                     ks_config::learning::LearningError::Invalid(invalid) => invalid.0,
-                    other @ ks_config::learning::LearningError::Io(_) | other @ ks_config::learning::LearningError::Value(_) => format!("Правило не сохранено: {other}"),
+                    other @ (ks_config::learning::LearningError::Io(_) |
+ks_config::learning::LearningError::Value(_)) => format!("Правило не сохранено: {other}"),
                 },
             }
         });

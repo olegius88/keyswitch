@@ -171,7 +171,7 @@ fn status_repr(status: &serde_json::Map<String, Value>) -> String {
                 Value::Bool(true) => "True".to_owned(),
                 Value::Bool(false) => "False".to_owned(),
                 Value::String(text) => format!("'{text}'"),
-                other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
+                other @ (Value::Null | Value::Number(_) | Value::Array(_) | Value::Object(_)) => other.to_string(),
             };
             format!("'{key}': {shown}")
         })

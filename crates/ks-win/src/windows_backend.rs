@@ -497,6 +497,7 @@ impl WindowsBackend {
     }
 
     #[cfg(windows)]
+    #[cfg_attr(windows, expect(clippy::unnecessary_wraps, reason = "other systems answer with the error"))]
     fn native_api() -> Result<Arc<dyn WindowsAPI>, WindowsBackendError> {
         Ok(Arc::new(crate::windows_native::NativeWindowsAPI::new()))
     }

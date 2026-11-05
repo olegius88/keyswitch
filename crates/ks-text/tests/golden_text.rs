@@ -3,6 +3,7 @@
 //! The files live in `$KS_GOLDEN_DIR/text` (default: the `golden` folder of the private work tree); a test
 //! skips with a message when its file is absent. Floats are compared by their bits (a NaN only has to be a NaN).
 
+#![expect(clippy::unreachable, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_text::{layouts, normalize, pyjson, pynum, pystr, russian_text, ucd};

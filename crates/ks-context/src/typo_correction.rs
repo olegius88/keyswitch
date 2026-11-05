@@ -608,6 +608,7 @@ impl TypoCorrector {
 
 /// `TypoCorrector.decide` under any policy: the candidates do not depend on it, so the measurement tool scores one list under many.
 #[must_use]
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn decide_under(policy: &TypoPolicy, candidates: &[Candidate], capital: bool) -> TypoJudgement {
     if candidates.is_empty() {
         return TypoJudgement::bare(Reason::NoCandidate);

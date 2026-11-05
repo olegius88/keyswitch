@@ -260,6 +260,7 @@ impl SettingsStore {
     /// `set(dotted_path, value, persist=...)`. Intermediate levels that are not mappings are replaced by empty ones. An
     /// unchanged value (Python `==`: `1` equals `True`) changes nothing and calls nobody. A failure to save is returned
     /// after the value has been changed in memory, and the callbacks are not called.
+    #[expect(clippy::unreachable, reason = "the mapping was put there two lines above")]
     pub fn set(&self, dotted_path: &str, value: Value, persist: bool) -> io::Result<()> {
         let callbacks;
         {

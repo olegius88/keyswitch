@@ -64,7 +64,7 @@ pub fn parse_arguments(arguments: &[String]) -> Parsed {
             continue;
         };
         if argument.contains('=') && option != "--help" {
-            return error(&format!("argument {option}: ignored explicit argument '{}'", argument.split_once('=').unwrap().1));
+            return error(&format!("argument {option}: ignored explicit argument '{}'", argument.split_once('=').map_or("", |(_, value)| value)));
         }
         match option {
             "--help" => {

@@ -2,6 +2,7 @@
 //! context model, prefix model and typo lists), and prints what each step cost:
 //! `/usr/bin/time -v memory_probe <resources>`; the steady RSS is the value printed last, the peak is `VmHWM`.
 
+#![expect(clippy::mem_forget, clippy::string_slice, reason = "a test or a probe stops on what it did not expect")]
 use ks_context::context_model::{ContextEvidence, ContextModel};
 use ks_context::input_context::FieldContext;
 use ks_context::prefix_schema::VersionedPrefixModel;

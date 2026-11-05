@@ -394,6 +394,7 @@ impl MacBackend {
     }
 
     #[cfg(target_os = "macos")]
+    #[cfg_attr(target_os = "macos", expect(clippy::unnecessary_wraps, reason = "other systems answer with the error"))]
     fn native_api() -> Result<Arc<dyn MacAPI>, MacBackendError> {
         Ok(Arc::new(crate::macos_native::NativeMacAPI::new()))
     }

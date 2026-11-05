@@ -29,6 +29,7 @@
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
 //! line per frame with floats as C99 hex, to be compared with another trainer's.
+#![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
 use ks_cast::To as _;
 use ks_text::JsonOptions;
 use ks_train::fit::{FitRequest, NoStages, fit};

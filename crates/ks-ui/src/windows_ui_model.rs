@@ -455,7 +455,7 @@ pub fn py_str(value: &Value) -> String {
         Value::Bool(true) => "True".to_owned(),
         Value::Bool(false) => "False".to_owned(),
         Value::Null => "None".to_owned(),
-        other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::Array(_) | other @ Value::Object(_) => other.to_string(),
+        other @ (Value::Number(_) | Value::Array(_) | Value::Object(_)) => other.to_string(),
     }
 }
 

@@ -242,6 +242,7 @@ fn forced(code: u32, seq: u32) -> NativeKeyEvent {
     NativeKeyEvent { forced: true, ..key(code, seq, true) }
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "the signature a key filter has")]
 fn filter(predicate: impl Fn(&KeyEvent) -> KeyDisposition + Send + Sync + 'static) -> Option<KeyFilter> {
     Some(Arc::new(predicate))
 }

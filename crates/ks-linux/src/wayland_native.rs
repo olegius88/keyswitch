@@ -447,7 +447,7 @@ pub fn run_wayland_input_helper(socket_fd: i32) -> i32 {
         // SAFETY: `action` is fully initialised, and the handler is an `extern "C" fn(c_int)`.
         unsafe {
             let mut action: libc::sigaction = std::mem::zeroed();
-            #[expect(clippy::as_conversions, clippy::fn_to_numeric_cast_any, reason = "libc declares the handler as an address, and a function has no safe way to become one")]
+            #[expect(clippy::as_conversions, clippy::fn_to_numeric_cast_any, trivial_casts, reason = "libc declares the handler as an address, and a function has no safe way to become one")]
             {
                 action.sa_sigaction = request_stop as extern "C" fn(c_int) as usize;
             }
@@ -1449,7 +1449,7 @@ fn write_script_file(prefix: &str, code: &str) -> io::Result<PathBuf> {
                 file.write_all(code.as_bytes())?;
                 return Ok(path);
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
             Err(error) => return Err(error),
         }
     }

@@ -53,7 +53,7 @@ impl LoadError {
         match error.classify() {
             // A value of the wrong type met by a visitor: the check after `json.loads` that would refuse it.
             Category::Data => LoadError::value(error.to_string()),
-            _ => LoadError { name: "JSONDecodeError", message: error.to_string() },
+            Category::Io | Category::Syntax | Category::Eof => LoadError { name: "JSONDecodeError", message: error.to_string() },
         }
     }
 }
@@ -101,7 +101,7 @@ pub(crate) fn py_equals_int(value: &serde_json::Value, number: i64) -> bool {
         serde_json::Value::Number(found) => {
             found.as_i64().map_or_else(|| found.as_f64() == Some(number.to::<f64>()), |found| found == number)
         }
-        _ => false,
+        serde_json::Value::Null | serde_json::Value::String(_) | serde_json::Value::Array(_) | serde_json::Value::Object(_) => false,
     }
 }
 

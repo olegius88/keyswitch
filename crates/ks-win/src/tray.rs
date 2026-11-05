@@ -44,6 +44,7 @@ fn copy_text(target: &mut [u16], text: &str) {
 ///
 /// SAFETY of callers: the pointer is valid for `size * size * 4` bytes while the returned bitmap lives.
 unsafe fn dib_section(size: usize) -> Option<(windows_sys::Win32::Graphics::Gdi::HBITMAP, *mut u8)> {
+    // SAFETY: BITMAPINFO is plain data, and all zeros is a valid one.
     let mut header: BITMAPINFO = unsafe { std::mem::zeroed() };
     header.bmiHeader = BITMAPINFOHEADER {
         biSize: (size_of::<BITMAPINFOHEADER>()).low::<u32>(),
@@ -193,7 +194,8 @@ impl Tray {
         if !old.is_null() {
             // SAFETY: the icon was made by CreateIconIndirect and the shell has been given the new one before this.
             self.notify_icon(NIM_MODIFY, NIF_ICON);
-            unsafe { DestroyIcon(old) };
+            // SAFETY: the icon was created here and nothing shows it any more.
+        unsafe { DestroyIcon(old) };
         }
     }
 

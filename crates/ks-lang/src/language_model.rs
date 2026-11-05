@@ -619,6 +619,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
     fn scores_a_small_lexicon() {
         let model = tiny();
         assert_eq!(model.maximum, 2000);

@@ -169,6 +169,7 @@ impl DeferredEngine {
     }
 
     /// Start the engine once it is built, on the window's thread; `failed` gets the error that stopped it.
+    #[expect(clippy::unnecessary_wraps, reason = "the same call as a backend start, which can fail")]
     pub fn start(self: &Arc<Self>, failed: StartFailed) -> Result<(), BackendError> {
         let engine = {
             let mut state = self.lock();

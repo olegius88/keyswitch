@@ -416,6 +416,7 @@ fn claim_test_access(ledger: &Path, identity: &Identity) -> Result<(), String> {
 }
 
 /// The calibration a candidate carries must show a balance, not an absence of error (`validate_calibration`).
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn validate_calibration(value: &Value) -> Result<(), String> {
     let profiles = value.get("by_profile").and_then(Value::as_object).ok_or("calibration must contain both declared lexical profiles")?;
     if profiles.len() != PROFILES.len() || PROFILES.iter().any(|name| !profiles.contains_key(*name)) {

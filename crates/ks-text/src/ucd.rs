@@ -48,7 +48,7 @@ macro_rules! predicate {
         $(#[$doc])*
         #[inline]
         pub fn $name(c: char) -> bool {
-            $cp_name(c as u32)
+            $cp_name(u32::from(c))
         }
     };
 }

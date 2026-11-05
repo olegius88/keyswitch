@@ -1,6 +1,7 @@
 //! Parity of `ks-config` with the Python program, against golden files dumped by `gen_golden_config.py`.
 //! They live in `$KS_GOLDEN_DIR/config`; a test skips with a message when its file is absent.
 
+#![expect(clippy::string_slice, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_config::config::SettingsStore;

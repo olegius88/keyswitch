@@ -77,7 +77,8 @@ mod scenario {
         if message == WM_SIZE {
             let edit = EDIT.load(Ordering::SeqCst);
             if edit != 0 {
-                let mut area = unsafe { std::mem::zeroed() };
+                // SAFETY: RECT is plain integers, and all zeros is a valid one.
+                    let mut area = unsafe { std::mem::zeroed() };
                 // SAFETY: the rectangle is ours and both windows belong to this thread.
                 unsafe {
                     GetClientRect(window, &raw mut area);
@@ -157,7 +158,8 @@ mod scenario {
         fn pump_until(&self, milliseconds: u64, mut condition: impl FnMut(&Editor) -> bool) -> bool {
             let deadline = Instant::now() + Duration::from_millis(milliseconds);
             loop {
-                let mut message: MSG = unsafe { std::mem::zeroed() };
+                // SAFETY: MSG is plain data, and all zeros is a valid one.
+        let mut message: MSG = unsafe { std::mem::zeroed() };
                 // SAFETY: the message is ours for the length of the calls.
                 unsafe {
                     while PeekMessageW(&raw mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {

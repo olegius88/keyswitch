@@ -5,6 +5,7 @@
 //! `lang/words.txt.gz` beside it), the resources in `$KS_RESOURCES`; a test skips with a message when they are absent.
 //! Floats are compared by their bits. In a debug build only every 20th row of the big files is compared.
 
+#![expect(clippy::string_slice, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::detector::{DecideOptions, DetectionDecision, LanguageDetector};

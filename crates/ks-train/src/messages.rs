@@ -1031,7 +1031,8 @@ pub fn build_devchat(root: &Path, comments: &Path, dump: &Path, out: &Path, earl
         for comment in batch.as_array().ok_or("comments")? {
             let post = match &comment["post_id"] {
                 Value::String(text) => text.parse().map_err(|_| "a post")?,
-                value @ Value::Null | value @ Value::Bool(_) | value @ Value::Number(_) | value @ Value::Array(_) | value @ Value::Object(_) => value.as_i64().ok_or("a post")?,
+                value @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::Array(_) |
+Value::Object(_)) => value.as_i64().ok_or("a post")?,
             };
             let question = question_of.get(&post).copied().unwrap_or(post);
             for text in messages_of(or_empty(comment, "body")) {

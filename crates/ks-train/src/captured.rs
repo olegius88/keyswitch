@@ -252,6 +252,7 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
 }
 
 /// `captured_head_curriculum`: a head's frames of one split: the questions about tokens of its class.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn captured_head_curriculum(tools: &Tools, split: &str, options: &Value, question: &dyn Fn(&ContextEvidence) -> bool, category: &str) -> Result<Curriculum, String> {
     let named: Vec<(String, String)> = options
         .get("captured")

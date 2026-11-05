@@ -108,7 +108,7 @@ fn masked(value: &Value, secrets: &HashSet<String>) -> Value {
                 .collect::<Map<String, Value>>(),
         ),
         Value::Array(items) => Value::Array(items.iter().map(|item| masked(item, secrets)).collect()),
-        other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) => other.clone(),
+        other @ (Value::Null | Value::Bool(_) | Value::Number(_)) => other.clone(),
     }
 }
 
@@ -151,6 +151,7 @@ impl LogRedactor {
         LogRedactor::default()
     }
 
+    #[expect(clippy::unreachable, reason = "masking keeps the kind of a value")]
     pub fn record(&mut self, payload: &Map<String, Value>) -> Map<String, Value> {
         let before = payload.get("context").and_then(Value::as_object).and_then(|context| context.get("words"));
         let previous: Vec<String> = match before.and_then(Value::as_object) {

@@ -97,6 +97,7 @@ fn libm() -> Vec<Entry> {
 }
 
 /// `math.nextafter`.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 fn next_after(from: f64, to: f64) -> f64 {
     if from == to {
         return to;

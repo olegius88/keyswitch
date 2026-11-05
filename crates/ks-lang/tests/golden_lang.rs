@@ -4,6 +4,7 @@
 //! `$KS_RESOURCES` (default: those of the Python tree); a test skips with a message when they are absent. Floats are
 //! compared by their bits. The first word of `words.txt` is the empty string, so the list is split on `\n` alone.
 
+#![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::boundary_model::{self, BoundaryModel, Features};

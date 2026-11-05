@@ -399,7 +399,7 @@ fn code_of(character: char) -> Option<u16> {
 /// The window typed into, in a process of its own: the program neither follows the focus into a window of its own process
 /// nor reads its fields, so a window here would hide what a user's application goes through.
 mod target {
-    use super::{json, Value, Write, DisplayExt, DBusInterfaceSkeletonExt, DBusObjectSkeletonExt, OutputStreamExt, ApplicationExt, TARGET_APPLICATION_ID, ButtonExt, CheckButtonExt, ComboBoxExt, EntryExt, FlowBoxChildExt, ListBoxRowExt, GtkWindowExt, NativeDialogExt, ToplevelExt, WINDOW_WIDTH, WINDOW_HEIGHT, CellRendererTextExt, AdjustmentExt, EditableExt, FilterExt, RecentManagerExt, SorterExt, TextBufferExt, DeviceExt, DriveExt, FileMonitorExt, MountExt, SettingsExt, VolumeExt, EntryBufferExtManual, Cast, IsAttribute, IsRenderNode, WidgetExt, ENTRY_MARGIN, BoxExt, MultiFilterExt, UnixFDListExtManual, FrameExt, ListItemExt, PopoverExt, gdk, SeatExt, DragSurfaceExt, PopupExt, channel, BufRead, SocketExtManual, glib, Duration, CellRendererExt, SurfaceExt, PixbufAnimationExt, ApplicationExtManual};
+    use super::{json, Value, Write, DisplayExt, ApplicationExt, TARGET_APPLICATION_ID, EntryExt, GtkWindowExt, WINDOW_WIDTH, WINDOW_HEIGHT, EditableExt, DeviceExt, Cast, WidgetExt, ENTRY_MARGIN, BoxExt, gdk, SeatExt, channel, BufRead, glib, Duration, ApplicationExtManual};
 
     fn emit(event: &Value) {
         let mut out = std::io::stdout().lock();

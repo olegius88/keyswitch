@@ -78,6 +78,7 @@ pub trait WindowsRegistry: Send + Sync {
 }
 
 #[cfg(windows)]
+#[cfg_attr(windows, expect(clippy::unnecessary_wraps, reason = "other systems answer with the error"))]
 fn default_registry() -> Result<Arc<dyn WindowsRegistry>, WindowsSystemError> {
     Ok(Arc::new(crate::windows_registry::NativeWindowsRegistry))
 }

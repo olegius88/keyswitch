@@ -36,7 +36,7 @@ jobs:
           esac
       - name: Toolchain with the Windows target for type checks
         run: |
-          rustup toolchain install stable --profile minimal
+          rustup toolchain install stable --profile minimal --component clippy
           rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
       - name: Tests
         run: |
@@ -67,8 +67,12 @@ jobs:
       - name: Windows code type-checks for every architecture
         run: |
           for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do
-            cargo check -p ks-win --target "$target"
+            cargo clippy -p ks-win --all-targets --target "$target"
           done
+      - name: The macOS code type-checks
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo clippy -p ks-mac --all-targets --target x86_64-apple-darwin
 
   windows-installer:
     # Built and run on the architecture it is for: Windows on Arm on an Arm runner, x86 on the x64 image.
@@ -158,9 +162,11 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain and GTK development files
         run: |
-          rustup toolchain install stable --profile minimal
+          rustup toolchain install stable --profile minimal --component clippy
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus
+      - name: The strict rules over everything that builds here
+        run: cargo clippy --workspace --all-targets
       - name: Tests
         run: cargo test -p ks-linux
       - name: Build

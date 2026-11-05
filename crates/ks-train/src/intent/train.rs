@@ -215,7 +215,8 @@ fn compact(value: &Value, depth: usize) -> Value {
         }
         Value::Object(object) => Value::Object(object.iter().map(|(key, item)| (key.clone(), compact(item, depth + 1))).collect()),
         Value::Array(items) if items.len() > COMPACT_MAX_INLINE_ITEMS => json!({"omitted_items": items.len()}),
-        other @ Value::Null | other @ Value::Bool(_) | other @ Value::Number(_) | other @ Value::String(_) | other @ Value::Array(_) => other.clone(),
+        other @ (Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) |
+Value::Array(_)) => other.clone(),
     }
 }
 

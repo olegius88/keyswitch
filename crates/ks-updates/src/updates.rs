@@ -630,6 +630,7 @@ impl UpdateManager {
         Self::new(current_version, directory, Arc::new(GitHubReleaseClient::new(current_version, opener)))
     }
 
+    #[expect(clippy::panic, reason = "builders run before the manager is shared: this is a mistake in the program, not in what it reads")]
     fn rebuilt(self, change: impl FnOnce(&mut Inner)) -> Self {
         // Builders run before the manager is shared, so the Arc is unique.
         let mut inner = Arc::try_unwrap(self.inner).unwrap_or_else(|_| panic!("builder used on a shared manager"));
@@ -642,10 +643,12 @@ impl UpdateManager {
         self.rebuilt(|inner| inner.target = target)
     }
 
+    #[must_use]
     pub fn with_runner(self, runner: BackgroundRunner) -> Self {
         self.rebuilt(|inner| inner.runner = runner)
     }
 
+    #[must_use]
     pub fn with_install_request(self, request: InstallRequest) -> Self {
         self.rebuilt(|inner| inner.install_request = Some(request))
     }

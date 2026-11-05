@@ -48,6 +48,7 @@ impl PlatformFieldReader {
         }
     }
 
+    #[must_use]
     pub fn with_password_focus(mut self, password: PasswordFocus) -> PlatformFieldReader {
         self.password = Some(password);
         self

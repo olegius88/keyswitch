@@ -1,6 +1,7 @@
 //! Loads all the language models together, as the engine does, and prints what that cost:
 //! `/usr/bin/time -v memory_probe <resources>`; the steady RSS is the value printed after loading.
 
+#![expect(clippy::string_slice, reason = "a test or a probe stops on what it did not expect")]
 use ks_lang::ortho_model::OrthoEvidence;
 use ks_lang::Resources;
 

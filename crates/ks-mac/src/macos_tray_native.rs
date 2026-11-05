@@ -185,6 +185,5 @@ mod native {
         }
     }
 
-    #[expect(dead_code, reason = "the macOS build alone uses it")]
     const _: *const c_void = std::ptr::null();
 }

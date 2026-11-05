@@ -20,6 +20,7 @@ impl fmt::Display for LayoutError {
 impl std::error::Error for LayoutError {}
 
 /// The one-character `str.upper()` of a key; the key rows hold no character whose capital is longer.
+#[expect(clippy::panic, reason = "the tables are constants of the program, and the tests read every one")]
 fn upper_char(c: char) -> char {
     let mut it = crate::pystr::upper(&c.to_string()).chars().collect::<Vec<_>>().into_iter();
     match (it.next(), it.next()) {

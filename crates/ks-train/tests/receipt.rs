@@ -1,5 +1,6 @@
 //! The receipt of the installed pair passes the checks, and a receipt whose numbers were changed, whose fields are gone or
 //! that names other files does not.
+#![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 use ks_train::corpus::read_json;
 use ks_train::receipt::validate_evidence;
 use serde_json::{Value, json};
