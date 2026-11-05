@@ -97,6 +97,8 @@ pub const TERM_FREQUENCY_FILE: &str = "context-term-frequency.json";
 pub const ALNUM_FREQUENCY_FILE: &str = "context-alnum-frequency.json";
 pub const SHORT_FREQUENCY_FILE: &str = "context-short-frequency.json";
 pub const ARTIFACT_FILE: &str = "context_policy_v1.json";
+/// The schema of the frozen baseline model the sealed tests compare a candidate with.
+pub const BASELINE_FEATURE_VERSION: i64 = 2;
 pub const TERM_ALPHABETS: [&str; 4] = ["cyrillic", "english", "latin", "russian"];
 pub const ALNUM_ALPHABETS: [&str; 2] = ["cyrillic", "latin"];
 pub const SHORT_ALPHABETS: [&str; 1] = ["cyrillic"];
@@ -446,10 +448,11 @@ impl ContextModel {
         let actions_match = payload.get("actions").and_then(Value::as_array).is_some_and(|actions| {
             actions.len() == ACTIONS.len() && actions.iter().zip(ACTIONS).all(|(found, wanted)| found.as_str() == Some(wanted.as_str()))
         });
-        if feature_version != Some(CONTEXT_ACTION_FEATURE_VERSION as i64) || !actions_match {
-            // The older schemas load in the Python; this port reads the action schema only.
+        // Schema 2 is the frozen baseline the sealed tests compare a candidate with; no such model is shipped.
+        if !matches!(feature_version, Some(version) if version == CONTEXT_ACTION_FEATURE_VERSION as i64 || version == BASELINE_FEATURE_VERSION) || !actions_match {
             return Err(LoadError::value("incompatible context model"));
         }
+        let feature_version = feature_version.expect("checked above");
         // The model is not whole without the table of how often each reading occurs. It is read here, before the keyboard
         // hook starts, and not on the first word typed.
         let tables = TermTables::load(models_dir)?;
@@ -466,7 +469,7 @@ impl ContextModel {
         }
         let version = payload.get("version").and_then(Value::as_str);
         let version = match version {
-            Some(version) if version.starts_with("context-v3-") && pystr::len(version) <= MAX_CONTEXT_MODEL_VERSION_CHARACTERS => version,
+            Some(version) if version.starts_with(if feature_version == BASELINE_FEATURE_VERSION { "context-v1-" } else { "context-v3-" }) && pystr::len(version) <= MAX_CONTEXT_MODEL_VERSION_CHARACTERS => version,
             _ => return Err(LoadError::value("invalid context version")),
         };
         let threshold = match payload.get("conversion_threshold") {
@@ -483,7 +486,9 @@ impl ContextModel {
             // before the keyboard hook starts, as the term table is.
             tables.short()?;
         }
-        Ok(ContextModel::new(table, version, threshold, std::sync::Arc::new(tables)))
+        let mut model = ContextModel::new(table, version, threshold, std::sync::Arc::new(tables));
+        model.feature_version = feature_version;
+        Ok(model)
     }
 
     /// `ContextModel.try_load()`: the model and its version, or nothing and why.
@@ -499,6 +504,9 @@ impl ContextModel {
 
     /// Use the same language-support gate during calibration and inference.
     pub fn supports_features(&self, features: &FeatureMap) -> bool {
+        if self.feature_version == BASELINE_FEATURE_VERSION {
+            return features.keys().any(|name| (name.starts_with("pair:") || name.starts_with("before:word:") || name.starts_with("after:word:") || name.starts_with("app:")) && self.weights.get(name).is_some());
+        }
         let text = ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX;
         // The kept-neighbour question names its letters under its own prefix, and the single-letter head once more under
         // its own: the kept-neighbour frames hold no word of one letter, so only the head knows the letters of `b` before
@@ -545,9 +553,32 @@ impl ContextModel {
         ContextPrediction { action: ContextAction::Suggest, probability: 0.0, probabilities: [0.0, 0.0, 0.0, 1.0], model_version: self.version.clone(), supported: false }
     }
 
+    /// The frozen baseline of the sealed tests answers on features of its own, with no check beyond its threshold.
+    fn predict_baseline(&self, item: &ContextEvidence) -> ContextPrediction {
+        let features = crate::context_action_features::extract_baseline_features(item);
+        let mut scores = [0.0_f64; ACTION_COUNT];
+        for (name, &value) in &features {
+            if let Some(weights) = self.weights.get(name) {
+                for (index, &weight) in weights.iter().enumerate() {
+                    scores[index] += weight * value;
+                }
+            }
+        }
+        let probabilities = softmax(&scores);
+        let selected = first_greatest(&probabilities);
+        let mut action = ACTIONS[selected];
+        if action == ContextAction::Convert && probabilities[selected] < self.conversion_threshold {
+            action = ContextAction::Suggest;
+        }
+        ContextPrediction { action, probability: probabilities[selected], probabilities, model_version: self.version.clone(), supported: self.supports_features(&features) }
+    }
+
     pub fn predict(&self, item: &ContextEvidence) -> ContextPrediction {
         if let Some(answer) = &self.answer {
             return answer(item);
+        }
+        if self.feature_version == BASELINE_FEATURE_VERSION {
+            return self.predict_baseline(item);
         }
         let Ok(features) = extract_action_features(item, &self.tables) else {
             return self.unsupported();

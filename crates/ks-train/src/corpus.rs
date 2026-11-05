@@ -35,6 +35,29 @@ pub struct CorpusRow {
     pub layout_representable: bool,
     pub split: String,
     pub quarantine_reasons: Vec<String>,
+    pub lemma: String,
+    pub language: String,
+    pub source: String,
+    pub source_file: String,
+    pub source_sentence: String,
+    pub source_token: String,
+    pub space_before: String,
+    pub upos: String,
+    pub features: String,
+    pub misc: String,
+    pub alignment: String,
+}
+
+impl CorpusRow {
+    /// `canonical(asdict(row))`.
+    pub fn line(&self) -> Vec<u8> {
+        crate::artifact::canonical(&serde_json::json!({
+            "identifier": self.identifier, "original": self.original, "group": self.group, "before": self.before, "after": self.after, "lemma": self.lemma, "family": self.family,
+            "document": self.document, "language": self.language, "source": self.source, "source_file": self.source_file, "source_sentence": self.source_sentence, "source_token": self.source_token,
+            "spacing": self.spacing, "space_before": self.space_before, "literal_tail": self.literal_tail, "upos": self.upos, "features": self.features, "misc": self.misc,
+            "alignment": self.alignment, "layout_representable": self.layout_representable, "split": self.split, "quarantine_reasons": self.quarantine_reasons,
+        }))
+    }
 }
 
 pub fn checksum(path: &Path) -> Result<String, String> {
@@ -51,11 +74,16 @@ fn text(value: &Value, name: &str) -> Result<String, String> {
     value.get(name).and_then(Value::as_str).map(str::to_owned).ok_or_else(|| format!("corpus row without {name}"))
 }
 
-/// `load_split`.
+/// `load_split` of a split that is fitted on: the trainers read nothing else.
 pub fn load_split(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, String> {
     if !FITTING_SPLITS.contains(&split) {
         return Err("only a fitting split is read here".to_owned());
     }
+    load_rows(directory, split)
+}
+
+/// `load_split`: exactly one requested split. The test split goes through here only from the sealed evaluation.
+pub(crate) fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, String> {
     let manifest = read_json(&directory.join("manifest.json"))?;
     let record = &manifest["splits"][split];
     if record["path"].as_str() != Some(&format!("{split}.jsonl.gz")) {
@@ -93,6 +121,17 @@ pub fn load_split(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, Strin
                 .as_array()
                 .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
                 .unwrap_or_default(),
+            lemma: text(&value, "lemma")?,
+            language: text(&value, "language")?,
+            source: text(&value, "source")?,
+            source_file: text(&value, "source_file")?,
+            source_sentence: text(&value, "source_sentence")?,
+            source_token: text(&value, "source_token")?,
+            space_before: text(&value, "space_before")?,
+            upos: text(&value, "upos")?,
+            features: text(&value, "features")?,
+            misc: text(&value, "misc")?,
+            alignment: text(&value, "alignment")?,
         };
         if row.split != split || pystr::len(&row.before) > CORPUS_BEFORE_WINDOW_CHARACTERS || pystr::len(&row.after) > CORPUS_AFTER_WINDOW_CHARACTERS {
             return Err("invalid corpus row bounds or split".to_owned());

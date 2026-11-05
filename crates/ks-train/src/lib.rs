@@ -5,10 +5,13 @@
 
 pub mod artifact;
 pub mod captured;
+pub mod compare;
 pub mod corpus;
 pub mod curricula;
+pub mod evaluate;
 pub mod evidence;
 pub mod fit;
+pub mod freeze;
 pub mod heads;
 pub mod historical;
 pub mod kernel;
@@ -16,6 +19,7 @@ pub mod lookahead;
 pub mod physical;
 pub mod prefix;
 pub mod rows;
+pub mod replay;
 pub mod selection;
 pub mod spans;
 pub mod tools;

@@ -20,8 +20,11 @@ ks-replay.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 flate2.workspace = true
-# The captured question files are xz: decoded here, in Rust.
+# The captured question files are xz, the Tatoeba exports bz2 and the RPM indexes zstd: decoded here, in Rust.
 lzma-rs = "0.3"
+bzip2-rs = "0.1"
+ruzstd = "0.8"
+sha1 = "0.10"
 
 [dev-dependencies]
 flate2.workspace = true

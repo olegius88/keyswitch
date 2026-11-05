@@ -1,5 +1,8 @@
 //! `ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]`
 //! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--jobs N]`
+//! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--jobs N]`
+//! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
+//! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
 //! line per frame with floats as C99 hex, to be compared with another trainer's.
@@ -32,6 +35,41 @@ fn main() {
             }
         }
     }
+    if arguments.first().map(String::as_str) == Some("evaluate") {
+        let required = |name: &str| option(&arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+        let root = required("--tree");
+        let resource_dir = root.join("resources");
+        let (artifact, seal, prefix, prefix_seal, corpus, output) = (required("--candidate"), option(&arguments, "--seal").map(PathBuf::from).unwrap_or_default(), required("--prefix-candidate"), option(&arguments, "--prefix-seal").map(PathBuf::from).unwrap_or_default(), required("--corpus"), required("--output"));
+        let ledger = option(&arguments, "--ledger").map_or_else(|| root.join(".t/reliable-release-2026-09-12/context-action-test-ledger"), PathBuf::from);
+        let request = ks_train::evaluate::EvaluationRequest {
+            root: &root,
+            resource_dir: &resource_dir,
+            artifact: &artifact,
+            seal: &seal,
+            prefix: &prefix,
+            prefix_seal: &prefix_seal,
+            corpus: &corpus,
+            split: option(&arguments, "--split").unwrap_or("development"),
+            output: &output,
+            ledger: &ledger,
+            jobs: option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number")),
+            unsealed: arguments.iter().any(|argument| argument == "--unsealed"),
+        };
+        match ks_train::evaluate::evaluate(&request) {
+            Ok(report) => {
+                println!("promotion_passed: {}", report["promotion_passed"]);
+                let development = request.split == "development";
+                std::process::exit(i32::from(!(development || report["promotion_passed"].as_bool() == Some(true))));
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
+    }
+    if matches!(arguments.first().map(String::as_str), Some("holdout" | "fitting")) {
+        std::process::exit(freeze_command(&arguments));
+    }
     if arguments.first().map(String::as_str) != Some("fit") {
         eprintln!("usage: ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]");
         std::process::exit(2);
@@ -53,6 +91,70 @@ fn main() {
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(1);
+        }
+    }
+}
+
+fn all_of<'a>(arguments: &'a [String], name: &str) -> Vec<&'a str> {
+    arguments.iter().enumerate().filter(|(_, argument)| *argument == name).filter_map(|(place, _)| arguments.get(place + 1)).map(String::as_str).collect()
+}
+
+/// The two corpus freezes share their arguments.
+fn freeze_command(arguments: &[String]) -> i32 {
+    use ks_train::freeze::{self, FreezeRequest, TechnicalSource};
+    let required = |name: &str| option(arguments, name).map(PathBuf::from).unwrap_or_else(|| panic!("{name} is required"));
+    let root = required("--tree");
+    let holdout = arguments[0] == "holdout";
+    let (base, ud_origin, technical_origin, prefix_inventory) = (required("--base"), required("--ud-origin"), required("--technical-origin"), required("--prefix-inventory"));
+    let lexicon = option(arguments, "--lexicon").map_or_else(|| root.join("resources/identifiers.json"), PathBuf::from);
+    let ledger = option(arguments, "--ledger").map_or_else(|| root.join(".t/reliable-release-2026-09-12/context-action-test-ledger"), PathBuf::from);
+    let namespace = option(arguments, "--namespace").expect("--namespace is required");
+    let output = option(arguments, "--output").map(PathBuf::from);
+    let report = option(arguments, "--report").map(PathBuf::from);
+    let tatoeba = option(arguments, "--tatoeba-directory").map(PathBuf::from);
+    let default_documents = if holdout { freeze::HOLDOUT_MAX_DOCUMENTS_PER_SOURCE } else { freeze::FITTING_DEFAULT_MAX_DOCUMENTS_PER_SOURCE };
+    let request = FreezeRequest {
+        root: &root,
+        base: &base,
+        ud_origin: &ud_origin,
+        technical_origin: &technical_origin,
+        prefix_inventory: &prefix_inventory,
+        lexicon: &lexicon,
+        ledger: &ledger,
+        namespace,
+        output: output.as_deref(),
+        report: report.as_deref(),
+        extra_exposure: all_of(arguments, "--extra-exposure").into_iter().map(PathBuf::from).collect(),
+        tatoeba_directory: tatoeba.as_deref(),
+        tatoeba_languages: all_of(arguments, "--tatoeba-language").into_iter().map(str::to_owned).collect(),
+        max_documents: option(arguments, "--max-documents").map_or(default_documents, |value| value.parse().expect("a number")),
+        max_sentences_per_document: option(arguments, "--max-sentences-per-document").map_or(freeze::DEFAULT_MAX_SENTENCES_PER_DOCUMENT, |value| value.parse().expect("a number")),
+    };
+    let result = if holdout {
+        let technical: Vec<(&str, PathBuf)> = ["--sid-directory", "--arch-directory", "--rpm-directory", "--alpine-directory"].into_iter().filter_map(|name| option(arguments, name).map(|path| (name, PathBuf::from(path)))).collect();
+        let [(name, directory)] = technical.as_slice() else {
+            eprintln!("exactly one technical source is required: --sid-directory, --arch-directory, --rpm-directory or --alpine-directory");
+            return 2;
+        };
+        let source = match *name {
+            "--sid-directory" => TechnicalSource::Sid(directory),
+            "--arch-directory" => TechnicalSource::Arch(directory),
+            "--rpm-directory" => TechnicalSource::Rpm(directory),
+            _ => TechnicalSource::Alpine(directory),
+        };
+        let treebanks: Vec<String> = all_of(arguments, "--treebank").into_iter().map(str::to_owned).collect();
+        freeze::freeze_holdout(&request, &required("--source-root"), &treebanks, &source)
+    } else {
+        freeze::freeze_fitting(&request)
+    };
+    match result {
+        Ok(summary) => {
+            println!("{summary}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
         }
     }
 }

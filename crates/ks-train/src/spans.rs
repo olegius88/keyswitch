@@ -4,24 +4,11 @@ use crate::corpus::{CorpusRow, TRAIN, DEVELOPMENT, CALIBRATION};
 use crate::curricula::Counts;
 use crate::physical::{PhysicalKey, hex_digest, key_of, sha256};
 use crate::rows::is_alpha;
-use crate::tools::{Lexicons, Tools};
-use ks_backend::KeyEvent;
-use ks_backend::constants::SHIFT_MASK;
-use ks_config::config::SettingsStore;
-use ks_config::history::HistoryStore;
-use ks_context::ContextPolicy;
-use ks_context::context_model::{ContextAction, ContextEvidence, ContextModel, ContextPrediction};
-use ks_context::flat_table::WeightTable;
-use ks_context::input_context::InputContext;
-use ks_engine::engine::{EngineCore, EngineParts};
-use ks_lang::detector::ProtectedTokens;
-use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
-use ks_replay::harness::{Backend, FakeClock};
+use crate::replay::{Capture, Mode, Plan, Replayer};
+use ks_context::context_model::{ContextAction, ContextEvidence};
 use ks_text::pystr;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
 
 const VARIANTS: [(&str, &str); 6] = [("", " "), (".", " "), (",", "  "), (";", "   "), ("...", "  "), ("!", "   ")];
 const SPAN_ANCHOR_MAX_CHARACTERS: usize = 24;
@@ -29,11 +16,6 @@ const SPAN_ANCHOR_MIN_CHARACTERS: usize = 3;
 const SPAN_MAXIMUM_FAMILIES: i64 = 128;
 const SPAN_ORIGINAL_MAX_CHARACTERS: usize = 64;
 const LAYOUT_GROUP_COUNT: usize = 2;
-const SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS: f64 = 1.5;
-const SIMULATED_KEY_DOWN_SECONDS: f64 = 0.05;
-const SIMULATED_KEY_UP_SECONDS: f64 = 0.03;
-const SIMULATED_WORD_IDLE_SECONDS: f64 = 1.7;
-const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpanFrame {
@@ -95,159 +77,6 @@ fn select(rows: &[CorpusRow], maximum: usize) -> (Vec<&CorpusRow>, [Vec<&CorpusR
     (selected, anchors)
 }
 
-struct Capture {
-    evidence: ContextEvidence,
-    observed: String,
-    event: usize,
-}
-
-#[derive(Default)]
-struct Recording {
-    backend: Option<Arc<Backend>>,
-    serial: usize,
-    records: Vec<Capture>,
-}
-
-/// One engine after another over the shared models, every question recorded and answered `keep`.
-pub struct Replayer {
-    tools_root: PathBuf,
-    models: Lexicons,
-    intent_model: Option<Arc<LinearNgramModel>>,
-    intent_model_status: IntentModelStatus,
-    protected_tokens: Arc<ProtectedTokens>,
-    boundary_model: Option<Arc<ks_lang::boundary_policy::BoundaryPolicy>>,
-    prefix_indexes: Vec<Arc<ks_lang::early_switch::PrefixIndex>>,
-    context_policy: Option<ContextPolicy>,
-    recording: Arc<Mutex<Recording>>,
-    folder: PathBuf,
-}
-
-impl Replayer {
-    /// `shared` is the orthotactic model every replay of a fit binds to the first profile's dictionaries.
-    pub fn new(tools: &Tools, models: &Lexicons, shared: ks_context::context_policy::SharedOrtho, folder: PathBuf) -> Replayer {
-        let resources = &tools.resources;
-        let (intent_model, intent_model_status) = resources.intent_model();
-        let recording = Arc::new(Mutex::new(Recording::default()));
-        let mut context_policy = ContextPolicy::with_ortho(resources, None, shared, None);
-        let mut recorder = ContextModel::new(WeightTable::empty(), "context-v3-span-capture", 0.99, tools.tables.clone());
-        let handle = recording.clone();
-        recorder.answer = Some(Arc::new(move |item: &ContextEvidence| {
-            let mut state = handle.lock().unwrap_or_else(PoisonError::into_inner);
-            let observed: String = state.backend.as_ref().expect("a replay is running").text().iter().collect();
-            let event = state.serial;
-            state.records.push(Capture { evidence: item.clone(), observed, event });
-            ContextPrediction { action: ContextAction::Keep, probability: 1.0, probabilities: [1.0, 0.0, 0.0, 0.0], model_version: "context-v3-span-capture".to_owned(), supported: true }
-        }));
-        context_policy.model = Some(recorder);
-        std::fs::create_dir_all(&folder).expect("a folder for the stores");
-        Replayer {
-            tools_root: resources.resource_dir().to_path_buf(),
-            models: models.clone(),
-            intent_model,
-            intent_model_status,
-            protected_tokens: resources.protected_tokens(),
-            boundary_model: resources.boundary_policy(),
-            prefix_indexes: Vec::new(),
-            context_policy: Some(context_policy),
-            recording,
-            folder,
-        }
-    }
-
-    /// `_capture`: what the model was asked while the keys of one sequence were typed.
-    fn capture(&mut self, keys: &[PhysicalKey], expected: &[char]) -> Vec<Capture> {
-        let settings = Arc::new(SettingsStore::new(Some(self.folder.join("settings.json"))));
-        for (name, value) in [
-            ("detection.correct_typos", json!(false)),
-            ("detection.pause_delay_seconds", json!(SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS)),
-            ("detection.context_policy", json!("assist")),
-            ("detection.context_aware", json!(true)),
-            ("detection.context_read_field", json!(false)),
-            ("detection.early_switch", json!(false)),
-            ("detection.respect_manual_layout", json!(false)),
-            ("detection.learning", json!(false)),
-            ("general.keep_history", json!(false)),
-            ("diagnostics.technical_logging", json!(false)),
-        ] {
-            settings.set(name, value, false).expect("in memory");
-        }
-        let backend = Arc::new(Backend::new("TestEditor", 0, Vec::new()));
-        let clock = FakeClock::new();
-        let mut context_policy = self.context_policy.take().expect("one engine at a time");
-        context_policy.stream = InputContext::with_clock(clock.read());
-        {
-            let mut state = self.recording.lock().unwrap_or_else(PoisonError::into_inner);
-            state.backend = Some(backend.clone());
-            state.records.clear();
-        }
-        let mut core = EngineCore::from_parts(EngineParts {
-            settings,
-            history: Arc::new(HistoryStore::new(Some(self.folder.join("history.jsonl")), 200)),
-            backend: backend.clone(),
-            learning: None,
-            backend_label: "editor".to_owned(),
-            models: self.models.clone(),
-            intent_model: self.intent_model.clone(),
-            intent_model_status: self.intent_model_status.clone(),
-            protected_tokens: self.protected_tokens.clone(),
-            context_policy,
-            boundary_model: self.boundary_model.clone(),
-            prefix_model: None,
-            prefix_indexes: self.prefix_indexes.clone(),
-            resource_dir: self.tools_root.clone(),
-            clock: clock.read(),
-            platform_reader: None,
-        })
-        .expect("an engine over the shared models");
-        let timers = |core: &mut EngineCore| {
-            core._expire_deferred_action().expect("a timer of the replay");
-            core._expire_manual_correction();
-            core._poll_current_group().expect("a timer of the replay");
-            core._maybe_correct_after_pause(None).expect("a timer of the replay");
-            core._expire_learning_prompt(None);
-        };
-        for (index, key) in keys.iter().enumerate() {
-            let serial = index + 1;
-            self.recording.lock().unwrap_or_else(PoisonError::into_inner).serial = serial;
-            if let Some(group) = key.explicit_group {
-                backend.set_group(group);
-            }
-            let group = backend.group();
-            let observed = key.characters[group as usize];
-            clock.advance(SIMULATED_KEY_DOWN_SECONDS);
-            let pressed = KeyEvent {
-                pressed: true,
-                keycode: key.keycode,
-                key_name: if observed == ' ' { "space".to_owned() } else { observed.to_string() },
-                character: observed.to_string(),
-                characters: key.characters.iter().map(char::to_string).collect(),
-                group,
-                state: if key.shift { SHIFT_MASK } else { 0 },
-                timestamp: ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND) as i64,
-                ..KeyEvent::default()
-            };
-            backend.type_key(&pressed);
-            core._handle(Arc::new(pressed.clone())).expect("a key the engine handles");
-            clock.advance(SIMULATED_KEY_UP_SECONDS);
-            let released = KeyEvent { pressed: false, timestamp: ks_text::py_round(clock.now() * MILLISECONDS_PER_SECOND) as i64, ..pressed };
-            backend.type_key(&released);
-            core._handle(Arc::new(released)).expect("a key the engine handles");
-            timers(&mut core);
-            let character = expected[index];
-            let following = expected.get(index + 1);
-            let space = |value: char| pystr::isspace(value.encode_utf8(&mut [0_u8; 4]));
-            if !space(character) && following.is_none_or(|value| space(*value)) {
-                clock.advance(SIMULATED_WORD_IDLE_SECONDS);
-                timers(&mut core);
-            }
-        }
-        assert_eq!(backend.corrections(), 0, "span capture must complete without corrections");
-        self.context_policy = Some(core.context_policy);
-        let _ = std::fs::remove_file(self.folder.join("history.jsonl"));
-        std::mem::take(&mut self.recording.lock().unwrap_or_else(PoisonError::into_inner).records)
-    }
-}
-
 /// `_label`: what a captured question's answer is, given the text that should stand by then.
 fn label(capture: &Capture, expected: &str) -> Option<ContextAction> {
     if capture.observed == expected {
@@ -298,7 +127,10 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
                 let expected = format!("{before}{}{tail} ", row.original);
                 let expected_characters: Vec<char> = expected.chars().collect();
                 let identity = hex_digest(&format!("{}:{variant}:{}", row.identifier, i32::from(wrong)));
-                let records = replayer.capture(&keys, &expected_characters);
+                let plan = Plan::typed(identity.clone(), row.document.clone(), group, expected.clone(), keys, source);
+                let outcome = replayer.replay(&plan, Mode::EarlyOff);
+                assert!(outcome.error.is_none() && outcome.corrections.is_empty(), "span capture must complete without corrections");
+                let records = replayer.take_records();
                 counts.add("sequences");
                 let focus: Vec<Capture> = records.into_iter().filter(|record| record.event > prefix_length).collect();
                 counts.add_by("no_focus_call", i64::from(focus.is_empty()));

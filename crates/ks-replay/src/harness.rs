@@ -76,7 +76,21 @@ struct EditorState {
     application: String,
     enter: Option<KeyEvent>,
     delivered: Option<String>,
-    corrections: usize,
+    corrections: Vec<Correction>,
+    serial: usize,
+}
+
+/// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Correction {
+    pub event: usize,
+    pub before: String,
+    pub after: String,
+    pub source_group: i32,
+    pub target_group: i32,
+    pub actual_group: i32,
+    pub caret_before: usize,
+    pub caret_after: usize,
 }
 
 /// Model editing and submission before the passive observer sees a key.
@@ -87,16 +101,21 @@ pub struct Backend {
 impl Backend {
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: 0 }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0 }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// How many corrections were injected.
-    pub fn corrections(&self) -> usize {
-        self.lock().corrections
+    /// The corrections injected so far.
+    pub fn corrections(&self) -> Vec<Correction> {
+        self.lock().corrections.clone()
+    }
+
+    /// The number of the key being typed, which the next correction records.
+    pub fn set_serial(&self, serial: usize) {
+        self.lock().serial = serial;
     }
 
     pub fn text(&self) -> Vec<char> {
@@ -235,7 +254,7 @@ impl InputBackend for Backend {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError> {
         let mut state = self.lock();
-        state.corrections += 1;
+        let (initial_text, initial_group, initial_caret): (String, i32, usize) = (state.text.iter().collect(), state.group, state.caret);
         let word = injection.strokes;
         let count = word.len() + injection.trailing.len() + usize::from(injection.boundary.is_some()) + injection.late.len();
         if state.caret < count {
@@ -267,6 +286,17 @@ impl InputBackend for Backend {
         state.text.splice(start..caret, added.iter().copied());
         state.caret = start + added.len();
         state.group = final_group;
+        let (event, after, actual_group, caret_after) = (state.serial, state.text.iter().collect(), state.group, state.caret);
+        state.corrections.push(Correction {
+            event,
+            before: initial_text,
+            after,
+            source_group: initial_group,
+            target_group: injection.target_group,
+            actual_group,
+            caret_before: initial_caret,
+            caret_after,
+        });
         Ok(0)
     }
 

@@ -11,7 +11,8 @@ use crate::lookahead;
 use crate::physical::{expanded_aliases, hex, reading, sha256};
 use crate::rows::{ActionRow, action_rows, select_rows, training_order};
 use crate::selection::{EpochSelection, Qualifying, ThresholdOptions, assess_epoch, choose_threshold, metrics, select_features, settled_epoch};
-use crate::spans::{Replayer, SpanCurriculum, SpanFrame, build_span_curriculum};
+use crate::replay::Replayer;
+use crate::spans::{SpanCurriculum, SpanFrame, build_span_curriculum};
 use crate::tools::{Lexicons, Options, Tools, reference_models};
 use crate::{ACTIONS, DETERMINISTIC_ROUNDING_DECIMALS, LOG_LOSS_PROBABILITY_FLOOR};
 use ks_context::constants::{ALONE_FEATURE_PREFIX, KEPT_FEATURE_PREFIX};
@@ -359,7 +360,7 @@ pub struct Columns {
 }
 
 impl Columns {
-    fn rows<'a>(&'a self, names: &'a [String]) -> impl Iterator<Item = (FeatureMap, u8, f64)> + 'a {
+    pub fn feature_rows<'a>(&'a self, names: &'a [String]) -> impl Iterator<Item = (FeatureMap, u8, f64)> + 'a {
         let mut position = 0_usize;
         self.counts.iter().zip(self.labels.iter()).zip(self.importance.iter()).map(move |((count, label), importance)| {
             let end = position + *count as usize;
@@ -496,8 +497,14 @@ fn captured_all(inputs: &FitInputs, sources: &[CapturedSource], options: &Value)
 }
 
 /// `Build.run`: curricula and features of one fit.
-#[allow(clippy::too_many_lines)]
 pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) -> Result<FeatureSet, String> {
+    build_features_of_splits(inputs, jobs, stages, &FITTING_SPLITS)
+}
+
+/// The features of `splits` alone: without TRAIN none of its curricula is built and no TRAIN frame is held in memory.
+#[allow(clippy::too_many_lines)]
+pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages, splits: &[&'static str]) -> Result<FeatureSet, String> {
+    let train_built = splits.contains(&TRAIN);
     let root = inputs.tools.root.clone();
     let options = &inputs.options;
     let keep_importance = options.float("keep_importance");
@@ -513,7 +520,14 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
     for (split, rows) in &inputs.frames {
         stages.rows(&format!("natural-{split}"), rows);
     }
-    if frozen {
+    if !train_built {
+        let skipped = json!({"scope": "not built: TRAIN is not featurised"});
+        for source in &sources {
+            captured_report.insert(file_name(source), skipped.clone());
+        }
+        capitals_report = skipped.clone();
+        english_report = skipped;
+    } else if frozen {
         // Nothing but the tail is framed for TRAIN: the other TRAIN curricula are not built.
         let unused = json!({"scope": "not used: a frozen base keeps the word decided at its own boundary"});
         for source in &sources {
@@ -543,7 +557,7 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
         extra.extend(rows);
         english_report = report;
     }
-    let (tail, tail_report) = tail_curricula(inputs)?;
+    let (tail, tail_report) = if train_built { tail_curricula(inputs)? } else { (Vec::new(), json!({"scope": "not built: TRAIN is not featurised"})) };
     stages.rows("tail", &tail);
     eprintln!("tail: {} frames; extra: {} frames", tail.len(), extra.len());
     let first = inputs.lexical_models(&inputs.profiles[0]).clone();
@@ -561,7 +575,7 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
     let mut columns = HashMap::new();
     let (mut chains, mut spans) = (HashMap::new(), HashMap::new());
     for profile in &inputs.profiles {
-        for split in FITTING_SPLITS {
+        for split in splits.iter().copied() {
             let natural = inputs.frames[split].clone();
             let rows = if split == TRAIN && !frozen {
                 let mut all = natural;
@@ -577,7 +591,7 @@ pub fn build_features(inputs: &FitInputs, jobs: usize, stages: &mut dyn Stages) 
                 SpanCurriculum::default()
             } else {
                 let folder = std::env::temp_dir().join(format!("ks-train-{}", std::process::id()));
-                let mut replayer = Replayer::new(tools, inputs.lexical_models(profile), shared.clone(), folder.clone());
+                let mut replayer = Replayer::recording(tools, inputs.lexical_models(profile), shared.clone(), folder.clone());
                 let built = build_span_curriculum(&mut replayer, &inputs.source_rows[split], budgets.int(split), split);
                 let _ = std::fs::remove_dir_all(folder);
                 built
@@ -684,6 +698,14 @@ impl FeatureSet {
     fn part(&self, profile: &str, split: &'static str) -> &Columns {
         &self.columns[&(profile.to_owned(), split)]
     }
+
+    pub fn part_of(&self, profile: &str, split: &'static str) -> &Columns {
+        self.part(profile, split)
+    }
+
+    pub fn feature_names(&self) -> &[String] {
+        &self.names
+    }
 }
 
 fn base_weights(names: &[String], base: &ContextModel) -> Vec<f64> {
@@ -736,7 +758,7 @@ fn apply_support_mask(probabilities: &[f64], supported: &[bool]) -> Vec<f64> {
 }
 
 fn with_runtime_support(model: &ContextModel, part: &Columns, names: &[String]) -> Vec<bool> {
-    part.rows(names).map(|(features, _, _)| model.supports_features(&features)).collect()
+    part.feature_rows(names).map(|(features, _, _)| model.supports_features(&features)).collect()
 }
 
 /// `outside_lone_word`: calibration at the serving threshold on the frames outside the lone-word head's class.

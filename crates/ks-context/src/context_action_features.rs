@@ -123,7 +123,7 @@ fn english_letter(c: char) -> bool {
 }
 
 /// The words of `_WORDS = [^\W\d_]+(?:['’\-][^\W\d_]+)*`.
-fn words_of(text: &str) -> Vec<&str> {
+pub fn words_of(text: &str) -> Vec<&str> {
     let chars: Vec<(usize, char)> = text.char_indices().collect();
     let mut words = Vec::new();
     let mut at = 0;
@@ -2200,4 +2200,89 @@ fn slip_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
         format!("{ortho}:{known}"),
     ];
     head_pairs(SLIP_FEATURE_PREFIX, &names, "")
+}
+
+/// `extract_context_features(item, 2)`: the bounded features of the frozen baseline model the sealed tests compare a
+/// candidate with. No shipped model reads them.
+pub fn extract_baseline_features(item: &ContextEvidence) -> FeatureMap {
+    use crate::context_model::normalized;
+    const BEFORE_WORDS: usize = 6;
+    const AFTER_WORDS: usize = 3;
+    const ORDERS: [usize; 3] = [1, 2, 3];
+    let original = normalized(pystr::slice(&item.original, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS as i64)));
+    let alternative = normalized(pystr::slice(&item.alternative, None, Some(ACTION_FEATURE_WORD_MAX_CHARACTERS as i64)));
+    let before = normalized(pystr::slice(&item.field.before, Some(-(ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS as i64)), None));
+    let after = normalized(pystr::slice(&item.field.after, None, Some(ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS as i64)));
+    let length = ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS.min(pystr::len(&original).max(pystr::len(&alternative)));
+    let direction = item.source_group;
+    let baseline = i32::from(item.baseline_convert);
+    let role = item.field.role.as_str();
+    let mut features = FeatureMap::new();
+    let bound = ACTION_FEATURE_WORD_SCORE_BOUND;
+    for (name, value) in [
+        ("bias".to_owned(), 1.0),
+        (format!("baseline:{baseline}"), 1.0),
+        (format!("direction:{direction}"), 1.0),
+        (format!("length:{length}"), 1.0),
+        (format!("baseline:{baseline}:length:{length}"), 1.0),
+        (format!("role:{role}"), 1.0),
+        (format!("trigger:{}", item.trigger), 1.0),
+        (format!("known:{}:{}", i32::from(item.source_known), i32::from(item.target_known)), 1.0),
+        ("score_delta".to_owned(), item.score_delta.min(bound).max(-bound) / bound),
+    ] {
+        features.insert(name, value);
+    }
+    let application = pystr::casefold(&item.field.application);
+    let application = pystr::slice(&application, None, Some(ACTION_FEATURE_APPLICATION_NAME_CHARACTERS as i64));
+    let parts = application.split(|character: char| !(character.is_ascii_lowercase() || character.is_ascii_digit())).filter(|part| !part.is_empty());
+    for part in parts.take(ACTION_FEATURE_APPLICATION_TOKEN_COUNT) {
+        features.insert(format!("app:{part}"), 1.0);
+        features.insert(format!("app:{part}:length:{length}"), 1.0);
+    }
+    let mut scripts: Vec<&str> = Vec::new();
+    for (label, text) in [("before", before.as_str()), ("after", after.as_str())] {
+        let all_words = words_of(text);
+        let words: &[&str] = if label == "before" { &all_words[all_words.len().saturating_sub(BEFORE_WORDS)..] } else { &all_words[..all_words.len().min(AFTER_WORDS)] };
+        let ru = text.chars().filter(|character| ('а'..='я').contains(character) || *character == 'ё').count();
+        let en = text.chars().filter(char::is_ascii_lowercase).count();
+        let dominant = match ru.cmp(&en) {
+            std::cmp::Ordering::Greater => "ru",
+            std::cmp::Ordering::Less => "en",
+            std::cmp::Ordering::Equal => "none",
+        };
+        scripts.push(dominant);
+        features.insert(format!("{label}:script:{dominant}:length:{length}"), 1.0);
+        features.insert(format!("{label}:script:{dominant}:direction:{direction}"), 1.0);
+        features.insert(format!("{label}:script:{dominant}:baseline:{baseline}"), 1.0);
+        for word in words {
+            features.insert(format!("{label}:word:{word}"), 1.0);
+        }
+        let neighbour = if label == "before" { words.last() } else { words.first() };
+        if let Some(neighbour) = neighbour {
+            for (token, sign) in [(&original, -1.0), (&alternative, 1.0)] {
+                *features.entry(format!("pair:{label}:{neighbour}:{token}")).or_insert(0.0) += sign;
+            }
+        }
+        if label == "before" {
+            let holds = |marks: &[&str]| f64::from(u8::from(marks.iter().any(|mark| text.contains(mark))));
+            features.insert("before:code".to_owned(), holds(&["=", "(`", "::", "=>", "{", "```"]));
+            features.insert("before:comment".to_owned(), holds(&["//", "#", "/*"]));
+        }
+    }
+    for (token, sign) in [(&original, -1.0_f64), (&alternative, 1.0)] {
+        let padded: Vec<char> = std::iter::once('^').chain(token.chars()).chain(std::iter::once('$')).collect();
+        for order in ORDERS {
+            let scale = sign / (padded.len().saturating_sub(order).saturating_add(1).max(1) as f64).sqrt();
+            for start in 0..(padded.len() + 1).saturating_sub(order) {
+                let gram: String = padded[start..start + order].iter().collect();
+                *features.entry(format!("char:{gram}")).or_insert(0.0) += scale;
+            }
+        }
+    }
+    features.insert("token:digits".to_owned(), f64::from(u8::from(original.chars().any(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4]))))));
+    features.insert("token:technical".to_owned(), f64::from(u8::from(original.chars().any(|character| crate::context_model::TECHNICAL_MARKS.contains(character)))));
+    features.insert(format!("context:{}:{}:{role}:{direction}:{length}", scripts[0], scripts[1]), 1.0);
+    features.insert(format!("context:{}:{}:baseline:{baseline}:length:{length}", scripts[0], scripts[1]), 1.0);
+    features.retain(|_, value| *value != 0.0);
+    features
 }
