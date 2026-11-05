@@ -251,6 +251,13 @@ impl GramTable {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_plain_table_and_an_empty_packed_one() {
+        let packed = GramTable::from_raw(std::iter::empty::<&str>(), &[]);
+        assert_eq!((packed.longest(), packed.len()), (0, 0));
+        assert!(packed.is_empty());
+    }
+
     fn grid() -> Vec<(String, f64)> {
         let letters: Vec<char> = ('a'..='z').chain('а'..='я').chain("\x02\x03,.;[]'`-".chars()).collect();
         let mut table = Vec::new();

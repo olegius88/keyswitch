@@ -289,6 +289,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_policy_as_a_dictionary_and_what_stops_an_early_switch() {
+        assert!(EarlySwitchPolicy::default().as_dict().get("minimum_length").is_some());
+        let table = WordTable::from_pairs([("ghb", 5)]);
+        let source = PrefixIndex::new(["ghb"], table.clone());
+        let target = PrefixIndex::new(["при"], WordTable::from_pairs([("привет", 5000)]));
+        let indexes: Vec<(i64, &PrefixIndex)> = vec![(0, &source), (1, &target)];
+        let scorers: Vec<(i64, &dyn PrefixScorer)> = vec![(0, &Scorer(false)), (1, &Scorer(false))];
+        let policy = EarlySwitchPolicy::default();
+        for (original, alternatives) in [
+            ("ghb", vec![(0, "при")]),
+            ("ghb", vec![(7, "при")]),
+            ("zzz", vec![(1, "XMLHttp")]),
+            ("ghb", vec![(1, "при")]),
+        ] {
+            let decision = early_switch_decision(&indexes, &scorers, original, &alternatives, 0, &policy);
+            assert!(!decision.should_switch, "{original} {alternatives:?}");
+        }
+        let empty = PrefixIndex::from_lexicon(Arc::new(table), "no dictionary");
+        let _ = empty.completions("x");
+    }
+
+    #[test]
     fn an_empty_word_is_no_word_and_a_source_without_a_dictionary_has_no_words() {
         let table = WordTable::from_pairs([("да", 5)]);
         let index = PrefixIndex::new(["", "да"], table);

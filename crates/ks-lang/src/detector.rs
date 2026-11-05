@@ -557,6 +557,62 @@ fn looks_like_protected_token(token: &str, protected_tokens: &ProtectedTokens) -
 mod tests {
     use super::*;
 
+    struct Stub;
+
+    impl LanguageScorer for Stub {
+        fn score(&self, _word: &str) -> WordScore {
+            WordScore { value: 0.0, known: false, frequency: 0, gram_ratio: 0.0, exact: false, spell_known: false, ngram_score: 0.0, invalid_ratio: 0.0, raw_ngram_score: 0.0 }
+        }
+        fn context_score(&self, _previous: &str, _word: &str) -> f64 {
+            0.0
+        }
+        fn best_single_deletion(&self, word: &str) -> WordScore {
+            self.score(word)
+        }
+    }
+
+    #[test]
+    fn what_a_scorer_and_a_list_of_tokens_answer() {
+        assert!(Stub.as_language_model().is_none());
+        let tokens = ProtectedTokens::from_text("npm\n");
+        assert_eq!(tokens.iter().collect::<Vec<_>>(), ["npm"]);
+        assert!(is_protected_token("npm", &tokens));
+    }
+
+    fn spelling_model(locale: &str, words: &'static [&'static str]) -> Arc<LanguageModel> {
+        let table = crate::tables::WordTable::from_pairs([("да", 100), ("нет", 100), ("the", 100), ("and", 100)]);
+        let speller: Box<dyn crate::spellcheck::SpellChecker> = Box::new(crate::spellcheck::FnSpellChecker::new("test", move |word: &str| words.contains(&word)));
+        Arc::new(LanguageModel::new(locale, table, "test", crate::tables::WordTable::default(), speller))
+    }
+
+    #[test]
+    fn every_reason_of_a_word_the_dictionary_of_the_target_knows() {
+        let (english, russian): (Arc<dyn LanguageScorer>, Arc<dyn LanguageScorer>) = (spelling_model("en_US", &[]), spelling_model("ru_RU", &["привет", "ъъъъъъ"]));
+        let models = vec![(0, english), (1, russian)];
+        let detector = LanguageDetector::new(models, None, Arc::new(ProtectedTokens::default())).unwrap();
+        let options = |threshold: f64| DecideOptions {
+            minimum_length: 1,
+            confidence_threshold: threshold,
+            ignored_words: &[],
+            aggressive: false,
+            protect_code: false,
+            previous_words: &[],
+            context_group: None,
+            forced_target_group: None,
+            rejected_targets: &[],
+            trigger: crate::intent_model::TRIGGERS[0],
+            use_intent_model: false,
+        };
+        let mut reasons = std::collections::BTreeSet::new();
+        for (word, target) in [("ghbdtn", "привет"), ("]]]]]]", "ъъъъъъ")] {
+            for threshold in [-100.0, 0.0, 100.0] {
+                let alternatives = [(9, "x".to_owned()), (1, target.to_owned())];
+                reasons.insert(detector.decide(word, &alternatives, 0, &options(threshold)).unwrap().reason);
+            }
+        }
+        assert!(reasons.len() >= 2, "{reasons:?}");
+    }
+
     #[test]
     fn errors_and_tokens_read_from_a_folder() {
         let error = DetectorError::from(LoadError::value("bad"));

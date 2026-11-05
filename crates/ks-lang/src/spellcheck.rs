@@ -135,6 +135,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn roots_without_a_home_and_the_real_environment() {
+        assert!(!dictionary_roots_from(None, None, None, Path::new("/d")).is_empty());
+        assert!(!dictionary_roots(Path::new("/d")).is_empty());
+        let _ = find_dictionary("xx_XX", Path::new("/d"));
+    }
+
+    #[test]
     fn checkers() {
         let disabled = DisabledSpellChecker;
         assert!(!disabled.available() && disabled.source().is_empty() && !disabled.check("word"));

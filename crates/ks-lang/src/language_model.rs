@@ -592,6 +592,44 @@ mod tests {
     use super::*;
     use crate::spellcheck::FnSpellChecker;
 
+    #[test]
+    fn a_table_with_a_very_large_alphabet_and_the_hashes_of_its_keys() {
+        let words: Vec<(String, i64)> = (0x4e00..0x4e00 + 300_u32).map(|code| (char::from_u32(code).unwrap().to_string(), 5)).collect();
+        let frequencies = WordTable::from_pairs(words.iter().map(|(word, count)| (word.as_str(), *count)));
+        let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert!(model.raw_ngram_score("\u{4e00}") > f64::NEG_INFINITY);
+        let mut hasher = MixHasher(0);
+        hasher.write(b"ab");
+        let first = hasher.finish();
+        hasher.write_u128(1);
+        assert_ne!(first, hasher.finish());
+    }
+
+    #[test]
+    fn counts_outside_the_range_and_models_with_nothing_to_measure() {
+        assert_eq!((count_value(-1), count_value(i128::MIN), count_value(i128::MAX)), (-1, i64::MIN, i64::MAX));
+        let empty = LanguageModel::new("en_US", WordTable::default(), "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert_eq!(empty.ngram_deviation.to_bits(), 1.0_f64.to_bits());
+        let one = LanguageModel::new("en_US", WordTable::from_pairs([("a", 5)]), "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert_eq!(one.ngram_deviation.to_bits(), 1.0_f64.to_bits());
+        let equal = LanguageModel::new("en_US", WordTable::from_pairs([("a", 5), ("b", 5)]), "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert_eq!(equal.ngram_deviation.to_bits(), 1.0_f64.to_bits());
+        assert!(!tiny().has_gram("ab"));
+    }
+
+    #[test]
+    fn an_arpa_file_that_is_gone_or_names_no_word() {
+        let (unigrams, bigrams) = LanguageModel::_read_arpa(Path::new("/nonexistent.arpa"));
+        assert!(unigrams.is_empty() && bigrams.is_empty());
+        let file = std::env::temp_dir().join(format!("ks-arpa-{}.arpa", std::process::id()));
+        std::fs::write(&file, "\\\\data\\\\\n\\\\1-grams:\n-1 a\n\\\\2-grams:\n-1 1 b\n-1 a 2\n-1 a b\n").unwrap();
+        let (_, bigrams) = LanguageModel::_read_arpa(&file);
+        assert!(bigrams.len() <= 1);
+        std::fs::remove_file(file).unwrap();
+        let tables = LanguageModel::load_tables("en_US", ["123"], &[]);
+        assert!(!tables.frequencies.is_empty());
+    }
+
     fn tiny() -> LanguageModel {
         let frequencies = WordTable::from_pairs([("hello", 1000), ("help", 500), ("world", 2000), ("it's", 7), ("a", 9)]);
         let bigrams = bigram_table([("hello", "world", 9), ("help", "me", 3)]);
