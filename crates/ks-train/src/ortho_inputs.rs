@@ -16,7 +16,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const SOURCE: &str = "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz";
 const SOURCE_SHA256: &str = "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793";
@@ -589,7 +589,6 @@ pub fn verify(root: &Path) -> Result<(), String> {
     let report = read_json(&directory.join("report.json"))?;
     let outcome = ortho::independent_outcome(root, &kept, &known_active)?;
     report_line(&mut differences, "independent test report", outcome == report["corpus_test"]);
-    let _ = INDEPENDENT_SCHEMA;
     if differences != 0 {
         return Err(format!("{differences} inputs of the orthotactic model differ from the frozen files"));
     }
@@ -613,7 +612,6 @@ pub fn freeze(root: &Path, output: &Path) -> Result<(), String> {
     let (evidence_path, known_path) = (output.join("known-evidence.json.gz"), output.join("known-receipt.json"));
     std::fs::write(&evidence_path, gz_write(&crate::artifact::canonical(&evidence))?).map_err(|error| error.to_string())?;
     std::fs::write(&known_path, pretty(&known_receipt(root, &evidence, &checksum(&evidence_path)?, &tokens)?)).map_err(|error| error.to_string())?;
-    let _: PathBuf = output.to_path_buf();
     Ok(())
 }
 
@@ -1009,4 +1007,131 @@ pub fn verify_lexicon_sources(root: &Path, web: Option<&Path>, prose: Option<&Pa
         return Err(format!("{differences} lexicon checks differ"));
     }
     Ok(())
+}
+
+/// One downloaded file of an independent set.
+struct SetSource {
+    locale: String,
+    name: String,
+    sha256: String,
+    wikisource: bool,
+    sample_percent: u64,
+    taken_percent: u64,
+}
+
+fn sampled(sentence: &str, percent: u64, namespace: &str) -> bool {
+    u64::from_str_radix(&hex_digest(&format!("{namespace}:{sentence}"))[..CHOICE_HEX_DIGITS], 16).expect("a digest") % 100 < percent
+}
+
+fn set_sentences(source: &SetSource, directory: &Path, excluded: &[String], namespace: &str, previous: &str) -> Result<Vec<String>, String> {
+    let path = directory.join(&source.name);
+    if checksum(&path)? != source.sha256 {
+        return Err(format!("{} is not the pinned file", source.name));
+    }
+    let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let lines: Vec<String> = if source.wikisource {
+        let pages: Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+        let table = pages.as_object().ok_or("a set of pages is an object")?;
+        let mut titles: Vec<&String> = table.keys().filter(|title| !excluded.contains(title)).collect();
+        titles.sort();
+        titles.into_iter().flat_map(|title| wikitext_sentences(table[title]["content"].as_str().unwrap_or(""))).collect()
+    } else {
+        pystr::splitlines(&text, false).into_iter().map(str::to_owned).collect()
+    };
+    Ok(lines.into_iter().filter(|line| sampled(line, source.sample_percent, namespace) && !sampled(line, source.taken_percent, previous)).collect())
+}
+
+/// `rows_from`: rows of the sentences, as a split of the corpus is built: one per (script, keys) with shapes.
+fn set_rows(root: &Path, sources: &[SetSource], directory: &Path, excluded: &[String], namespace: &str, previous: &str) -> Result<Vec<TokenRow>, String> {
+    let lists = word_lists(root)?;
+    let mut counts: BTreeMap<(String, String), BTreeMap<String, i64>> = BTreeMap::new();
+    for source in sources {
+        for line in set_sentences(source, directory, excluded, namespace, previous)? {
+            let text = normalize::nfc(&line);
+            for (position, raw) in pystr::split(&text).into_iter().enumerate() {
+                if raw.chars().count() > MAXIMUM_TOKEN_CHARACTERS {
+                    continue;
+                }
+                let Some(script) = label(raw, &source.locale, &lists)? else { continue };
+                let keys = to_keys(raw)?;
+                if !keys.is_empty() {
+                    *counts.entry((script.to_owned(), keys)).or_default().entry(shape_of(raw, position).to_owned()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    Ok(counts.into_iter().map(|((script, keys), shapes)| ("test".to_owned(), script, keys, shapes)).collect())
+}
+
+/// `--freeze DIR` of `ortho_independent`: a new independent set from downloaded files, before any model is scored on it.
+/// The sources are described by a JSON file: `name`, `sample_namespace`, `previous_sample_namespace`, `excluded_pages` and `files`, each with
+/// `locale`, `name`, `url`, `retrieved`, `sha256`, `license`, `reader` (`lines` or `wikisource`), `sample_percent` and
+/// `taken_by_an_earlier_set_percent`. `model/ortho_v1/independent` must not exist yet.
+pub fn freeze_independent(root: &Path, description: &Path, directory: &Path) -> Result<Value, String> {
+    let described = read_json(description)?;
+    let folder = root.join(DIRECTORY).join("independent");
+    if folder.exists() {
+        return Err("independent test already frozen; do not overwrite it".to_owned());
+    }
+    let (Some(set_name), Some(namespace), Some(previous)) = (described["name"].as_str(), described["sample_namespace"].as_str(), described["previous_sample_namespace"].as_str()) else { return Err("a description names the set and its sample namespaces".to_owned()) };
+    let excluded: Vec<String> = described["excluded_pages"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+    let mut sources = Vec::new();
+    for item in described["files"].as_array().ok_or("a description lists its files")? {
+        let text = |name: &str| item[name].as_str().map(str::to_owned).ok_or_else(|| format!("a file without {name}"));
+        sources.push(SetSource { locale: text("locale")?, name: text("name")?, sha256: text("sha256")?, wikisource: item["reader"].as_str() == Some("wikisource"), sample_percent: item["sample_percent"].as_u64().ok_or("sample_percent")?, taken_percent: item["taken_by_an_earlier_set_percent"].as_u64().unwrap_or(0) });
+    }
+    let rows = set_rows(root, &sources, directory, &excluded, namespace, previous)?;
+    std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+    let (tokens, evidence_path, receipt_path) = (folder.join("tokens.jsonl.gz"), folder.join("known-evidence.json.gz"), folder.join("receipt.json"));
+    std::fs::write(&tokens, gz_write(&tokens_content(&rows))?).map_err(|error| error.to_string())?;
+    let token_rows = read_set_rows(&tokens)?;
+    let models = reference_models(root)?;
+    let mut forms = empty_forms();
+    for row in &token_rows {
+        for direction in SCRIPTS {
+            for token in served(&row.keys, direction) {
+                if token.chars().all(|key| KEYS.contains(&key)) {
+                    queried(&token, direction, &mut forms);
+                }
+            }
+        }
+    }
+    let evidence = verdict(&models, forms);
+    std::fs::write(&evidence_path, gz_write(&crate::artifact::canonical(&evidence))?).map_err(|error| error.to_string())?;
+    let known = read_known(&evidence_path)?;
+    let minimum = read_json(&root.join(DIRECTORY).join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")? as usize;
+    let (kept, dropped) = independent_population(root, &token_rows, &known, minimum)?;
+    let mut by_script: BTreeMap<&str, i64> = BTreeMap::new();
+    for row in &token_rows {
+        *by_script.entry(if row.script == "en" { "en" } else { "ru" }).or_insert(0) += 1;
+    }
+    let mut words: BTreeSet<&str> = LOOKED_AT_WORDS.iter().copied().collect();
+    words.extend(ortho::AUTHORED_WORDS.iter().copied());
+    let history: Map<String, Value> = HISTORY.iter().map(|entry| entry.0).chain(DEVELOPMENT_SETS).map(|set| { let path = root.join(DIRECTORY).join(set); Ok((path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), json!(checksum(&path.join("tokens.jsonl.gz"))?))) }).collect::<Result<_, String>>()?;
+    let receipt = json!({
+        "schema_version": INDEPENDENT_SCHEMA, "set": set_name, "source": {"excluded_pages": excluded, "files": described["files"], "sample_namespace": namespace},
+        "population": "the corpus' own rules (label, to_keys, shape_of; population) with this verdict; a type whose served keys, every run read once, match a row of the snapshot, of an opened set or of a case written by hand is left out",
+        "left_out_words": words, "rows_by_script": by_script, "types": type_counts(&kept), "excluded_as_seen": dropped,
+        "snapshot_tokens_sha256": checksum(&root.join(DIRECTORY).join("tokens.jsonl.gz"))?, "history_tokens_sha256": history,
+        "tokens_sha256": checksum(&tokens)?, "evidence_sha256": checksum(&evidence_path)?, "provenance": pins(root, &["crates/ks-train/src/ortho_inputs.rs", "crates/ks-train/src/ortho.rs", "crates/ks-lang/src/ortho_model.rs"])?,
+    });
+    std::fs::write(&receipt_path, pretty(&receipt)).map_err(|error| error.to_string())?;
+    Ok(receipt)
+}
+
+/// A set's rows from its files against a frozen set, one source at a time: a row must be in the frozen file with at least as many
+/// shapes. That is how far files can be compared when a set's other source is no longer available.
+pub fn check_rows_within(root: &Path, description: &Path, directory: &Path, only: &str, frozen: &Path) -> Result<(usize, usize), String> {
+    let described = read_json(description)?;
+    let item = described["files"].as_array().into_iter().flatten().find(|item| item["name"].as_str() == Some(only)).ok_or("no such file in the description")?;
+    let source = SetSource { locale: item["locale"].as_str().unwrap_or("").to_owned(), name: only.to_owned(), sha256: item["sha256"].as_str().unwrap_or("").to_owned(), wikisource: item["reader"].as_str() == Some("wikisource"), sample_percent: item["sample_percent"].as_u64().unwrap_or(100), taken_percent: item["taken_by_an_earlier_set_percent"].as_u64().unwrap_or(0) };
+    let rows = set_rows(root, std::slice::from_ref(&source), directory, &[], described["sample_namespace"].as_str().unwrap_or(""), described["previous_sample_namespace"].as_str().unwrap_or(""))?;
+    let table: HashMap<(String, String), HashMap<String, i64>> = read_set_rows(frozen)?.into_iter().map(|row| ((row.script, row.keys), row.shapes.into_iter().collect())).collect();
+    let mut within = 0;
+    for (_, script, keys, shapes) in &rows {
+        if let Some(recorded) = table.get(&(script.clone(), keys.clone())) {
+            within += usize::from(shapes.iter().all(|(shape, count)| recorded.get(shape).is_some_and(|known| known >= count)));
+        }
+    }
+    Ok((within, rows.len()))
 }

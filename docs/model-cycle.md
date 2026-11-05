@@ -38,7 +38,7 @@
 
 Корпус префиксов: `ks-train prefix-corpus --tree .` собирает его заново и сверяет с файлами в `model/prefix_v1`, `--freeze <папка>` пишет новое поколение. Нужна переменная `KEYSWITCH_HUNSPELL_PATH=model/intent_v1/sources/hunspell`.
 
-Входные данные орфографической модели: `ks-train ortho --tree . --inputs` собирает заново токены, ответ словарей и независимые наборы и сверяет их с замороженными файлами; `--freeze-inputs --output <папка>` пишет новое поколение. Словари веб-форм и прозы выводятся из больших публичных файлов, которых нет в репозитории: `ks-train ortho --tree . --lexicon-sources --web-source <cc.ru.300.vec.gz> --prose-source <папка дампа Wikisource>` сверяет их с замороженными.
+Входные данные орфографической модели: `ks-train ortho --tree . --inputs` собирает заново токены, ответ словарей и независимые наборы и сверяет их с замороженными файлами; `--freeze-inputs --output <папка>` пишет новое поколение. Словари веб-форм и прозы выводятся из больших публичных файлов, которых нет в репозитории: `ks-train ortho --tree . --lexicon-sources --web-source <cc.ru.300.vec.gz> --prose-source <папка дампа Wikisource>` сверяет их с замороженными. Новый независимый набор: `ks-train ortho --tree . --freeze-independent <описание.json> --files <папка файлов>`, до него не должно быть папки `model/ortho_v1/independent`; набор открывается один раз.
 
 Семейства, которые больше не обучаются (`boundary_v1`, `context_v1`, `context_v2`, `ortho_v2`), лежат как история и как входные данные других шагов. `ks-train archive --tree .` сверяет каждый их файл с `model/archive-sha256.json`.
 

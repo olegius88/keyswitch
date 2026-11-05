@@ -23,6 +23,7 @@ use std::sync::{Arc, LazyLock};
 const DIRECTORY: &str = "model/ortho_v1";
 const NAMESPACE: &str = "keyswitch:ortho-v1:candidate15";
 const SYNTHESIS_NAMESPACE: &str = "keyswitch:ortho-v1:extra-key-synthesis";
+pub(crate) const AUTHORED_WORDS: [&str; 25] = ["htop", "webjs", "nginx", "bild", ".dist", "я-то", "фпривет", "привет", "клаиватура", "повторнно", "превет", "репост", "севодня", "созвон", "уведмление", "чатик", "пересборку", "healthcheck", "websocket", "hotfix", "npm", "kubectl", "const", "фнафер", "йцукен"];
 pub(crate) const AUTHORED_KEYS: [&str; 25] = [".dist", "aghbdtn", "ayfath", "bild", "cjpdjy", "const", "ctdjlyz", "edtlvktybt", "ghbdtn", "ghtdtn", "gjdnjhyyj", "gthtc,jhre", "healthcheck", "hotfix", "htgjcn", "htop", "kubectl", "nginx", "npm", "qwerty", "rkfbdfnehf", "webjs", "websocket", "xfnbr", "z-nj"];
 const TRAIN: &str = "train";
 const TEST: &str = "test";

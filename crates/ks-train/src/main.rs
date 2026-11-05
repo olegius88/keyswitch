@@ -163,6 +163,21 @@ fn main() {
     }
     if arguments.first().map(String::as_str) == Some("ortho") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        if let Some(description) = option(&arguments, "--freeze-independent") {
+            let directory = Path::new(option(&arguments, "--files").expect("--files is required"));
+            let result = match option(&arguments, "--check-within") {
+                Some(name) => ks_train::ortho_inputs::check_rows_within(&root, Path::new(description), directory, name, &root.join("model/ortho_v1/independent/tokens.jsonl.gz")).map(|(within, rows)| serde_json::json!({"within": within, "rows": rows})),
+                None => ks_train::ortho_inputs::freeze_independent(&root, Path::new(description), directory),
+            };
+            match result {
+                Ok(report) => println!("{report}"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         if arguments.iter().any(|argument| argument == "--lexicon-sources") {
             if let Err(error) = ks_train::ortho_inputs::verify_lexicon_sources(&root, option(&arguments, "--web-source").map(Path::new), option(&arguments, "--prose-source").map(Path::new)) {
                 eprintln!("{error}");
