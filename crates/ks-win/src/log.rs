@@ -44,6 +44,7 @@ pub fn info_with_error(logger: &str, message: &str, error: &dyn std::fmt::Displa
 
 /// The lines every test of the crate wrote, for the tests to look through.
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod capture {
     use std::sync::{Mutex, Once};
 

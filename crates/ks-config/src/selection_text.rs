@@ -33,10 +33,9 @@ impl Table {
         // zip(source, target, strict=True): the two rows have the same length.
         assert_eq!(source.chars().count(), target.chars().count());
         for (from, to) in source.chars().zip(target.chars()) {
-            match mapping.iter_mut().find(|(key, _)| *key == from) {
-                Some(entry) => entry.1 = to,
-                None => mapping.push((from, to)),
-            }
+            // A later pair wins, as it does in a dict.
+            mapping.retain(|(key, _)| *key != from);
+            mapping.push((from, to));
         }
         mapping.sort_unstable();
         Table(mapping)
@@ -90,18 +89,6 @@ fn tables() -> &'static Tables {
             cyrillic_letters: letters_of(RU_KEYS),
         }
     })
-}
-
-/// `LATIN_LETTERS`.
-#[must_use]
-pub fn latin_letters() -> &'static HashSet<char> {
-    &tables().latin_letters
-}
-
-/// `CYRILLIC_LETTERS`.
-#[must_use]
-pub fn cyrillic_letters() -> &'static HashSet<char> {
-    &tables().cyrillic_letters
 }
 
 /// The selection as the same keys type it in the other layout, and the layouts it went between.
@@ -322,9 +309,6 @@ fn cyrillic_to_latin(key: &str) -> Option<&'static str> {
 }
 
 fn latin_to_cyrillic(key: &str) -> Option<&'static str> {
-    if key.is_empty() {
-        return None;
-    }
     LATIN_TO_CYRILLIC.iter().find(|(latin, _)| *latin == key).map(|(_, cyrillic)| *cyrillic)
 }
 

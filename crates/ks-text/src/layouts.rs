@@ -19,13 +19,12 @@ impl fmt::Display for LayoutError {
 
 impl std::error::Error for LayoutError {}
 
-/// The one-character `str.upper()` of a key; the key rows hold no character whose capital is longer.
-#[expect(clippy::panic, reason = "the tables are constants of the program, and the tests read every one")]
+/// The one-character `str.upper()` of a key; the key rows hold no character whose capital is longer, and one would stay itself.
 fn upper_char(c: char) -> char {
     let mut it = crate::pystr::upper(&c.to_string()).chars().collect::<Vec<_>>().into_iter();
     match (it.next(), it.next()) {
         (Some(u), None) => u,
-        _ => panic!("str.translate tables need one-character keys"),
+        _ => c,
     }
 }
 
@@ -130,8 +129,20 @@ impl LayoutPair {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_two_layouts_in_either_order() {
+        assert!(LayoutPair::new("us", "ru").is_ok());
+        assert!(LayoutPair::new("ru", "us").is_ok());
+        for (first, second) in [("us", "de"), ("ru", "de"), ("de", "ru")] {
+            assert!(LayoutPair::new(first, second).is_err());
+        }
+        assert_eq!(LayoutPair::new("us", "ru").unwrap().translate("x", "us", "us").unwrap(), "x");
+        assert_eq!(upper_char('ß'), 'ß');
+    }
 
     #[test]
     fn translates_both_ways_with_case() {
@@ -152,5 +163,14 @@ mod tests {
         assert_eq!(m[0], ('`', 'ё'));
         assert_eq!(m.len(), 60); // 34 keys, plus a capital for each of the 26 letter pairs
         assert_eq!(m[34], ('Q', 'Й'));
+    }
+
+    #[test]
+    fn an_error_shows_its_message_and_a_key_given_twice_keeps_the_last() {
+        assert_eq!(LayoutError("broken".to_owned()).to_string(), "broken");
+        let mut map = vec![('a', 'x')];
+        set(&mut map, 'a', 'y');
+        set(&mut map, 'b', 'z');
+        assert_eq!(map, [('a', 'y'), ('b', 'z')]);
     }
 }

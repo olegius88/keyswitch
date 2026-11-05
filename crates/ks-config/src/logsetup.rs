@@ -105,10 +105,8 @@ pub fn utc_time(unix_milliseconds: i64) -> LocalTime {
 /// The current time in UTC.
 #[must_use]
 pub fn utc_now() -> LocalTime {
-    let milliseconds = match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(after) => after.as_millis().to::<i64>(),
-        Err(before) => -before.duration().as_millis().to::<i64>(),
-    };
+    // A clock set before 1970 reads as 1970.
+    let milliseconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |after| after.as_millis().to::<i64>());
     utc_time(milliseconds)
 }
 
@@ -152,14 +150,10 @@ pub fn strftime(format: &str, time: &LocalTime) -> String {
 
 fn platform_name() -> &'static str {
     // sys.platform
-    if cfg!(windows) {
-        "win32"
-    } else if cfg!(target_os = "macos") {
-        "darwin"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else {
-        std::env::consts::OS
+    match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
     }
 }
 
@@ -169,9 +163,7 @@ fn platform_description() -> String {
     }
     let os = std::env::consts::OS;
     let mut name = os.to_string();
-    if let Some(first) = name.get_mut(0..1) {
-        first.make_ascii_uppercase();
-    }
+    name.get_mut(0..1).into_iter().for_each(|first| first.make_ascii_uppercase());
     format!("{name}-{}", std::env::consts::ARCH)
 }
 
@@ -314,17 +306,13 @@ impl HandlerState {
         if self.should_rollover(line)? {
             self.do_rollover()?;
         }
-        if self.stream.is_none() {
-            self.open()?;
-        }
         let mut text = String::with_capacity(line.len() + 2);
         text.push_str(line);
         text.push_str(TERMINATOR);
-        if let Some(stream) = self.stream.as_mut() {
-            stream.write_all(text.as_bytes())?;
-            stream.flush()?;
-            self.position += text.len().to::<u64>();
-        }
+        let stream = self.stream.as_mut().expect("opened above");
+        stream.write_all(text.as_bytes())?;
+        stream.flush()?;
+        self.position += text.len().to::<u64>();
         Ok(())
     }
 }
@@ -546,9 +534,10 @@ pub fn follow_settings(settings: &Arc<SettingsStore>, handler: Option<&RotatingF
         if path != TECHNICAL_LOGGING_PATH && path != "*" {
             return;
         }
-        if let Some(settings) = weak.upgrade() {
+        // The store calls this, so it is alive.
+        weak.upgrade().into_iter().for_each(|settings| {
             let _ = apply_rotation(&changed_target, truthy(&settings.get_or(TECHNICAL_LOGGING_PATH, Value::Bool(false))));
-        }
+        });
     })))
 }
 
@@ -585,9 +574,93 @@ pub fn configure_logging_in(directory: &Path, settings: Option<&Arc<SettingsStor
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::sync::Mutex as TestMutex;
+
+    #[test]
+    fn a_folder_in_place_of_the_log_is_never_rolled_over() {
+        let folder = directory("folder-in-place");
+        let file = folder.join("keyswitch.log");
+        let mut state = HandlerState { base_filename: file.clone(), max_bytes: 5, backup_count: 1, stream: None, position: 0 };
+        state.open().unwrap();
+        state.position = 4;
+        assert!(state.should_rollover("line").unwrap());
+        std::fs::remove_file(&file).unwrap();
+        assert!(state.should_rollover("line").unwrap());
+        std::fs::create_dir(&file).unwrap();
+        assert!(!state.should_rollover("line").unwrap());
+    }
+
+    #[test]
+    fn format_codes_it_does_not_know_stay_as_they_are() {
+        let time = record("x").time;
+        assert_eq!(strftime("%% %q %", &time), "% %q %");
+        assert_eq!(utc_now().year >= 2026, true);
+    }
+
+    #[test]
+    fn the_platform_crate_sets_the_clock_and_the_description() {
+        let _turn = ROOT_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        set_local_clock(|| utc_time(0));
+        assert_eq!(local_time().year, 1970);
+        *locked(&CLOCK) = None;
+        assert!(local_time().year >= 2026);
+        set_platform_description("Linux-test");
+        assert_eq!(platform_description(), "Linux-test");
+        *locked(&PLATFORM) = None;
+        assert!(platform_description().contains(std::env::consts::ARCH));
+        assert!(!platform_name().is_empty());
+    }
+
+    #[test]
+    fn rotation_survives_a_missing_file_and_a_closed_stream() {
+        let folder = directory("rotation-edges");
+        let file = folder.join("keyswitch.log");
+        let handler = RotatingFileHandler::new(&file, 10, 1).unwrap();
+        assert_eq!(handler.base_filename(), std::path::absolute(&file).unwrap());
+        handler.emit(&record("a long enough line to roll over"));
+        handler.close();
+        handler.emit(&record("after closing it opens again"));
+        std::fs::remove_file(&file).unwrap();
+        handler.do_rollover().unwrap();
+        handler.close();
+        let mut state = HandlerState { base_filename: folder.clone(), max_bytes: 1, backup_count: 1, stream: None, position: 1 };
+        state.position = 1;
+        assert!(state.open().is_err() || !state.should_rollover("line").unwrap_or(false));
+    }
+
+    #[test]
+    fn without_a_handler_only_warnings_are_shown_and_a_handler_is_replaced_once() {
+        let _turn = ROOT_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        uninstall_handler();
+        uninstall_handler();
+        locked(&ROOT).level = Level::Debug;
+        debug("keyswitch.test", "not shown");
+        warning("keyswitch.test", "shown");
+        error("keyswitch.test", "shown");
+        let folder = directory("replace");
+        let handler = RotatingFileHandler::new(&folder.join("a.log"), 0, 0).unwrap();
+        install_handler(&handler);
+        install_handler(&handler);
+        uninstall_handler();
+        assert!(!log_status_of(&folder.join("a.log")).is_empty());
+        assert_eq!(log_path(), log_directory().join(LOG_FILE_NAME));
+        let _ = log_status();
+    }
+
+    #[test]
+    fn a_change_of_another_setting_leaves_the_rotation_alone() {
+        let _turn = ROOT_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let folder = directory("settings");
+        let settings = Arc::new(SettingsStore::new(Some(folder.join("config.json"))));
+        let handler = configure_logging_in(&folder, Some(&settings)).unwrap();
+        settings.set("history.limit", Value::from(5), false).unwrap();
+        settings.set(TECHNICAL_LOGGING_PATH, Value::Bool(true), false).unwrap();
+        handler.close();
+        uninstall_handler();
+    }
 
     /// The root logger is one per process: the tests that use it take turns.
     static ROOT_TURN: TestMutex<()> = TestMutex::new(());

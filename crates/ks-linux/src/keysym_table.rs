@@ -156,6 +156,7 @@ pub fn keysym_to_utf32(keysym: u32) -> u32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

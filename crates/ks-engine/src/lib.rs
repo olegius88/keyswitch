@@ -3,6 +3,7 @@
 //!
 //! `engine` is one Python module split by concern. `EngineCore` holds the state and is owned by one thread, the worker;
 //! `KeySwitchEngine` is the handle the application keeps, and `engine::Shared` is all that another thread may touch.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 pub mod constants;

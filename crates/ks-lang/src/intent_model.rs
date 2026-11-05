@@ -1173,6 +1173,7 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use crate::constants::FNV1A64_OFFSET_BASIS;
     use super::*;

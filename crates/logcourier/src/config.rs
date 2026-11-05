@@ -235,6 +235,7 @@ pub fn save_config(root: &Path, config: &Config) -> Result<()> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

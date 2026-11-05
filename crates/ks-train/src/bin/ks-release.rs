@@ -8,6 +8,7 @@
 //!
 //! With --candidate the tag is vX.Y.Z-rcN and the release a pre-release: the update check of an installed program does not
 //! see it, and the APT repository stays as it is. Without it the tag replaces the published version for everybody.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 use ks_cast::To as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -373,6 +374,7 @@ fn main() {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

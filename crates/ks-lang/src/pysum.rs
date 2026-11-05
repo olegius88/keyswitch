@@ -28,6 +28,7 @@ pub fn py_sum<I: IntoIterator<Item = f64>>(values: I) -> f64 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

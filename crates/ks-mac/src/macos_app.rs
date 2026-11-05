@@ -118,6 +118,7 @@ fn run(_hidden: bool, wants_diagnose: bool, _no_engine: bool) -> i32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

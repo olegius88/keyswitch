@@ -176,6 +176,7 @@ pub fn typo_variants(original: &str, identifier: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

@@ -198,6 +198,7 @@ pub fn supplement_words(resource_dir: &Path, locale: &str) -> Result<WordList, L
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

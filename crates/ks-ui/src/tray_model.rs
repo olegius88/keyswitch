@@ -113,8 +113,14 @@ pub fn menu_activation_message(message: u32, primary_click: u32, menu_click: u32
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tooltip_names_the_program() {
+        assert!(TrayState::default().title().starts_with("KeySwitch"));
+    }
 
     #[test]
     fn the_menu_has_the_shape_of_the_python_one() {

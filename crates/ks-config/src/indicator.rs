@@ -53,6 +53,7 @@ pub fn layout_icon_name(style: &Value, group: i64) -> &'static str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use serde_json::json;

@@ -255,6 +255,7 @@ impl Client for Telegram {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) mod fake {
     use std::sync::{Arc, Mutex};
 
@@ -284,6 +285,7 @@ pub(crate) mod fake {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::fake::Script;
     use super::*;

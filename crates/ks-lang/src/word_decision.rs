@@ -154,6 +154,7 @@ pub fn word_shape_veto(decision: DetectionDecision) -> DetectionDecision {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::language_model::WordScore;

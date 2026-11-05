@@ -130,6 +130,7 @@ pub(crate) fn split_path_list(value: &str) -> impl Iterator<Item = &str> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

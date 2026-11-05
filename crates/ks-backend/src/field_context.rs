@@ -144,8 +144,15 @@ fn last_characters(text: &str, count: usize) -> &str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_characters_from_the_end_is_nothing() {
+        assert_eq!(last_characters("abc", 0), "");
+        assert_eq!(last_characters("abc", 2), "bc");
+    }
 
     #[test]
     fn bounded_cuts_by_characters_and_hides_a_password() {

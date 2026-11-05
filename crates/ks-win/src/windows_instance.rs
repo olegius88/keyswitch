@@ -136,6 +136,7 @@ mod native {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;

@@ -270,6 +270,7 @@ pub fn prompt_position(anchor: (i32, i32), size: (i32, i32), monitor: Option<(i3
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

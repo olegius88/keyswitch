@@ -4,6 +4,7 @@
 //!
 //!     field-gate --root <tree with the private data> --released <folder of reports> [--manifest <file>]
 //!                [--replay <ks-replay binary>] [--jobs N] [--record <file>]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, HashSet};
@@ -264,6 +265,7 @@ fn main() {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

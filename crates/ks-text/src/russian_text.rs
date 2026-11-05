@@ -81,6 +81,7 @@ pub fn quantity(value: f64, forms: NounForms) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

@@ -234,6 +234,7 @@ pub fn scaled_bgra(canvas: &Canvas, target: usize) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

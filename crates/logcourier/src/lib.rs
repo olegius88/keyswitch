@@ -1,4 +1,5 @@
 //! `LogCourier`: a personal collector of log files into a closed Telegram group.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 pub mod batching;
 pub mod catalog;
 pub mod cli;

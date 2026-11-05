@@ -12,6 +12,7 @@ use crate::constants::{
     PERSONAL_WORD_MIN_COUNT, PERSONAL_WORD_SALT_BYTES, USER_DATA_JSON_INDENT,
 };
 use crate::history::data_dir;
+use crate::pycompat::create_parent;
 use crate::pycompat::{decode_text, json_loads, py_eq, with_suffix, write_text};
 use ks_text::pystr::casefold;
 use ks_text::{json_dumps, Indent, JsonOptions};
@@ -76,10 +77,8 @@ impl<V> Ordered<V> {
 
     /// `d[key] = value`: a key that is there keeps its place.
     fn set(&mut self, key: String, value: V) {
-        if let Some(position) = self.positions.get(&key) {
-            if let Some(entry) = self.entries.get_mut(position) {
-                entry.1 = value;
-            }
+        if let Some(entry) = self.positions.get(&key).and_then(|position| self.entries.get_mut(position)) {
+            entry.1 = value;
         } else {
             self.positions.insert(key.clone(), self.next);
             self.entries.insert(self.next, (key, value));
@@ -183,16 +182,12 @@ impl PersonalWords {
             return;
         };
         state.salt = payload["salt"].as_str().unwrap_or_default().to_string();
-        if let Value::Array(personal) = &payload["personal"] {
-            for key in personal.iter().filter_map(Value::as_str) {
-                state.personal.set(key.to_string(), ());
-            }
+        for key in payload["personal"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            state.personal.set(key.to_string(), ());
         }
-        if let Value::Object(counts) = &payload["counts"] {
-            for (key, count) in counts {
-                if let Some(count) = crate::pycompat::as_py_int(count).filter(|count| *count > 0) {
-                    state.counts.set(key.clone(), count);
-                }
+        for (key, count) in payload["counts"].as_object().into_iter().flatten() {
+            if let Some(count) = crate::pycompat::as_py_int(count).filter(|count| *count > 0) {
+                state.counts.set(key.clone(), count);
             }
         }
     }
@@ -293,9 +288,7 @@ impl PersonalWords {
         let mut text = json_dumps(&Value::Object(data), &options);
         text.push('\n');
         let result: std::io::Result<()> = (|| {
-            if let Some(parent) = self.path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+            create_parent(&self.path)?;
             let temporary = with_suffix(&self.path, ".json.tmp");
             write_text(&temporary, &text)?;
             std::fs::rename(&temporary, &self.path)
@@ -306,8 +299,21 @@ impl PersonalWords {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_without_lists_is_an_empty_one_and_nothing_can_be_dropped_from_nothing() {
+        let file = path("bare");
+        std::fs::write(&file, r#"{"salt": "x"}"#).unwrap();
+        let words = PersonalWords::always_persisting(Some(file));
+        words.load();
+        assert!(!words.contains("слово"));
+        let mut ordered: Ordered<()> = Ordered::new();
+        ordered.pop_first();
+        assert_eq!(ordered.len(), 0);
+    }
 
     fn path(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!("ks-words-{name}-{}", std::process::id()));

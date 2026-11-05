@@ -777,6 +777,7 @@ pub fn load_artifact(path: &Path, limit: usize, too_large: &str, spec: &WeightSp
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

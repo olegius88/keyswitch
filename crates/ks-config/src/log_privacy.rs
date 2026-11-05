@@ -151,7 +151,6 @@ impl LogRedactor {
         LogRedactor::default()
     }
 
-    #[expect(clippy::unreachable, reason = "masking keeps the kind of a value")]
     pub fn record(&mut self, payload: &Map<String, Value>) -> Map<String, Value> {
         let before = payload.get("context").and_then(Value::as_object).and_then(|context| context.get("words"));
         let previous: Vec<String> = match before.and_then(Value::as_object) {
@@ -176,17 +175,22 @@ impl LogRedactor {
             }
         }
         let secrets: HashSet<String> = self.secrets.iter().cloned().collect();
-        match masked(&Value::Object(payload.clone()), &secrets) {
-            Value::Object(map) => map,
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => unreachable!("an object stays an object"),
-        }
+        masked(&Value::Object(payload.clone()), &secrets).as_object().cloned().unwrap_or_default()
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn what_is_no_text_holds_no_word() {
+        let mut out = Vec::new();
+        texts(&json!([1, null, true, {"a": "слово"}]), &mut out);
+        assert_eq!(out.len(), 1);
+    }
 
     #[test]
     fn long_mixed_tokens_are_secrets() {

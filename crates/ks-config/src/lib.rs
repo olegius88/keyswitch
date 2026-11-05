@@ -2,6 +2,7 @@
 //!
 //! One file per Python module of the same name; `pycompat` holds the few behaviours of Python's standard library
 //! (text files, equality of JSON values, `Path.with_suffix`) that the stores of this crate rely on.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 pub mod app_quirks;

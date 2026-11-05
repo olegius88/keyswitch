@@ -31,7 +31,8 @@ pub fn float_repr(x: f64) -> String {
     let mut text = format!("{:e}", x.abs());
     let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(char::is_ascii_digit).count();
     let exact = format!("{:.*e}", shortest_len - 1, x.abs());
-    if exact != text && exact.parse::<f64>().is_ok_and(|v| v == x.abs()) {
+    // The correctly rounded value of that length is at least as close as the shortest form, so it reads back the same.
+    if exact != text {
         text = exact;
     }
     let (mantissa, exponent) = text.split_once('e').expect("exponent form");
@@ -63,12 +64,6 @@ pub fn float_repr(x: f64) -> String {
         out.push_str(digits.get(decpt.to::<usize>()..).unwrap_or_default());
     }
     out
-}
-
-/// `str(x)` of a float is its repr.
-#[must_use]
-pub fn float_str(x: f64) -> String {
-    float_repr(x)
 }
 
 // ---------------------------------------------------------------- parsing
@@ -557,26 +552,44 @@ where
     best
 }
 
-/// `min(items)` without a key: the first minimal element.
-#[expect(clippy::neg_cmp_op_on_partial_ord, reason = "Python keeps the first value when a comparison with NaN is false")]
-pub fn min_first<I>(items: I) -> Option<I::Item>
-where
-    I: IntoIterator,
-    I::Item: PartialOrd,
-{
-    let mut best: Option<I::Item> = None;
-    for item in items {
-        match &best {
-            Some(b) if !(item < *b) => {}
-            _ => best = Some(item),
-        }
-    }
-    best
-}
-
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_end_where_the_text_ends() {
+        assert_eq!(py_float("12"), Some(12.0));
+        assert_eq!(py_float("1."), Some(1.0));
+        assert_eq!(py_round_to_int(1e39), None);
+    }
+
+    #[test]
+    fn every_kind_of_float_has_its_hex_form() {
+        assert_eq!(float_hex(f64::NAN), "nan");
+        assert_eq!(float_hex(f64::INFINITY), "inf");
+        assert_eq!(float_hex(f64::NEG_INFINITY), "-inf");
+        assert!(float_fromhex("nan").is_some_and(f64::is_nan));
+        assert_eq!(float_fromhex("0x1.0p+0"), None);
+        assert_eq!(float_fromhex("0x0.0000000000001p-1022"), Some(f64::from_bits(1)));
+        assert_eq!(float_fromhex("0x2.0000000000000p+0"), None);
+    }
+
+    #[test]
+    fn the_first_of_equals_wins_and_nan_never_replaces() {
+        assert_eq!(max_first([1.0, 3.0, 3.0, 2.0]), Some(3.0));
+        assert_eq!(max_first([1.0, f64::NAN]), Some(1.0));
+        assert_eq!(max_first(Vec::<f64>::new()), None);
+    }
+
+    #[test]
+    fn a_hex_float_is_read_only_in_the_form_python_writes() {
+        assert_eq!(float_fromhex("-inf"), Some(f64::NEG_INFINITY));
+        assert_eq!(float_fromhex("inf"), Some(f64::INFINITY));
+        assert_eq!(float_fromhex("0x0.0p+0"), Some(0.0));
+        assert_eq!(float_fromhex("-0x1.8000000000000p+1"), Some(-3.0));
+        assert_eq!(float_fromhex("nonsense"), None);
+    }
 
     #[test]
     fn repr_layout() {
@@ -732,6 +745,7 @@ pub fn float_hex(x: f64) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod float_hex_tests {
     use super::float_hex;
 

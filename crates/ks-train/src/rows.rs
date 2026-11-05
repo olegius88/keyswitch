@@ -465,6 +465,7 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

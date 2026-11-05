@@ -8,6 +8,7 @@
 //! every call it made on its backend and field reader with the answer, and what could be seen from outside after each
 //! entry. The Rust engine is given the same entries, its backend answers from the trace and checks the calls and their
 //! arguments are the same in the same order, and the first difference is reported with its test name.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
 #![forbid(unsafe_code)]
 #![recursion_limit = "512"]
