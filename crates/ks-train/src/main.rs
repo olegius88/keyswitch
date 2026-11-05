@@ -19,6 +19,7 @@
 //! `supplement --tree <root> --verify | --input <file> [--output <file>] [--receipt <file>] [--removed-list <file>]`,
 //! `apt-build --tree <root> --repository <folder> --package <file>... [--passphrase-file <file>]`, `apt-verify --tree <root> --repository <folder> --expect-version <version> [--public-key <file>]`
 //! `ks-train ortho --tree <root> --fit|--verify|--test|--promote [--output <folder>]`
+//! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
 //! `ks-train fitting --tree <root> --base <folder> --output <folder> --namespace <text> --tatoeba-directory <folder> --tatoeba-language <code>... ...`
 //!
 //! Fits a candidate of the context action model or of the prefix model. Never reads a test split. With `--stages` every stage is written down, one
@@ -99,6 +100,18 @@ fn main() {
     }
     if matches!(arguments.first().map(String::as_str), Some("carry" | "doctor" | "supplement" | "apt-build" | "apt-verify")) {
         std::process::exit(small_command(&arguments));
+    }
+    if arguments.first().map(String::as_str) == Some("detector") {
+        let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
+        let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+        let size = |name: &str| option(&arguments, name).map_or(5000, |value| value.parse().expect("a number"));
+        match ks_train::detector::command(&resources, size("--sample"), size("--dictionary-sample"), arguments.iter().any(|argument| argument == "--strict")) {
+            Ok(code) => std::process::exit(code),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
     }
     if arguments.first().map(String::as_str) == Some("ortho") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));

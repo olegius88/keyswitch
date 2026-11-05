@@ -9,6 +9,7 @@ pub mod captured;
 pub mod compare;
 pub mod corpus;
 pub mod curricula;
+pub mod detector;
 pub mod engine_reports;
 pub mod evaluate;
 pub mod evidence;

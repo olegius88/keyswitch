@@ -46,6 +46,11 @@ pub struct ProtectedTokens {
 }
 
 impl ProtectedTokens {
+    /// The tokens, in no particular order.
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.tokens.iter().map(String::as_str)
+    }
+
     /// `_load_protected_tokens()`.
     pub fn load(resource_dir: &Path) -> ProtectedTokens {
         let Ok(bytes) = std::fs::read(resource_dir.join("protected_tokens.txt")) else {
