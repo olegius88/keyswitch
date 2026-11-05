@@ -29,6 +29,7 @@ in_x_server() {
 cd "$project_dir"
 cargo test "${cargo_profile[@]}" -p ks-linux --no-run
 GTK_A11Y=none in_x_server cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_x11
+GTK_A11Y=none in_x_server cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_gtk
 dbus-run-session -- cargo test "${cargo_profile[@]}" -p ks-linux --test e2e_tray
 
 runtime="$(mktemp -d)"

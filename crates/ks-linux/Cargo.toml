@@ -18,6 +18,10 @@ name = "e2e_x11"
 harness = false
 
 [[test]]
+name = "e2e_gtk"
+harness = false
+
+[[test]]
 name = "e2e_package"
 harness = false
 

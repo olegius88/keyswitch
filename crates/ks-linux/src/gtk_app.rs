@@ -78,6 +78,20 @@ pub fn with_app(action: impl FnOnce(&Rc<App>)) {
 }
 
 /// Runs `action` on the settings window if there is one.
+/// The window as a plain widget, for a test to walk through.
+pub fn with_app_window() -> Option<gtk::Widget> {
+    let mut found = None;
+    with_window(|window| found = Some(window.window.clone().upcast::<gtk::Widget>()));
+    found
+}
+
+/// What a call on the window answers, when there is a window.
+pub fn with_window_result<T>(action: impl FnOnce(&MainWindow) -> T) -> Option<T> {
+    let mut found = None;
+    with_window(|window| found = Some(action(window)));
+    found
+}
+
 pub fn with_window(action: impl FnOnce(&MainWindow)) {
     if let Some(window) = app().and_then(|app| app.window.borrow().clone()) {
         action(&window);
