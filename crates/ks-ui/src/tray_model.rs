@@ -113,6 +113,7 @@ pub fn menu_activation_message(message: u32, primary_click: u32, menu_click: u32
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

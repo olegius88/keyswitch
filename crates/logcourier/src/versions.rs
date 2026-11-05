@@ -202,6 +202,7 @@ pub fn caption(metadata: &Value) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

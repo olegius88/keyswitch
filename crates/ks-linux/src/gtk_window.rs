@@ -1675,6 +1675,7 @@ fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry) {
 pub type Rule = LearnedRule;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

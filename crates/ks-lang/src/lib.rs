@@ -4,6 +4,7 @@
 //! Each module is the Python module of the same name. The models read one resources folder given at load time
 //! (`Resources`); nothing here derives a path from the executable.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 pub mod boundary_model;

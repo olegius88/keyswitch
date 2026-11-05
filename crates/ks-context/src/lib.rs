@@ -5,6 +5,7 @@
 //! here derives a path from the executable. The two big tables, the feature weights and the term counts, are held in flat
 //! arrays (`flat_table`).
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 pub mod constants;

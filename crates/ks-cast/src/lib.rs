@@ -5,6 +5,7 @@
 //!   or the smallest one; a float loses its fraction, and `NaN` becomes zero; a large integer becomes the nearest float.
 //! - [`To::low`]: the low bits of an integer, for hashes and packed values, where dropping the rest is the point.
 //! - [`To::bits`]: the same bits read with the other sign, as a system handle or status is.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(
     clippy::as_conversions,
     clippy::cast_possible_truncation,
@@ -265,8 +266,34 @@ pub const fn const_usize(value: i64) -> usize {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{To, const_i32, const_i64, const_usize};
+
+    #[test]
+    fn a_constant_converts_at_run_time_too() {
+        assert_eq!(const_i64(std::hint::black_box(5)), 5);
+        assert_eq!(const_i32(std::hint::black_box(6)), 6);
+        assert_eq!(const_usize(std::hint::black_box(7)), 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "value <= i64::MAX as usize")]
+    fn a_constant_too_large_for_i64_stops() {
+        let _ = const_i64(std::hint::black_box(usize::MAX));
+    }
+
+    #[test]
+    #[should_panic(expected = "value <= i32::MAX as usize")]
+    fn a_constant_too_large_for_i32_stops() {
+        let _ = const_i32(std::hint::black_box(usize::MAX));
+    }
+
+    #[test]
+    #[should_panic(expected = "value >= 0")]
+    fn a_negative_constant_stops() {
+        let _ = const_usize(std::hint::black_box(-1));
+    }
 
     #[test]
     fn a_constant_converts_while_the_program_is_built() {

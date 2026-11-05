@@ -6,6 +6,7 @@
 //! `FIELD_DEBUG=1` writes the engine's technical log to `<report>.log`, to be set beside the Python's at the first
 //! difference. The clock is one and fake: the engine's and the observed text's alike, as `time.monotonic` is patched on the
 //! module both read it from.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 use ks_cast::To as _;

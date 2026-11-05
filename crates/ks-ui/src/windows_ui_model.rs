@@ -841,6 +841,7 @@ pub fn prompt_position(anchor: (i32, i32), size: (i32, i32), screen: (i32, i32, 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use ks_config::config::default_settings;

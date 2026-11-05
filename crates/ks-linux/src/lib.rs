@@ -2,6 +2,7 @@
 //!
 //! `unsafe` lives in this crate only, each block with the reason it is sound.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 pub mod constants;
 pub mod keysym_names;
 pub mod keysym_table;

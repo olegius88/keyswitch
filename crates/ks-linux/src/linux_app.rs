@@ -378,6 +378,7 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

@@ -57,6 +57,7 @@ pub fn focused_caret_anchor(api: &dyn AtspiApi, window_pid: u32) -> Option<(i32,
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::atspi_context::{AtspiError, AtspiResult};

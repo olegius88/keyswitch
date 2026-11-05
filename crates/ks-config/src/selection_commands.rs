@@ -299,6 +299,7 @@ pub fn caret_steps(text: &str) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

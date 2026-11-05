@@ -273,6 +273,7 @@ impl<A: SelectionAccessibilityAPI + Send + Sync> SelectionAccess for MacSelectio
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::collections::HashMap;

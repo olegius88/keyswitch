@@ -101,6 +101,7 @@ pub fn setting_change(settings: &SettingsStore, path: &str, value: &Value) -> Op
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

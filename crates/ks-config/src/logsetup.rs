@@ -585,6 +585,7 @@ pub fn configure_logging_in(directory: &Path, settings: Option<&Arc<SettingsStor
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::sync::Mutex as TestMutex;

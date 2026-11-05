@@ -260,6 +260,7 @@ impl GramTable {
 pub fn pack_channels(_model: Option<&mut OrthoModel>) {}
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

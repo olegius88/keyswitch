@@ -6,6 +6,7 @@
 //! interfaces; what calls macOS itself compiles on macOS only. `unsafe` is allowed in this crate alone, and each block
 //! says why it holds.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 pub mod constants;
 pub mod macos_app;
 pub mod macos_backend;

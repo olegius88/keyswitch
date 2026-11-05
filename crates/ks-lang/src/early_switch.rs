@@ -284,6 +284,7 @@ pub fn early_switch_decision(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

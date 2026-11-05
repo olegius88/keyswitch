@@ -168,9 +168,15 @@ pub fn json_dumps(value: &Value, options: &JsonOptions) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_number_above_the_signed_range_is_written_whole() {
+        assert_eq!(json_dumps(&json!(u64::MAX), &JsonOptions::default()), u64::MAX.to_string());
+    }
 
     #[test]
     fn dumps_like_python() {
@@ -193,5 +199,13 @@ mod tests {
         assert_eq!(json_string("a\"b\\c\n\u{8}\u{c}\u{1}", true), r#""a\"b\\c\n\b\f\u0001""#);
         assert_eq!(json_string("\u{7f}é", false), "\"\u{7f}é\"");
         assert_eq!(json_float(f64::NAN), "NaN");
+    }
+
+    #[test]
+    fn floats_python_writes_by_name() {
+        assert_eq!(json_float(f64::NAN), "NaN");
+        assert_eq!(json_float(f64::INFINITY), "Infinity");
+        assert_eq!(json_float(f64::NEG_INFINITY), "-Infinity");
+        assert_eq!(json_float(1.5), "1.5");
     }
 }

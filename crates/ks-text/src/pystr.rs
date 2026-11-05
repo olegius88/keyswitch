@@ -399,27 +399,6 @@ pub fn splitlines(s: &str, keepends: bool) -> Vec<&str> {
 
 // ---------------------------------------------------------------- prefixes
 
-/// `s.startswith(prefix)`.
-#[must_use]
-pub fn startswith(s: &str, prefix: &str) -> bool {
-    s.starts_with(prefix)
-}
-/// `s.endswith(suffix)`.
-#[must_use]
-pub fn endswith(s: &str, suffix: &str) -> bool {
-    s.ends_with(suffix)
-}
-/// `s.startswith((a, b, ...))`.
-#[must_use]
-pub fn startswith_any(s: &str, prefixes: &[&str]) -> bool {
-    prefixes.iter().any(|p| s.starts_with(p))
-}
-/// `s.endswith((a, b, ...))`.
-#[must_use]
-pub fn endswith_any(s: &str, suffixes: &[&str]) -> bool {
-    suffixes.iter().any(|p| s.ends_with(p))
-}
-
 // ---------------------------------------------------------------- code point indexing
 
 /// `len(s)`: the number of code points.
@@ -623,8 +602,16 @@ pub fn cmp(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_separator_and_a_zero_step_are_python_errors() {
+        assert_eq!(rsplit_sep("a", "", -1), None);
+        assert_eq!(slice_step("a", None, None, 0), None);
+        assert_eq!(cmp("a", "b"), std::cmp::Ordering::Less);
+    }
 
     #[test]
     fn case_mapping_special_cases() {
@@ -688,5 +675,12 @@ mod tests {
         assert_eq!(center("ab", 4, '*'), "*ab*");
         assert_eq!(zfill("-5", 4), "-005");
         assert_eq!(rjust("я", 3, ' '), "  я");
+    }
+
+    #[test]
+    fn lines_split_as_python_splits_them() {
+        assert_eq!(splitlines("a\nb\r\nc\rd\u{2028}e", false), ["a", "b", "c", "d", "e"]);
+        assert_eq!(splitlines("a\r\nb\n", true), ["a\r\n", "b\n"]);
+        assert!(splitlines("", false).is_empty());
     }
 }

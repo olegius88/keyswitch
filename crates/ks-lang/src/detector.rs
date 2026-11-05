@@ -552,6 +552,7 @@ fn looks_like_protected_token(token: &str, protected_tokens: &ProtectedTokens) -
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

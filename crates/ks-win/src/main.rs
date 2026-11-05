@@ -1,4 +1,5 @@
 //! `KeySwitch` for Windows. A windowed program: no console window, whatever started it.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![windows_subsystem = "windows"]
 
 fn main() {

@@ -138,6 +138,7 @@ pub fn autostart_command(executable: &str) -> Result<String> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use serde_json::json;
 

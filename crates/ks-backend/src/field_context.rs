@@ -144,6 +144,7 @@ fn last_characters(text: &str, count: usize) -> &str {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

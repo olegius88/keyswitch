@@ -106,6 +106,7 @@ pub(crate) fn py_equals_int(value: &serde_json::Value, number: i64) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

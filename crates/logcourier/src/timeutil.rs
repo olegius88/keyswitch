@@ -136,6 +136,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

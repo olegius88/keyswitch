@@ -24,7 +24,7 @@ pub fn combining_class(c: char) -> u8 {
         return 0;
     }
     let i = t::CCC_RUNS.partition_point(|r| r.0 <= cp);
-    if i > 0 && cp <= t::CCC_RUNS[i - 1].1 { t::CCC_RUNS[i - 1].2 } else { 0 }
+    i.checked_sub(1).and_then(|before| t::CCC_RUNS.get(before)).filter(|run| cp <= run.1).map_or(0, |run| run.2)
 }
 
 fn decompose_char(c: char, out: &mut Vec<char>) {
@@ -127,6 +127,7 @@ pub fn nfc(s: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

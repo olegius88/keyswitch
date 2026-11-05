@@ -595,6 +595,7 @@ pub fn build_kwin_action_script(action: &KwinAction<'_>) -> String {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
 

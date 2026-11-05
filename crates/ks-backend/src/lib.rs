@@ -1,6 +1,7 @@
 //! What the engine and the platform layers share: keys, the backend contract, field and selection readings.
 //!
 //! It depends on nothing, so a platform crate and the engine can be built apart.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
 pub mod backend;

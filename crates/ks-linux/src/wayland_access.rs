@@ -168,6 +168,7 @@ pub fn disable_command() -> i32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::cell::RefCell;

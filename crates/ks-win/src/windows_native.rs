@@ -908,6 +908,7 @@ mod win32 {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::constants::{VK_BACK, VK_MENU_MASK, WM_LBUTTONDOWN};

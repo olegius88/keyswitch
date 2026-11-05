@@ -5,6 +5,7 @@
 //! calls Windows itself compiles on Windows only. `unsafe` is allowed in this crate alone, and each block says why it
 //! holds.
 
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 pub mod constants;
 #[cfg(windows)]
 pub mod desktop_app;

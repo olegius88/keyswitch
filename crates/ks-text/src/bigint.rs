@@ -257,8 +257,15 @@ impl Ord for BigUint {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bit_past_the_end_is_clear_and_zero_times_anything_is_zero() {
+        assert!(!big(1).bit(100));
+        assert_eq!(big(5).mul(&BigUint::zero()), BigUint::zero());
+    }
 
     fn big(v: u128) -> BigUint {
         BigUint::from_u64((v >> 64).to::<u64>()).shl(64).add(&BigUint::from_u64(v.low::<u64>()))
@@ -302,5 +309,13 @@ mod tests {
         assert_eq!(big(1).to_f64_scaled(1024), f64::INFINITY);
         assert_eq!(big(1).to_f64_scaled(1023), 2f64.powi(1023));
         assert_eq!(big(1).to_f64_scaled(0), 1.0);
+    }
+
+    #[test]
+    fn nothing_has_no_length_and_no_value() {
+        assert_eq!(BigUint::zero().bit_length(), 0);
+        assert_eq!(big(5).shr(64), BigUint::zero());
+        assert_eq!(BigUint::zero().to_f64_scaled(7), 0.0);
+        assert_eq!(big(1).to_f64_scaled(-1200), 0.0);
     }
 }
