@@ -3,22 +3,36 @@
 //! published files checked. It writes no prose: the changelog's Unreleased entries and RELEASE_NOTES.md are the author's,
 //! and it refuses to run without them.
 //!
-//!     ks-release --version X.Y.Z [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch rust]
+//!     ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main]
 //!                [--field-root <tree>] [--field-released <folder>] [--message-file <file>]
+//!
+//! With --candidate the tag is vX.Y.Z-rcN and the release a pre-release: the update check of an installed program does not
+//! see it, and the APT repository stays as it is. Without it the tag replaces the published version for everybody.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const UNRELEASED: &str = "## Unreleased";
-const WORKFLOW: &str = "Rust";
+const WORKFLOW: &str = "CI and release";
 const CI_TIMEOUT_SECONDS: u64 = 3 * 60 * 60;
 const CI_POLL_SECONDS: u64 = 60;
 const SECONDS_PER_DAY: i64 = 86_400;
-const ASSETS: [&str; 6] = ["KeySwitch-Setup-{version}-x64.exe", "KeySwitch-Setup-{version}-arm64.exe", "KeySwitch-Setup-{version}-x86.exe", "keyswitch_{version}_amd64.deb", "KeySwitch-{version}-macos-arm64.zip", "KeySwitch-{version}-macos-x86_64.zip"];
+const ASSETS: [&str; 9] = [
+    "KeySwitch-Setup-{version}-x64.exe",
+    "KeySwitch-Setup-{version}-arm64.exe",
+    "KeySwitch-Setup-{version}-x86.exe",
+    "KeySwitch-{version}-windows-x64.zip",
+    "KeySwitch-{version}-windows-arm64.zip",
+    "KeySwitch-{version}-windows-x86.zip",
+    "keyswitch_{version}_amd64.deb",
+    "KeySwitch-{version}-macos-arm64.zip",
+    "KeySwitch-{version}-macos-x86_64.zip",
+];
 const TESTED_CRATES: [&str; 8] = ["ks-text", "ks-lang", "ks-context", "ks-engine", "ks-config", "ks-replay", "ks-train", "logcourier"];
 
 #[derive(Default)]
 struct Options {
     version: String,
+    candidate: Option<u32>,
     dry_run: bool,
     skip_checks: bool,
     skip_ci: bool,
@@ -152,6 +166,10 @@ fn wrapped_lines(text: &str) -> Vec<usize> {
     wrapped
 }
 
+fn release_tag(options: &Options) -> String {
+    options.candidate.map_or_else(|| format!("v{}", options.version), |candidate| format!("v{}-rc{candidate}", options.version))
+}
+
 fn assets(version: &str) -> Vec<String> {
     ASSETS.iter().map(|asset| asset.replace("{version}", version)).collect()
 }
@@ -211,7 +229,7 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
 }
 
 fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
-    let tag = format!("v{}", options.version);
+    let tag = release_tag(options);
     if !output(root, "git", &["status", "--porcelain"])?.is_empty() {
         let message = match &options.message_file {
             Some(path) => std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?,
@@ -276,7 +294,7 @@ fn check_preconditions(root: &Path, options: &Options) -> Result<(), String> {
     if branch != options.branch {
         return Err(format!("the tree is on {branch}, not on {}", options.branch));
     }
-    let tag = format!("v{}", options.version);
+    let tag = release_tag(options);
     if !output(root, "git", &["ls-remote", "--tags", &options.remote, &tag])?.is_empty() && !output(root, "git", &["status", "--porcelain"])?.is_empty() {
         return Err(format!("{tag} is already published and the tree has changes; choose another version"));
     }
@@ -312,7 +330,7 @@ fn release(root: &Path, options: &Options) -> Result<(), String> {
     wait_for_workflow(root, &tag)?;
     println!("[8] verifying the published release");
     let url = verify_published(root, options, &tag)?;
-    println!("\nKeySwitch {} is released: {url}", options.version);
+    println!("\nKeySwitch {tag} is released: {url}");
     Ok(())
 }
 
@@ -321,16 +339,24 @@ fn main() {
     let value = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|place| arguments.get(place + 1)).cloned();
     let flag = |name: &str| arguments.iter().any(|argument| argument == name);
     let Some(version) = value("--version") else {
-        eprintln!("usage: ks-release --version X.Y.Z [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch rust] [--field-root <tree>] [--field-released <folder>] [--message-file <file>]");
+        eprintln!("usage: ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main] [--field-root <tree>] [--field-released <folder>] [--message-file <file>]");
         std::process::exit(2);
+    };
+    let candidate = match value("--candidate").map(|candidate| candidate.parse::<u32>()).transpose() {
+        Ok(candidate) => candidate,
+        Err(error) => {
+            eprintln!("--candidate takes a number: {error}");
+            std::process::exit(2);
+        }
     };
     let options = Options {
         version,
+        candidate,
         dry_run: flag("--dry-run"),
         skip_checks: flag("--skip-checks"),
         skip_ci: flag("--skip-ci"),
         remote: value("--remote").unwrap_or_else(|| "origin".to_owned()),
-        branch: value("--branch").unwrap_or_else(|| "rust".to_owned()),
+        branch: value("--branch").unwrap_or_else(|| "main".to_owned()),
         field_root: value("--field-root").map(PathBuf::from),
         field_released: value("--field-released").map(PathBuf::from),
         message_file: value("--message-file").map(PathBuf::from),
@@ -471,6 +497,14 @@ mod tests {
             let tree = Tree::new("version").with_version_sites();
             assert!(check_preconditions(&tree.0, &options(version, false)).unwrap_err().contains("no version"), "{version}");
         }
+    }
+
+    #[test]
+    fn a_candidate_has_its_own_tag() {
+        let plain = Options { version: "1.3.0".to_owned(), ..Options::default() };
+        assert_eq!(release_tag(&plain), "v1.3.0");
+        let candidate = Options { version: "1.3.0".to_owned(), candidate: Some(2), ..Options::default() };
+        assert_eq!(release_tag(&candidate), "v1.3.0-rc2");
     }
 
     #[test]

@@ -966,6 +966,7 @@ dependencies = [
 name = "ks-hunspell"
 version = "0.70.0"
 dependencies = [
+ "ks-config",
  "ks-lang",
  "libloading",
 ]

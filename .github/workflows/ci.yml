@@ -1,11 +1,11 @@
-name: Rust
+name: CI and release
 
 on:
   push:
-    branches: [rust]
+    branches: [main, rust]
     tags: ["v*"]
   pull_request:
-    branches: [rust]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,12 +21,28 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
+      # The APT repository goes live before the release does: a tag that does not name the packaged version must stop here,
+      # before installed systems are offered a rebuilt package under the old version. A candidate adds -rcN to the version.
+      - name: The tag names the packaged version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml | head -n 1)"
+          case "$GITHUB_REF_NAME" in
+            "v$version" | "v$version"-rc[0-9]*) ;;
+            *)
+              printf 'Tag %s does not name the packaged version %s\n' "$GITHUB_REF_NAME" "$version" >&2
+              exit 1
+              ;;
+          esac
       - name: Toolchain with the Windows target for type checks
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
       - name: Tests
-        run: cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru
+          cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-hunspell -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
       - name: The engine against the recorded traces
         run: cargo test --release -p ks-replay
       - name: The trainer, and the models it can rebuild from the files in the repository
@@ -34,8 +50,6 @@ jobs:
           cargo test --release -p ks-train
           cargo run --release -p ks-train --bin ks-train -- boundary --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --verify
-          sudo apt-get update
-          sudo apt-get install -y libhunspell-1.7-0
           cargo run --release -p ks-train --bin ks-train -- archive --tree "$PWD"
           cargo run --release -p ks-train --bin ks-train -- gates --tree "$PWD"
           cargo run --release -p ks-train --bin ks-train -- licenses --tree "$PWD" --verify
@@ -98,6 +112,16 @@ jobs:
           & $run $app @("--version") 60000
           & $run $app @("--smoke-ui") 120000
           "$((Get-Item $app).Length) bytes, setup $((Get-Item $setup).Length) bytes"
+      - name: The portable archive starts from where it is unpacked
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem out\KeySwitch-*-windows-*.zip).FullName
+          $folder = Join-Path $env:RUNNER_TEMP "keyswitch-portable"
+          Expand-Archive -LiteralPath $zip -DestinationPath $folder
+          $process = Start-Process -FilePath (Join-Path $folder "KeySwitch.exe") -ArgumentList "--version" -PassThru
+          $null = $process.Handle
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw "the unpacked program did not answer --version" }
+          if ($process.ExitCode -ne 0) { throw "the unpacked program exited with $($process.ExitCode)" }
       - name: The installed program against a real window
         timeout-minutes: 15
         shell: pwsh
@@ -120,8 +144,10 @@ jobs:
           }
       - uses: actions/upload-artifact@v7
         with:
-          name: KeySwitch-Setup-${{ matrix.architecture }}
-          path: out/KeySwitch-Setup-*.exe
+          name: keyswitch-release-windows-${{ matrix.architecture }}
+          path: |
+            out/KeySwitch-Setup-*.exe
+            out/KeySwitch-*-windows-*.zip
           retention-days: 14
 
   deb:
@@ -148,7 +174,7 @@ jobs:
           xvfb-run -a dbus-run-session -- keyswitch --diagnose | jq -e '.intent_model.available and .context_model.available and .prefix_model.available'
       - uses: actions/upload-artifact@v7
         with:
-          name: keyswitch-deb
+          name: keyswitch-release-deb
           path: out/keyswitch_*.deb
           retention-days: 14
 
@@ -168,7 +194,7 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin
       - uses: actions/download-artifact@v7
         with:
-          name: keyswitch-deb
+          name: keyswitch-release-deb
           path: out
       - name: The real tests in a private X server, and the package itself
         run: packaging/e2e.sh "$(ls out/keyswitch_*.deb)"
@@ -252,7 +278,7 @@ jobs:
           ditto -c -k --keepParent "$bundle" "$archive"
       - uses: actions/upload-artifact@v7
         with:
-          name: keyswitch-macos-${{ matrix.architecture }}
+          name: keyswitch-release-macos-${{ matrix.architecture }}
           path: dist/KeySwitch-*-macos-*.zip
           retention-days: 14
 
@@ -282,12 +308,100 @@ jobs:
             target/release/logcourier.exe
           retention-days: 14
 
-  publish:
-    # A tag becomes a pre-release, never the latest release: the update check of every installed program reads the latest
-    # one. Dropping the two flags below is the decision that this build replaces the published one.
-    name: Publish the files of a tag
-    if: startsWith(github.ref, 'refs/tags/v')
+  apt-repository:
+    # The repository is what keeps an installed Linux KeySwitch up to date, and every package carries the source pointing
+    # at it, so it has to be live before the release that hands out that package. A candidate tag (-rcN) stays out of it.
+    name: Publish the signed APT repository
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SIGNING_KEY: ${{ secrets.KEYSWITCH_APT_SIGNING_KEY }}
+      SIGNING_PASSPHRASE: ${{ secrets.KEYSWITCH_APT_SIGNING_PASSPHRASE }}
+      POOL_RELEASES: "5"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: keyswitch-release-deb
+          path: dist
+      - name: Read the GitHub Pages configuration
+        id: pages
+        uses: actions/configure-pages@v6
+      - name: Pages publishes the URL the package trusts
+        run: |
+          published="${{ steps.pages.outputs.base_url }}/"
+          trusted="$(sed -nE 's/^URIs:[[:space:]]+([^[:space:]]+)$/\1/p' packaging/debian/keyswitch.sources)"
+          if [ "$published" != "$trusted" ]; then
+            printf 'Pages serves %s while the package trusts %s\n' "$published" "$trusted" >&2
+            exit 1
+          fi
+      - name: Keep the previously published packages installable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          current="keyswitch_${version}_amd64.deb"
+          test -f "dist/$current"
+          mkdir -p pool-history
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-pre-releases --limit "$POOL_RELEASES" --json tagName --jq '.[].tagName')"
+          for tag in $tags; do
+            asset="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+              --jq '[.assets[].name | select(startswith("keyswitch_") and endswith("_amd64.deb"))] | first // empty')"
+            if [ -z "$asset" ] || [ "$asset" = "$current" ]; then
+              continue
+            fi
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir pool-history
+          done
+          printf 'Kept %d earlier package(s) alongside %s\n' "$(find pool-history -name '*.deb' | wc -l)" "$current"
+      - name: Import the repository signing key
+        run: |
+          if [ -z "$SIGNING_KEY" ] || [ -z "$SIGNING_PASSPHRASE" ]; then
+            printf 'The repository signing secrets are missing: set %s and %s.\n' KEYSWITCH_APT_SIGNING_KEY KEYSWITCH_APT_SIGNING_PASSPHRASE >&2
+            exit 1
+          fi
+          home="$RUNNER_TEMP/keyswitch-apt-gnupg"
+          install -d -m 0700 "$home"
+          printf '%s' "$SIGNING_KEY" | GNUPGHOME="$home" gpg --batch --import
+          printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/keyswitch-apt-passphrase"
+          chmod 0600 "$RUNNER_TEMP/keyswitch-apt-passphrase"
+          echo "GNUPGHOME=$home" >> "$GITHUB_ENV"
+      - run: rustup toolchain install stable --profile minimal
+      - name: Build and sign the repository
+        run: |
+          arguments=()
+          for package in dist/*.deb pool-history/*.deb; do
+            if [ -e "$package" ]; then
+              arguments+=(--package "$package")
+            fi
+          done
+          cargo run --release -p ks-train --bin ks-train -- apt-build --tree "$PWD" --repository site "${arguments[@]}" \
+            --passphrase-file "$RUNNER_TEMP/keyswitch-apt-passphrase"
+      - name: Verify the repository the way an installed system reads it
+        run: cargo run --release -p ks-train --bin ks-train -- apt-verify --tree "$PWD" --repository site --expect-version "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - name: Deploy the repository to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  publish:
+    # A candidate tag (vX.Y.Z-rcN) becomes a pre-release: the update check of every installed program reads the latest
+    # release, and a pre-release is never that. The plain tag vX.Y.Z replaces the published version for everybody.
+    name: Publish the files of a tag
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, apt-repository]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -295,11 +409,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
+          pattern: keyswitch-release-*
           path: assets
           merge-multiple: true
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          version="$(sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml | head -n 1)"
           (cd assets && sha256sum -- * > SHA256SUMS)
-          gh release create "$GITHUB_REF_NAME" assets/* --title "KeySwitch ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md --prerelease --latest=false
+          flags=()
+          case "$GITHUB_REF_NAME" in
+            *-*) flags+=(--prerelease --latest=false) ;;
+            *) flags+=(--latest) ;;
+          esac
+          gh release create "$GITHUB_REF_NAME" assets/* --verify-tag --title "KeySwitch ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md "${flags[@]}"

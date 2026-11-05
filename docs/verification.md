@@ -62,7 +62,7 @@ cargo run --profile parity --bin field-gate -- --root <дерево с набо�
 | Windows: установщик, ZIP | `packaging/build-rust.ps1 -Architecture x64` | Windows, нужны цель MSVC и Inno Setup |
 | macOS | `packaging/build-rust-macos.sh dist` | Mac, подпись через `KEYSWITCH_SIGN_IDENTITY` |
 
-Workflow [`rust.yml`](../.github/workflows/rust.yml) делает всё это на каждый коммит: тесты, повторные обучения, установку и запуск установщика Windows на каждой архитектуре, установку DEB в чистую Ubuntu, запуск приложения macOS и его нотаризацию. На теге он публикует файлы как предварительный выпуск.
+Workflow [`ci.yml`](../.github/workflows/ci.yml) делает всё это на каждый коммит: тесты, повторные обучения, установку и запуск установщика Windows на каждой архитектуре, установку DEB в чистую Ubuntu, запуск приложения macOS и его нотаризацию. На теге он публикует файлы как предварительный выпуск.
 
 ## Выпуск
 

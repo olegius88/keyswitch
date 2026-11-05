@@ -720,7 +720,7 @@ target/train/ks-train detector --tree . --sample 10000 --dictionary-sample 10000
 
 Обучение каждой модели, заморозка корпусов и замеры описаны в [цикле обучения](docs/model-cycle.md), остальные проверки — в [инструкции проверки](docs/verification.md). Архитектура и критерии описаны в [DESIGN.md](DESIGN.md), обоснование модели — в [обзоре механизма распознавания](docs/detection-research.md).
 
-Сборка пакетов: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (установщик и ZIP Windows, нужен Inno Setup), `packaging/build-rust-macos.sh` (приложение macOS). Workflow [`rust.yml`](.github/workflows/rust.yml) собирает их на каждый коммит и публикует файлы тега.
+Сборка пакетов: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (установщик и ZIP Windows, нужен Inno Setup), `packaging/build-rust-macos.sh` (приложение macOS). Workflow [`ci.yml`](.github/workflows/ci.yml) собирает их на каждый коммит и публикует файлы тега.
 
 Выпуск выполняется **только после явного решения о релизе**, команда включает коммит и push всех изменений дерева:
 
@@ -784,7 +784,7 @@ KeySwitch, — отправляет только выбранные пользо
 Подпись, когда она появится, следует этим правилам:
 
 - Подписываются только файлы, собранные из помеченного тегом коммита этого
-  репозитория рабочим процессом [Rust](.github/workflows/rust.yml)
+  репозитория рабочим процессом [CI and release](.github/workflows/ci.yml)
   на GitHub-hosted runners: исполняемые файлы KeySwitch и Setup EXE. Собранное
   на машине разработчика не подписывается.
 - Каждый запрос на подпись подтверждается вручную.

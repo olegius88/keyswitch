@@ -167,8 +167,16 @@ if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) {
     throw "Inno Setup did not produce $Installer"
 }
 
+# The portable archive: the staged folder as it is, for a computer where nothing is installed.
+$Archive = Join-Path $OutputDirectory "KeySwitch-$Version-windows-$Architecture.zip"
+if (Test-Path -LiteralPath $Archive) {
+    Remove-Item -Force -LiteralPath $Archive
+}
+Compress-Archive -Path (Join-Path $Stage "*") -DestinationPath $Archive -CompressionLevel Optimal
+
 function Format-Size([long]$Bytes) { return "{0:N1} MB" -f ($Bytes / 1MB) }
 $ResourceBytes = (Get-ChildItem -LiteralPath $ResourceStage -Recurse -File | Measure-Object Length -Sum).Sum
 Write-Host ("KeySwitch.exe: {0}" -f (Format-Size (Get-Item (Join-Path $Stage "KeySwitch.exe")).Length))
 Write-Host ("resources:     {0}" -f (Format-Size $ResourceBytes))
 Write-Host ("Installer:     {0}  {1}" -f (Format-Size (Get-Item $Installer).Length), $Installer)
+Write-Host ("Archive:       {0}  {1}" -f (Format-Size (Get-Item $Archive).Length), $Archive)

@@ -8,3 +8,6 @@ license.workspace = true
 ks-lang.workspace = true
 # Hunspell is opened at run time: a program runs without it and answers as with no speller.
 libloading = "0.8"
+
+[dev-dependencies]
+ks-config.workspace = true

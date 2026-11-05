@@ -695,7 +695,7 @@ target/train/ks-train detector --tree . --sample 10000 --dictionary-sample 10000
 
 Training each model, freezing corpora and the measurements are in the Russian [training cycle](docs/model-cycle.md), the other checks in the [verification guide](docs/verification.md). The architecture and criteria are in [DESIGN.md](DESIGN.md), the reasoning behind the model in the [detection overview](docs/detection-research.en.md).
 
-Packages: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (Windows installer and ZIP, needs Inno Setup), `packaging/build-rust-macos.sh` (the macOS application). The [`rust.yml`](.github/workflows/rust.yml) workflow builds them on every commit and publishes the files of a tag.
+Packages: `packaging/build-rust-deb.sh` (DEB), `packaging/build-rust.ps1` (Windows installer and ZIP, needs Inno Setup), `packaging/build-rust-macos.sh` (the macOS application). The [`ci.yml`](.github/workflows/ci.yml) workflow builds them on every commit and publishes the files of a tag.
 
 A release happens **only after an explicit decision to release**, and the command commits and pushes everything in the tree:
 
@@ -760,7 +760,7 @@ Windows releases are not signed yet (see [Limitations](#limitations)). Signing,
 once enabled, follows these rules:
 
 - Only files produced from a tagged commit of this repository by the
-  [Rust](.github/workflows/rust.yml) workflow on GitHub-hosted
+  [CI and release](.github/workflows/ci.yml) workflow on GitHub-hosted
   runners are signed: the KeySwitch executables and the Setup EXE. Nothing built
   on a developer machine is signed.
 - Every signing request is approved manually.
