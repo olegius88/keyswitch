@@ -126,11 +126,6 @@ pub fn build_rule(draft: &RuleDraft) -> Result<LearnedRule, InvalidRule> {
     Ok(rule)
 }
 
-/// What stops the form from becoming a rule, or an empty string.
-pub fn draft_problem(draft: &RuleDraft) -> String {
-    build_rule(draft).err().map_or_else(String::new, |error| error.0)
-}
-
 /// One line under the letters: which layout they are typed in and what the other prints.
 #[must_use]
 pub fn layout_hint(draft: &RuleDraft) -> String {
@@ -164,4 +159,55 @@ pub fn prompt_word_line(prompt: &LearningPrompt) -> String {
         return format!("«{}»: не переводить", prompt.original);
     }
     format!("«{}» → «{}»: переводить", prompt.original, prompt.replacement)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn draft(pattern: &str) -> RuleDraft {
+        RuleDraft { pattern: pattern.to_owned(), r#match: RuleMatch::Exact, case_sensitive: false, action: RuleAction::Convert, application: String::new(), editing: None }
+    }
+
+    #[test]
+    fn a_pattern_is_of_one_layout_and_has_a_letter() {
+        assert_eq!(pattern_group("ghbdtn"), Some(0));
+        assert_eq!(pattern_group("привет"), Some(1));
+        assert_eq!(pattern_group("123"), None);
+        assert_eq!(pattern_group("приvет"), None);
+        assert_eq!(other_layout_text("ghbdtn", 0), "привет");
+        assert_eq!(other_layout_text("привет", 1), "ghbdtn");
+        assert!(build_rule(&draft("123")).is_err());
+        assert!(build_rule(&draft("приvет")).is_err());
+        assert_eq!(build_rule(&draft(" ghbdtn ")).unwrap().target_group, 1);
+        assert_eq!(layout_hint(&draft("123")), "");
+        assert!(layout_hint(&draft("ghbdtn")).contains("привет"));
+    }
+
+    #[test]
+    fn every_label_of_a_rule() {
+        for rule_match in [RuleMatch::Contains, RuleMatch::Prefix, RuleMatch::Exact] {
+            assert!(!match_short_label(rule_match).is_empty() && !match_label(rule_match).is_empty());
+        }
+        assert!(!action_label(RuleAction::Keep).is_empty() && !action_label(RuleAction::Convert).is_empty());
+        let mut rule = LearnedRule::new("ghbdtn", 0, 1);
+        assert!(action_text(&rule).starts_with("переводить"));
+        assert_eq!(draft_from_rule(&rule).pattern, "ghbdtn");
+        rule.case_sensitive = true;
+        assert!(condition_text(&rule).contains("с учётом"));
+        rule.action = RuleAction::Keep;
+        assert_eq!(action_text(&rule), "не переводить");
+    }
+
+    #[test]
+    fn the_offer_reads_as_what_it_would_do() {
+        let mut prompt = LearningPrompt { source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: String::new(), action: RuleAction::Convert };
+        assert!(prompt_word_line(&prompt).ends_with("переводить"));
+        prompt.action = RuleAction::Keep;
+        assert!(prompt_word_line(&prompt).ends_with("не переводить"));
+        assert_eq!(draft_from_prompt(&prompt).pattern, "ghbdtn");
+        prompt.original.clear();
+        assert_eq!(prompt_word_line(&prompt), PROMPT_EMPTY);
+    }
 }
