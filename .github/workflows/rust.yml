@@ -124,6 +124,9 @@ jobs:
     env:
       SIGNING_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12 }}
       SIGNING_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v7
       - name: Toolchain
@@ -173,6 +176,25 @@ jobs:
           assert report["prefix_model"]["available"], report["prefix_model"]
           assert "KeySwitch.app" in report["intent_model"]["path"], report["intent_model"]
           PYTHON
+      - name: Notarize the bundle and staple the ticket
+        if: ${{ env.KEYSWITCH_SIGN_IDENTITY != '' && env.NOTARY_KEY != '' }}
+        run: |
+          bundle="dist/macos-native/KeySwitch.app"
+          key="$RUNNER_TEMP/notary-key.p8"
+          submission="$RUNNER_TEMP/KeySwitch-notarization.zip"
+          trap 'rm -f "$key" "$submission"' EXIT
+          printf '%s\n' "$NOTARY_KEY" > "$key"
+          ditto -c -k --keepParent "$bundle" "$submission"
+          xcrun notarytool submit "$submission" --key "$key" --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" --wait
+          # Stapling fails when no accepted ticket exists, so a rejected submission stops the job here.
+          xcrun stapler staple "$bundle"
+          xcrun stapler validate "$bundle"
+          spctl --assess --type execute --verbose=2 "$bundle"
+          archive="$(find dist -maxdepth 1 -name 'KeySwitch-*-macos-*.zip' -print -quit)"
+          test -n "$archive"
+          rm -f "$archive"
+          ditto -c -k --keepParent "$bundle" "$archive"
       - uses: actions/upload-artifact@v7
         with:
           name: keyswitch-macos-${{ matrix.architecture }}

@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::desktop_app::{Services, quit};
 use crate::macos_app::VERSION;
 use crate::macos_native::run_on_main;
+use crate::macos_system::MacApplicationCatalog;
 use crate::macos_objc::{Id, open_path, string, text_of};
 
 #[repr(C)]
@@ -94,6 +95,7 @@ const ACTION_CLEAR_RULES: isize = 5;
 const ACTION_OPEN_LOGS: isize = 6;
 const ACTION_RESET_SETTINGS: isize = 7;
 const ACTION_QUIT: isize = 8;
+const ACTION_ADD_APPLICATION: isize = 10;
 
 struct Ui {
     services: Arc<Services>,
@@ -103,6 +105,8 @@ struct Ui {
     specs: Vec<SettingSpec>,
     controls: Vec<Id>,
     status: Id,
+    catalog: Id,
+    catalog_items: Vec<(String, String)>,
     applications: Id,
     words: Id,
     history: Id,
@@ -405,6 +409,35 @@ impl Ui {
     }
 
 
+    /// The installed programs, read once when the window is first shown.
+    fn load_catalog(&mut self) {
+        if !self.catalog_items.is_empty() {
+            return;
+        }
+        self.catalog_items = MacApplicationCatalog::default().installed().into_iter().map(|application| (catalog_label(&application.name, &application.identifier), application.identifier)).collect();
+        objc2::rc::autoreleasepool(|_| {
+            for (title, _) in &self.catalog_items {
+                // SAFETY: messages on the main thread to the list of this window.
+                unsafe {
+                    let _: () = msg_send![self.catalog, addItemWithTitle: string(title)];
+                }
+            }
+        });
+    }
+
+    fn add_catalog_application(&self) {
+        // SAFETY: a message on the main thread to the list of this window.
+        let index: isize = unsafe { msg_send![self.catalog, indexOfSelectedItem] };
+        let Some((_, identifier)) = usize::try_from(index).ok().and_then(|index| self.catalog_items.get(index)) else { return };
+        let mut names = string_list(self.setting("exclusions.applications").as_ref());
+        if !names.contains(identifier) {
+            names.push(identifier.clone());
+            if let Err(error) = self.services.settings.set("exclusions.applications", json!(names), true) {
+                show_error(&format!("Исключения не сохранены: {error}"));
+            }
+        }
+    }
+
     fn save_exclusions(&self) {
         let lines = |view: Id| -> Vec<String> { area_text(view).lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect() };
         let settings = &self.services.settings;
@@ -419,6 +452,9 @@ fn action(tag: isize) {
     match tag {
         ACTION_SAVE_EXCLUSIONS => {
             with_ui(|ui| ui.save_exclusions());
+        }
+        ACTION_ADD_APPLICATION => {
+            with_ui(|ui| ui.add_catalog_application());
         }
         ACTION_REFRESH_HISTORY => {
             with_ui(|ui| ui.refresh_history());
@@ -474,6 +510,8 @@ pub fn create(services: Arc<Services>) {
                 specs: Vec::new(),
                 controls: Vec::new(),
                 status: std::ptr::null_mut(),
+                catalog: std::ptr::null_mut(),
+                catalog_items: Vec::new(),
                 applications: std::ptr::null_mut(),
                 words: std::ptr::null_mut(),
                 history: std::ptr::null_mut(),
@@ -545,6 +583,14 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
         "exclusions" => {
             y += label(page, "В исключённых программах KeySwitch наблюдает раскладку, но не заменяет введённые слова. По одной записи в строке.", y, false) + 6.0;
             y += label(page, "Программы", y, false) + 2.0;
+            // SAFETY: messages on the main thread; the list stays alive as a subview of the page.
+            unsafe {
+                let allocated: Id = msg_send![class!(NSPopUpButton), alloc];
+                ui.catalog = msg_send![allocated, initWithFrame: rect(MARGIN, y, 400.0, 26.0), pullsDown: false];
+            }
+            add(page, ui.catalog);
+            button(page, target, "Добавить", ACTION_ADD_APPLICATION, MARGIN + 410.0, y, 110.0);
+            y += 32.0;
             ui.applications = text_area(page, y, 140.0, true);
             y += 150.0;
             y += label(page, "Слова", y, false) + 2.0;
@@ -607,6 +653,7 @@ pub fn show(page: Option<&'static str>) {
         ui.refresh_status();
         ui.refresh_history();
         ui.refresh_rules();
+        ui.load_catalog();
     });
 }
 
