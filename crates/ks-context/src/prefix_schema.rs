@@ -99,3 +99,54 @@ pub fn prefix_diagnostics(models_dir: &Path) -> (bool, String) {
         None => (false, String::new()),
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn real() -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models/prefix_policy_v1.json");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn loaded(value: &Value) -> Result<VersionedPrefixModel, LoadError> {
+        let path = std::env::temp_dir().join(format!("ks-prefix-{}-{:?}.json", std::process::id(), std::thread::current().id()));
+        std::fs::write(&path, value.to_string()).unwrap();
+        let result = VersionedPrefixModel::load(&path);
+        std::fs::remove_file(&path).unwrap();
+        result
+    }
+
+    #[test]
+    fn the_shipped_model_loads_and_every_changed_field_is_refused() {
+        assert!(loaded(&real()).is_ok());
+        let models = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models");
+        assert!(VersionedPrefixModel::default_model(&models).is_some());
+        assert!(VersionedPrefixModel::default_model(Path::new("/nonexistent")).is_none());
+        let changes: [(&str, Value); 8] = [
+            ("kind", json!("other")),
+            ("feature_version", json!(99)),
+            ("prefix_feature_version", json!(99)),
+            ("version", json!("other")),
+            ("conversion_threshold", json!(0.0)),
+            ("weights_sha256", json!("0")),
+            ("actions", json!(["a"])),
+            ("weights", json!({})),
+        ];
+        for (name, value) in changes {
+            let mut changed = real();
+            changed[name] = value;
+            assert!(loaded(&changed).is_err(), "{name}");
+        }
+        let mut no_version = real();
+        no_version.as_object_mut().unwrap().remove("prefix_feature_version");
+        let _ = loaded(&no_version);
+        let mut no_kind = real();
+        no_kind.as_object_mut().unwrap().remove("kind");
+        assert!(loaded(&no_kind).is_err());
+        assert!(loaded(&json!([1])).is_err());
+    }
+}

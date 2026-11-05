@@ -330,10 +330,6 @@ impl TermTables {
         self.starts.get_or_init(|| AffixCounts::build(self.term("russian"), false))
     }
 
-    /// Bytes of heap the tables hold now.
-    pub fn heap_bytes(&self) -> usize {
-        self.term.heap_bytes()
-    }
 }
 
 /// `bisect.bisect_right(CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, count)`.

@@ -164,6 +164,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn what_a_stream_ignores_and_the_clock_it_keeps_by_default() {
+        let mut context = InputContext::default();
+        context.observe(&KeyEvent { pressed: true, character: "а".to_owned(), ..KeyEvent::default() });
+        context.observe(&KeyEvent { pressed: false, character: "б".to_owned(), ..KeyEvent::default() });
+        context.observe(&KeyEvent { pressed: true, synthetic: true, character: "в".to_owned(), ..KeyEvent::default() });
+        assert_eq!(context.text, "а");
+        context.observe(&KeyEvent { pressed: true, state: ks_backend::constants::ALT_MASK, ..KeyEvent::default() });
+        assert_eq!(context.text, "");
+        context.observe(&KeyEvent { pressed: true, character: "а".to_owned(), ..KeyEvent::default() });
+        context.observe(&KeyEvent { pressed: true, state: ks_backend::constants::SUPER_MASK, ..KeyEvent::default() });
+        assert_eq!(context.text, "");
+    }
+
+    #[test]
     fn text_is_kept_until_the_time_to_live_passes() {
         let now = Arc::new(Mutex::new(100.0));
         let clock: Clock = {

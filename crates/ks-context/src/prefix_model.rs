@@ -196,29 +196,4 @@ impl PrefixModel {
         ContextPrediction { action, probability, probabilities, model_version: self.version.clone(), supported: true }
     }
 
-    #[must_use]
-    pub fn predict(&self, item: &PrefixInput, sides: [&PrefixSide<'_>; 2]) -> ContextPrediction {
-        self.predict_features(&features(item, sides))
-    }
-
-    /// `PrefixModel.load(path)`: the frozen schema one only.
-    pub fn load(path: &Path) -> Result<PrefixModel, LoadError> {
-        let (artifact, _) = load_artifact(path, MAX_PREFIX_MODEL_BYTES, "oversized prefix model", &weight_spec())?;
-        let unsupported = || LoadError::value("unsupported prefix model");
-        let artifact = artifact.ok_or_else(unsupported)?;
-        let payload = &artifact.payload;
-        if payload.get("kind").and_then(Value::as_str) != Some("keyswitch.prefix-policy")
-            || payload.get("feature_version").and_then(Value::as_i64) != Some(PREFIX_FEATURE_VERSION.to::<i64>())
-            || !actions_match(payload)
-        {
-            return Err(unsupported());
-        }
-        Ok(finish_load(artifact, PREFIX_FEATURE_VERSION.to::<i64>(), "prefix-v1-")?.model)
-    }
-
-    /// `PrefixModel.default()`: the installed artifact, or nothing.
-    #[must_use]
-    pub fn default_model(models_dir: &Path) -> Option<PrefixModel> {
-        PrefixModel::load(&models_dir.join(ARTIFACT_FILE)).ok()
-    }
 }

@@ -796,3 +796,28 @@ impl ContextPolicy {
         Some(decision)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_convert_and_show_their_message() {
+        let policy = PolicyError::from(DetectorError { name: "N", message: "m".to_owned() });
+        assert_eq!((policy.name, policy.to_string()), ("N", "m".to_owned()));
+        assert_eq!(PolicyError::from(FeatureError("f")).name, "ValueError");
+        assert!(EvidenceOptions::default().literal_tail.is_empty());
+    }
+
+    #[test]
+    fn scoped_names_and_quoted_words() {
+        assert_eq!(split_scoped("a::b:c.d", true), ["a", "b", "c", "d"]);
+        assert_eq!(split_scoped("a:b", false), ["a:b"]);
+        assert!(!quoted_or_scoped("", "x"));
+        assert!(quoted_or_scoped("\"слово\"", "@ckjdj@"));
+        assert!(quoted_or_scoped("\"слово\".", "@ckjdj@/"));
+        assert!(ends_with_typed("abc", "") && !ends_with_typed("abc", "x"));
+        assert_eq!(shown_ahead("abc", "", "x"), 0);
+    }
+}

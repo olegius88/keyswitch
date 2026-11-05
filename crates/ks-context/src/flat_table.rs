@@ -76,11 +76,6 @@ impl NameIndex {
         self.order.iter().map(|&entry| self.name(entry.to::<usize>()))
     }
 
-    /// Bytes of heap the index holds.
-    #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        self.arena.capacity() + 4 * (self.ends.capacity() + self.hashes.capacity() + self.order.capacity())
-    }
 }
 
 /// Names in the order of the file, as they are read.
@@ -163,10 +158,6 @@ impl CountTable {
         self.index.names()
     }
 
-    #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        self.index.heap_bytes() + 4 * self.counts.capacity()
-    }
 }
 
 /// What a count table reader found wrong with a count.
@@ -312,10 +303,6 @@ impl CountTables {
         self.tables.iter().find(|entry| entry.0 == name).map_or_else(|| EMPTY.get_or_init(CountTable::default), |entry| &entry.1)
     }
 
-    #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        self.tables.iter().map(|entry| entry.1.heap_bytes()).sum()
-    }
 }
 
 struct TablesVisitor;
@@ -468,10 +455,6 @@ impl WeightTable {
         WeightTable { index: names.index(), values }
     }
 
-    #[must_use]
-    pub fn heap_bytes(&self) -> usize {
-        self.index.heap_bytes() + 8 * self.values.capacity()
-    }
 }
 
 /// One weight as the JSON wrote it: an int prints without a point in the checksum.
