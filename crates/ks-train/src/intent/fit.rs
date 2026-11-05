@@ -115,7 +115,7 @@ impl FitConfig {
 }
 
 /// `random.Random(seed)` as far as a shuffle reads it: MT19937 seeded by `init_by_array`.
-struct Twister {
+pub struct Twister {
     state: Vec<u32>,
     index: usize,
 }
@@ -124,7 +124,7 @@ const MT_N: usize = 624;
 const MT_M: usize = 397;
 
 impl Twister {
-    fn new(seed: u64) -> Twister {
+    pub fn new(seed: u64) -> Twister {
         let mut key = vec![seed as u32];
         if seed >> 32 != 0 {
             key.push((seed >> 32) as u32);
@@ -159,7 +159,7 @@ impl Twister {
         Twister { state, index: MT_N }
     }
 
-    fn next_u32(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         if self.index >= MT_N {
             for k in 0..MT_N {
                 let y = (self.state[k] & 0x8000_0000) | (self.state[(k + 1) % MT_N] & 0x7fff_ffff);
@@ -187,7 +187,7 @@ impl Twister {
     }
 
     /// `shuffle`.
-    fn shuffle(&mut self, items: &mut [u32]) {
+    pub fn shuffle(&mut self, items: &mut [u32]) {
         for i in (1..items.len()).rev() {
             let j = self.below(i as u32 + 1) as usize;
             items.swap(i, j);
@@ -209,11 +209,11 @@ impl Featured<'_> {
     }
 }
 
-fn ignored_score() -> WordScore {
+pub fn ignored_score() -> WordScore {
     WordScore { value: 0.0, known: false, frequency: 0, gram_ratio: 0.0, exact: false, spell_known: false, ngram_score: 0.0, invalid_ratio: 1.0, raw_ngram_score: 0.0 }
 }
 
-fn balanced_ranges(length: usize, chunks: usize) -> Vec<std::ops::Range<usize>> {
+pub fn balanced_ranges(length: usize, chunks: usize) -> Vec<std::ops::Range<usize>> {
     if length == 0 {
         return Vec::new();
     }

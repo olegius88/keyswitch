@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 
 use ks_lang::SpellChecker;
 use ks_lang::resources::SpellerFactory;
-use ks_lang::spellcheck::{check_argument, find_dictionary};
+use ks_lang::spellcheck::{check_argument, find_dictionary, find_dictionary_in};
 
 /// The names the library goes by, newest first.
 const HUNSPELL_LIBRARY_NAMES: [&str; 4] = ["libhunspell-1.7.so.0", "libhunspell-1.7.so", "libhunspell.so.0", "libhunspell.so"];
@@ -91,9 +91,18 @@ pub struct HunspellDictionary {
 
 impl HunspellDictionary {
     pub fn new(locale: &str, data_dir: &Path) -> HunspellDictionary {
+        Self::open(find_dictionary(locale, data_dir))
+    }
+
+    /// The dictionary of a locale in these folders only: a training tool pins its dictionaries by reading them from one.
+    pub fn in_roots(locale: &str, roots: &[std::path::PathBuf]) -> HunspellDictionary {
+        Self::open(find_dictionary_in(locale, roots))
+    }
+
+    fn open(found: Option<(std::path::PathBuf, std::path::PathBuf)>) -> HunspellDictionary {
         let closed = HunspellDictionary { source: String::new(), encoding: Encoding::Utf8, handle: Mutex::new(None) };
         let Some(library) = library() else { return closed };
-        let Some((affix_path, dictionary_path)) = find_dictionary(locale, data_dir) else { return closed };
+        let Some((affix_path, dictionary_path)) = found else { return closed };
         let (Ok(affix), Ok(dictionary)) = (CString::new(affix_path.as_os_str().as_bytes()), CString::new(dictionary_path.as_os_str().as_bytes()))
         else {
             return closed;
@@ -159,6 +168,11 @@ impl Drop for HunspellDictionary {
 /// The speller of a locale for `Resources::with_speller`: `HunspellDictionary(locale)`.
 pub fn hunspell_speller(data_dir: std::path::PathBuf) -> SpellerFactory {
     Box::new(move |locale| Box::new(HunspellDictionary::new(locale, &data_dir)))
+}
+
+/// The speller of a locale for `Resources::with_speller`, reading only these folders.
+pub fn hunspell_speller_in(roots: Vec<std::path::PathBuf>) -> SpellerFactory {
+    Box::new(move |locale| Box::new(HunspellDictionary::in_roots(locale, &roots)))
 }
 
 #[cfg(test)]

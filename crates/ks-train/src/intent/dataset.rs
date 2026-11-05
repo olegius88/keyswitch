@@ -12,10 +12,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 pub const SPLIT_NAMESPACE: &str = "keyswitch:intent-v28:physical-signature";
-const HARD_NEGATIVE_POLICY: &str = "keyswitch-intent-v28-frozen-unknown-typo-development";
+pub const HARD_NEGATIVE_POLICY: &str = "keyswitch-intent-v28-frozen-unknown-typo-development";
 const RANK_NAMESPACE: &str = "keyswitch:intent-v1:unknown-typo-rank";
 const CHOICE_NAMESPACE: &str = "keyswitch:intent-v1:unknown-typo-choice";
-const ROLE_NAMESPACE: &str = "keyswitch:intent-v28:unknown-typo-development-role";
+pub const ROLE_NAMESPACE: &str = "keyswitch:intent-v28:unknown-typo-development-role";
 const DRAW_DIGEST_BYTES: usize = 8;
 const SPLIT_BUCKET_COUNT: u64 = 40;
 const TYPO_MIN_SIGNATURE_CHARACTERS: usize = 3;
@@ -346,7 +346,7 @@ fn canonical_physical_text(text: &str, group: i64) -> String {
     if group == 0 { normalized.to_owned() } else { translate(normalized, "ru", "us") }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct DatasetBundle {
     pub by_split: Vec<Vec<LexicalExample>>,
     pub safety: Vec<LexicalExample>,

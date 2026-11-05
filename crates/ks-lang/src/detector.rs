@@ -450,7 +450,8 @@ impl LanguageDetector {
         Ok(Some(model.predict(&item)?))
     }
 
-    fn context_delta(
+    /// `_context_delta`.
+    pub fn context_delta(
         &self,
         source_group: i64,
         target_group: i64,
