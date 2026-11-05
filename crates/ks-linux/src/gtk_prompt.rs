@@ -359,6 +359,11 @@ impl RuleEditorWindow {
     }
 
     /// The form as it stands, for tests and for the application's diagnostics.
+    /// What OK does.
+    pub fn confirm(&self) {
+        self.form.confirm();
+    }
+
     pub fn current_draft(&self) -> RuleDraft {
         self.form.current_draft()
     }

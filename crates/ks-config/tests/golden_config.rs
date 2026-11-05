@@ -609,4 +609,3 @@ fn logfile() {
     f.done("logfile");
 }
 
-/// Files written by Rust are read back by the Python stores (only when KS_GOLDEN_DIR is set and the tree exists).
