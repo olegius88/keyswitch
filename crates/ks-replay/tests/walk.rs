@@ -321,8 +321,40 @@ fn age_what_is_held(session: &mut Session, dice: &mut Dice) {
     }
 }
 
+/// Keys that overlap: the next goes down before the last comes up, a modifier stays held over a word.
+fn overlapping_keys(session: &mut Session, dice: &mut Dice) {
+    let held = match dice.below(3) {
+        0 => Some(("Shift_L", 50)),
+        1 => Some(("Control_L", 37)),
+        _ => None,
+    };
+    let group = session.backend.group();
+    let named = |name: &str, code: u32, pressed: bool| KeyEvent { pressed, keycode: code, key_name: name.to_owned(), characters: vec![String::new(), String::new()], group, ..KeyEvent::default() };
+    if let Some((name, code)) = held {
+        session.handle(named(name, code, true));
+    }
+    let word = *dice.of(WORDS);
+    let events: Vec<KeyEvent> = word.chars().filter_map(|character| key_event(session, character, if held.is_some_and(|key| key.1 == 50) { SHIFT_MASK } else { 0 })).collect();
+    for event in &events {
+        session.handle(event.clone());
+    }
+    if dice.one_in(2) {
+        session.idle(*dice.of(IDLES));
+    }
+    if dice.one_in(2) {
+        press_pause(session);
+    }
+    for event in &events {
+        session.handle(KeyEvent { pressed: false, ..event.clone() });
+    }
+    if let Some((name, code)) = held {
+        session.handle(named(name, code, false));
+    }
+}
+
 fn step(session: &mut Session, dice: &mut Dice, window: &mut i64) {
-    match dice.below(112) {
+    match dice.below(116) {
+        112..=115 => overlapping_keys(session, dice),
         100..=103 => age_what_is_held(session, dice),
         104..=105 => session.advance(*dice.of(IDLES)),
         106..=109 => queue_keys(session, dice),
@@ -423,6 +455,16 @@ fn a_long_walk_stops_nowhere() {
         let mut session = bundle.session(dice.of(APPLICATIONS), group, opening);
         session.recovers = true;
         let _ = session.core.settings.set("detection.correct_typos", json!(dice.one_in(3)), false);
+        // Each walk has settings of its own, and a third of them keep the technical journal.
+        for (path, values) in SETTINGS.iter().filter(|(path, _)| *path != "enabled") {
+            if dice.one_in(12) {
+                let value: Value = serde_json::from_str(dice.of(values)).expect("a value");
+                let _ = session.core.settings.set(path, value, false);
+            }
+        }
+        if dice.one_in(3) {
+            let _ = session.core.settings.set("diagnostics.technical_logging", json!(true), false);
+        }
         let mut window = 1;
         for _ in 0..STEPS {
             step(&mut session, &mut dice, &mut window);
