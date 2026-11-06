@@ -256,7 +256,7 @@ mod tests {
             assert!(map.get(name).is_some(), "{name}");
         }
         let empty = crate::windows_context::UiaProbe { available: false, error: None, focused_text_pattern: None, focused_probe_ms: None, focused_error: None, hresult: None };
-        assert_eq!(field_access_of(empty).as_object().map(serde_json::Map::len), Some(1));
+        assert_eq!(field_access_of(empty).as_object().map(Map::len), Some(1));
     }
 
     #[test]

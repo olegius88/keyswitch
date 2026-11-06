@@ -2543,7 +2543,7 @@ const WALK_KEYS: [u32; 28] = [VK_A, VK_RETURN, VK_TAB, VK_BACK, VK_ESCAPE, VK_SP
 fn walk_stroke(dice: &mut Dice) -> KeyEvent {
     let code = *dice.of(&WALK_KEYS);
     let group = *dice.of(&[0, 0, 1, 1, -1, 5]);
-    key_with(code, *dice.of(&["a", "A", "ф", "Ф", ",", " "]), [*dice.of(&["a", "A", ",", ""]), *dice.of(&["ф", "Ф", "б", ""])], group)
+    key_with(code, dice.of(&["a", "A", "ф", "Ф", ",", " "]), [*dice.of(&["a", "A", ",", ""]), *dice.of(&["ф", "Ф", "б", ""])], group)
 }
 
 #[test]
