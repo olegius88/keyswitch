@@ -33,8 +33,12 @@ fn golden_root() -> PathBuf {
 
 fn golden(folder: &str, name: &str) -> Option<PathBuf> {
     let path = golden_root().join(folder).join(name);
+    // The answers on made-up files are kept in the repository; those built on real typing are not.
+    let kept = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures")).join(folder).join(name);
     if path.exists() {
         Some(path)
+    } else if kept.exists() {
+        Some(kept)
     } else {
         eprintln!("SKIPPED: golden file {} is absent", path.display());
         None
@@ -134,8 +138,11 @@ fn fixture() -> Option<&'static Fixture> {
     FIXTURE
         .get_or_init(|| {
             let dir = resource_dir()?;
+            // The word list comes from real typing and is not in the repository: without it the tests over words have nothing to go through.
             let mut text = String::new();
-            reader_of_lang("words.txt.gz")?.read_to_string(&mut text).expect("words");
+            if let Some(mut reader) = reader_of_lang("words.txt.gz") {
+                reader.read_to_string(&mut text).expect("words");
+            }
             let mut words: Vec<String> = text.split('\n').map(str::to_string).collect();
             words.pop();
             let resources = Resources::new(dir.clone());

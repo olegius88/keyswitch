@@ -31,8 +31,12 @@ const BATCH: usize = 8192;
 fn golden(name: &str) -> Option<PathBuf> {
     let root = std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string());
     let path = PathBuf::from(root).join("lang").join(name);
+    // The answers on made-up files are kept in the repository; those built on real typing are not.
+    let kept = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/lang")).join(name);
     if path.exists() {
         Some(path)
+    } else if kept.exists() {
+        Some(kept)
     } else {
         eprintln!("SKIPPED: golden file {} is absent", path.display());
         None
