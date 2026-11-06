@@ -42,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data
-          cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-hunspell -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
+          cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-hunspell -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win
       - name: The engine against the recorded traces
         run: cargo test --release -p ks-replay
       - name: The trainer, and the models it can rebuild from the files in the repository

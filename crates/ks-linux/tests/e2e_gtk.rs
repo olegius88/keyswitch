@@ -480,7 +480,15 @@ fn offers(app: &Rc<gtk_app::App>) {
     drop(gone);
     // The engine's own calls.
     if let Ok(engine) = app.services.engine.engine() {
+        // Stopped and started by hand: whether it has started by now depends on how fast the models load.
+        engine.stop();
         gtk_app::record_models(&engine, &app.services.models);
+        app.tray_action(TrayAction::SwitchLayout);
+        pump(20);
+        engine.start().expect("the engine starts on the private server");
+        gtk_app::record_models(&engine, &app.services.models);
+        assert!(engine.select_alternate_group(), "{}", engine.snapshot().last_error);
+        pump(20);
         app.tray_action(TrayAction::SwitchLayout);
         pump(20);
         let shared = engine.shared.clone();
