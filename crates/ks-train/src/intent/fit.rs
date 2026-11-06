@@ -1130,7 +1130,7 @@ mod tests {
         }
     }
 
-    fn scored<'a>(example: &'a LexicalExample, calibrated: f64, typo: bool, direction: usize) -> Scored<'a> {
+    fn scored(example: &LexicalExample, calibrated: f64, typo: bool, direction: usize) -> Scored<'_> {
         Scored { example, raw: calibrated, calibrated, typo, direction }
     }
 

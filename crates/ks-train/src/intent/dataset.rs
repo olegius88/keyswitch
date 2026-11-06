@@ -58,6 +58,7 @@ impl Split {
         }
     }
 
+    #[must_use]
     pub fn index(self) -> usize {
         match self {
             Self::Train => 0,
@@ -329,6 +330,7 @@ impl VariantQuarantine {
 }
 
 /// `variant_quarantine_fingerprint`: the hash of a canonical, order-independent form.
+#[must_use]
 pub fn quarantine_fingerprint(occurrences: &[QuarantinedOccurrence]) -> String {
     let mut sorted: Vec<&QuarantinedOccurrence> = occurrences.iter().collect();
     sorted.sort();

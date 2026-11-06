@@ -2,7 +2,7 @@
 //! rows, the epoch and threshold selection, the artifact's bytes and the seal. A fit builds the same candidate as the
 //! Python trainer did, to the bit, so that a model can be retrained without Python.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![expect(clippy::panic, clippy::unreachable, reason = "a tool stops on input it cannot use: nobody is typing through it")]
+#![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
 #![forbid(unsafe_code)]
 
 pub mod artifact;

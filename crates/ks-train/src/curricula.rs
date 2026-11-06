@@ -3,7 +3,7 @@
 //! documentation of the model (`model/context_v3/README.md`) and in the Python trainer's history.
 use ks_cast::To as _;
 use crate::corpus::{CorpusRow, DEVELOPMENT, TRAIN, typo_variants};
-use crate::physical::{hex_digest, reading, sha256, translated, variant_choice};
+use crate::physical::{hex_digest, reading, sha256, variant_choice};
 use crate::rows::{ActionRow, ContextRing, application_of, cyrillic, curated_letter, field_of, natural_mixed_contexts, public_field, varied_boundary, word_spans};
 use crate::rows::capital_citation;
 use crate::tools::{Lexicons, Options, Tools};
@@ -143,8 +143,7 @@ fn counted_terms(tools: &Tools, minimum: u64) -> Vec<String> {
             continue;
         }
         let other = reading(term, 0);
-        if !pystr::isalpha(&other)
-            || tools.plausible_reading(&other, 1)
+        if tools.plausible_reading(&other, 1)
             || tools.count("cyrillic", &other) >= UNCOUNTED
             || tools.count("russian", &other) >= UNCOUNTED
             || tools.is_refused(&[term, &other])
@@ -216,7 +215,7 @@ pub fn capital_citation_curriculum(tools: &Tools, source_rows: &[CorpusRow], opt
             continue;
         }
         let upper = pystr::upper(word);
-        let Ok(latin) = translated(&upper, 1) else { continue };
+        let latin = reading(&upper, 1);
         if !capital_citation(tools, &latin, &upper) || tools.is_refused(&[word, &latin]) {
             continue;
         }
@@ -265,11 +264,11 @@ pub fn english_capital_curriculum(tools: &Tools, source_rows: &[CorpusRow], opti
     let mut candidates: HashMap<usize, Vec<(String, String)>> = HashMap::new();
     for (word, _) in words {
         let length = pystr::len(word);
-        if !budgets.iter().any(|entry| entry.0 == length) || !cyrillic(word) || !pystr::islower(word) {
+        if !budgets.iter().any(|entry| entry.0 == length) || !cyrillic(word) {
             continue;
         }
         let latin = reading(&pystr::upper(word), 1);
-        if !pystr::isascii(&latin) || !pystr::isalpha(&latin) || tools.is_refused(&[word, &latin]) {
+        if !pystr::isalpha(&latin) || tools.is_refused(&[word, &latin]) {
             continue;
         }
         candidates.entry(length).or_default().push((word.to_owned(), latin));
@@ -442,8 +441,9 @@ pub fn unknown_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpu
         }
         let typed = reading(term, 0);
         let family = format!("unknown-term:{typed}");
-        if !features::unknown_shape(&typed)
-            || tools.plausible_reading(&typed, 1)
+        // The keys of letters and digits read as letters a sign key does not type, and digits.
+        assert!(features::unknown_shape(&typed), "a term that is no token of the class");
+        if tools.plausible_reading(&typed, 1)
             || tools.count("cyrillic", &typed) >= UNCOUNTED
             || tools.count("russian", &typed) >= UNCOUNTED
             || variant_choice(&family, "draw", item_modulus) != 0
@@ -477,32 +477,6 @@ pub fn unknown_token_curriculum(tools: &Tools, split: &str, source_rows: &[Corpu
             counts.add(if earlier_word.is_empty() { action.as_str().to_owned() } else { format!("echo:{}", action.as_str()) });
             rows.push(frame(identifier, shown, group, &before, action));
         }
-    }
-    for item in monolingual_rows(source_rows) {
-        let (row, group) = (item.row, item.group);
-        let word = row.original.as_str();
-        if group != 1
-            || echo_modulus == 0
-            || !features::unknown_question(word, &row.before, &tools.tables)
-            || tools.plausible_reading(word, 1)
-            || variant_choice(&row.identifier, "echo-word", echo_modulus) != 0
-        {
-            continue;
-        }
-        let keys = reading(word, 1);
-        if held_out.contains(&pystr::casefold(word)) || held_out.contains(&pystr::casefold(&keys)) || tools.is_refused(&[word, &keys]) {
-            counts.add("refused");
-            continue;
-        }
-        let identifier = format!("unknown-echo:{}", row.identifier);
-        let earlier = contexts.choice(&identifier, "earlier-context");
-        let before = format!("{} {keys}. {}", pystr::rstrip(earlier), row.before);
-        if !features::unknown_question(word, &before, &tools.tables) {
-            counts.add("outside_class");
-            continue;
-        }
-        counts.add("echo:keep");
-        rows.push(frame(identifier, word, 1, &before, Keep));
     }
     let frames = rows.len();
     (rows, json!({"frames": frames, "items": counts.report(), "item_modulus": item_modulus, "echo_modulus": echo_modulus, "held_out": held_out.len(), "sample_weight": weight,
@@ -720,7 +694,7 @@ pub fn term_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], op
             rows.push(revisit(format!("{family}:revisit"), &typed, context, Convert, 1.0));
         }
         let longest = TERM_HEAD_ENDING_LETTERS[TERM_HEAD_ENDING_LETTERS.len() - 1];
-        if pystr::len(&typed) <= longest && question(&typed, "") && pystr::len(&typed) <= TERM_ALONE_WAIT_MAX_LETTERS {
+        if pystr::len(&typed) <= longest && pystr::len(&typed) <= TERM_ALONE_WAIT_MAX_LETTERS {
             // Every short term once more alone at a space.
             let application = crate::rows::APPLICATIONS[variant_choice(&family, "alone-application", crate::rows::APPLICATIONS.len())];
             counts.add("wait:alone");
@@ -794,7 +768,7 @@ pub fn first_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
         let mut field = field_of(application_of(&stem), crate::rows::PUBLIC_TRAINING, "", "", FieldRole::Text);
         "reader".clone_into(&mut field.source);
         let start = features::russian_start_bucket(&typed, &tools.tables);
-        let stopped = if start != "na" && start.parse::<i64>().expect("a start bucket is a number") >= FIRST_PAUSE_WORD_START_MIN_BUCKET { Keep } else { Convert };
+        let stopped = if start.parse::<i64>().expect("a start bucket is a number") >= FIRST_PAUSE_WORD_START_MIN_BUCKET { Keep } else { Convert };
         for (trigger, boundary, action) in [("space", " ", Convert), ("pause", "", stopped)] {
             counts.add(format!("{}:{trigger}", action.as_str()));
             rows.push(ActionRow::new(format!("first:{typed}:{trigger}"), typed.as_str(), 1, field.clone(), trigger, action, "first", boundary).weighing(weight));
@@ -824,17 +798,14 @@ pub fn brief_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
     let mut tokens: BTreeMap<String, String> = BTreeMap::new();
     for word in tools.tables.term("russian").words() {
         let keys = reading(word, 1);
-        if tools.count("russian", word) >= minimum && brief_length(word) && pystr::isascii(&keys) && pystr::isalpha(&keys) {
+        if tools.count("russian", word) >= minimum && brief_length(word) && pystr::isalpha(&keys) {
             tokens.insert(pystr::casefold(&keys), word.to_owned());
         }
     }
     for alphabet in ["english", "latin"] {
         for word in tools.tables.term(alphabet).words() {
             if tools.count(alphabet, word) >= minimum && brief_length(word) && letters_only_lower(word) {
-                let keys = reading(word, 0);
-                if pystr::isalpha(&keys) && !pystr::isascii(&keys) {
-                    tokens.entry(word.to_owned()).or_insert(keys);
-                }
+                tokens.entry(word.to_owned()).or_insert_with(|| reading(word, 0));
             }
         }
     }
@@ -856,13 +827,8 @@ pub fn brief_curriculum(tools: &Tools, split: &str, options: &Value) -> Curricul
         }
         let russian = tools.count("russian", cyrillic_keys);
         let share = russian.to::<f64>() / (russian + tools.count("english", latin).max(tools.count("latin", latin))).to::<f64>();
-        counts.add(if share > 0.0 && share < 1.0 {
-            "both"
-        } else if share != 0.0 {
-            "russian"
-        } else {
-            "latin"
-        });
+        // A settled token is counted in Russian text, so its share is never nothing.
+        counts.add(if share < 1.0 { "both" } else { "russian" });
         for (index, (trigger, boundary)) in BRIEF_BOUNDARIES.into_iter().enumerate() {
             for (case, shown) in [("lower", latin.clone()), ("title", pystr::capitalize(latin))] {
                 let identifier = format!("{family}:{index}:{case}");
@@ -955,12 +921,11 @@ pub fn kept_neighbour_curriculum(tools: &Tools, source_rows: &[CorpusRow], optio
     let chosen_abbreviations = inserted(&ranked(abbreviations.clone(), "abbreviation"), abbreviation_frames, "abbreviation", &|token| token.to_owned(), Keep);
     let mut misspelt: BTreeSet<String> = BTreeSet::new();
     for word in models[1].frequencies.words().iter() {
-        if !cyrillic(word) || !pystr::isalpha(word) || tools.is_refused(&[word]) {
+        if !cyrillic(word) || tools.is_refused(&[word]) {
             continue;
         }
         for variant in typo_variants(word, &format!("kept-typo:{word}")) {
             if !(KEPT_NEIGHBOUR_MIN_LETTERS..=KEPT_CONTEXT_WORD_MAX_CHARACTERS).contains(&pystr::len(&variant))
-                || !pystr::isalpha(&variant)
                 || tools.plausible_reading(&variant, 1)
             {
                 continue;
@@ -1148,9 +1113,6 @@ pub fn lone_word_curriculum(tools: &Tools, split: &str, evidence: &Value, decide
         for second in 'a'..='z' {
             let latin: String = [first, second].iter().collect();
             let cyrillic_keys = reading(&latin, 0);
-            if !pystr::isalpha(&cyrillic_keys) {
-                continue;
-            }
             let share = match variant_choice(&format!("lone-word:{latin}"), "split", LONE_WORD_SPLIT_MODULUS) {
                 0 => DEVELOPMENT,
                 1 => crate::corpus::CALIBRATION,

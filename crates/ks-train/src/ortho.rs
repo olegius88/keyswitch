@@ -476,17 +476,17 @@ fn sqrt_of_fraction(numerator: &BigUint, denominator: &BigUint, extra_power: i64
     };
     // `numerator / denominator` of two integers: the nearest double, ties to even.
     let width = value.bits().to::<i64>();
-    let drop = (width - 53).max(0);
+    let drop = width - 53;
     let kept: BigUint = &value >> drop.to::<u64>();
     let mut mantissa = kept.iter_u64_digits().next().unwrap_or(0);
-    if drop > 0 {
-        let half = BigUint::from(1_u8) << (drop - 1).to::<u64>();
-        let rest = &value - (&kept << drop.to::<u64>());
-        if rest > half || (rest == half && mantissa & 1 == 1) {
-            mantissa += 1;
-        }
+    let half = BigUint::from(1_u8) << (drop - 1).to::<u64>();
+    let rest = &value - (&kept << drop.to::<u64>());
+    if rest > half || (rest == half && mantissa & 1 == 1) {
+        mantissa += 1;
     }
-    mantissa.to::<f64>() * 2_f64.powi((drop + power + extra_power).to::<i32>())
+    // In two steps: the power alone may be too small for a double while the result is not.
+    let exponent = (drop + power + extra_power).to::<i32>();
+    mantissa.to::<f64>() * 2_f64.powi(exponent / 2) * 2_f64.powi(exponent - exponent / 2)
 }
 
 /// `statistics.pstdev`: the exact variance as a fraction, its square root correctly rounded.
@@ -728,9 +728,6 @@ pub(crate) fn population(rows: &[&Row], split: &str, known: &HashMap<String, Has
 fn synthetic_population(rows: &[&Row], known: &HashMap<String, HashSet<String>>, minimum: usize) -> BTreeMap<Label, bool> {
     let mut labels = BTreeMap::new();
     for row in rows {
-        if row.split != TRAIN {
-            continue;
-        }
         let Some(synthetic) = extra_key_variant(&row.script, &row.keys) else { continue };
         let typed = Row { keys: synthetic, ..(*row).clone() };
         for (label, _) in population(&[&typed], TRAIN, known, minimum) {
@@ -789,7 +786,7 @@ fn feature_weights(inputs: &Inputs, names: &[&'static str], ties: &mut Ties, cen
     let index_of = |name: &str| names.iter().position(|known| *known == name);
     if let Some(position) = index_of(CONTINUOUS_FEATURE) {
         for (direction, drawn) in &samples {
-            centres.insert(direction, if drawn.is_empty() { 0.0 } else { fmean(&drawn.iter().map(|sample| sample[1 + position]).collect::<Vec<f64>>()) });
+            centres.insert(direction, fmean(&drawn.iter().map(|sample| sample[1 + position]).collect::<Vec<f64>>()));
         }
         for name in &gated {
             let gate = 1 + index_of(name).ok_or("a gated feature")?;
@@ -804,7 +801,7 @@ fn feature_weights(inputs: &Inputs, names: &[&'static str], ties: &mut Ties, cen
     }
     if let Some(position) = index_of(TARGET_FEATURE) {
         for (direction, drawn) in &samples {
-            target_centres.insert(direction, if drawn.is_empty() { 0.0 } else { fmean(&drawn.iter().map(|sample| sample[1 + position]).collect::<Vec<f64>>()) });
+            target_centres.insert(direction, fmean(&drawn.iter().map(|sample| sample[1 + position]).collect::<Vec<f64>>()));
         }
     }
     fitted_weights(&samples, &labels, settings, names, ties)
@@ -989,8 +986,17 @@ fn serving_model(path: &Path, inputs: &Inputs) -> Result<OrthoModel, String> {
     OrthoModel::load(path, Some(identifier), Some(known), None).map_err(|error| error.name.to_string())
 }
 
-/// The commands: `fit` into a folder, `verify` the artifact byte for byte and the recorded test, `test`, `promote`.
-pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), String> {
+/// What `command` does: `Fit` into a folder, `Verify` the artifact byte for byte and the recorded test, `Test`, `Promote`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    Fit,
+    Verify,
+    Test,
+    Promote,
+}
+
+/// Runs one `Action` of the orthotactic model.
+pub fn command(root: &Path, action: Action, output: Option<&Path>) -> Result<(), String> {
     let inputs = load_inputs(root)?;
     let directory: PathBuf = output.map_or_else(|| root.join(DIRECTORY), Path::to_path_buf);
     let (candidate, seal_path, report_path) = (directory.join("candidate.json"), directory.join("seal.json"), directory.join("report.json"));
@@ -999,7 +1005,7 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
     let mut ties = Ties::new();
     let result = (|| -> Result<(), String> {
         match action {
-            "fit" => {
+            Action::Fit => {
                 if candidate.exists() || seal_path.exists() {
                     return Err("candidate already exists; do not refit over sealed evidence".to_owned());
                 }
@@ -1014,14 +1020,14 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
                 std::fs::write(&seal_path, canonical(&seal)).map_err(|error| error.to_string())?;
                 println!("{}", payload["version"].as_str().unwrap_or(""));
             }
-            "verify" => {
+            Action::Verify => {
                 let payload = build(&inputs, &mut ties, &scratch)?;
                 if canonical(&payload) != std::fs::read(&candidate).map_err(|error| error.to_string())? {
                     return Err("orthotactic candidate is not reproducible".to_owned());
                 }
                 println!("{} reproduces", payload["version"].as_str().unwrap_or(""));
             }
-            "test" => {
+            Action::Test => {
                 if report_path.exists() {
                     return Err("test already observed; re-scoring it would not be an independent test".to_owned());
                 }
@@ -1042,17 +1048,101 @@ pub fn command(root: &Path, action: &str, output: Option<&Path>) -> Result<(), S
                 std::fs::write(&report_path, canonical(&report)).map_err(|error| error.to_string())?;
                 println!("promotion passed: {passed}");
             }
-            "promote" => {
+            Action::Promote => {
                 let report = read_json(&report_path)?;
                 if report["promotion_passed"] != json!(true) || report["candidate_sha256"].as_str() != Some(checksum(&candidate)?.as_str()) {
                     return Err("refusing to promote a candidate without a passing report".to_owned());
                 }
                 std::fs::copy(&candidate, root.join("resources/models/ortho_v1.json")).map_err(|error| error.to_string())?;
             }
-            other => return Err(format!("unknown ortho command: {other}")),
         }
         Ok(())
     })();
     let _ = std::fs::remove_dir_all(&scratch);
     result
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_word_ends_where_the_engine_ends_it() {
+        assert!(ends_a_word(" "));
+        assert!(ends_a_word("!"));
+        assert!(!ends_a_word("a"));
+    }
+
+    #[test]
+    fn a_matrix_with_an_empty_column_is_solved_without_dividing_by_it() {
+        let answer = solve(&[vec![0.0, 0.0], vec![0.0, 2.0]], &[0.0, 4.0]);
+        assert!(answer[0].is_nan());
+        assert!((answer[1] - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_spread_is_the_exact_one_rounded_to_the_nearest_even() {
+        // Each value checked against Python's statistics.pstdev.
+        let exact = |values: &[f64], wanted: f64| assert_eq!(pstdev(values).to_bits(), wanted.to_bits(), "{values:?}");
+        exact(&[2.0, 2.0], 0.0);
+        exact(&[0.0, 0.0], 0.0);
+        exact(&[1.0, 3.0], 1.0);
+        exact(&[f64::from_bits(1), f64::from_bits(3)], f64::from_bits(1));
+        exact(&[0.0, 1.0, 2.0], 0.816_496_580_927_726);
+        // Halfway between two doubles: to the even one, down and then up.
+        exact(&[-9_007_199_254_740_992.0, 9_007_199_254_740_994.0], 9_007_199_254_740_992.0);
+        exact(&[-9_007_199_254_740_992.0, 9_007_199_254_740_998.0], 9_007_199_254_740_996.0);
+        assert_eq!(dyadic(-1.0).0, BigInt::from(-4_503_599_627_370_496_i64));
+    }
+
+    #[test]
+    fn a_column_that_never_changes_and_the_firth_prior_leave_the_fit_on_the_score() {
+        let samples: Vec<Vec<f64>> = [(1.0, 5.0, 0_i64), (2.0, 5.0, 0), (3.0, 5.0, 1), (4.0, 5.0, 0), (5.0, 5.0, 1), (6.0, 5.0, 1)].iter().map(|row| vec![row.0, row.1]).collect();
+        let labels = [0, 0, 1, 0, 1, 1];
+        let plain = logistic(&samples, &labels, 0.1, false, &[]);
+        let firth = logistic(&samples, &labels, 0.1, true, &[]);
+        assert!(plain[0] > 0.0 && firth[0] > 0.0 && (plain[0] - firth[0]).abs() > 0.0);
+    }
+
+    #[test]
+    fn a_shared_weight_with_nothing_seen_is_nothing_and_firth_moves_the_rest() {
+        let nothing: Parts = BTreeMap::new();
+        assert_eq!(shared_weight(&nothing, false, None).to_bits(), 0.0_f64.to_bits());
+        let parts: Parts = [("en", vec![(-1.0, 1.0, 0_i64), (1.0, 1.0, 1), (0.5, 1.0, 0), (-0.5, 0.0, 1)])].into_iter().collect();
+        assert_ne!(shared_weight(&parts, true, None).to_bits(), shared_weight(&parts, false, None).to_bits());
+    }
+
+    fn settings_of(value: Value) -> Settings {
+        Settings { value, order: 5, scale: 512, discount: 0.75, collapse: None }
+    }
+
+    #[test]
+    fn a_score_that_points_the_wrong_way_is_refused_and_copied_features_follow_their_parent() {
+        let settings = |extra: &[(&str, Value)]| {
+            let mut value = json!({"feature_l2": 0.1, "feature_min_types": 0, "feature_shared": [], "feature_tied": [], "feature_omitted": [], "feature_copied": [], "feature_separated": {}});
+            for (name, item) in extra {
+                value[*name] = item.clone();
+            }
+            settings_of(value)
+        };
+        let row = |score: f64, parent: f64, rare: f64| vec![score, parent, rare];
+        let upward: Vec<Vec<f64>> = vec![row(1.0, 0.0, 0.0), row(2.0, 1.0, 0.0), row(3.0, 0.0, 1.0), row(4.0, 1.0, 0.0), row(5.0, 0.0, 1.0), row(6.0, 1.0, 1.0)];
+        let downward: Vec<Vec<f64>> = upward.iter().rev().cloned().collect();
+        let labels: BTreeMap<&'static str, Vec<i64>> = SCRIPTS.iter().map(|script| (*script, vec![0, 0, 1, 0, 1, 1])).collect();
+        let samples_of = |rows: &[Vec<f64>]| -> BTreeMap<&'static str, Vec<Vec<f64>>> { SCRIPTS.iter().map(|script| (*script, rows.to_vec())).collect() };
+        let (rare, parent) = FEATURE_PARENTS[0];
+        let names = [parent, rare];
+        let mut ties = Ties::new();
+        let refused = fitted_weights(&samples_of(&downward), &labels, &settings(&[]), &names, &mut ties).unwrap_err();
+        assert!(refused.contains("does not predict"), "{refused}");
+        let copied = fitted_weights(&samples_of(&upward), &labels, &settings(&[("feature_copied", json!([rare]))]), &names, &mut ties).expect("a fit");
+        assert_eq!(copied["en"][rare].to_bits(), copied["en"][parent].to_bits());
+        // A feature named copied whose parent is not in the model stands on its own.
+        let alone = fitted_weights(&samples_of(&upward.iter().map(|sample| vec![sample[0], sample[2]]).collect::<Vec<_>>()), &labels, &settings(&[("feature_copied", json!([rare]))]), &[rare], &mut ties).expect("a fit");
+        assert!(alone["en"].contains_key(rare));
+        let other: Vec<&'static str> = FEATURE_PARENTS.iter().map(|pair| pair.1).filter(|name| *name != rare).take(1).collect();
+        let without = fitted_weights(&samples_of(&upward.iter().map(|sample| vec![sample[0], sample[1]]).collect::<Vec<_>>()), &labels, &settings(&[("feature_copied", json!([rare]))]), &other, &mut ties).expect("a fit");
+        assert!(without["en"].get(rare).is_none_or(|weight| weight.to_bits() == 0.0_f64.to_bits()));
+    }
 }

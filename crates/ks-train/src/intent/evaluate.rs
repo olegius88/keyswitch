@@ -1514,7 +1514,7 @@ mod tests {
         }
         let mut other = context.clone();
         other["profiles"].as_object_mut().expect("the profiles").remove(&profile);
-        assert!(context_evidence(Some(&other), false) != Some(true));
+        assert_ne!(context_evidence(Some(&other), false), Some(true));
         assert!(quality_evidence(Some(gates)));
         let top: Vec<String> = {
             let mut found = Vec::new();
@@ -1634,7 +1634,7 @@ mod tests {
         }
     }
 
-    fn row<'a>(example: &'a LexicalExample, fallback: bool, ensemble: bool) -> PolicyRow<'a> {
+    fn row(example: &LexicalExample, fallback: bool, ensemble: bool) -> PolicyRow<'_> {
         PolicyRow { example, fallback, ensemble, model_evaluated: true, observed_delta: 0.0 }
     }
 
@@ -1713,7 +1713,7 @@ mod tests {
         let references: Vec<&PolicyRow<'_>> = rows.iter().collect();
         let observed = |profile: &Profile| -> BTreeMap<String, Vec<f64>> { [("0_to_1".to_owned(), vec![profile.expected_delta(), profile.expected_delta()]), ("1_to_0".to_owned(), vec![profile.expected_delta(), profile.expected_delta()])].into_iter().collect() };
         let corpora = || -> BTreeMap<&'static str, CorpusEvaluation<'_>> { CORPORA.iter().map(|name| (*name, corpus_evaluation(&references))).collect() };
-        let whole = ContextEvaluation { profiles: PROFILES.iter().map(|profile| ProfileEvaluation { profile: profile.clone(), observed: observed(profile), corpora: corpora() }).collect(), unique_predictions: 1, cache_hits: 1 };
+        let whole = ContextEvaluation { profiles: PROFILES.iter().map(|profile| ProfileEvaluation { profile: *profile, observed: observed(profile), corpora: corpora() }).collect(), unique_predictions: 1, cache_hits: 1 };
         assert!(production_context_gate(&config, &whole)["passed"].is_boolean());
         assert!(production_context_payload(&whole, &json!({"passed": false})).is_object());
         // One corpus short, an extremum off, a direction short, a profile short, no neutral at all.
@@ -1727,16 +1727,16 @@ mod tests {
         short.remove("1_to_0");
         let parts = ContextEvaluation {
             profiles: vec![
-                ProfileEvaluation { profile: neutral.clone(), observed: observed(neutral), corpora: corpora() },
-                ProfileEvaluation { profile: other.clone(), observed: observed(other), corpora: few },
-                ProfileEvaluation { profile: other.clone(), observed: wrong, corpora: corpora() },
-                ProfileEvaluation { profile: other.clone(), observed: short, corpora: corpora() },
+                ProfileEvaluation { profile: *neutral, observed: observed(neutral), corpora: corpora() },
+                ProfileEvaluation { profile: *other, observed: observed(other), corpora: few },
+                ProfileEvaluation { profile: *other, observed: wrong, corpora: corpora() },
+                ProfileEvaluation { profile: *other, observed: short, corpora: corpora() },
             ],
             unique_predictions: 1,
             cache_hits: 1,
         };
         assert_eq!(production_context_gate(&config, &parts)["passed"], json!(false));
-        let none = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: other.clone(), observed: observed(other), corpora: corpora() }], unique_predictions: 0, cache_hits: 0 };
+        let none = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: *other, observed: observed(other), corpora: corpora() }], unique_predictions: 0, cache_hits: 0 };
         assert_eq!(production_context_gate(&config, &none)["passed"], json!(false));
     }
 
@@ -1847,11 +1847,11 @@ mod tests {
     #[test]
     fn scorers_of_the_evaluation_answer_as_the_program_does() {
         let (models, _) = snapshots();
-        assert_eq!(detector_error(ks_lang::detector::DetectorError { name: "n", message: "m".to_owned() }).is_empty(), false);
+        assert!(!detector_error(ks_lang::detector::DetectorError { name: "n", message: "m".to_owned() }).is_empty());
         assert_eq!(load_error(LoadError { name: "n", message: "m".to_owned() }), "n");
         let cache = CorpusCache::new(models[0].clone());
         assert!(cache.context_score("the", "word").is_finite());
-        assert!(cache.score("word").known == cache.score("word").known);
+        assert_eq!(cache.score("word").known, cache.score("word").known);
         let _ = cache.best_single_deletion("wordd");
     }
 

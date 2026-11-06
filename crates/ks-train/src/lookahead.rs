@@ -118,10 +118,13 @@ fn anchor_word(text: &str) -> bool {
 
 /// `build_lookahead_curriculum`: original plus labelled, unexecuted planned-context variants.
 fn build(tools: &Tools, seeds: &[Seed], anchors: &[Anchor], detector: &LanguageDetector, maximum_families: i64, seeds_per_family: i64) -> Built {
-    assert!((1..=LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT).contains(&maximum_families) && (1..=LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY).contains(&seeds_per_family), "lookahead budgets");
+    assert!((1..=LOOKAHEAD_MAXIMUM_FAMILIES_LIMIT).contains(&maximum_families), "lookahead budget of families");
+    assert!((1..=LOOKAHEAD_MAXIMUM_SEEDS_PER_FAMILY).contains(&seeds_per_family), "lookahead budget of seeds");
     for seed in seeds {
-        assert!(!seed.identifier.is_empty() && !seed.parent_family.is_empty(), "lookahead requires source and parent identities");
-        assert!(seed.sample_weight.is_finite() && seed.sample_weight > 0.0, "lookahead requires finite positive mass");
+        assert!(!seed.identifier.is_empty(), "lookahead requires a source identity");
+        assert!(!seed.parent_family.is_empty(), "lookahead requires a parent identity");
+        assert!(seed.sample_weight.is_finite(), "lookahead requires finite mass");
+        assert!(seed.sample_weight > 0.0, "lookahead requires positive mass");
     }
     let mut counts = Counts::default();
     counts.add_by("input_seeds", seeds.len().to::<i64>());
@@ -551,4 +554,127 @@ pub fn balance_planned_mass(tools: &Tools, rows: Vec<ActionRow>) -> Curriculum {
     let report = json!({"policy": "planned frames per (direction, focus length) carry the total mass of the isolated deferred frames of the same class",
         "isolated_mass": rounded_table(&isolated), "planned_mass_before": rounded_table(&planned), "scale": rounded_table(&scale), "input_mass": input_mass, "output_mass": output_mass});
     (result, report)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::tools::reference_models;
+    use ks_lang::Resources;
+    use std::collections::BTreeSet;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    struct Kit {
+        tools: Tools,
+        detector: LanguageDetector,
+    }
+
+    fn kit() -> Kit {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("the repository");
+        let resources: Arc<Resources> = Resources::new(root.join("resources"));
+        let portable = reference_models(&root, &resources, false).expect("the lexicons");
+        let detector = resources.language_detector(&["en_US", "ru_RU"]).expect("the detector");
+        Kit { tools: Tools::new(&root, resources, portable, BTreeSet::new()).expect("the tools"), detector }
+    }
+
+    struct Wanted<'a> {
+        original: &'a str,
+        group: i64,
+        before: &'a str,
+        after: &'a str,
+        action: ContextAction,
+        category: &'a str,
+        planned: Option<ContextAction>,
+        next: &'a str,
+    }
+
+    const KEEP: Wanted<'static> = Wanted { original: "on", group: 0, before: "это ", after: "", action: ContextAction::Keep, category: "legacy_short", planned: None, next: "" };
+
+    fn seed(kit: &Kit, identifier: &str, wanted: &Wanted<'_>) -> Seed {
+        let row = ActionRow::new(identifier, wanted.original, wanted.group, public_field("Code", wanted.before, wanted.after), "space", wanted.action, wanted.category, " ");
+        Seed {
+            identifier: identifier.to_owned(),
+            parent_family: "family".to_owned(),
+            evidence: evidence(&kit.tools, &row, &kit.detector, None, None),
+            action: wanted.action,
+            category: wanted.category.to_owned(),
+            sample_weight: 1.0,
+            next_words: wanted.next.to_owned(),
+            planned_action: wanted.planned,
+        }
+    }
+
+    #[test]
+    fn a_seed_stands_for_a_word_only_when_it_may_wait_for_its_next_word() {
+        let kit = kit();
+        let with = |wanted: &Wanted<'_>| eligible(&kit.tools, &seed(&kit, "seed", wanted));
+        assert!(with(&KEEP));
+        assert!(!with(&Wanted { original: "window", ..KEEP }));
+        assert!(!with(&Wanted { original: "o1", ..KEEP }));
+        assert!(!with(&Wanted { original: "ю", group: 1, ..KEEP }));
+        let changed = |change: &dyn Fn(&mut ContextEvidence)| {
+            let mut made = seed(&kit, "seed", &KEEP);
+            change(&mut made.evidence);
+            eligible(&kit.tools, &made)
+        };
+        assert!(!changed(&|item| item.trigger = "enter".to_owned()));
+        assert!(!changed(&|item| item.boundary_text = ",".to_owned()));
+        assert!(!changed(&|item| item.literal_tail = "x".to_owned()));
+        assert!(!changed(&|item| item.after_origin = AfterOrigin::PlannedNextConversion));
+        assert!(!changed(&|item| item.alternative = "щщ".to_owned()));
+        assert!(!changed(&|item| item.original = "ñn".to_owned()));
+        // The label a frame has or is going to have, and the category that says where its word comes from.
+        let convert = Wanted { action: ContextAction::Convert, category: "legacy_short_lookahead", before: "", ..KEEP };
+        assert!(!with(&convert));
+        assert!(with(&Wanted { after: "дом", ..convert }));
+        assert!(!with(&Wanted { category: "other", ..convert }));
+        let natural = Wanted { action: ContextAction::Wait, planned: Some(ContextAction::Convert), category: "natural_short_lookahead", before: "", ..KEEP };
+        assert!(!with(&natural));
+        assert!(!with(&Wanted { next: " ", ..natural }));
+        assert!(with(&Wanted { next: "дом", ..natural }));
+        assert!(!with(&Wanted { next: "дом", after: "дом", ..natural }));
+        assert!(!with(&Wanted { category: "other", ..natural }));
+        let lexical = Wanted { category: "lexical_short_pair", ..natural };
+        assert!(with(&lexical));
+        assert!(!with(&Wanted { before: "это ", ..lexical }));
+        assert!(!with(&Wanted { after: "дом", ..lexical }));
+        assert!(with(&Wanted { category: "natural_surface", ..KEEP }));
+        assert!(!with(&Wanted { category: "other", ..KEEP }));
+        assert!(!with(&Wanted { before: " ", ..KEEP }));
+        assert!(!with(&Wanted { after: "дом", ..KEEP }));
+        assert!(!with(&Wanted { action: ContextAction::Wait, ..KEEP }));
+    }
+
+    fn anchor(identifier: &str, text: &str, group: i64) -> Anchor {
+        Anchor { identifier: identifier.to_owned(), text: text.to_owned(), group }
+    }
+
+    #[test]
+    fn a_planned_frame_needs_an_anchor_and_one_label() {
+        let kit = kit();
+        let counted = |built: &Built, name: &str| built.counts.report()[name].as_i64().unwrap_or(0);
+        let plain = [seed(&kit, "keep", &KEEP)];
+        // Those anchors that cannot stand after a word are left out.
+        let anchors = [anchor("a", "дом", 1), anchor("short", "до", 1), anchor("number", "дом1", 1), anchor("foreign", "ñandu", 0)];
+        let built = build(&kit.tools, &plain, &anchors, &kit.detector, 4, 4);
+        assert!(counted(&built, "skipped_anchor") == 3, "{}", built.counts.report());
+        assert!(built.frames.iter().any(|frame| frame.planned_anchor.as_deref() == Some("a")), "{}", built.counts.report());
+        let lonely = build(&kit.tools, &plain, &[anchor("other", "word", 0)], &kit.detector, 4, 4);
+        assert_eq!(counted(&lonely, "skipped_missing_anchor"), 1);
+        // Two seeds of one frame that would be told two things.
+        let conflict = [seed(&kit, "keep", &KEEP), seed(&kit, "convert", &Wanted { action: ContextAction::Wait, planned: Some(ContextAction::Convert), category: "natural_short_lookahead", next: "дом", ..KEEP })];
+        let told = build(&kit.tools, &conflict, &anchors[..1], &kit.detector, 4, 4);
+        assert!(counted(&told, "skipped_label_conflict") == 2, "{}", told.counts.report());
+        // A word no seed can wait for, a next word already in the field, a next word that would not be converted.
+        let unfit = [seed(&kit, "unfit", &Wanted { original: "window", ..KEEP })];
+        assert_eq!(counted(&build(&kit.tools, &unfit, &anchors, &kit.detector, 4, 4), "selected_seeds"), 0);
+        let named = [seed(&kit, "named", &Wanted { action: ContextAction::Convert, category: "legacy_short_lookahead", before: "", after: "дом", ..KEEP })];
+        let found = build(&kit.tools, &named, &anchors[..1], &kit.detector, 4, 4);
+        assert!(found.frames.iter().any(|frame| frame.planned_anchor.is_some()), "{}", found.counts.report());
+        let russian = [seed(&kit, "russian", &Wanted { original: "щт", group: 1, ..KEEP })];
+        let refused = build(&kit.tools, &russian, &[anchor("plain", "the", 0)], &kit.detector, 4, 4);
+        assert!(counted(&refused, "skipped_next_not_proposed") == 1, "{}", refused.counts.report());
+    }
 }

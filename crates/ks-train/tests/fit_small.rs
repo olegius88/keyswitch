@@ -147,13 +147,25 @@ fn a_warm_base_starts_a_fit_and_stands_alone() {
     }
     let first = fitted(&run, "first", &whole);
     assert!(first.status.success(), "{}", said(&first));
+    // Without what a whole run keeps of its own: the kept-neighbour weights and the heads.
+    let mut plain_model: Value = serde_json::from_slice(&std::fs::read(run.folder.join("first/context-action.json")).expect("a model")).expect("json");
+    plain_model["weights"].as_object_mut().expect("weights").retain(|name, _| !name.starts_with(ks_context::constants::KEPT_FEATURE_PREFIX) && !ks_train::heads::HEAD_PREFIXES.iter().any(|head| name.starts_with(head.1)));
+    let dumped = ks_text::json_dumps(&plain_model["weights"], &ks_text::JsonOptions { ensure_ascii: false, sort_keys: true, separators: Some((",".to_owned(), ":".to_owned())), ..ks_text::JsonOptions::default() });
+    let hash = support::digest(dumped.as_bytes());
+    plain_model["version"] = json!(format!("context-v3-{}", hash.get(..12).expect("a hash")));
+    plain_model["weights_sha256"] = json!(hash);
+    let plain = run.folder.join("plain.json");
+    std::fs::write(&plain, serde_json::to_vec(&plain_model).expect("json")).expect("a file");
+    let mut mixed = whole.clone();
+    mixed["warm_base"] = base_of(&run.folder.join("first/context-action.json"));
+    refused(&fitted(&run, "warm-with-heads", &mixed), "without kept-neighbour weights or heads");
     let mut warm = whole.clone();
-    warm["warm_base"] = base_of(&run.folder.join("first/context-action.json"));
+    warm["warm_base"] = base_of(&plain);
     warm["warm_base"]["learning_rate"] = json!(0.01);
     let answer = fitted(&run, "warmed", &warm);
     println!("{}", said(&answer));
     let mut both = warm;
-    both["frozen_base"] = base_of(&run.folder.join("first/context-action.json"));
+    both["frozen_base"] = base_of(&plain);
     refused(&fitted(&run, "both", &both), "not both");
 }
 

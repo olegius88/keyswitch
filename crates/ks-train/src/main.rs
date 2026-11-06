@@ -243,7 +243,8 @@ fn main() {
             }
             return;
         }
-        let Some(action) = ["fit", "verify", "test", "promote"].into_iter().find(|name| arguments.iter().any(|argument| *argument == format!("--{name}"))) else {
+        use ks_train::ortho::Action;
+        let Some((_, action)) = [("--fit", Action::Fit), ("--verify", Action::Verify), ("--test", Action::Test), ("--promote", Action::Promote)].into_iter().find(|(name, _)| arguments.iter().any(|argument| argument == name)) else {
             eprintln!("--fit, --verify, --test, --promote, --inputs or --freeze-inputs");
             std::process::exit(2);
         };
