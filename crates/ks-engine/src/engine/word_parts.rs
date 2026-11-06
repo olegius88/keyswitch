@@ -366,6 +366,7 @@ impl EngineCore {
     /// pressed for the layout the word was meant in - unless it is a quotation mark and
     /// one opened the word (`opened`): then it closes the quotation, and `"john"` keeps
     /// both quotes.
+    #[must_use]
     pub fn _replay_sign_with_word(plan: &PlanRef, opened: &[Stroke]) -> PlanRef {
         let Some(boundary) = plan.boundary.clone() else {
             return plan.clone();
@@ -536,6 +537,7 @@ impl EngineCore {
         letters
     }
 
+    #[must_use]
     pub fn _letters_before(text: &str) -> String {
         let mut start = text.len();
         for (index, character) in text.char_indices().rev() {
@@ -547,11 +549,13 @@ impl EngineCore {
         text.get(start..).unwrap_or_default().to_owned()
     }
 
+    #[must_use]
     pub fn _letters_after(text: &str) -> String {
         let end = text.char_indices().find(|(_, character)| !ks_text::ucd::isalpha(*character)).map_or(text.len(), |(index, _)| index);
         text.get(..end).unwrap_or_default().to_owned()
     }
 
+    #[must_use]
     pub fn _reads_alike(plan: &CorrectionPlan) -> bool {
         // A token of signs that the other layout types the same (`-`, `2`): nothing in it to convert.
         plan.original == plan.replacement && !any_alpha(&plan.original)

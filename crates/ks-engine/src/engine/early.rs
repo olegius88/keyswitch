@@ -176,6 +176,7 @@ impl EngineCore {
     /// Code (Windows logs, 05.09-08.10.2026). Up to `FIELD_PENDING_MAX_CHARACTERS` of the last letters
     /// may be missing, the caret right after the rest. Text typed ahead may follow the word, and
     /// the caret may be seen short of it (`caret_lag`). None for any other text.
+    #[must_use]
     pub fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
         let boundaries: Vec<usize> = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len())).collect();
         for &end in boundaries.iter().rev() {

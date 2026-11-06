@@ -146,7 +146,7 @@ impl EngineCore {
         // Behind is missing, not shifted: the last letters, or the boundary after the whole word, are nowhere in the
         // field yet; standing after the caret, they are a caret seen off (caret_lag), which waiting does not mend.
         if typed_short_of(&field.before, &field.after, &typed).is_none()
-            && !(!closing.is_empty() && ends_with_typed(&field.before, &typed))
+            && (closing.is_empty() || !ends_with_typed(&field.before, &typed))
         {
             return false;
         }

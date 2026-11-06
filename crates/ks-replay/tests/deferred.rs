@@ -254,8 +254,9 @@ fn stopping_does_not_wait_for_ever_nor_for_itself() {
     let engine = KeySwitchEngine::of(session.core);
     engine.start().unwrap();
     backend.set_stall(Duration::from_secs(4));
-    engine.select_alternate_group();
-    std::thread::sleep(Duration::from_millis(100));
+    let key = KEYS.iter().find(|key| key.characters[0] == 'a').expect("a key of the first layout");
+    engine.enqueue(KeyEvent { pressed: true, keycode: key.keycode, key_name: "a".to_owned(), character: "a".to_owned(), characters: key.strings(), ..KeyEvent::default() });
+    std::thread::sleep(Duration::from_millis(200));
     let began = Instant::now();
     engine.stop();
     assert!(began.elapsed() < Duration::from_secs(4));
@@ -275,11 +276,13 @@ fn stopping_does_not_wait_for_ever_nor_for_itself() {
         }
     }));
     engine.start().unwrap();
+    let key = KEYS.iter().find(|key| key.characters[0] == 'a').expect("a key of the first layout");
+    engine.enqueue(KeyEvent { pressed: true, keycode: key.keycode, key_name: "a".to_owned(), character: "a".to_owned(), characters: key.strings(), ..KeyEvent::default() });
     let deadline = Instant::now() + Duration::from_secs(10);
     while engine.shared.running.load(std::sync::atomic::Ordering::Relaxed) && Instant::now() < deadline {
-        engine.shared.update(ks_engine::engine::Update::default());
         std::thread::sleep(Duration::from_millis(20));
     }
+    assert!(!engine.shared.running.load(std::sync::atomic::Ordering::Relaxed));
     engine.stop();
     bundle.clean();
     // A listener that fails while the worker gets over a failure of its own: the worker is gone, the stop still returns.

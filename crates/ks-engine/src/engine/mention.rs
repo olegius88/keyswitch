@@ -10,6 +10,7 @@ impl EngineCore {
     // after the word can only be the closing one, and then the quote in front
     // of it was the opening one. The word is still judged on its own, so the
     // name inside the quotation is corrected while both quotes stay.
+    #[must_use]
     pub fn _quotation_closed(head: &KeyEvent, trailing: &[Stroke], boundary: Option<&Stroke>) -> bool {
         trailing.iter().chain(boundary).any(|stroke| stroke.keycode == head.keycode)
     }

@@ -25,6 +25,7 @@ mod types;
 mod word_parts;
 
 pub use decide::WordOptions;
+pub use logging::WordEvaluation;
 pub use handle::KeySwitchEngine;
 pub use shared::{Command, QueueItem, Shared};
 pub use types::*;

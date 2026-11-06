@@ -21,7 +21,7 @@ macro_rules! technical_event {
 pub(crate) use technical_event;
 
 /// The keyword arguments of `log_word_evaluation`.
-pub(crate) struct WordEvaluation<'a> {
+pub struct WordEvaluation<'a> {
     pub trigger: &'a str,
     pub original: &'a str,
     pub alternatives: &'a Alternatives,
@@ -92,6 +92,7 @@ impl EngineCore {
         })
     }
 
+    #[must_use]
     pub fn _decision_diagnostics(decision: &DetectionDecision) -> Map<String, Value> {
         let mut map = Map::new();
         map.insert("should_convert".into(), json!(decision.should_convert));
@@ -108,7 +109,7 @@ impl EngineCore {
         map
     }
 
-    pub(crate) fn log_word_evaluation(&mut self, evaluation: WordEvaluation<'_>) -> EngineResult<()> {
+    pub fn log_word_evaluation(&mut self, evaluation: WordEvaluation<'_>) -> EngineResult<()> {
         if !self.shared.technical_logging() {
             return Ok(());
         }

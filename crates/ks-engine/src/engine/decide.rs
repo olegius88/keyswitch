@@ -271,7 +271,8 @@ impl EngineCore {
     /// the words before it on its line are a Latin term of up to `STRANDED_TERM_MAX_WORDS` words with
     /// a Russian word before the term and no end of a sentence in between. A capital letter is
     /// left alone (`plan B` in English prose), and so is a letter after Latin text alone.
-    fn stranded_letter(&self, decision: DetectionDecision, original: &str, alternatives: &Alternatives, source_group: i64) -> DetectionDecision {
+    #[must_use]
+    pub fn stranded_letter(&self, decision: DetectionDecision, original: &str, alternatives: &Alternatives, source_group: i64) -> DetectionDecision {
         let mut characters = original.chars();
         let (Some(only), None) = (characters.next(), characters.next()) else {
             return decision;
@@ -507,9 +508,7 @@ impl EngineCore {
         };
         let result = Arc::new(result);
         self.context_result = Some(result.clone());
-        if result.fallback_reason == "field_changed"
-            && let Some(field) = &result.field
-        {
+        if let Some(field) = result.field.as_ref().filter(|_| result.fallback_reason == "field_changed") {
             // Where the typed word stands against the caret the field reported, as numbers only:
             // the shape tells a lagging caret from a field that really changed.
             let anchor = format!("{original}{literal_tail}");

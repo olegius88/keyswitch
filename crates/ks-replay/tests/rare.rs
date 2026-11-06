@@ -8,7 +8,7 @@ use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::config::SettingsStore;
 use ks_config::selection_commands::SelectionCommand;
-use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EngineCore, FieldWait, Hotkey, InsertionPoint, KeptWord, PlanRef, QueueItem, Shared, Stroke, Strokes, WordOptions};
+use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EngineCore, FieldWait, Hotkey, InsertionPoint, KeptWord, PlanRef, QueueItem, Shared, Stroke, Strokes, WordEvaluation, WordOptions};
 use ks_lang::detector::DetectionDecision;
 use ks_lang::intent_model::CorrectionTrigger;
 use ks_lang::early_switch::EarlySwitchDecision;
@@ -256,14 +256,16 @@ fn an_early_plan_is_dropped_when_the_word_is_no_longer_what_it_was() {
     set(core, "detection.early_switch_min_length", json!(50));
     assert!(core.refresh_early_plan(&early).expect("no failure").is_none());
     set(core, "detection.early_switch_min_length", json!(3));
-    // Not letters in the other layout.
+    // Not letters in the other layout: `бит` typed in the second layout is `,bn` in the first.
     let sign = {
-        let mut early = (*plan("ghb", "при", None)).clone();
+        let mut early = (*plan("бит", ",bn", None)).clone();
         early.mode = "early";
         Arc::new(early)
     };
-    core.strokes = keys("ghb1");
+    core.source_group = 1;
+    core.strokes = keys("бит");
     assert!(core.refresh_early_plan(&sign).expect("no failure").is_none());
+    core.source_group = 0;
     // A password field protects the prefix.
     let secret = Fixed::new("ghbdtn", "");
     let mut shown = field("ghbdtnz", "");
@@ -413,6 +415,7 @@ fn the_early_switch_looks_only_at_letters_and_reads_the_field_it_was_given() {
     core.source_group = 0;
     assert!(!core.late_stroke_after_early_switch(&key('a')));
     // A word of a third layout is no typo, and a switch finished in an excluded program says nothing of its text.
+    set(core, "detection.correct_typos", json!(true));
     assert!(core.typo_plan(&Arc::new(CorrectionPlan { target_group: 2, ..(*plan("ghbdtn", "привет", Some(' '))).clone() }), &keys("ghbdtn")).expect("no failure").is_none());
     set(core, "exclusions.applications", json!(["firefox"]));
     core.early_switch_origin = Some(0);
@@ -448,7 +451,7 @@ fn double_capitals_are_fixed_only_where_shift_was_held_too_long() {
     core.insertion = Some(InsertionPoint { head: "ab".to_owned(), tail: String::new() });
     assert_eq!(core.fix_double_capitals(&of("HEllo"), &space).original, "HEllo");
     core.insertion = None;
-    for known in ["MHz", "PCs", "TVs", "CDs", "IDs", "DNA", "McDonald"] {
+    for known in ["MHz", "GHz", "OSes", "HBase", "XEmacs", "IJssel", "OFris", "PCs"] {
         let _ = core.fix_double_capitals(&of(known), &space);
         core.pending = None;
     }
@@ -736,7 +739,7 @@ fn the_tail_of_a_word_is_cut_off_only_if_it_can_be_a_tail() {
     set(core, "exclusions.words", json!([]));
     // A token whose parts hold no letters is not split.
     assert_eq!(core.joined_split(&keys("1-2"), 0), 0);
-    assert_eq!(core.joined_split(&keys("-b"), 0), 0);
+    assert_eq!(core.joined_split(&keys("-ghbdtn"), 0), 0);
     // The sign after a word replayed with it: a key with no meaning in the other layout, or a space there, stays.
     let base = plan("ghbdtn", "привет", Some(','));
     for characters in [[",", ""], [",", " "], [",", ","]] {
@@ -882,7 +885,7 @@ fn late_keys_of_a_correction_that_cannot_be_typed_again_refuse_it() {
         Arc::new(plan)
     };
     let up = KeyEvent { pressed: false, ..(*key('z')).clone() };
-    for (trailing, typed) in [(",", "ghb"), ("", "ghb"), ("", "xyz"), ("", "g")] {
+    for (trailing, typed) in [(",", "ghb"), ("", "ghb"), ("", "xyz"), ("", "xyzw"), ("", "g")] {
         core.pending = Some(hidden(trailing));
         core.pressed.clear();
         core.strokes = keys(typed);
@@ -993,6 +996,13 @@ fn the_keys_of_a_word_are_read_by_the_model_of_its_other_layout() {
     let empty = Arc::new(CorrectionPlan { original: String::new(), ..(*short).clone() });
     assert!(!core.keys_lean_to_target_language(&empty, ""));
     assert!(!core.keys_of_target_language(&empty, ""));
+    // A shape the model was told not to score.
+    let loaded = core.context_policy.ortho.clone().expect("the model ships");
+    let mut no_shapes = (*loaded).clone();
+    no_shapes.unscored_shapes = vec!["lower".to_owned()];
+    core.context_policy.ortho = Some(Arc::new(no_shapes));
+    assert!(!core.keys_of_target_language(&plan("ghbdtn", "привет", Some(' ')), ""));
+    core.context_policy.ortho = Some(loaded);
     for word in ["ghbdtn", "GHBDTN", "Ghbdtn", "gHBDTN", "GHbdtn", "ghb1dtn", "gh,bd", "123456"] {
         for before in ["", "начало "] {
             let _ = core.keys_of_target_language(&plan("ghbdtn", word, Some(' ')), before);
@@ -1022,7 +1032,7 @@ fn a_kept_word_is_asked_again_only_as_it_was_kept() {
     let core = &mut session.core;
     let kept = core.kept.clone();
     if !kept.is_empty() {
-        let plus = key('+');
+        let plus = Arc::new(KeyEvent { group: 1, ..(*key('+')).clone() });
         let decision = baseline_of(core, "+");
         let of = |change: &dyn Fn(&mut KeptWord)| {
             let mut word = (*kept[kept.len() - 1]).clone();
@@ -1046,6 +1056,223 @@ fn a_kept_word_is_asked_again_only_as_it_was_kept() {
         core.context_policy.stream.clear();
         let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &decision, "firefox");
     }
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn what_is_asked_of_a_lone_letter_and_of_a_waiting_word_directly() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    // A letter with its own layout among its readings; a letter nothing is known of.
+    let decision = baseline_of(core, "z");
+    let own = vec![(0, "z".to_owned()), (1, "я".to_owned())];
+    let _ = core.stranded_letter(decision.clone(), "z", &own, 0);
+    assert!(!core.stranded_letter(decision, "x", &vec![(0, "x".to_owned())], 0).should_convert);
+    bundle.give_back(session);
+    let mut found = None;
+    for first in ["tot", "ещ", "yt", "lf", "да", "z", "я", "x", "ч", "gj", "по", "rfr", "как", "qr", "йк", "d", "в", "c", "с"] {
+        let mut session = bundle.session("firefox", 0, "начало ".chars().collect());
+        session.recovers = true;
+        let backend = session.backend.clone();
+        session.core.context_policy.reader = Some(Arc::new(ks_replay::harness::CaretReader { backend }));
+        for character in format!("{first} ").chars() {
+            let event = key(character);
+            session.select_layout(event.group);
+            session.tap((*event).clone());
+        }
+        if session.core.context_waiting.is_some() {
+            found = Some(session);
+            break;
+        }
+        bundle.give_back(session);
+    }
+    let mut session = found.expect("some word waits for its neighbour");
+    let waiting = session.core.context_waiting.clone();
+    let waiting = waiting.expect("some word waits for its neighbour");
+    let core = &mut session.core;
+    let space = key(' ');
+    let next = keys("ghbdtn");
+    let alternatives = vec![(1, "привет".to_owned())];
+    let decision = DetectionDecision { source_group: waiting.plan.source_group, target_group: waiting.plan.target_group, ..baseline_of(core, "ghbdtn") };
+    // Each step of a phrase asked with the word that waits: as it is, with the policy off, with the next word switched.
+    let _ = core.resolve_context_wait(Some(&waiting), &next, Some(&space), &decision, "firefox", &alternatives, true);
+    let _ = core.resolve_context_wait(Some(&waiting), &keys("привет"), Some(&space), &decision, "firefox", &alternatives, true);
+    let _ = core.resolve_context_wait(Some(&waiting), &keys("привет"), Some(&space), &DetectionDecision { source_group: 1 - waiting.plan.source_group, ..decision.clone() }, "firefox", &alternatives, true);
+    let aged = ks_engine::engine::WaitingContextWord { deadline: 0.0, ..waiting.clone() };
+    let _ = core.resolve_context_wait(Some(&aged), &keys("привет"), Some(&space), &decision, "firefox", &alternatives, true);
+    set(core, "detection.context_policy", json!("off"));
+    assert!(core.resolve_context_wait(Some(&waiting), &next, Some(&space), &decision, "firefox", &alternatives, false).expect("no failure").is_none());
+    set(core, "detection.context_policy", json!("assist"));
+    // The same, beside a kept next word, for a next word that is nothing or more than one.
+    for original in ["", "a b"] {
+        let other = DetectionDecision { original: original.to_owned(), ..decision.clone() };
+        assert!(core.decide_with_kept_neighbour(&waiting, &next, &space, &other, "firefox").expect("no failure").is_none());
+    }
+    // A word converted at a pause stays open only for a plain space.
+    let paused = ks_engine::engine::ProvisionalWord { plan: plan("ghbdtn", "привет", None), window: core.focus_or_zero(), deadline: f64::MAX };
+    let deferred = Arc::new(KeyEvent { deferred: true, ..(*space).clone() });
+    assert!(core.provisional_after_pause(Some(&paused), &next, 1, &deferred).is_none());
+    let _ = core.provisional_after_pause(Some(&paused), &next, 1, &space);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn words_kept_for_later_go_along_only_while_the_model_can_be_asked() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let baseline = baseline_of(core, "lf");
+    let word = |segmentation_open| Arc::new(KeptWord {
+        plan: plan("lf", "да", Some(' ')),
+        baseline: Some(baseline.clone()),
+        field: Some(field("", "")),
+        window: 0,
+        deadline: f64::MAX,
+        segmentation_open,
+    });
+    let next = plan("ghbdtn", "привет", Some(' '));
+    for segmentation_open in [false, true] {
+        for before in ["", "начало ", "x "] {
+            let kept = vec![Arc::new(KeptWord { field: Some(field(before, "")), ..(*word(segmentation_open)).clone() })];
+            let _ = core.take_along(&kept, &next, 6, "firefox", false);
+        }
+    }
+    let model = core.context_policy.model.take();
+    let _ = core.take_along(&[word(false)], &next, 6, "firefox", false);
+    core.context_policy.model = model;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn the_field_reader_of_the_platform_says_how_it_is() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let clock = session.core.clock.clone();
+    let core = &mut session.core;
+    let factory: ks_engine::context_access::ReaderFactory = Arc::new(|| Err(ks_backend::ReaderFailure { failure_type: "os_error", failure_name: "OSError", failure_code: None, permanent: false }));
+    let platform = Arc::new(ks_engine::context_access::PlatformFieldReader::new(factory, clock));
+    core.platform_reader = Some(platform.clone());
+    // Another reader beside it speaks for itself.
+    assert_eq!(core.field_reader_status(), "custom_reader");
+    assert_eq!(core.field_reader_details()["status"], json!("custom_reader"));
+    core.context_policy.reader = Some(platform);
+    assert_ne!(core.field_reader_status(), "custom_reader");
+    assert!(core.field_reader_details().get("retry").is_some());
+    core.context_policy.reader = None;
+    assert!(core.field_reader_details().get("retry").is_none());
+    core.platform_reader = None;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_rule_is_offered_even_when_there_is_nothing_more_to_convert() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let done = plan("ghbdtn", "привет", Some(' '));
+    for origin in [plan("ghbdtn", "привет", Some(' ')), plan("руддщ", "hello", Some(' '))] {
+        core.pending = None;
+        core.strokes.clear();
+        core.last_committed = None;
+        core.last_correction = None;
+        core.convert_outcome = Some(ConvertOutcome::Plan(done.clone()));
+        core.last_requested_plan = Some(done.clone());
+        core.correction_origin = Some(origin);
+        core.request_rule_after_double_press(i64::from(PAUSE_KEYCODE));
+        core.shared.dismiss_learning_prompt(None, "test");
+    }
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_prompt_is_heard_going_as_it_was_coming() {
+    let mut bundle = Bundle::load(None);
+    let session = session(&mut bundle);
+    let shared = session.core.shared.clone();
+    let heard = Arc::new(Mutex::new((0, 0)));
+    let counter = heard.clone();
+    shared.subscribe_learning_prompts(Arc::new(move |prompt| {
+        let mut counts = counter.lock().expect("not poisoned");
+        if prompt.is_some() {
+            counts.0 += 1;
+        } else {
+            counts.1 += 1;
+        }
+    }));
+    let offer = || ks_engine::engine::LearningPrompt {
+        source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: "firefox".to_owned(),
+        action: ks_config::learning::RuleAction::Convert,
+    };
+    shared.show_learning_prompt(offer());
+    assert!(shared.dismiss_learning_prompt(None, "test"));
+    shared.show_learning_prompt(offer());
+    let _ = shared.confirm_learning_prompt(None);
+    shared.show_learning_prompt(offer());
+    assert!(shared.expire_learning_prompt(Some(f64::MAX)));
+    assert_eq!(*heard.lock().expect("not poisoned"), (3, 4), "each of three prompts came and went, and a listener hears the state as it subscribes");
+    drop(shared);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_shared_state_nobody_subscribed_goes_quietly() {
+    let mut bundle = Bundle::load(None);
+    let session = session(&mut bundle);
+    let core = &session.core;
+    let lone = Shared::new(core.settings.clone(), core.backend.clone(), core.clock.clone(), 2, ks_engine::engine::EngineSnapshot::default());
+    drop(lone);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn the_rule_window_reads_a_rule_in_words() {
+    let mut rule = ks_config::learning::LearnedRule::new("ghbdtn", 0, 1);
+    rule.case_sensitive = false;
+    let plain = ks_engine::rule_editor::condition_text(&rule);
+    rule.case_sensitive = true;
+    assert_ne!(ks_engine::rule_editor::condition_text(&rule), plain);
+}
+
+#[test]
+fn a_word_nobody_can_place_is_noted_without_a_second_opinion() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let alternatives = vec![(1, "привет".to_owned())];
+    let core = &mut session.core;
+    for source_group in [None, Some(5), Some(0)] {
+        let evaluation = WordEvaluation {
+            trigger: "space",
+            original: "ghbdtn",
+            alternatives: &alternatives,
+            application: "firefox",
+            enabled: false,
+            trigger_enabled: true,
+            manual_layout_protected: false,
+            application_excluded: false,
+            decision: None,
+            caret_unknown: false,
+            protection: None,
+            source_group,
+            early_switch_origin: None,
+            idle_ms: None,
+            context: None,
+            literal_head: "",
+        };
+        core.log_word_evaluation(evaluation).expect("no failure");
+    }
+    // Selections when the layouts setting is not a list.
+    set(core, "detection.layouts", json!(5));
+    session.backend.set_selection(Some("ghbdtn"));
+    session.core.run_selection_command(SelectionCommand::Layout);
+    set(&session.core, "detection.layouts", json!(["us", "ru"]));
     bundle.give_back(session);
     bundle.clean();
 }

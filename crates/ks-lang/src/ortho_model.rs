@@ -648,6 +648,7 @@ fn value_error<T>(message: &str) -> Result<T, LoadError> {
 }
 
 /// Loaded orthotactic model. Construction validates; scoring never raises.
+#[derive(Clone)]
 pub struct OrthoModel {
     pub order: usize,
     pub channels: PerScript<Channel>,

@@ -466,6 +466,7 @@ impl EngineCore {
     ///
     /// Composed text, surrogate pairs, combining marks and IME results do
     /// not have the one-key/one-deletion contract used by these backends.
+    #[must_use]
     pub fn _safe_text_stroke(event: &KeyEvent) -> bool {
         event.characters.iter().all(|char| {
             let mut characters = char.chars();
@@ -480,6 +481,7 @@ impl EngineCore {
     }
 
     /// A printable key whose character differs between the layouts.
+    #[must_use]
     pub fn _layout_dependent(event: &KeyEvent) -> bool {
         if event.character.is_empty() {
             return false;
@@ -498,6 +500,7 @@ impl EngineCore {
         false
     }
 
+    #[must_use]
     pub fn _is_layout_letter(event: &KeyEvent) -> bool {
         event.characters.iter().any(|character| pystr::isalpha(character))
     }
@@ -505,6 +508,7 @@ impl EngineCore {
     /// A key that types one and the same sign in every layout (`-`, `_`, `+`, `=`) can join two
     /// words typed in different layouts. A sign that is a letter in another layout is a letter of the
     /// word: `,` is the `б` of `cj,thb` (`собери`), `;` the `ж` of `ye;yj` (`нужно`).
+    #[must_use]
     pub fn _joins_parts(stroke: &KeyEvent) -> bool {
         let Some(first) = stroke.characters.first() else {
             return false;
@@ -545,6 +549,7 @@ impl EngineCore {
         self.flag("detection.correct_on_punctuation", true)
     }
 
+    #[must_use]
     pub fn _trigger_for_boundary(event: &KeyEvent) -> ks_lang::intent_model::CorrectionTrigger {
         use ks_lang::intent_model::CorrectionTrigger;
         let name = event.key_name.as_str();

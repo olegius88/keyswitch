@@ -341,6 +341,8 @@ impl InputBackend for Backend {
     }
 
     fn active_application(&self) -> String {
+        let stall = self.lock().stall;
+        std::thread::sleep(stall);
         let (application, panicking) = {
             let state = self.lock();
             (state.application.clone(), state.panicking)

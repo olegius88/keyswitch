@@ -255,3 +255,83 @@ fn a_pause_takes_along_what_stands_before_the_word() {
     }
     bundle.clean();
 }
+
+/// Words after words, at a space and at a pause, the second one also as if the early switch had converted it: the questions
+/// about a pair come up only for some pairs, and only the pairs tell which.
+#[test]
+fn pairs_of_words_ask_each_other_about_their_layout() {
+    const FIRST: &[&str] = &[
+        "z", "я", "x", "ч", "d", "в", "r", "к", "f", "а", "b", "и", "c", "с", "tot", "ещ", "ещу", "lf", "да", "yt", "не", "yf", "на", "ytn", "нет", "gj", "по", "dct", "все",
+        "rfr", "как", "qr", "йк", "v67", "м67", "2ю", "webjs", "htmx", "git", "npm", "тзь", "ntcn", "тест", "ghbdtn", "привет", "the", "еру", "and", "фтв", "м", "ь", "н", "y", "T",
+        "Z", "Я", "ТОТ", "ьщтпщ", "vjq", "мой", "ns", "ты", "jy", "он", "jyf", "она",
+    ];
+    const NEXT: &[&str] = &["ghbdtn", "привет", "hello", "руддщ", "d", "в", "rfr", "как", "+", "-", "=", "2", "vbh", "мир", "git", "пше", "npm", "the", "еру", "ytn", "нет", "lj,hsq", "ghbdtn,"];
+    let mut bundle = Bundle::load(None);
+    for start in ["", "начало ", "git "] {
+        for first in FIRST {
+            for next in NEXT {
+                for way in 0..3 {
+                    let mut session = bundle.session("firefox", 0, start.chars().collect());
+                    session.recovers = true;
+                    let backend = session.backend.clone();
+                    session.core.context_policy.reader = Some(Arc::new(CaretReader { backend }));
+                    type_text(&mut session, first);
+                    type_text(&mut session, " ");
+                    type_text(&mut session, next);
+                    match way {
+                        0 => type_text(&mut session, " "),
+                        1 => session.idle(1.0),
+                        _ => {
+                            session.core.early_switch_origin = Some(1 - session.core.source_group.clamp(0, 1));
+                            session.core.early_switch_at = Some(session.core.monotonic());
+                            if start.is_empty() {
+                                session.idle(1.0);
+                            } else {
+                                type_text(&mut session, " ");
+                            }
+                        }
+                    }
+                    type_text(&mut session, "d ");
+                    assert!(session.backend.caret() <= session.backend.text().len());
+                    bundle.give_back(session);
+                }
+            }
+        }
+    }
+    bundle.clean();
+}
+
+/// A quote typed in the second layout is `@` of the first where the program reads it as a mention, and a second one closes it.
+#[test]
+fn a_quote_closed_after_a_word_is_a_quote_at_a_pause() {
+    let quote_key = KEYS.iter().find(|key| key.characters[1] == '"').expect("the key of the quote");
+    let mut bundle = Bundle::load(None);
+    for application in ["firefox", "telegram-desktop", "slack"] {
+        for word in ["ощрт", "руддщ", "john"] {
+            for closes in [false, true] {
+                let mut session = bundle.session(application, 1, Vec::new());
+                session.recovers = true;
+                let quote = KeyEvent {
+                    pressed: true,
+                    keycode: quote_key.keycode,
+                    key_name: "quotedbl".to_owned(),
+                    character: "\"".to_owned(),
+                    characters: quote_key.strings(),
+                    group: 1,
+                    state: SHIFT_MASK,
+                    ..KeyEvent::default()
+                };
+                session.tap(quote.clone());
+                type_text(&mut session, word);
+                if closes {
+                    session.select_layout(1);
+                    session.tap(quote);
+                }
+                session.idle(1.0);
+                assert!(session.backend.caret() <= session.backend.text().len());
+                bundle.give_back(session);
+            }
+        }
+    }
+    bundle.clean();
+}
