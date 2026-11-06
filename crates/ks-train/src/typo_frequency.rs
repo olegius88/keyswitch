@@ -205,6 +205,8 @@ pub struct Paths {
     pub en: PathBuf,
     pub messages: PathBuf,
     pub code: PathBuf,
+    /// What each must be, in that order.
+    pub pins: [String; 4],
 }
 
 impl Paths {
@@ -216,6 +218,7 @@ impl Paths {
             en: private.join(SOURCES[1].default),
             messages: private.join("research-2026-09-29/messages-tool/so-train.jsonl.gz"),
             code: private.join("research-2026-09-29/messages-tool/code-train.txt.gz"),
+            pins: [SOURCES[0].sha256.to_owned(), SOURCES[1].sha256.to_owned(), MESSAGES_SHA256.to_owned(), CODE_SHA256.to_owned()],
         }
     }
 }
@@ -226,14 +229,14 @@ fn map_of_sections(built: &Built) -> Value {
 
 /// The command: rebuild the files and the receipt, or with `verify` check the shipped ones against the sources.
 pub fn command(root: &Path, paths: &Paths, verify: bool) -> Result<bool, String> {
-    let messages = gz_text(&pinned_text(&paths.messages, MESSAGES_SHA256)?)?;
-    let code = gz_text(&pinned_text(&paths.code, CODE_SHA256)?)?;
+    let messages = gz_text(&pinned_text(&paths.messages, &paths.pins[2])?)?;
+    let code = gz_text(&pinned_text(&paths.code, &paths.pins[3])?)?;
     let vocabulary = vocabulary_counts(&messages, &code)?;
     let mut entries = Map::new();
     let mut failures = Vec::new();
     for source in &SOURCES {
-        let path = if source.locale == "ru_RU" { &paths.ru } else { &paths.en };
-        let raw = pinned_text(path, source.sha256)?;
+        let (path, pin) = if source.locale == "ru_RU" { (&paths.ru, &paths.pins[0]) } else { (&paths.en, &paths.pins[1]) };
+        let raw = pinned_text(path, pin)?;
         let text = String::from_utf8(raw).map_err(|error| error.to_string())?;
         let built = build(source, &text, &vocabulary[source.locale])?;
         let target = root.join(file_of(source.locale));
