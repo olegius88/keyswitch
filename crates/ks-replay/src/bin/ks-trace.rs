@@ -121,11 +121,10 @@ fn run_chunk(mut chunk: Vec<PathBuf>, results: &std::sync::Mutex<Vec<Value>>) {
         let Ok(mut child) = child else { return };
         let stdout = child.stdout.take().expect("a piped stream");
         let mut done = 0;
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                results.lock().expect("results").push(value);
-                done += 1;
-            }
+        // A line that is no result (the end of one a worker killed mid-line was writing) is passed over.
+        for value in BufReader::new(stdout).lines().map_while(Result::ok).filter_map(|line| serde_json::from_str::<Value>(&line).ok()) {
+            results.lock().expect("results").push(value);
+            done += 1;
         }
         let _ = child.wait();
         let _ = std::fs::remove_file(&list);

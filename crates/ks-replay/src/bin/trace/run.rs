@@ -632,8 +632,9 @@ impl Worker {
                     (None, Some(message)) => return differ("rust raises, python does not", message.clone()),
                     (None, None) => {}
                 }
+                // A step that raised in the Python returned above unless the port raised too, and an entry that raises
+                // returns nothing: what is compared here is always the answer of a step that raised on neither side.
                 if let Some(value) = returned
-                    && step.get("x").is_none()
                     && !same(&step["r"], &value)
                 {
                     return differ(format!("result of {name}"), format!("python {}; rust {}", compact(&step["r"]), compact(&value)));
