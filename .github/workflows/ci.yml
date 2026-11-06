@@ -147,6 +147,92 @@ jobs:
             cargo test --release -p ks-win --test e2e_windows --target $target
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: The uninstaller removes the running program and its autostart
+        shell: pwsh
+        run: |
+          $root = "$env:LOCALAPPDATA\Programs\KeySwitch"
+          $app = Join-Path $root "KeySwitch.exe"
+          function Wait-Mutex {
+            $mutex = $null
+            for ($attempt = 0; $attempt -lt 240; $attempt++) {
+              if ([System.Threading.Mutex]::TryOpenExisting("Local\io.github.olegius88.KeySwitch", [ref]$mutex)) { $mutex.Dispose(); return }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "KeySwitch did not take its single-instance mutex in a minute"
+          }
+          $running = Start-Process -FilePath $app -ArgumentList "--hidden" -PassThru
+          Wait-Mutex
+          $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+          New-Item -Path $runKey -Force | Out-Null
+          New-ItemProperty -Path $runKey -Name "KeySwitch" -Value "`"$app`" --hidden" -PropertyType String -Force | Out-Null
+          $uninstaller = Get-ChildItem -Path $root -Filter "unins*.exe" | Select-Object -First 1
+          if (-not $uninstaller) { throw "the installed uninstaller is missing" }
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -PassThru
+          $null = $uninstall.Handle
+          if (-not $uninstall.WaitForExit(120000)) { $uninstall.Kill(); throw "the uninstaller did not finish in two minutes" }
+          # The uninstaller hands over to a copy of itself in the temporary folder (_iu*.tmp): it has finished when that copy has gone.
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+          if (Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) { throw "the uninstaller's copy did not finish in two minutes" }
+          if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
+          if (Test-Path $app) { throw "the uninstaller left KeySwitch.exe behind" }
+          if (-not $running.HasExited) { throw "the uninstaller left KeySwitch running" }
+          if ((Get-ItemProperty -Path $runKey).PSObject.Properties.Name -contains "KeySwitch") { throw "the uninstaller left the autostart value behind" }
+      - name: The published 0.66.2 updated the way its own updater does
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $root = "$env:LOCALAPPDATA\Programs\KeySwitch"
+          $app = Join-Path $root "KeySwitch.exe"
+          $setup = (Get-ChildItem out\KeySwitch-Setup-*.exe).FullName
+          $version = [regex]::Match((Split-Path $setup -Leaf), 'KeySwitch-Setup-(.+)-[^-]+\.exe').Groups[1].Value
+          function Wait-Mutex {
+            $mutex = $null
+            for ($attempt = 0; $attempt -lt 480; $attempt++) {
+              if ([System.Threading.Mutex]::TryOpenExisting("Local\io.github.olegius88.KeySwitch", [ref]$mutex)) { $mutex.Dispose(); return }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "KeySwitch did not take its single-instance mutex in two minutes"
+          }
+          function Run-Bounded($file, $arguments, $limit) {
+            $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+            $null = $process.Handle
+            if (-not $process.WaitForExit($limit)) { $process.Kill(); throw "$file $arguments did not finish in $limit ms" }
+            if ($process.ExitCode -ne 0) { throw "$file $arguments exited with $($process.ExitCode)" }
+          }
+          $old = Join-Path $env:RUNNER_TEMP "keyswitch-0.66.2"
+          gh release download v0.66.2 --repo "${{ github.repository }}" --pattern "KeySwitch-Setup-0.66.2-${{ matrix.architecture }}.exe" --dir $old
+          if ($LASTEXITCODE -ne 0) { throw "the 0.66.2 installer could not be downloaded" }
+          Run-Bounded (Join-Path $old "KeySwitch-Setup-0.66.2-${{ matrix.architecture }}.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 300000
+          if (-not (Test-Path (Join-Path $root "python3*.dll"))) { throw "0.66.2 did not install its Python runtime where this check looks" }
+          $python = Start-Process -FilePath $app -ArgumentList "--hidden" -PassThru
+          Wait-Mutex
+          # The arguments of keyswitch.updates in 0.66.2: the program starts the installer and quits.
+          $update = Start-Process -FilePath $setup -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1" -PassThru
+          $null = $update.Handle
+          if (-not $update.WaitForExit(300000)) { $update.Kill(); throw "the update did not finish in five minutes" }
+          if ($update.ExitCode -ne 0) { throw "the update exited with $($update.ExitCode)" }
+          if (-not $python.HasExited) { throw "the update left 0.66.2 running" }
+          $relaunched = $null
+          for ($attempt = 0; $attempt -lt 120 -and -not $relaunched; $attempt++) {
+            Start-Sleep -Milliseconds 250
+            $relaunched = Get-Process -Name "KeySwitch" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $app } | Select-Object -First 1
+          }
+          if (-not $relaunched) { throw "the update did not start KeySwitch again" }
+          $said = Join-Path $env:RUNNER_TEMP "keyswitch-version.txt"
+          $process = Start-Process -FilePath $app -ArgumentList "--version" -RedirectStandardOutput $said -PassThru
+          $null = $process.Handle
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw "the updated program did not answer --version" }
+          if ((Get-Content $said -Raw) -notmatch [regex]::Escape($version)) { throw "the updated program says $(Get-Content $said -Raw), not $version" }
+          $left = Get-ChildItem -LiteralPath $root -Name
+          "after the update: $($left -join ', ')"
+          $python_files = $left | Where-Object { $_ -match '\.(pyd|zip)$' -or $_ -match '^(python3.*|vcruntime140.*|libcrypto-3|libffi-8|libssl-3|libtommath|tcl90|tcl9tk90|zlib1)\.dll$' -or $_ -in @("keyswitch", "PIL", "README.md", "README.en.md") }
+          if ($python_files) { throw "the update left files of 0.66.2: $($python_files -join ', ')" }
+          # Installed by hand over the running program, as a user downloading the next release does.
+          Run-Bounded $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 120000
+          if (-not $relaunched.HasExited) { throw "the installer over the running KeySwitch left it running" }
+          Run-Bounded $app @("--smoke-ui") 120000
       - uses: actions/upload-artifact@v7
         with:
           name: keyswitch-release-windows-${{ matrix.architecture }}
