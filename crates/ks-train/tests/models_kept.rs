@@ -164,10 +164,10 @@ fn the_prefix_corpus_is_made_from_its_config() {
     let mut config: Value = serde_json::from_slice(&std::fs::read(&path).expect("the config")).expect("json");
     let shrink = |config: &mut Value| {
         for (name, value) in config.as_object_mut().expect("a table").iter_mut() {
-            if name.contains("families") || name.contains("words") {
-                if let Some(number) = value.as_u64() {
-                    *value = json!((number / 50).max(4));
-                }
+            if (name.contains("families") || name.contains("words"))
+                && let Some(number) = value.as_u64()
+            {
+                *value = json!((number / 50).max(4));
             }
         }
     };
