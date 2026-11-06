@@ -511,8 +511,8 @@ fn known_receipt(root: &Path, payload: &Value, evidence_sha: &str, tokens: &Path
 }
 
 /// `derive` of `ortho_web_lexicon`: `[form, rank]` of every lowercase Cyrillic word with enough letters, and of every compound.
-fn derive_web_forms(source: &Path) -> Result<Vec<u8>, String> {
-    if checksum(source)? != WEB_SOURCE_SHA256 {
+fn derive_web_forms(source: &Path, pin: &str) -> Result<Vec<u8>, String> {
+    if checksum(source)? != pin {
         return Err("web vocabulary source is not the pinned file".to_owned());
     }
     let raw = String::from_utf8(gz_read(source)?).map_err(|error| error.to_string())?;
@@ -672,7 +672,7 @@ pub fn freeze(root: &Path, output: &Path) -> Result<(), String> {
 
 const PROSE_LEADING: &str = "—–-«»\"'„“” ";
 const PROSE_DUMP: &str = "ruwikisource-20260901";
-const PROSE_FILES: [(&str, &str); 4] = [("pages-articles.xml.bz2", "900444fd4dea093a918908390ec93130575fa530dddbec327c89313a65f7fc81"), ("page.sql.gz", "4fc8ee33447f4c864086afbbbb492e46486224dbd176e37f22933dac6a2b5b5d"), ("categorylinks.sql.gz", "356b33624d80ca13f82ce3dc50fbab53229d42bae96ed70019e792e564150a7e"), ("linktarget.sql.gz", "5927a112017995d8632f971fe45653e79abb9ff584ea72be5447483dc29149de")];
+pub const PROSE_FILES: [(&str, &str); 4] = [("pages-articles.xml.bz2", "900444fd4dea093a918908390ec93130575fa530dddbec327c89313a65f7fc81"), ("page.sql.gz", "4fc8ee33447f4c864086afbbbb492e46486224dbd176e37f22933dac6a2b5b5d"), ("categorylinks.sql.gz", "356b33624d80ca13f82ce3dc50fbab53229d42bae96ed70019e792e564150a7e"), ("linktarget.sql.gz", "5927a112017995d8632f971fe45653e79abb9ff584ea72be5447483dc29149de")];
 const PROSE_CATEGORY: &str = "Проза_по_авторам";
 const RUSSIAN_WRITERS: &str = "Писатели_на_русском_языке";
 const EXCLUDED_AUTHORS: [&str; 3] = ["Антон_Павлович_Чехов", "Николай_Семёнович_Лесков", "Аркадий_Тимофеевич_Аверченко"];
@@ -922,9 +922,9 @@ fn russian_form(token: &str) -> bool {
 }
 
 /// `derive` of `ortho_prose_lexicon`: the forms of the selected public-domain pages and what they were selected from.
-pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), String> {
-    for (name, digest) in PROSE_FILES {
-        if checksum(&directory.join(format!("{PROSE_DUMP}-{name}")))? != digest {
+pub fn derive_prose(directory: &Path, pins: &[(&str, &str)]) -> Result<(BTreeMap<String, i64>, Value), String> {
+    for (name, digest) in pins {
+        if checksum(&directory.join(format!("{PROSE_DUMP}-{name}")))? != *digest {
             return Err(format!("{PROSE_DUMP}-{name} is not the pinned dump file"));
         }
     }
@@ -968,8 +968,7 @@ pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), 
         if kind != "subcat" || *namespace != CATEGORY_NAMESPACE {
             continue;
         }
-        let Some(own) = by_title.get(&(CATEGORY_NAMESPACE, category.clone())) else { continue };
-        for parent in parents.get(own).into_iter().flatten() {
+        for parent in parents.get(&by_title[&(CATEGORY_NAMESPACE, category.clone())]).into_iter().flatten() {
             if died.get(parent).copied().unwrap_or(LAST_DEATH_YEAR + 1) <= LAST_DEATH_YEAR && !EXCLUDED_AUTHORS.contains(&parent.as_str()) {
                 authors.insert(category.clone(), parent.clone());
             }
@@ -1041,13 +1040,18 @@ pub fn derive_prose(directory: &Path) -> Result<(BTreeMap<String, i64>, Value), 
 
 /// `verify` of the two lexicons whose sources are too large for the repository.
 pub fn verify_lexicon_sources(root: &Path, web: Option<&Path>, prose: Option<&Path>) -> Result<(), String> {
+    verify_pinned_lexicon_sources(root, web.map(|source| (source, WEB_SOURCE_SHA256)), prose.map(|source| (source, &PROSE_FILES[..])))
+}
+
+/// The same with the sources' pins named: what the shipped lexicons were made from, or another set of files.
+pub fn verify_pinned_lexicon_sources(root: &Path, web: Option<(&Path, &str)>, prose: Option<(&Path, &[(&str, &str)])>) -> Result<(), String> {
     let directory = root.join(DIRECTORY);
     let mut differences = 0;
-    if let Some(source) = web {
-        report_line(&mut differences, "web lexicon from its source", derive_web_forms(source)? == gz_read(&directory.join("web-lexicon-ru.json.gz"))?);
+    if let Some((source, pin)) = web {
+        report_line(&mut differences, "web lexicon from its source", derive_web_forms(source, pin)? == gz_read(&directory.join("web-lexicon-ru.json.gz"))?);
     }
-    if let Some(source) = prose {
-        let (table, summary) = derive_prose(source)?;
+    if let Some((source, pins)) = prose {
+        let (table, summary) = derive_prose(source, pins)?;
         let recorded: Value = serde_json::from_slice(&gz_read(&directory.join("prose-lexicon-ru.json.gz"))?).map_err(|error| error.to_string())?;
         report_line(&mut differences, "prose lexicon from its source", json!(table) == recorded["forms"]);
         let receipt = read_json(&directory.join("prose-lexicon-receipt.json"))?;

@@ -40,7 +40,9 @@ pub(crate) fn refused(output: &Output, words: &str) {
 }
 
 /// The files a cycle writes or reads as its own; everything else of a small tree is the repository's, through links.
-const OWN_FILES: [&str; 29] = [
+const OWN_FILES: [&str; 31] = [
+    "model/ortho_v1/web-lexicon-ru.json.gz",
+    "model/ortho_v1/prose-lexicon-ru.json.gz",
     "resources/models/boundary-v2.json",
     "resources/models/ortho_v1.json",
     "model/boundary_v1/engine-regression.json",
@@ -74,6 +76,8 @@ const OWN_FILES: [&str; 29] = [
 
 /// Folders a cycle writes into: empty in a small tree, never links.
 const OWN_FOLDERS: [&str; 2] = ["model/boundary_v1/engine-history", "model/prefix_v1/engine-history"];
+/// Folders a cycle makes itself: not in a small tree at all.
+const LEFT_OUT: [&str; 1] = ["model/ortho_v1/independent"];
 
 fn mirror(source: &Path, target: &Path, relative: &str) {
     std::fs::create_dir_all(target).expect("a folder");
@@ -84,6 +88,9 @@ fn mirror(source: &Path, target: &Path, relative: &str) {
             continue;
         }
         let path = if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") };
+        if LEFT_OUT.contains(&path.as_str()) {
+            continue;
+        }
         if OWN_FILES.contains(&path.as_str()) {
             std::fs::copy(entry.path(), target.join(&name)).expect("a copy");
         } else if OWN_FOLDERS.contains(&path.as_str()) {

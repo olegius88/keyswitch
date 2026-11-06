@@ -85,7 +85,7 @@ pub fn load_split(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, Strin
 }
 
 /// `load_split`: exactly one requested split. The test split goes through here only from the sealed evaluation.
-pub(crate) fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, String> {
+pub fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, String> {
     let manifest = read_json(&directory.join("manifest.json"))?;
     let record = &manifest["splits"][split];
     if record["path"].as_str() != Some(&format!("{split}.jsonl.gz")) {
