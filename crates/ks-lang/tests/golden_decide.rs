@@ -100,7 +100,7 @@ fn for_each_row<F: Fn(usize, &Value) + Sync>(name: &str, visit: F) -> bool {
     let Some(file) = reader(name) else {
         return false;
     };
-    let step = if cfg!(debug_assertions) { 20 } else { 1 };
+    let step = if cfg!(debug_assertions) && !cfg!(coverage) { 20 } else { 1 };
     let mut lines = file.lines();
     let mut base = 0;
     loop {

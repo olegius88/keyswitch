@@ -26,7 +26,7 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-const STEP: usize = if cfg!(debug_assertions) { 10 } else { 1 };
+const STEP: usize = if cfg!(debug_assertions) && !cfg!(coverage) { 10 } else { 1 };
 
 fn golden_root() -> PathBuf {
     PathBuf::from(std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string()))
