@@ -5,19 +5,18 @@
 
 use ks_cast::To as _;
 use crate::constants::{
-    MAX_PREFIX_FEATURE_NAME_CHARACTERS, MAX_PREFIX_MODEL_BYTES, MAX_PREFIX_WEIGHTS, MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_V1_APPLICATION_NAME_CHARACTERS,
+    MAX_PREFIX_FEATURE_NAME_CHARACTERS, MAX_PREFIX_WEIGHTS, MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_V1_APPLICATION_NAME_CHARACTERS,
     PREFIX_V1_APPLICATION_TOKEN_COUNT, PREFIX_V1_BEFORE_CONTEXT_CHARACTERS, PREFIX_V1_BEFORE_WORD_COUNT, PREFIX_V1_COMPLETIONS_LOG_DIVISOR,
     PREFIX_V1_FEATURE_VERSION, PREFIX_V1_FREQUENCY_LOG_DIVISOR, PREFIX_V1_LENGTH_BUCKET_MAX_CHARACTERS, PREFIX_V1_LENGTH_SCALE_CHARACTERS,
     PREFIX_V1_NGRAM_SCORE_BOUND, PREFIX_V1_QUOTE_MARKS_PER_PAIR, VERSION_HASH_CHARACTERS,
 };
 use crate::context_model::{first_greatest, softmax, ContextAction, ContextPrediction, ACTIONS};
-use crate::flat_table::{load_artifact, Artifact, WeightSpec, WeightTable, ACTION_COUNT};
+use crate::flat_table::{Artifact, WeightSpec, WeightTable, ACTION_COUNT};
 use crate::input_context::FieldContext;
 use ks_lang::early_switch::PrefixIndex;
 use ks_lang::{LanguageModel, LoadError};
 use ks_text::{pystr, ucd};
 use serde_json::Value;
-use std::path::Path;
 
 /// The file name of the installed prefix artifact, in the `models` folder.
 pub const ARTIFACT_FILE: &str = "prefix_policy_v1.json";

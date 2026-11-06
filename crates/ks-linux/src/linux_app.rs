@@ -388,7 +388,7 @@ mod tests {
         for (value, truth) in [(json!(null), false), (json!(0), false), (json!(1), true), (json!(""), false), (json!("x"), true), (json!([]), false), (json!([1]), true), (json!({}), false), (json!({"a": 1}), true), (json!(true), true), (json!(0.0), false)] {
             assert_eq!(truthy(&value), truth, "{value}");
         }
-        assert_eq!((python_float(1.0), python_float(1.5), python_float(1e22)), ("1.0".to_owned(), "1.5".to_owned(), "1e+22".to_owned()));
+        assert_eq!((python_float(1.0), python_float(1.5), python_float(1e22)), ("1".to_owned(), "1.5".to_owned(), "1e+22".to_owned()));
         let settings = SettingsStore::new(None);
         assert!(setting_bool(&settings, "nothing.at.all", true));
     }

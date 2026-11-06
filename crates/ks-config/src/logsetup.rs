@@ -717,7 +717,7 @@ mod tests {
         let path = dir.join("keyswitch.log");
         // Room for two lines: the third one does not fit.
         let length = (format_record(&record("")).chars().count()).to::<u64>();
-        let handler = RotatingFileHandler::new(&path, 2 * (length + 1) + 1, 2).unwrap();
+        let handler = RotatingFileHandler::new(&path, 2 * (length + TERMINATOR.len().to::<u64>()) + 1, 2).unwrap();
         for _ in 0..8 {
             handler.emit(&record(""));
         }

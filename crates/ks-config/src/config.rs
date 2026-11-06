@@ -435,7 +435,7 @@ mod tests {
         store.set("enabled", json!(false), true).unwrap();
         let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(saved["mine"], json!([1]));
-        assert!(std::fs::read_to_string(&path).unwrap().ends_with("}\n"));
+        assert!(std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n").ends_with("}\n"));
     }
 
     #[test]

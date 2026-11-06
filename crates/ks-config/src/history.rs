@@ -358,7 +358,7 @@ mod tests {
         let store = HistoryStore::new(Some(path.clone()), 1);
         assert!(store.read(None).unwrap().is_empty());
         store.append(&HistoryEntry::with_timestamp("t".into(), "x", "y", "z", 0.5)).unwrap();
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
         assert_eq!(text, "{\"timestamp\": \"t\", \"original\": \"x\", \"replacement\": \"y\", \"application\": \"z\", \"confidence\": 0.5}\n");
     }
 

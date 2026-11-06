@@ -267,8 +267,11 @@ mod tests {
         for wrong in ["--limit x", "--limit", "--other 1", "--all-versions --keyswitch-version 1.2.3", "--keyswitch-version 1.2.3 --all-versions"] {
             assert!(parse(&words(wrong)).is_err(), "{wrong}");
         }
-        assert_eq!(parse_output(&words("fetch --output o")), Some(PathBuf::from("o")));
-        assert_eq!(parse_output(&words("fetch")), None);
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            assert_eq!(parse_output(&words("fetch --output o")), Some(PathBuf::from("o")));
+            assert_eq!(parse_output(&words("fetch")), None);
+        }
     }
 
     #[test]

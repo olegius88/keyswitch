@@ -188,12 +188,12 @@ mod tests {
     #[test]
     fn suffix_like_pathlib() {
         let s = |p: &str, x: &str| with_suffix(Path::new(p), x).to_string_lossy().into_owned();
-        assert_eq!(s("/a/config.json", ".json.tmp"), "/a/config.json.tmp");
-        assert_eq!(s("/a/history.jsonl", ".jsonl.tmp"), "/a/history.jsonl.tmp");
-        assert_eq!(s("/a/noext", ".json.tmp"), "/a/noext.json.tmp");
-        assert_eq!(s("/a/.hidden", ".json.tmp"), "/a/.hidden.json.tmp");
-        assert_eq!(s("/a/dot.", ".json.tmp"), "/a/dot..json.tmp");
-        assert_eq!(s("/a/x.tar.gz", ".z"), "/a/x.tar.z");
+        assert_eq!(s("/a/config.json", ".json.tmp"), Path::new("/a").join("config.json.tmp").to_string_lossy());
+        assert_eq!(s("/a/history.jsonl", ".jsonl.tmp"), Path::new("/a").join("history.jsonl.tmp").to_string_lossy());
+        assert_eq!(s("/a/noext", ".json.tmp"), Path::new("/a").join("noext.json.tmp").to_string_lossy());
+        assert_eq!(s("/a/.hidden", ".json.tmp"), Path::new("/a").join(".hidden.json.tmp").to_string_lossy());
+        assert_eq!(s("/a/dot.", ".json.tmp"), Path::new("/a").join("dot..json.tmp").to_string_lossy());
+        assert_eq!(s("/a/x.tar.gz", ".z"), Path::new("/a").join("x.tar.z").to_string_lossy());
     }
 
     #[test]

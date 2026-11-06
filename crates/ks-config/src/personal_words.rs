@@ -333,7 +333,7 @@ mod tests {
         assert!(words.contains("МИТАП") && words.len() == 1);
         words.add("иишка");
         assert!(words.contains("иишка") && words.keep("иишка"));
-        let text = std::fs::read_to_string(&file).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap().replace("\r\n", "\n");
         assert!(text.starts_with("{\n  \"schema_version\": 1,\n  \"salt\": \""));
         assert!(!text.contains("митап"));
         let again = PersonalWords::always_persisting(Some(file));

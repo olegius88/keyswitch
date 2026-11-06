@@ -603,7 +603,7 @@ mod tests {
         assert!(store.keeps(0, "ghbxyz") && !store.keeps(1, "ghbxyz"));
         assert!(store.keeps_continuation(0, "gh"));
         assert!(store.r#match(0, "").is_none());
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
         assert!(text.starts_with("{\n  \"schema_version\": 3,\n  \"rules\": [\n    {\n      \"pattern\": \"ghbdtn\","));
         let again = LearningStore::new(Some(path), None).unwrap();
         assert_eq!(again.rules(), store.rules());
