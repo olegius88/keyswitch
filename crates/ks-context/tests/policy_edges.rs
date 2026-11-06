@@ -78,7 +78,8 @@ fn a_word_of_no_letters_is_not_looked_for_in_the_field() {
     let resources = resources();
     let detector = resources.language_detector(&["en_US", "ru_RU"]).expect("the detector");
     let reader: Arc<dyn FieldReader> = Arc::new(Shows(field("текст ")));
-    let policy = ContextPolicy::new(&resources, Some(reader), None, None);
+    let mut policy = ContextPolicy::new(&resources, Some(reader), None, None);
+    "firefox".clone_into(&mut policy.stream.application);
     let nothing = baseline(&detector, false, "", "", 0);
     let options = DecideOptions { read_field: true, ..DecideOptions::default() };
     assert!(policy.decide(&nothing, "", 1, &detector, "space", "assist", &options).is_ok());

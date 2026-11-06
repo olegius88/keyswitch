@@ -734,7 +734,7 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
         // and the frozen model kept `Re-re!` after a Russian sentence, meant as `Ку-ку!`, at p=0.99 (sealed test v58,
         // both pairs); the head reads the counts of its words.
         update(&mut result, prefixed(JOINED_FEATURE_PREFIX, &features));
-        update(&mut result, joined_evidence(item, tables)?);
+        update(&mut result, joined_evidence(item, tables));
     }
     if brief_question(&item.original, &item.field.before, &item.field.after)
         && (if item.source_known { brief_dominant(&item.original, &item.alternative, tables) } else { brief_settled(&item.original, &item.alternative, tables) })
@@ -1162,22 +1162,14 @@ pub fn joined_question(original: &str) -> bool {
 /// tell the language: `ку` occurs in Russian prose and `re` nowhere in English (`Re-re!` is `Ку-ку!`), and `pre-order` is
 /// English by `order` though `pre` is no word of either prose. The shared features stay as the frozen model read them: fed
 /// these counts, its weights for single words turned `bye-bye` typed as meant into `ину-ину`.
-pub fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
+pub fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let (latin, cyrillic) = if item.source_group == 0 { (&item.original, &item.alternative) } else { (&item.alternative, &item.original) };
     let mut names: Vec<String> = Vec::new();
     for (reading, alphabet) in [(latin, "english"), (cyrillic, "russian")] {
         let mut buckets: Vec<&str> = match joined_parts(reading) {
             None => vec!["na"],
             Some(parts) => {
-                let mut buckets = Vec::with_capacity(parts.len());
-                for part in parts {
-                    let bucket = term_bucket(part, alphabet, tables);
-                    // `sorted(..., key=int)`: a part that is no word of the table raises.
-                    if bucket == "na" {
-                        return Err(FeatureError("invalid literal for int() with base 10: 'na'"));
-                    }
-                    buckets.push(bucket);
-                }
+                let mut buckets: Vec<&str> = parts.iter().map(|part| term_bucket(part, alphabet, tables)).collect();
                 buckets.sort_by_key(|bucket| bucket.parse::<i64>().unwrap_or(0));
                 buckets
             }
@@ -1196,7 +1188,7 @@ pub fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<P
     let repeat = format!("repeat:{}", flag(distinct.len() == 1));
     let counts = format!("{}:{}", names[0], names[1]);
     let all = [names[0].clone(), names[1].clone(), counts.clone(), repeat.clone(), format!("{repeat}:{counts}")];
-    Ok(head_pairs(JOINED_FEATURE_PREFIX, &all, &format!(":direction:{}", item.source_group)))
+    head_pairs(JOINED_FEATURE_PREFIX, &all, &format!(":direction:{}", item.source_group))
 }
 
 /// A token of Russian letters whose Latin reading is Latin letters, a trailing sign (`TERM_HEAD_TRAILING_SIGNS`) and the

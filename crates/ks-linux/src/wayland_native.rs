@@ -440,6 +440,11 @@ extern "C" fn request_stop(_signal: c_int) {
 /// Entry point for `keyswitch --wayland-input-helper <fd>`.
 #[must_use]
 pub fn run_wayland_input_helper(socket_fd: i32) -> i32 {
+    // SAFETY: asking about a descriptor changes nothing. One that is not open must not be taken for a socket.
+    if unsafe { libc::fcntl(socket_fd, libc::F_GETFD) } == -1 {
+        eprintln!("keyswitch: no input helper socket at descriptor {socket_fd}");
+        return 2;
+    }
     // SAFETY: the parent passed this descriptor to the process and nothing else owns it.
     let channel = unsafe { UnixStream::from_raw_fd(socket_fd) };
     // The handler only stores into an atomic, which is async-signal-safe. No SA_RESTART: a signal ends the wait in poll.

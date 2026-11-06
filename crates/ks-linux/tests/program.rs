@@ -126,7 +126,7 @@ fn an_engine_that_cannot_start_ends_the_program() {
 #[test]
 fn a_helper_on_a_socket_that_is_not_there_ends_at_once() {
     let output = run("helper", &["--wayland-input-helper", "987654"]);
-    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(output.status.code(), Some(2), "{}", said(&output));
 }
 
 #[test]

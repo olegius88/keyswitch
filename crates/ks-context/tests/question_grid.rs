@@ -193,10 +193,8 @@ fn the_shape_of_letters_and_digits_and_of_parts_that_are_no_words() {
     assert_eq!(alnum_shape("a1b2c3d4e5f6g7h8i9"), "many");
     assert_ne!(alnum_shape("a1"), "many");
     let tables = tables();
-    for token in ["A1b2", "a1b2", "A1B2", "Ф1и2", "ф1и2", "Ф1И2"] {
-        let _ = alnum_evidence(&evidence(token, token, "x ", "", "space", AfterOrigin::None, false), &tables);
+    for (cyrillic, latin) in [("Ф1и2", "A1b2"), ("ф1и2", "a1b2"), ("Ф1И2", "A1B2")] {
+        assert!(alnum_evidence(&evidence(cyrillic, latin, "x ", "", "space", AfterOrigin::None, false), &tables).is_ok());
     }
-    // A reading of parts one of which the other alphabet's table cannot hold.
-    assert!(joined_evidence(&evidence("ab-кто", "фи-rnj", "x ", "", "space", AfterOrigin::None, false), &tables).is_err());
-    assert!(unknown_shape("1z2") || !unknown_shape("1z2"));
+    assert!(!joined_evidence(&evidence("rnj-nj", "кто-то", "x ", "", "space", AfterOrigin::None, false), &tables).is_empty());
 }

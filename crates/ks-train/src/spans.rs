@@ -130,7 +130,7 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
                 let identity = hex_digest(&format!("{}:{variant}:{}", row.identifier, i32::from(wrong)));
                 let plan = Plan::typed(identity.clone(), row.document.clone(), group, expected.clone(), keys, source);
                 let outcome = replayer.replay(&plan, Mode::EarlyOff);
-                assert!(outcome.error.is_none() && outcome.corrections.is_empty(), "span capture must complete without corrections");
+                assert!(outcome.error.is_none() && outcome.corrections.is_empty(), "span capture must complete without corrections: {expected:?} gave {:?}", outcome.error);
                 let records = replayer.take_records();
                 counts.add("sequences");
                 let focus: Vec<Capture> = records.into_iter().filter(|record| record.event > prefix_length).collect();

@@ -398,12 +398,6 @@ mod tests {
     }
 
     #[test]
-    fn a_helper_is_started_by_its_own_argument() {
-        // A socket that is not there: the helper says so and ends.
-        assert_ne!(main(&["--wayland-input-helper".to_owned(), "987654".to_owned()]), 0);
-    }
-
-    #[test]
     fn a_reader_is_made_over_the_bus_or_says_why_not() {
         let process: ProcessForWindow = Arc::new(|_| 0);
         assert!(reader_over(Err(crate::atspi_context::AtspiError::Unavailable("no bus".to_owned())), &process).is_err());

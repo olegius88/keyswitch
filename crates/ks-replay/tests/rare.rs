@@ -256,6 +256,11 @@ fn an_early_plan_is_dropped_when_the_word_is_no_longer_what_it_was() {
     set(core, "detection.early_switch_min_length", json!(50));
     assert!(core.refresh_early_plan(&early).expect("no failure").is_none());
     set(core, "detection.early_switch_min_length", json!(3));
+    // A word the person excluded protects its prefix.
+    core.strokes = keys("ghbdtnz");
+    set(core, "exclusions.words", json!(["ghbdtnz"]));
+    assert!(core.refresh_early_plan(&early).expect("no failure").is_none());
+    set(core, "exclusions.words", json!([]));
     // Not letters in the other layout: `бит` typed in the second layout is `,bn` in the first.
     let sign = {
         let mut early = (*plan("бит", ",bn", None)).clone();
@@ -754,6 +759,9 @@ fn the_tail_of_a_word_is_cut_off_only_if_it_can_be_a_tail() {
     let twisted = Arc::new(KeyEvent { character: "x".to_owned(), characters: vec![" ".to_owned(), " ".to_owned()], ..(*key(' ')).clone() });
     let _ = core.pause_reaches_past(std::slice::from_ref(&twisted));
     assert!(core.reopenable_committed_word().is_some());
+    core.strokes = keys("a");
+    assert!(core.reopenable_committed_word().is_none());
+    core.strokes.clear();
     core.last_committed = Some(Arc::new(CorrectionPlan { strokes: Vec::new(), ..(*plan("ghbdtn", "привет", Some(' '))).clone() }));
     assert!(core.reopenable_committed_word().is_none());
     core.last_committed = Some(Arc::new(CorrectionPlan { boundary: Some(Arc::new(KeyEvent { character: "ab".to_owned(), ..(*key(' ')).clone() })), ..(*plan("ghbdtn", "привет", Some(' '))).clone() }));
@@ -1337,6 +1345,8 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
                 for segmentation_open in [false, true] {
                     for before in ["", "начало ", "x ", "как дела "] {
                         let baseline = DetectionDecision::new(convert, word, reading, 0, 1, 0.9, reason, score.clone(), score.clone());
+                        // The text as the engine saw it typed, which the question must match.
+                        core.context_policy.stream.text = format!("{before}{word} ghbdtn ");
                         let kept = vec![Arc::new(KeptWord {
                             plan: plan(word, reading, Some(' ')),
                             baseline: Some(baseline),
@@ -1346,7 +1356,8 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
                             segmentation_open,
                         })];
                         let _ = core.take_along(&kept, &next, 6, "firefox", false);
-                        // The same at a pause.
+                        // The same at a pause, with the word not ended yet.
+                        core.context_policy.stream.text = format!("{before}{word} ghbdtn");
                         core.kept = kept;
                         core.strokes = keys("ghbdtn");
                         core.source_group = 0;
@@ -1366,6 +1377,7 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
     let model = core.context_policy.model.take();
     let baseline = DetectionDecision::new(true, "lf", "да", 0, 1, 0.9, SHORT_WORD_REASONS[0], score.clone(), score.clone());
     let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("x ", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: true })];
+    "x lf ghbdtn ".clone_into(&mut core.context_policy.stream.text);
     let _ = core.take_along(&kept, &next, 6, "firefox", false);
     core.context_policy.model = model;
     bundle.give_back(session);
