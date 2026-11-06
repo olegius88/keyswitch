@@ -3,8 +3,8 @@ mod support;
 
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::process::{Command, Output};
-use support::{corpus, recipe, scratch, tree, write_recipe};
+use std::process::Output;
+use support::{corpus, recipe, refused, scratch, trainer, tree, write_recipe};
 
 struct Run {
     corpus: PathBuf,
@@ -18,12 +18,6 @@ fn prepared(name: &str) -> Run {
     corpus(&run.corpus);
     std::fs::create_dir_all(&run.ledger).expect("a folder");
     run
-}
-
-fn trainer() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ks-train"));
-    command.env("KEYSWITCH_HUNSPELL_PATH", tree().join("model/intent_v1/sources/hunspell"));
-    command
 }
 
 fn fitted(run: &Run, name: &str, options: &Value) -> Output {
@@ -45,11 +39,6 @@ fn fitted(run: &Run, name: &str, options: &Value) -> Output {
         .args(["--jobs", "2"])
         .output()
         .expect("the trainer starts")
-}
-
-fn refused(output: &Output, words: &str) {
-    let said = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success() && said.contains(words), "{words}: {said}");
 }
 
 #[test]

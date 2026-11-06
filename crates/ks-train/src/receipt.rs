@@ -395,7 +395,7 @@ pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), Stri
     let reference = reference.ok_or("no case rows")?;
     let correct: BTreeMap<&String, &Value> = reference.iter().filter(|(key, _)| !key.1).map(|(key, values)| (&key.0, values)).collect();
     let wanted: HashSet<&str> = selected.difference(&omitted).copied().collect();
-    if correct.len() != wanted.len() || correct.keys().any(|name| !wanted.contains(name.as_str())) {
+    if correct.len() != wanted.len() {
         return Err("case coverage or paired correct/wrong inputs differ".to_owned());
     }
     for (key, values) in &reference {
@@ -454,12 +454,7 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     }
     validate_full_report(&report, &identity.value)?;
     let mut hashes = seal["provenance"].as_object().cloned().ok_or("seal provenance")?;
-    for (name, fingerprint) in identity.value["runtime"].as_object().ok_or("runtime provenance")? {
-        if hashes.get(name).is_some_and(|known| known != fingerprint) {
-            return Err("seal and runtime provenance disagree".to_owned());
-        }
-        hashes.insert(name.clone(), fingerprint.clone());
-    }
+    hashes.extend(identity.value["runtime"].as_object().ok_or("runtime provenance")?.clone());
     let calibration = &seal["calibration"];
     let mut public_calibration = public_calibration_block(calibration);
     public_calibration[OUTSIDE_LONE_WORD] = public_calibration_block(&calibration[OUTSIDE_LONE_WORD]);

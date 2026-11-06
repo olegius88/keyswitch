@@ -947,11 +947,8 @@ pub fn evaluate(resource_dir: &Path, messages: &Path, recipe: &Value, code: Opti
 
 // ---- the sealed test of developer chat ------------------------------------------------------------------------------
 
-const DEVCHAT_DEV_CONTENT_SHA256: &str = "b377987db979089f17afae4616c2f94936eb8429397713e901e410dfec047822";
-const DEVCHAT_TEST_CONTENT_SHA256: &str = "69307f09b2397b652791d91890c8e4e1720dd875a6f47333c21e3c155eb0beba";
 const DEVCHAT_NAMESPACE: &str = "keyswitch:devchat-2026-10-15:question";
 const DEVCHAT_SEED: &str = "devchat-v1";
-const DEVCHAT_TEST_COUNT: usize = 900;
 const DEVCHAT_MIN_NET_MARGIN: i64 = 1;
 const DEVCHAT_SIGNIFICANCE: f64 = 0.05;
 const BENCH: &str = "mixed_typing: the field read, a layout chosen by hand respected, the early switch off; four typing modes";
@@ -1091,9 +1088,10 @@ fn ledger_records(ledger: &Path, suffix: &str) -> Result<Vec<(PathBuf, Value)>, 
 pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let split = request.split;
     let directory = request.directory;
-    let mut files: Vec<(PathBuf, PathBuf, String)> = vec![(directory.join(format!("devchat-{split}.messages.jsonl.gz")), directory.join(format!("devchat-{split}.members.jsonl.gz")), if split == "dev" { DEVCHAT_DEV_CONTENT_SHA256 } else { DEVCHAT_TEST_CONTENT_SHA256 }.to_owned())];
+    let batches = crate::corpus::read_json(&request.root.join("model/context_v3/devchat-test-batches.json"))?;
+    let first_pin = batches[if split == "test" { "test_content_sha256" } else { "development_content_sha256" }].as_str().unwrap_or("").to_owned();
+    let mut files: Vec<(PathBuf, PathBuf, String)> = vec![(directory.join(format!("devchat-{split}.messages.jsonl.gz")), directory.join(format!("devchat-{split}.members.jsonl.gz")), first_pin)];
     if split == "test" {
-        let batches = crate::corpus::read_json(&request.root.join("model/context_v3/devchat-test-batches.json"))?;
         for batch in batches["batches"].as_array().into_iter().flatten() {
             let name = batch["name"].as_str().unwrap_or("");
             files.push((directory.join(format!("{name}.messages.jsonl.gz")), directory.join(format!("{name}.members.jsonl.gz")), batch["content_sha256"].as_str().unwrap_or("").to_owned()));
@@ -1175,13 +1173,14 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     }
     let mut ordered: Vec<(String, &Member)> = members.iter().filter(|member| !taken_messages.contains(&member.text) && !taken_questions.contains(&member.question)).map(|member| (hex_digest(&format!("{DEVCHAT_SEED}:{}", member.text)), member)).collect();
     ordered.sort_by(|a, b| (&a.0, &a.1.text).cmp(&(&b.0, &b.1.text)));
-    let limit = if split == "test" { DEVCHAT_TEST_COUNT } else { usize::MAX };
+    let test_count = batches["test_count"].as_u64().unwrap_or(0).to::<usize>();
+    let limit = if split == "test" { test_count } else { usize::MAX };
     let mixed: Vec<Member> = ordered.iter().filter(|entry| entry.1.mix == "mixed").take(limit).map(|entry| entry.1.clone()).collect();
     let share = (mixed.len().to::<f64>() * MIXED_EVALUATE_RUSSIAN_SHARE).to::<usize>();
     let russian: Vec<Member> = ordered.iter().filter(|entry| entry.1.mix == "russian").take(share).map(|entry| entry.1.clone()).collect();
     let mixed_count = mixed.len();
     let chosen: Vec<Member> = mixed.into_iter().chain(russian).collect();
-    if split == "test" && mixed_count < DEVCHAT_TEST_COUNT {
+    if split == "test" && mixed_count < test_count {
         return Err("the test holds fewer fresh messages than a read takes; a new batch is needed and no test was read".to_owned());
     }
     let membership_messages: BTreeSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();

@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(crate) fn tree() -> PathBuf {
@@ -17,6 +18,91 @@ pub(crate) fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("ks-train-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&path).expect("a folder");
     path
+}
+
+/// The trainer, with the reference dictionaries of the repository.
+pub(crate) fn trainer() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ks-train"));
+    command.env("KEYSWITCH_HUNSPELL_PATH", tree().join("model/intent_v1/sources/hunspell"));
+    command
+}
+
+/// What a command said, when it was to succeed.
+pub(crate) fn succeeded(output: &Output) -> String {
+    assert!(output.status.success(), "{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// A command that was to stop, and with these words.
+pub(crate) fn refused(output: &Output, words: &str) {
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && said.contains(words), "{words}: {said}");
+}
+
+/// The files a cycle writes or reads as its own; everything else of a small tree is the repository's, through links.
+const OWN_FILES: [&str; 8] = [
+    "model/context_v3/devchat-test-batches.json",
+    "model/prefix_v2/recipe.json",
+    "model/context_v3/recipe.json",
+    "model/context_v3/candidate-seal.json",
+    "model/context_v3/release-receipt.json",
+    "model/prefix_v2/candidate-seal.json",
+    "resources/models/context_policy_v1.json",
+    "resources/models/prefix_policy_v1.json",
+];
+
+fn mirror(source: &Path, target: &Path, relative: &str) {
+    std::fs::create_dir_all(target).expect("a folder");
+    for entry in std::fs::read_dir(source).expect("a folder of the repository") {
+        let entry = entry.expect("an entry");
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if matches!(name.as_str(), ".git" | ".t" | "build" | "target" | "dist") {
+            continue;
+        }
+        let path = if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") };
+        if OWN_FILES.contains(&path.as_str()) {
+            std::fs::copy(entry.path(), target.join(&name)).expect("a copy");
+        } else if OWN_FILES.iter().any(|file| file.starts_with(&format!("{path}/"))) {
+            mirror(&entry.path(), &target.join(&name), &path);
+        } else {
+            std::os::unix::fs::symlink(entry.path(), target.join(&name)).expect("a link");
+        }
+    }
+}
+
+/// A tree whose recipe is this one: a seal fitted over it holds against it.
+pub(crate) fn small_tree(name: &str, options: &Value) -> PathBuf {
+    let folder = scratch(name);
+    mirror(&tree(), &folder, "");
+    write_recipe(&folder.join("model/context_v3/recipe.json"), options);
+    folder
+}
+
+fn gz(lines: &[String]) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    for line in lines {
+        encoder.write_all(line.as_bytes()).expect("in memory");
+        encoder.write_all(b"\n").expect("in memory");
+    }
+    encoder.finish().expect("in memory")
+}
+
+/// The message files of a chat test, for both splits, each message a member of its own; the small tree pins them.
+pub(crate) fn chat_messages(small: &Path, directory: &Path, texts: &[&str], test_count: u64) {
+    std::fs::create_dir_all(directory).expect("a folder");
+    let messages: Vec<String> = texts.iter().map(|text| json!({"text": text}).to_string()).collect();
+    let members: Vec<String> = texts
+        .iter()
+        .enumerate()
+        .map(|(index, text)| json!({"text": digest(text.as_bytes()), "question": format!("question{index}"), "mix": if text.is_ascii() { "russian" } else { "mixed" }}).to_string())
+        .collect();
+    for split in ["dev", "test"] {
+        std::fs::write(directory.join(format!("devchat-{split}.messages.jsonl.gz")), gz(&messages)).expect("a file");
+        std::fs::write(directory.join(format!("devchat-{split}.members.jsonl.gz")), gz(&members)).expect("a file");
+    }
+    let pin = digest((messages.join("\n") + "\n").as_bytes());
+    let batches = json!({"development_content_sha256": pin, "test_content_sha256": pin, "test_count": test_count, "batches": []});
+    std::fs::write(small.join("model/context_v3/devchat-test-batches.json"), serde_json::to_vec(&batches).expect("json")).expect("a file");
 }
 
 pub(crate) fn digest(bytes: &[u8]) -> String {
@@ -50,7 +136,7 @@ pub(crate) fn row(split: &str, index: usize, group: i64, words: &[&str], at: usi
     let after = if at + 1 < words.len() { format!(" {}", words[at + 1..].join(" ")) } else { String::new() };
     json!({
         "identifier": format!("{split}:{index}"), "original": words[at], "group": group, "before": before, "after": after, "family": format!("family{}", index % 37),
-        "document": format!("document{}", index % 23), "language": if group == 0 { "en" } else { "ru" }, "source": "test", "source_file": "file", "source_sentence": index.to_string(),
+        "document": format!("document{}", index % 41), "language": if group == 0 { "en" } else { "ru" }, "source": "test", "source_file": "file", "source_sentence": index.to_string(),
         "source_token": at.to_string(), "spacing": " ", "space_before": " ", "literal_tail": "", "upos": "NOUN", "features": "", "misc": "", "alignment": "exact",
         "layout_representable": true, "split": split, "quarantine_reasons": [], "lemma": words[at],
     })
@@ -74,18 +160,30 @@ pub(crate) fn corpus(directory: &Path) {
     std::fs::create_dir_all(directory).expect("a folder");
     let mut dice = Dice(0x9e37_79b9_7f4a_7c15);
     let mut manifest = json!({"splits": {}});
-    for (split, size) in [("train", 400), ("development", 150), ("calibration", 150), ("test", 60)] {
+    let mut members: [Vec<String>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for (split, size) in [("train", 400), ("development", 150), ("calibration", 150), ("test", 200)] {
         let mut rows = Vec::new();
         for index in 0..size {
             let group = i64::try_from(index % 2).expect("small");
             let source = if group == 0 { ENGLISH } else { RUSSIAN };
             let words: Vec<&str> = (0..4 + dice.below(6)).map(|_| source[dice.below(source.len())]).collect();
             let at = dice.below(words.len());
-            rows.push(row(split, index, group, &words, at));
+            let new = row(split, index, group, &words, at);
+            if split == "test" {
+                for (list, field) in members.iter_mut().zip(["identifier", "family", "document"]) {
+                    list.push(digest(new[field].as_str().expect("text").as_bytes()));
+                }
+            }
+            rows.push(new);
         }
         write_split(directory, split, &rows, &mut manifest);
     }
-    let membership = serde_json::to_vec(&json!({"alias_sha256": [], "document_ids_sha256": [], "family_ids_sha256": [], "row_ids_sha256": [], "namespace": "small"})).expect("json");
+    for list in &mut members {
+        list.sort();
+        list.dedup();
+    }
+    let [row_ids, family_ids, document_ids] = members;
+    let membership = serde_json::to_vec(&json!({"row_ids_sha256": row_ids, "family_ids_sha256": family_ids, "document_ids_sha256": document_ids, "namespace": "small"})).expect("json");
     std::fs::write(directory.join("test-membership.json"), &membership).expect("a file");
     manifest["test_membership_sha256"] = json!(digest(&membership));
     std::fs::write(directory.join("manifest.json"), serde_json::to_vec(&manifest).expect("json")).expect("a file");

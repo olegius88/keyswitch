@@ -359,6 +359,7 @@ fn app_calls() {
             ("general.autostart", json!(false)),
             ("general.autostart", json!(true)),
             ("appearance.show_indicator", json!(false)),
+            ("appearance.show_indicator", json!(false)),
             ("appearance.show_indicator", json!(true)),
             ("appearance.show_indicator", json!(true)),
             ("appearance.indicator_style", json!("flag")),
