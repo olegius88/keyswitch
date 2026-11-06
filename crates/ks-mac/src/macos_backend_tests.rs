@@ -755,3 +755,106 @@ fn without_the_system_access_nothing_can_be_read_of_a_selection() {
     assert!(!none.attribute_settable(0, "x"));
     assert!(!none.set_string_attribute(0, "x", "y"));
 }
+
+/// A small generator with a fixed start: the walk is the same on every run.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, limit: usize) -> usize {
+        (self.next() % limit.to::<u64>()).to::<usize>()
+    }
+    fn of<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+    fn one_in(&mut self, odds: usize) -> bool {
+        self.below(odds) == 0
+    }
+}
+
+const WALK_KEYS: [u32; 12] = [KEY_Z, KEY_Q, MAC_VK_SHIFT, MAC_VK_CONTROL, MAC_VK_COMMAND, MAC_VK_OPTION, MAC_VK_CAPS_LOCK, 36, 48, 51, 49, 999];
+
+fn walk_stroke(dice: &mut Dice) -> KeyEvent {
+    let code = *dice.of(&[KEY_Z, KEY_Q, 49]);
+    let mut made = stroke(code, *dice.of(&[0, 1]), *dice.of(&[0, 0, SHIFT_MASK]));
+    made.group = *dice.of(&[0, 0, 1, 1, 1, -1, 5]);
+    made
+}
+
+#[test]
+fn a_long_walk_through_the_backend_stops_nowhere() {
+    for seed in 1..=300_u64 {
+        let mut dice = Dice(0x9e37_79b9_7f4a_7c15 ^ seed.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+        let api = FakeMac::new();
+        let mac = backend(&api);
+        for _ in 0..60 {
+            let code = *dice.of(&WALK_KEYS);
+            match dice.below(30) {
+                0..=11 => {
+                    let _ = mac.handle_native(native(true, code));
+                    let _ = mac.handle_native(native(false, code));
+                }
+                12..=14 => {
+                    let _ = mac.handle_native(native(true, code));
+                }
+                15 => {
+                    let _ = mac.handle_native(NativeKeyEvent { injected: true, ..native(dice.one_in(2), code) });
+                }
+                16 => {
+                    let _ = mac.handle_native(NativeKeyEvent { replayed: true, ..native(dice.one_in(2), code) });
+                }
+                17 => {
+                    let _ = mac.handle_native(NativeKeyEvent { pointer: true, ..native(true, 0) });
+                }
+                18..=19 => mac.hold_input(),
+                20 => {
+                    let _ = mac.release_input();
+                }
+                21 => {
+                    let _ = mac.complete_action(dice.one_in(2));
+                }
+                22 => {
+                    let strokes: Vec<KeyEvent> = (0..dice.below(4)).map(|_| walk_stroke(&mut dice)).collect();
+                    let trailing: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let late: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let boundary = dice.one_in(2).then(|| walk_stroke(&mut dice));
+                    let _ = mac.inject_correction(Injection {
+                        strokes: &strokes,
+                        target_group: *dice.of(&[0, 1, -1, 7]),
+                        boundary: boundary.as_ref(),
+                        source_group: *dice.of(&[None, None, Some(0), Some(1), Some(-1), Some(9)]),
+                        late: &late,
+                        trailing: &trailing,
+                        kept_tail: *dice.of(&[0, 0, 1, 9]),
+                        erased: *dice.of(&[None, None, Some(1)]),
+                    });
+                }
+                23 => match dice.below(4) {
+                    0 => mac.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.key_name == " " { KeyDisposition::Defer } else { KeyDisposition::Pass }))),
+                    1 => mac.set_key_filter(Some(Arc::new(|_: &KeyEvent| KeyDisposition::Consume))),
+                    2 => mac.set_key_filter(Some(Arc::new(|_: &KeyEvent| KeyDisposition::Defer))),
+                    _ => mac.set_key_filter(None),
+                },
+                24 => api.window.store(*dice.of(&[0, 1, 2]), Ordering::SeqCst),
+                25 => api.caps.store(dice.one_in(2), Ordering::SeqCst),
+                26 => {
+                    *api.take.lock().unwrap() = *dice.of(&[None, None, Some(0), Some(1)]);
+                    api.switch_ignored.store(dice.one_in(40), Ordering::SeqCst);
+                }
+                27 => {
+                    let _ = mac.switch_group(*dice.of(&[0, 1, -1, 9]));
+                }
+                _ => {
+                    let _ = (mac.current_group(), mac.active_application(), mac.focused_window(), mac.probe(), mac.input_anchor());
+                }
+            }
+        }
+        let _ = mac.complete_action(false);
+        let _ = mac.release_input();
+    }
+}

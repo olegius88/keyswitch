@@ -2516,3 +2516,114 @@ fn an_api_with_no_selection_answers_none_and_the_backend_can_select() {
     assert!(bare.supports_selection());
     let _ = bare.normalized_state();
 }
+
+/// A small generator with a fixed start: the walk is the same on every run.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, limit: usize) -> usize {
+        (self.next() % limit.to::<u64>()).to::<usize>()
+    }
+    fn of<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+    fn one_in(&mut self, odds: usize) -> bool {
+        self.below(odds) == 0
+    }
+}
+
+const WALK_KEYS: [u32; 28] = [VK_A, VK_RETURN, VK_TAB, VK_BACK, VK_ESCAPE, VK_SPACE, VK_LEFT, VK_RIGHT, VK_HOME, VK_END, VK_DELETE, VK_PAUSE, VK_CAPITAL, VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_CONTROL, VK_LCONTROL, VK_RCONTROL, VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, VK_OEM_1, VK_OEM_COMMA, VK_PACKET, 0xE7];
+
+fn walk_stroke(dice: &mut Dice) -> KeyEvent {
+    let code = *dice.of(&WALK_KEYS);
+    let group = *dice.of(&[0, 0, 1, 1, -1, 5]);
+    key_with(code, *dice.of(&["a", "A", "ф", "Ф", ",", " "]), [*dice.of(&["a", "A", ",", ""]), *dice.of(&["ф", "Ф", "б", ""])], group)
+}
+
+#[test]
+fn a_long_walk_through_the_backend_stops_nowhere() {
+    for seed in 1..=300_u64 {
+        let mut dice = Dice(0x9e37_79b9_7f4a_7c15 ^ seed.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+        let api = FakeWindowsAPI::plain();
+        let subject = backend(&api);
+        let mut time = 1000_i64;
+        for _ in 0..60 {
+            time += 5;
+            let code = *dice.of(&WALK_KEYS);
+            match dice.below(30) {
+                0..=11 => {
+                    let _ = subject.handle_native(native(true, code, code, false, time));
+                    let _ = subject.handle_native(native(false, code, code, false, time + 1));
+                }
+                12..=14 => {
+                    let _ = subject.handle_native(native(true, code, code, false, time));
+                }
+                15 => {
+                    let _ = subject.handle_native(NativeKeyEvent { foreign: true, ..native(dice.one_in(2), code, code, false, time) });
+                }
+                16 => {
+                    let _ = subject.handle_native(NativeKeyEvent { replayed: true, ..native(dice.one_in(2), code, code, false, time) });
+                }
+                17 => {
+                    let _ = subject.handle_native(native(dice.one_in(2), code, code, true, time));
+                }
+                18..=19 => subject.hold_input(),
+                20 => {
+                    let _ = subject.release_input();
+                }
+                21 => {
+                    let _ = subject.complete_action(dice.one_in(2));
+                }
+                22 => {
+                    let strokes: Vec<KeyEvent> = (0..dice.below(4)).map(|_| walk_stroke(&mut dice)).collect();
+                    let trailing: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let late: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let boundary = dice.one_in(2).then(|| walk_stroke(&mut dice));
+                    let _ = subject.inject_correction(Injection {
+                        strokes: &strokes,
+                        target_group: *dice.of(&[0, 1, -1, 7]),
+                        boundary: boundary.as_ref(),
+                        source_group: *dice.of(&[None, None, Some(0), Some(1), Some(-1), Some(9)]),
+                        late: &late,
+                        trailing: &trailing,
+                        kept_tail: *dice.of(&[0, 0, 1, 9]),
+                        erased: *dice.of(&[None, None, Some(1)]),
+                    });
+                }
+                23 => match dice.below(4) {
+                    0 => subject.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.key_name == "Return" { KeyDisposition::Defer } else { KeyDisposition::Pass }))),
+                    1 => subject.set_key_filter(Some(Arc::new(|_: &KeyEvent| KeyDisposition::Consume))),
+                    2 => subject.set_key_filter(Some(Arc::new(|_: &KeyEvent| KeyDisposition::Defer))),
+                    _ => subject.set_key_filter(None),
+                },
+                24 => api.state.lock().unwrap().foreground = *dice.of(&[0, 1, 2]),
+                25 => api.state.lock().unwrap().caps_lock = dice.one_in(2),
+                26 => {
+                    let mut state = api.state.lock().unwrap();
+                    state.send_error = dice.one_in(4);
+                    state.send_count = *dice.of(&[None, None, Some(0), Some(1)]);
+                    state.accept_switch = !dice.one_in(6);
+                    state.apply_switch = !dice.one_in(6);
+                }
+                27 => {
+                    api.state.lock().unwrap().released_keys.insert(code);
+                    time += 100_000;
+                }
+                28 => {
+                    let _ = subject.switch_group(*dice.of(&[0, 1, -1, 9]));
+                }
+                _ => {
+                    let _ = (subject.current_group(), subject.active_application(), subject.focused_window(), subject.probe(), subject.input_anchor());
+                }
+            }
+        }
+        let _ = subject.complete_action(false);
+        let _ = subject.release_input();
+    }
+}
