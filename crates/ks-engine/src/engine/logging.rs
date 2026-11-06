@@ -46,7 +46,11 @@ fn group_map(texts: &[(i64, String)]) -> Value {
 
 /// `sysconfig.get_platform()`: one version ships a build per architecture.
 fn build_platform() -> String {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+    build_platform_of(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn build_platform_of(os: &str, arch: &str) -> String {
+    match (os, arch) {
         ("windows", "x86_64") => "win-amd64".to_owned(),
         ("windows", "aarch64") => "win-arm64".to_owned(),
         ("windows", "x86") => "win32".to_owned(),
@@ -328,5 +332,17 @@ impl EngineCore {
             return Value::Object(details);
         }
         json!({"status": self.field_reader_status()})
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    #[test]
+    fn a_build_names_its_platform_as_python_does() {
+        assert_eq!(super::build_platform_of("windows", "x86_64"), "win-amd64");
+        assert_eq!(super::build_platform_of("windows", "aarch64"), "win-arm64");
+        assert_eq!(super::build_platform_of("windows", "x86"), "win32");
+        assert_eq!(super::build_platform_of("linux", "x86_64"), "linux-x86_64");
     }
 }

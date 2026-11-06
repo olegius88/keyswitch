@@ -89,7 +89,7 @@ pub struct Shared {
     pub typed_events: AtomicI64,
     pub typed_presses: AtomicI64,
     pub input_overflow: AtomicBool,
-    pub(crate) running: AtomicBool,
+    pub running: AtomicBool,
     inbox: Mutex<Inbox>,
     wake: Condvar,
     guarded: Mutex<Guarded>,

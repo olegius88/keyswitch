@@ -259,7 +259,7 @@ impl KeySwitchEngine {
             return failed("Движок раскладки не запущен");
         }
         let target = alternate_layout_group(self.shared.current_group());
-        let Some(target) = target.filter(|target| 0 <= *target && (*target).to::<usize>() < self.shared.models_len) else {
+        let Some(target) = target.filter(|target| (*target).to::<usize>() < self.shared.models_len) else {
             return failed("Текущая раскладка EN/RU не определена");
         };
         if !self.shared.put_nowait(QueueItem::LayoutSelection(target)) {

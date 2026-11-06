@@ -131,7 +131,7 @@ impl EngineCore {
             };
             let stem = strokes.clone();
             let stem_signs = signs.clone();
-            if !signs.is_empty() && inside.is_none() && !decided.should_convert {
+            if !signs.is_empty() && !decided.should_convert {
                 // The tail is split off only for a word the model converts without it (replayed_signs);
                 // otherwise the token is judged whole, as before: `'nb/` is `эти.` at p=0.9998 and
                 // `'nb` alone only at 0.978, while `ntrcn` is `текст` at 0.99999 and `ntrcn/` at 0.59.
@@ -241,10 +241,7 @@ impl EngineCore {
                 if taken.mode == "context_phrase" {
                     joint = Some((taken, decided.clone()));
                 }
-            } else if joint.is_none()
-                && switched
-                && let Some(origin) = early_switch_origin
-            {
+            } else if let Some(origin) = early_switch_origin.filter(|_| joint.is_none() && switched) {
                 let base = Arc::new(CorrectionPlan {
                     typed: text_for_group(&strokes, origin),
                     ..CorrectionPlan::new(strokes.clone(), Some(boundary.clone()), origin, source_group, original.clone(), original.clone(), decided.confidence, &application)
@@ -332,7 +329,7 @@ impl EngineCore {
                 }
                 let remembered = strokes_of(&[&typed[..head], &strokes, &signs]);
                 self.remember_context(&application, source_group, &remembered);
-                let waits = if signs.is_empty() { self.start_context_wait(&plan, &decided, boundary, &trailing, head, false) } else { false };
+                let waits = self.start_context_wait(&plan, &decided, boundary, &trailing, head, false);
                 let typo = if waits || alone.is_some() || !plain {
                     None
                 } else {
@@ -350,7 +347,7 @@ impl EngineCore {
                     self.learning_prompt_after = None;
                     self.pending_trigger_keycode = i64::from(boundary.keycode);
                 }
-                if inside.is_none() && trailing.is_empty() && head == 0 && signs.is_empty() {
+                if inside.is_none() && trailing.is_empty() && head == 0 {
                     let field = self.context_result.as_ref().and_then(|result| result.field.clone());
                     if !waits && alone.is_none() && self.pending.is_none() && early_switch_origin.is_none() && mention.is_empty() && shown.is_none() {
                         // The word stays in its layout for good: only now may its case be fixed. A word
@@ -375,7 +372,7 @@ impl EngineCore {
                     if !waits && alone.is_none() && !has_typo {
                         self.provisional = self.provisional_after_pause(paused.as_ref(), &strokes, source_group, boundary);
                     }
-                } else if inside.is_none() && !trailing.is_empty() && head == 0 && signs.is_empty() && self.sign_reads_as_letter(&plan) {
+                } else if inside.is_none() && !trailing.is_empty() && head == 0 && self.sign_reads_as_letter(&plan) {
                     // The boundary model split a sign off the end of the word and the word
                     // stayed, but only the whole token reads as a word: `t\`` is `её`, and
                     // only the next word can tell (`мать`). The model is asked about the

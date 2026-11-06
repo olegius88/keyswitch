@@ -6,7 +6,11 @@ use std::sync::atomic::Ordering;
 
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
-use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EngineCore, FieldWait, InsertionPoint, PlanRef, QueueItem, Stroke, Strokes};
+use ks_config::config::SettingsStore;
+use ks_config::selection_commands::SelectionCommand;
+use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EngineCore, FieldWait, Hotkey, InsertionPoint, KeptWord, PlanRef, QueueItem, Shared, Stroke, Strokes, WordOptions};
+use ks_lang::detector::DetectionDecision;
+use ks_lang::intent_model::CorrectionTrigger;
 use ks_lang::early_switch::EarlySwitchDecision;
 use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 use serde_json::json;
@@ -692,6 +696,356 @@ fn a_word_part_is_cut_only_where_a_word_could_end() {
     assert_eq!(core.replayed_signs(&[empty_meaning.clone()], 0), 0);
     let space_meaning = Arc::new(KeyEvent { characters: vec![",".to_owned(), " ".to_owned()], character: ",".to_owned(), ..(*comma).clone() });
     assert_eq!(core.replayed_signs(&[space_meaning.clone()], 0), 0);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn with_one_language_there_is_nothing_to_convert_to() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let models = core.models.clone();
+    core.models.truncate(1);
+    let word = keys("a/b");
+    assert_eq!(core.literal_head(&word, 0), 0);
+    assert_eq!(core.joined_split(&keys("a-b"), 0), 0);
+    assert_eq!(core.replayed_signs(&word, 0), 0);
+    let (whole, tail, certain, _) = core.completed_word(&keys("ab,"), 0);
+    assert_eq!((whole.len(), tail.len(), certain), (3, 0, false));
+    core.source_group = 0;
+    core.strokes = keys("ab");
+    core.schedule_manual_conversion(i64::from(PAUSE_KEYCODE));
+    assert!(core.pending.is_none());
+    core.models = models;
+    core.strokes.clear();
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn the_tail_of_a_word_is_cut_off_only_if_it_can_be_a_tail() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    // Nothing but signs, more signs than a word ends with, a word the person excluded.
+    assert!(!core.completed_word(&keys(",,"), 0).2);
+    assert!(!core.completed_word(&keys("abc,,,,,,,,,,,,,,,,"), 0).2);
+    set(core, "exclusions.words", json!(["ABC,"]));
+    assert!(!core.completed_word(&keys("abc,"), 0).2);
+    set(core, "exclusions.words", json!([]));
+    // A token whose parts hold no letters is not split.
+    assert_eq!(core.joined_split(&keys("1-2"), 0), 0);
+    assert_eq!(core.joined_split(&keys("-b"), 0), 0);
+    // The sign after a word replayed with it: a key with no meaning in the other layout, or a space there, stays.
+    let base = plan("ghbdtn", "привет", Some(','));
+    for characters in [[",", ""], [",", " "], [",", ","]] {
+        let odd = Arc::new(KeyEvent { character: ",".to_owned(), characters: characters.iter().map(|text| (*text).to_owned()).collect(), ..(*key(',')).clone() });
+        let replayed = EngineCore::_replay_sign_with_word(&Arc::new(CorrectionPlan { boundary: Some(odd), ..(*base).clone() }), &[]);
+        assert_eq!(replayed.strokes.len(), 6);
+    }
+    // What may follow a committed word and still let Pause reach it.
+    core.last_committed = Some(plan("ghbdtn", "привет", Some(' ')));
+    let bare = Arc::new(KeyEvent { characters: Vec::new(), ..(*key(' ')).clone() });
+    let _ = core.pause_reaches_past(std::slice::from_ref(&bare));
+    let twisted = Arc::new(KeyEvent { character: "x".to_owned(), characters: vec![" ".to_owned(), " ".to_owned()], ..(*key(' ')).clone() });
+    let _ = core.pause_reaches_past(std::slice::from_ref(&twisted));
+    assert!(core.reopenable_committed_word().is_some());
+    core.last_committed = Some(Arc::new(CorrectionPlan { strokes: Vec::new(), ..(*plan("ghbdtn", "привет", Some(' '))).clone() }));
+    assert!(core.reopenable_committed_word().is_none());
+    core.last_committed = Some(Arc::new(CorrectionPlan { boundary: Some(Arc::new(KeyEvent { character: "ab".to_owned(), ..(*key(' ')).clone() })), ..(*plan("ghbdtn", "привет", Some(' '))).clone() }));
+    assert!(core.reopenable_committed_word().is_none());
+    // Symbols alone do not make a mention, nor does a mention stand with nothing typed after it.
+    core.symbol_strokes = keys("@");
+    core.strokes.clear();
+    assert!(core.mention_head("telegram-desktop").is_empty());
+    core.symbol_strokes.clear();
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_word_typed_into_text_asks_the_field_around_it() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let reader = Fixed::new("ghbdtn", "");
+    session.core.context_policy.reader = Some(reader.clone());
+    let core = &mut session.core;
+    let alternatives = vec![(1, "привет".to_owned())];
+    let word = keys("ghbdtn");
+    let ask = |core: &mut EngineCore| core.decide_inside_word(&word, 0, &alternatives, "firefox", CorrectionTrigger::Space, Some(&key(' ')));
+    core.insertion = Some(InsertionPoint { head: "ab".to_owned(), tail: String::new() });
+    // In a selection, in another program: the field says nothing of this word.
+    let mut selected = field("xghbdtn", "");
+    selected.selection = true;
+    reader.show(Some(selected));
+    assert!(ask(core).expect("no failure").is_some());
+    let mut elsewhere = field("xghbdtn", "");
+    elsewhere.application = "another".to_owned();
+    reader.show(Some(elsewhere));
+    assert!(ask(core).expect("no failure").is_some());
+    // The letters around it are of the source layout, the target, both, or of a layout with no letters at all.
+    for before in ["йghbdtn", "xghbdtn", "йxghbdtn", "1ghbdtn"] {
+        reader.show(Some(field(before, "")));
+        let _ = ask(core);
+    }
+    for layouts in [json!(["us", "de"]), json!(["de", "ru"]), json!(["ru", "ru"]), json!(["de", "de"])] {
+        set(core, "detection.layouts", layouts);
+        for before in ["йghbdtn", "xghbdtn", "йxghbdtn"] {
+            reader.show(Some(field(before, "")));
+            let _ = ask(core);
+        }
+    }
+    set(core, "detection.layouts", json!(["us", "ru"]));
+    core.insertion = None;
+    // Whether the word stands where it was typed.
+    core.insertion = Some(InsertionPoint { head: "ab".to_owned(), tail: String::new() });
+    let mut other = field("ghbdtn", "");
+    other.application = "another".to_owned();
+    reader.show(Some(other));
+    assert!(core.insertion_holds("ghbdtn", "", "firefox"));
+    // The text before the word, unless it is a password or in another program.
+    set(core, "detection.context_read_field", json!(true));
+    reader.show(Some(field("x ghbdtn", "")));
+    assert_eq!(core.field_before("ghbdtn").as_deref(), Some("x "));
+    let mut secret = field("x ghbdtn", "");
+    secret.sensitive = true;
+    reader.show(Some(secret));
+    assert!(core.field_before("ghbdtn").is_none());
+    let mut selected = field("x ghbdtn", "");
+    selected.selection = true;
+    reader.show(Some(selected));
+    assert!(core.field_before("ghbdtn").is_none());
+    let mut other = field("x ghbdtn", "");
+    other.application = "another".to_owned();
+    reader.show(Some(other));
+    assert!(core.field_before("ghbdtn").is_none());
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_decision_asked_where_it_cannot_be_made_says_so() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let alternatives = vec![(1, "привет".to_owned())];
+    // A layout the boundary model does not know.
+    assert!(!core.signs_are_letters("ghb,", "при,", 2, 1, 1));
+    assert!(!core.signs_are_letters("ghb,", "при,", 0, 2, 1));
+    // An excluded program is its own decision, and a rule of the person's forces the answer before the next word.
+    set(core, "exclusions.applications", json!(["firefox"]));
+    let excluded = core.decide_word("ghbdtn", &alternatives, 0, "firefox", CorrectionTrigger::Space, WordOptions::default()).expect("no failure");
+    assert!(!excluded.reason.is_empty());
+    set(core, "exclusions.applications", json!([]));
+    // A letter with its own layout among its readings.
+    let own = vec![(0, "z".to_owned()), (1, "я".to_owned())];
+    let _ = core.decide_word("z", &own, 0, "firefox", CorrectionTrigger::Space, WordOptions::default()).expect("no failure");
+    core.learning.add_rule(ks_config::learning::LearnedRule::new("ghbdtn", 0, 1)).expect("a rule");
+    let forced = core.planned_baseline("ghbdtn", &alternatives, 0, "привет", 1).expect("no failure");
+    assert!(forced.should_convert);
+    // A layout the detector has no model of.
+    assert!(core.planned_baseline("ghbdtn", &alternatives, 7, "привет", 1).is_err());
+    let whole = baseline_of(core, "mongo-cthdbcf");
+    assert!(core.joined_head(&keys("mongo-cthdbcf"), 0) > 0);
+    assert!(core.decide_joined_part(&keys("mongo-cthdbcf"), &[], 0, &[5], "firefox", CorrectionTrigger::Space, Some(&key(' ')), &whole).is_err());
+    // No more than so many programs are remembered.
+    let typed = keys("ghbdtn");
+    for application in 0..200 {
+        core.remember_context(&format!("program {application}"), 0, &typed);
+    }
+    assert!(core.contexts.len() < 200);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+fn baseline_of(core: &EngineCore, original: &str) -> DetectionDecision {
+    let score = core.models[0].score(original);
+    DetectionDecision::new(false, original, original, 1, 0, 0.0, "test", score.clone(), score)
+}
+
+#[test]
+fn late_keys_of_a_correction_that_cannot_be_typed_again_refuse_it() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    session.backend.set_text("ghbdtn ".chars().collect());
+    session.backend.set_caret(7);
+    let core = &mut session.core;
+    queue(core, KeyEvent { characters: vec!["ab".to_owned(), "\u{1f600}".to_owned()], ..(*key('a')).clone() });
+    assert!(!core.execute_correction(plan("ghbdtn", "привет", Some(' ')), None));
+    while core.shared.get_nowait().is_some() {}
+    // A mention held back to its first letter's release, with keys typed since and without them.
+    let hidden = |trailing: &str| {
+        let mut plan = (*plan("@ghb", "@при", None)).clone();
+        plan.mode = "mention_hidden";
+        plan.trailing = keys(trailing);
+        Arc::new(plan)
+    };
+    let up = KeyEvent { pressed: false, ..(*key('z')).clone() };
+    for (trailing, typed) in [(",", "ghb"), ("", "ghb"), ("", "xyz"), ("", "g")] {
+        core.pending = Some(hidden(trailing));
+        core.pressed.clear();
+        core.strokes = keys(typed);
+        core.source_group = 0;
+        let _ = core.maybe_execute_pending(&up);
+        core.pending = None;
+    }
+    // The worker wakes for a correction waiting on its field sooner than for anything else.
+    core.field_wait = Some(FieldWait { plan: plan("ghbdtn", "привет", Some(' ')), learning_prompt: None, deadline: f64::MAX });
+    assert!(core.loop_timeout() < 0.5);
+    core.field_wait = None;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn the_toggle_says_when_it_could_not_be_saved() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let blocker = std::env::temp_dir().join(format!("ks-settings-blocker-{}", std::process::id()));
+    std::fs::write(&blocker, "").expect("a file");
+    let good = std::mem::replace(&mut session.core.settings, Arc::new(SettingsStore::new(Some(blocker.join("settings.json")))));
+    set(&session.core, "hotkeys.toggle", json!("Pause"));
+    let pause = KeyEvent { keycode: PAUSE_KEYCODE, ..named("Pause") };
+    assert!(session.core.handle_inner(Arc::new(pause)).is_err());
+    session.core.settings = good;
+    std::fs::remove_file(blocker).expect("removed");
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn the_selection_commands_wait_for_the_keys_and_for_nothing_else() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    session.backend.set_selection(Some("ghbdtn"));
+    let core = &mut session.core;
+    core.schedule_selection_command("no_such_hotkey");
+    assert!(core.selection_pending.is_none());
+    core.schedule_selection_command("selection_layout");
+    if core.selection_pending.is_some() {
+        core.modifier_keycodes.insert(50);
+        core.advance_selection_command();
+        assert!(core.selection_pending.is_some());
+        core.modifier_keycodes.clear();
+        core.advance_selection_command();
+    }
+    // A password field is refused by its window, another window's password says nothing here.
+    core.shared.set_focus_window(5);
+    core.shared.set_sensitive_context_window(Some(5));
+    core.run_selection_command(SelectionCommand::Layout);
+    core.shared.set_sensitive_context_window(Some(6));
+    core.run_selection_command(SelectionCommand::Layout);
+    core.shared.set_sensitive_context_window(None);
+    session.backend.set_selection(Some("ghbdtn"));
+    session.backend.set_release_failing(true);
+    session.core.run_selection_command(SelectionCommand::Layout);
+    session.backend.set_release_failing(false);
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_hotkey_and_a_plan_answer_for_themselves() {
+    let hotkey = Hotkey::new("Pause");
+    let pause = KeyEvent { keycode: PAUSE_KEYCODE, ..named("Pause") };
+    assert!(hotkey.matches(&pause));
+    assert!(!hotkey.matches(&KeyEvent { pressed: false, ..pause }));
+    let word = plan("hello", "Hello", None);
+    assert!(!word.case_fix());
+    assert!(Arc::new(CorrectionPlan { replaced: keys("hello"), ..(*word).clone() }).case_fix());
+    assert!(EngineCore::_is_boundary(&named("KP_Enter")));
+}
+
+#[test]
+fn settings_and_prompts_reach_whoever_is_still_there() {
+    let mut bundle = Bundle::load(None);
+    let session = session(&mut bundle);
+    let settings = session.core.settings.clone();
+    // Whoever listens to the prompts hears each one.
+    let heard = Arc::new(Mutex::new(0));
+    let counter = heard.clone();
+    session.core.shared.subscribe_learning_prompts(Arc::new(move |prompt| {
+        if prompt.is_some() {
+            *counter.lock().expect("not poisoned") += 1;
+        }
+    }));
+    let offer = ks_engine::engine::LearningPrompt {
+        source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: "firefox".to_owned(),
+        action: ks_config::learning::RuleAction::Convert,
+    };
+    session.core.shared.show_learning_prompt(offer);
+    assert_eq!(*heard.lock().expect("not poisoned"), 1);
+    // A second subscription outlives the engine: its callback finds nobody there and does nothing.
+    Shared::subscribe_settings(&session.core.shared);
+    bundle.give_back(session);
+    settings.set("general.keep_history", json!(false), false).expect("in memory");
+    bundle.clean();
+}
+
+#[test]
+fn the_keys_of_a_word_are_read_by_the_model_of_its_other_layout() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    // No keys for the model to read at all; every shape a word may have.
+    let short = plan("z", "я", Some(' '));
+    let empty = Arc::new(CorrectionPlan { original: String::new(), ..(*short).clone() });
+    assert!(!core.keys_lean_to_target_language(&empty, ""));
+    assert!(!core.keys_of_target_language(&empty, ""));
+    for word in ["ghbdtn", "GHBDTN", "Ghbdtn", "gHBDTN", "GHbdtn", "ghb1dtn", "gh,bd", "123456"] {
+        for before in ["", "начало "] {
+            let _ = core.keys_of_target_language(&plan("ghbdtn", word, Some(' ')), before);
+            let _ = core.keys_of_target_language(&Arc::new(CorrectionPlan { original: word.to_owned(), ..(*plan("ghbdtn", word, Some(' '))).clone() }), before);
+        }
+    }
+    let ortho = core.context_policy.ortho.take();
+    assert!(!core.keys_of_target_language(&plan("ghbdtn", "привет", Some(' ')), ""));
+    assert!(!core.keys_lean_to_target_language(&plan("ghbdtn", "привет", Some(' ')), ""));
+    core.context_policy.ortho = ortho;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A letter kept at its space, asked again with the sign after it; each thing that keeps the question from being asked.
+#[test]
+fn a_kept_word_is_asked_again_only_as_it_was_kept() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let backend = session.backend.clone();
+    session.core.context_policy.reader = Some(Arc::new(ks_replay::harness::CaretReader { backend }));
+    session.select_layout(1);
+    for character in "прохождения м ".chars() {
+        session.tap((*key(character)).clone());
+    }
+    let space = key(' ');
+    let core = &mut session.core;
+    let kept = core.kept.clone();
+    if !kept.is_empty() {
+        let plus = key('+');
+        let decision = baseline_of(core, "+");
+        let of = |change: &dyn Fn(&mut KeptWord)| {
+            let mut word = (*kept[kept.len() - 1]).clone();
+            change(&mut word);
+            vec![Arc::new(word)]
+        };
+        let deferred = Arc::new(KeyEvent { deferred: true, ..(*space).clone() });
+        let strokes = vec![plus.clone()];
+        let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &decision, "firefox");
+        let _ = core.decide_letter_before_sign(&kept, &strokes, &deferred, &decision, "firefox");
+        for original in ["", "a b"] {
+            let other = baseline_of(core, original);
+            let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &other, "firefox");
+        }
+        let _ = core.decide_letter_before_sign(&of(&|word| word.deadline = 0.0), &strokes, &space, &decision, "firefox");
+        let _ = core.decide_letter_before_sign(&of(&|word| word.window = -1), &strokes, &space, &decision, "firefox");
+        let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &decision, "another");
+        let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &DetectionDecision { source_group: 0, ..decision.clone() }, "firefox");
+        let mixed = vec![Arc::new(KeyEvent { group: 0, ..(*plus).clone() })];
+        let _ = core.decide_letter_before_sign(&kept, &mixed, &space, &decision, "firefox");
+        core.context_policy.stream.clear();
+        let _ = core.decide_letter_before_sign(&kept, &strokes, &space, &decision, "firefox");
+    }
     bundle.give_back(session);
     bundle.clean();
 }

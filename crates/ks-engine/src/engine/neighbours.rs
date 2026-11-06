@@ -547,7 +547,7 @@ impl EngineCore {
     ///
     /// The model of the policy's licence (`ContextPolicy`._licensed), asked about the whole token,
     /// signs at its end included: those are the keys of letters (`[` is `х`, `.` is `ю`).
-    fn keys_of_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
+    pub fn keys_of_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
         let Some(ortho) = &self.context_policy.ortho else {
             return false;
         };
@@ -563,7 +563,7 @@ impl EngineCore {
     /// layout more than as its own (a score above zero; keys_of_target_language asks for the policy's licence). A
     /// token shorter than the licence's minimum is read too, as the model supports it: `T\`` (`Её`) scores +37, the
     /// English `I.`, `A.`, `S.` from -10 to -31.
-    fn keys_lean_to_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
+    pub fn keys_lean_to_target_language(&self, plan: &CorrectionPlan, before: &str) -> bool {
         self.ortho_score(plan, before).is_some_and(|score| score.supported && score.total > 0.0)
     }
 

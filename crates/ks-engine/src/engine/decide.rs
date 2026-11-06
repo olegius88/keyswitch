@@ -10,7 +10,7 @@ use ks_lang::word_decision::{automatic_word_decision, AutomaticOptions};
 
 /// The keyword arguments of `decide_word`.
 #[derive(Default)]
-pub(crate) struct WordOptions {
+pub struct WordOptions {
     pub literal_tail: String,
     pub boundary_text: String,
     pub field_override: Option<FieldContext>,
@@ -228,7 +228,7 @@ impl EngineCore {
         DetectionDecision::new(false, fragment, fragment, source_group, source_group, 0.0, "слово набрано внутри другого слова", score.clone(), score)
     }
 
-    pub(crate) fn decide_word(
+    pub fn decide_word(
         &mut self, original: &str, alternatives: &Alternatives, source_group: i64, application: &str, trigger: CorrectionTrigger, options: WordOptions,
     ) -> EngineResult<DetectionDecision> {
         self.context_result = None;

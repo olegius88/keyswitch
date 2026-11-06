@@ -24,6 +24,7 @@ mod state;
 mod types;
 mod word_parts;
 
+pub use decide::WordOptions;
 pub use handle::KeySwitchEngine;
 pub use shared::{Command, QueueItem, Shared};
 pub use types::*;
@@ -49,7 +50,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub(crate) use decide::WordOptions;
 pub(crate) use logging::technical_event;
 
 /// The clock of the engine: `time.monotonic`, in seconds. A replay injects its own.

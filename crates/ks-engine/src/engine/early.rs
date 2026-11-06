@@ -575,3 +575,22 @@ impl EngineCore {
             && self.monotonic() - self.last_correction_time <= UNDO_AVAILABLE_WINDOW_SECONDS
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn a_failure_of_the_system_keeps_its_python_name() {
+        for (kind, name) in [
+            (ErrorKind::PermissionDenied, "PermissionError"),
+            (ErrorKind::NotFound, "FileNotFoundError"),
+            (ErrorKind::AlreadyExists, "FileExistsError"),
+            (ErrorKind::IsADirectory, "IsADirectoryError"),
+            (ErrorKind::TimedOut, "OSError"),
+        ] {
+            assert_eq!(super::os_error_name(&Error::from(kind)), name);
+        }
+    }
+}

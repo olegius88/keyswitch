@@ -184,3 +184,121 @@ fn an_engine_starts_once_and_says_why_it_cannot() {
     engine.stop();
     bundle.clean();
 }
+
+#[test]
+fn a_loader_thread_the_system_refuses_reads_as_a_failed_build() {
+    let (post, posted) = posting();
+    let build: Build = Box::new(|| Err(EngineError("no models".to_owned())));
+    let deferred = DeferredEngine::new(build, learning(), true, post, false);
+    deferred.note_spawned(&Ok(()));
+    deferred.note_spawned::<()>(&Err(std::io::Error::other("no threads")));
+    assert_eq!(deferred.snapshot().last_error, "no threads");
+    run(&posted);
+}
+
+#[test]
+fn a_built_engine_starts_when_it_can_and_says_when_it_cannot() {
+    let mut bundle = Bundle::load(None);
+    // Nobody asked for the start yet: the built engine waits.
+    let session = bundle.session("app", 0, Vec::new());
+    let (post, posted) = posting();
+    let core = session.core;
+    let build: Build = Box::new(move || Ok(KeySwitchEngine::of(core)));
+    let deferred = DeferredEngine::new(build, learning(), false, post, false);
+    run(&posted);
+    assert!(deferred.ready());
+    let _ = deferred.select_alternate_group();
+    deferred.stop();
+    run(&posted);
+    bundle.clean();
+    // Asked before it was built, and the backend refuses.
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    session.backend.set_failing(true);
+    let (post, posted) = posting();
+    let gate = Arc::new(Mutex::new(()));
+    let held = gate.lock().unwrap();
+    let open = gate.clone();
+    let core = session.core;
+    let build: Build = Box::new(move || {
+        drop(open.lock().unwrap());
+        Ok(KeySwitchEngine::of(core))
+    });
+    let deferred = DeferredEngine::new(build, learning(), true, post, true);
+    let (failed, heard) = counting();
+    deferred.start(failed).unwrap();
+    drop(held);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !deferred.ready() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    run(&posted);
+    assert_eq!(heard.lock().unwrap().len(), 1);
+    deferred.stop();
+    bundle.clean();
+}
+
+#[test]
+fn stopping_does_not_wait_for_ever_nor_for_itself() {
+    let mut bundle = Bundle::load(None);
+    // Marked running with no worker: nothing to wait for.
+    let session = bundle.session("app", 0, Vec::new());
+    let engine = KeySwitchEngine::of(session.core);
+    engine.shared.running.store(true, std::sync::atomic::Ordering::Relaxed);
+    engine.stop();
+    bundle.clean();
+    // A worker that hangs in the backend: the stop gives up after its time and the window goes on.
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let backend = session.backend.clone();
+    let engine = KeySwitchEngine::of(session.core);
+    engine.start().unwrap();
+    backend.set_stall(Duration::from_secs(4));
+    engine.select_alternate_group();
+    std::thread::sleep(Duration::from_millis(100));
+    let began = Instant::now();
+    engine.stop();
+    assert!(began.elapsed() < Duration::from_secs(4));
+    backend.set_stall(Duration::ZERO);
+    bundle.clean();
+    // A stop asked from the worker itself must not wait for the worker.
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let engine = Arc::new(KeySwitchEngine::of(session.core));
+    let worker_side = Arc::downgrade(&engine);
+    let once = std::sync::Once::new();
+    engine.subscribe(Arc::new(move |_| {
+        if std::thread::current().name() == Some("keyswitch-engine")
+            && let Some(engine) = worker_side.upgrade()
+        {
+            once.call_once(|| engine.stop());
+        }
+    }));
+    engine.start().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while engine.shared.running.load(std::sync::atomic::Ordering::Relaxed) && Instant::now() < deadline {
+        engine.shared.update(ks_engine::engine::Update::default());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    engine.stop();
+    bundle.clean();
+    // A listener that fails while the worker gets over a failure of its own: the worker is gone, the stop still returns.
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let backend = session.backend.clone();
+    let engine = KeySwitchEngine::of(session.core);
+    let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let trigger = armed.clone();
+    engine.subscribe(Arc::new(move |_| {
+        assert!(!(trigger.load(std::sync::atomic::Ordering::Relaxed) && std::thread::current().name() == Some("keyswitch-engine")), "a listener failed");
+    }));
+    engine.start().unwrap();
+    armed.store(true, std::sync::atomic::Ordering::Relaxed);
+    backend.set_panicking(true);
+    let key = KEYS.iter().find(|key| key.characters[0] == 'a').expect("a key of the first layout");
+    engine.enqueue(KeyEvent { pressed: true, keycode: key.keycode, key_name: "a".to_owned(), character: "a".to_owned(), characters: key.strings(), ..KeyEvent::default() });
+    std::thread::sleep(Duration::from_millis(500));
+    engine.stop();
+    backend.set_panicking(false);
+    bundle.clean();
+}

@@ -48,15 +48,20 @@ impl DeferredEngine {
         });
         if background {
             let loader = deferred.clone();
-            let thread = std::thread::Builder::new().name("KeySwitchEngineLoader".to_owned()).spawn(move || loader.load(build));
-            if let Err(error) = thread {
-                deferred.lock().error = Some(error.to_string());
-                deferred.lock().ready = true;
-            }
+            deferred.note_spawned(&std::thread::Builder::new().name("KeySwitchEngineLoader".to_owned()).spawn(move || loader.load(build)));
         } else {
             deferred.load(build);
         }
         deferred
+    }
+
+    /// A loader thread the system refused: the window hears it as a build that failed.
+    pub fn note_spawned<T>(&self, thread: &std::io::Result<T>) {
+        if let Err(error) = thread {
+            let mut state = self.lock();
+            state.error = Some(error.to_string());
+            state.ready = true;
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Loading> {

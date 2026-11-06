@@ -15,6 +15,7 @@ use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_lang::{LanguageModel, Resources};
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
@@ -84,6 +85,8 @@ struct EditorState {
     swallows: bool,
     selection: Option<String>,
     own: bool,
+    release_fails: bool,
+    stall: Duration,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -111,7 +114,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, release_fails: false, stall: Duration::ZERO }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -163,6 +166,16 @@ impl Backend {
     /// What the window has selected; None for nothing.
     pub fn set_selection(&self, selection: Option<&str>) {
         self.lock().selection = selection.map(str::to_owned);
+    }
+
+    /// Asking for the layout takes this long, as with a window that hangs.
+    pub fn set_stall(&self, stall: Duration) {
+        self.lock().stall = stall;
+    }
+
+    /// The next release of the held input fails.
+    pub fn set_release_failing(&self, failing: bool) {
+        self.lock().release_fails = failing;
     }
 
     /// Whether the window in front is the program's own.
@@ -255,6 +268,9 @@ impl InputBackend for Backend {
     fn hold_input(&self) {}
 
     fn release_input(&self) -> Result<i32, BackendError> {
+        if self.lock().release_fails {
+            return Err(BackendError::Failed("the input stayed held".to_owned()));
+        }
         Ok(0)
     }
 
@@ -272,6 +288,8 @@ impl InputBackend for Backend {
     fn close(&self) {}
 
     fn current_group(&self) -> Result<i32, BackendError> {
+        let stall = self.lock().stall;
+        std::thread::sleep(stall);
         let state = self.lock();
         if state.failing {
             return Err(BackendError::Failed("the window is gone".to_owned()));

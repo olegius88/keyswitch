@@ -146,7 +146,7 @@ impl EngineCore {
         // Behind is missing, not shifted: the last letters, or the boundary after the whole word, are nowhere in the
         // field yet; standing after the caret, they are a caret seen off (caret_lag), which waiting does not mend.
         if typed_short_of(&field.before, &field.after, &typed).is_none()
-            && !(!closing.is_empty() && ends_with_typed(&field.before, &typed) && !field.after.starts_with(closing))
+            && !(!closing.is_empty() && ends_with_typed(&field.before, &typed))
         {
             return false;
         }
@@ -389,8 +389,7 @@ impl EngineCore {
             }
             if refusal == "other_text"
                 && plan.mode != "early"
-                && let Some(field) = &field
-                && self.waits_for_field(&requested, learning_prompt.as_ref(), field, waiting.as_ref())
+                && field.as_ref().is_some_and(|field| self.waits_for_field(&requested, learning_prompt.as_ref(), field, waiting.as_ref()))
             {
                 return false;
             }

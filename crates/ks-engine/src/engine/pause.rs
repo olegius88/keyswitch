@@ -274,7 +274,7 @@ impl EngineCore {
         };
         let stem = strokes.clone();
         let stem_signs = signs.clone();
-        if !signs.is_empty() && inside.is_none() && !decision.should_convert {
+        if !signs.is_empty() && !decision.should_convert {
             // As at a boundary (commit_word): the tail is split off only for a word the model converts without it.
             strokes.append(&mut signs);
             original = text_for_group(&strokes, source_group);

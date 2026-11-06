@@ -267,7 +267,7 @@ impl EngineCore {
                 self.schedule_manual_conversion(trigger_keycode);
                 let scheduled = self.convert_outcome.take();
                 match scheduled {
-                    Some(ConvertOutcome::Plan(scheduled)) if self.pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, &scheduled)) => {
+                    Some(ConvertOutcome::Plan(_)) => {
                         self.learning_prompt_after = Some(offer);
                     }
                     _ => self.shared.show_learning_prompt(offer),

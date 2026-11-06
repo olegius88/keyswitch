@@ -16,7 +16,7 @@ const WORDS: &[&str] = &[
     "t`", "a.b", "x-y", "кто-то", "rnj-nj", "/usr/bin", "HEllo", "GHbdtn", "ПРивет", "пРИВЕТ", "123", "v67", "@ghbdtn", "ghb", "cj,thb", "ye;yj", "[jhjij",
     "хорош", "tot,", "yt", "t", "'",
 ];
-const BOUNDARIES: &[&str] = &[" ", ",", ".", "Return", "Tab", "deferred Return", "deferred Tab", "idle", "pause"];
+const BOUNDARIES: &[&str] = &[" ", ",", ".", "Return", "Tab", "deferred Return", "deferred Tab", "deferred space", "idle", "pause"];
 
 const STATES: usize = 18;
 
@@ -52,6 +52,7 @@ fn end_word(session: &mut Session, boundary: &str) {
         "Return" | "Tab" => session.tap(named(boundary, false)),
         "deferred Return" => session.handle(named("Return", true)),
         "deferred Tab" => session.handle(named("Tab", true)),
+        "deferred space" => session.handle(KeyEvent { character: " ".to_owned(), characters: vec![" ".to_owned(), " ".to_owned()], ..named("space", true) }),
         "idle" => session.idle(1.0),
         "pause" => session.tap(KeyEvent { keycode: PAUSE_KEYCODE, ..named("Pause", false) }),
         other => type_text(session, other),
@@ -161,9 +162,15 @@ fn hinder_waiting(session: &mut Session, way: usize) {
                 let mut plan = (*waiting.plan).clone();
                 "another".clone_into(&mut plan.application);
                 waiting.plan = Arc::new(plan);
+                waiting.settles_on_pause = true;
             }
         }
-        12 => core.settings.set("exclusions.applications", json!(["firefox"]), false).expect("in memory"),
+        12 => {
+            core.settings.set("exclusions.applications", json!(["firefox"]), false).expect("in memory");
+            if let Some(waiting) = &mut core.context_waiting {
+                waiting.settles_on_pause = true;
+            }
+        }
         13 => core.pending.clone_from(&core.last_committed),
         14 => {
             if let Some(waiting) = &mut core.context_waiting {
@@ -182,7 +189,7 @@ fn a_waiting_word_settles_only_with_nothing_in_its_way() {
     let mut waited = 0;
     for first in ["tot", "ещ", "yt", "lf", "да", "z", "я", "x", "ч", "gj", "по", "rfr", "как", "qr", "йк", "d", "в", "c", "с"] {
         for way in 0..17 {
-            for at in ["pause", "Return", "deferred Return", "pause then word"] {
+            for at in ["pause", "Return", "deferred Return", "pause then word", "word", "deferred word"] {
                 let mut session = bundle.session("firefox", 0, "начало ".chars().collect());
                 session.recovers = true;
                 let backend = session.backend.clone();
@@ -206,6 +213,11 @@ fn a_waiting_word_settles_only_with_nothing_in_its_way() {
                         session.core.modifier_keycodes.clear();
                         type_text(&mut session, "ghbdtn ");
                     }
+                    "word" => type_text(&mut session, "ghbdtn "),
+                    "deferred word" => {
+                        type_text(&mut session, "ghbdtn");
+                        end_word(&mut session, "deferred space");
+                    }
                     other => end_word(&mut session, other),
                 }
                 assert!(session.backend.caret() <= session.backend.text().len());
@@ -216,5 +228,30 @@ fn a_waiting_word_settles_only_with_nothing_in_its_way() {
         }
     }
     assert!(waited > 0);
+    bundle.clean();
+}
+
+/// A pause after a word with signs, quotes or a head around it, with a word before it that waits.
+#[test]
+fn a_pause_takes_along_what_stands_before_the_word() {
+    let mut bundle = Bundle::load(None);
+    for first in ["", "tot ", "ещ ", "yt ", "z ", "я ", "lf ", "ghbdtn "] {
+        for word in ["ghbdtn", "ghbdtn,", "ghbdtn.", "ntcn/", "\"ghbdtn\"", "\"ghbdtn", "@ghbdtn", "@ghbdtn\"", "(ghbdtn)", "ghbdtn!", "rfr", "vfvf", "'nb/", "vfvf,"] {
+            for application in ["firefox", "telegram-desktop"] {
+                for end in ["idle", "pause"] {
+                    let mut session = bundle.session(application, 0, Vec::new());
+                    session.recovers = true;
+                    let backend = session.backend.clone();
+                    session.core.context_policy.reader = Some(Arc::new(CaretReader { backend }));
+                    type_text(&mut session, first);
+                    type_text(&mut session, word);
+                    end_word(&mut session, end);
+                    session.idle(1.0);
+                    assert!(session.backend.caret() <= session.backend.text().len());
+                    bundle.give_back(session);
+                }
+            }
+        }
+    }
     bundle.clean();
 }
