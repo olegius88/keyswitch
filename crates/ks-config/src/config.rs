@@ -486,9 +486,9 @@ mod tests {
         let _ = store.subscribe(Arc::new(move |key: &str, _: &Value| recorder.lock().unwrap().push(key.to_string())));
         store.reset().unwrap();
         assert_eq!(reset_calls.lock().unwrap().as_slice(), ["*"]);
-        assert_eq!(Value::Object(store.snapshot()), Value::Object(DEFAULT_SETTINGS.clone()));
+        assert_eq!(Value::Object(store.snapshot()), Value::Object(default_settings(None)));
         let on_disk: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(on_disk, Value::Object(DEFAULT_SETTINGS.clone()));
+        assert_eq!(on_disk, Value::Object(default_settings(None)));
         assert!(store.is_default("enabled"));
         store.set("enabled", json!(false), false).unwrap();
         assert!(!store.is_default("enabled"));

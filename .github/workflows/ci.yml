@@ -350,6 +350,7 @@ jobs:
         shell: bash
         run: cargo +nightly-2026-11-05 llvm-cov --branch ${{ matrix.packages }} --profile coverage --no-fail-fast --json --output-path "coverage-$RUNNER_OS.json"
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
         with:
           name: coverage-${{ matrix.os }}
           path: coverage-*.json
@@ -358,6 +359,7 @@ jobs:
   coverage-gate:
     name: Every line and branch of the program ran
     needs: [coverage]
+    if: ${{ !cancelled() }}
     # Reports what is left until the program is at the full mark; then this line goes and the release needs this job.
     continue-on-error: true
     runs-on: ubuntu-24.04
