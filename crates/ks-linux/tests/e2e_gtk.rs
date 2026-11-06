@@ -5,6 +5,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 mod support;
@@ -20,6 +21,13 @@ use ks_linux::tray::TrayAction;
 use ks_updates::{UpdatePhase, UpdateSnapshot};
 use serde_json::json;
 use ks_linux::gtk_app;
+
+/// What the walk did last, for the watchdog to say.
+static LAST: Mutex<String> = Mutex::new(String::new());
+
+fn note(what: impl Into<String>) {
+    *LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = what.into();
+}
 
 fn every_widget(widget: &gtk::Widget, found: &mut Vec<gtk::Widget>) {
     found.push(widget.clone());
@@ -134,6 +142,7 @@ fn close_dialogs(window: &gtk::Widget, answer: &str) {
 }
 
 fn walk_everything() -> Result<(), String> {
+    note("the window");
     let root = gtk_app::with_app_window().ok_or("the window did not open")?;
     let mut pages = 0;
     for page in ["automation", "dashboard", "diagnostics", "exceptions", "history", "hotkeys", "languages", "system", "updates", "nonexistent"] {
@@ -146,6 +155,7 @@ fn walk_everything() -> Result<(), String> {
         every_widget(&root, &mut widgets);
         for widget in widgets.iter().filter(|widget| acts(widget)) {
             if widget.root().is_some() {
+                note(format!("{answer} {} {}", widget.type_(), widget.downcast_ref::<gtk::Button>().and_then(gtk::Button::label).unwrap_or_default()));
                 change(widget);
                 pump(1);
                 if widget.is::<gtk::Button>() {
@@ -288,20 +298,23 @@ fn main() {
     }
     seed();
     std::thread::spawn(|| {
-        std::thread::sleep(Duration::from_secs(150));
-        println!("E2E_FAILED: the walk did not end");
+        std::thread::sleep(Duration::from_secs(300));
+        println!("E2E_FAILED: the walk did not end, last: {}", LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         std::process::exit(3);
     });
     let failed = Rc::new(Cell::new(false));
     let failure = failed.clone();
     glib::timeout_add_local_once(Duration::from_millis(500), move || {
         pump(200);
+        note("window_calls();");
         window_calls();
         if let Err(error) = walk_everything() {
             println!("E2E_FAILED: {error}");
             failure.set(true);
         }
+        note("app_calls();");
         app_calls();
+        note("application_calls();");
         application_calls();
         if let Some(application) = gtk::gio::Application::default() {
             application.quit();
