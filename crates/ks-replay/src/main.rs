@@ -303,7 +303,12 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
                 last_item: None,
                 last_span: None,
                 last_wrong: None,
-                session: bundle.session(&app, first_group, text),
+                session: {
+                    // As in the running program, a failure of the engine forgets the word and goes on.
+                    let mut session = bundle.session(&app, first_group, text);
+                    session.recovers = true;
+                    session
+                },
             });
         } else if let Some(submitted) = field.as_mut().and_then(|field| field.submitted.take()) {
             let mut text: Vec<char> = submitted.chars().collect();

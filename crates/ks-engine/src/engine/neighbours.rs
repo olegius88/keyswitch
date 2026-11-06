@@ -414,7 +414,8 @@ impl EngineCore {
     ) -> EngineResult<Option<DetectionDecision>> {
         let previous = &waiting.plan;
         let group = previous.target_group;
-        let alternative = alternatives.iter().find(|entry| entry.0 == group).map(|entry| entry.1.clone()).expect("the waiting word's target");
+        // A word waiting as it was typed has its own layout for a target, and no reading in it: the worker forgets the word.
+        let alternative = alternatives.iter().find(|entry| entry.0 == group).map(|entry| entry.1.clone()).ok_or_else(|| EngineError(group.to_string()))?;
         let reading = text_for_group(&previous.strokes, group);
         let baseline = self.planned_baseline(&decision.original, &vec![(group, alternative.clone())], decision.source_group, &reading, group)?;
         let trigger = boundary.map_or(CorrectionTrigger::Pause, |boundary| Self::_trigger_for_boundary(boundary));
