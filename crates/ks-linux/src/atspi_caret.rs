@@ -141,3 +141,152 @@ mod tests {
         assert_eq!(focused_caret_anchor(&Tree, 9), None);
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tree_tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use crate::atspi_context::{AtspiError, AtspiResult};
+
+    /// A tree of named nodes; a node not named has no children, and a name in `gone` answers no child.
+    #[derive(Default)]
+    struct Tree {
+        children: HashMap<String, Vec<String>>,
+        focused: Vec<String>,
+        texts: Vec<String>,
+        pids: HashMap<String, u32>,
+        extents: (i32, i32, i32, i32),
+        caret: i32,
+        gone: Vec<String>,
+        all_children: Option<usize>,
+    }
+
+    fn node(name: &str) -> NodeRef {
+        NodeRef { bus_name: ":1".to_owned(), path: name.to_owned() }
+    }
+
+    fn name_of(node: Option<&NodeRef>) -> String {
+        node.map_or_else(|| "desktop".to_owned(), |node| node.path.clone())
+    }
+
+    impl AtspiApi for Tree {
+        fn child_count(&self, parent: Option<&NodeRef>) -> AtspiResult<usize> {
+            Ok(self.all_children.unwrap_or_else(|| self.children.get(&name_of(parent)).map_or(0, Vec::len)))
+        }
+        fn child_at(&self, parent: Option<&NodeRef>, index: usize) -> AtspiResult<Option<NodeRef>> {
+            let name = name_of(parent);
+            if self.gone.contains(&name) {
+                return Err(AtspiError::Call("gone".to_owned()));
+            }
+            if self.all_children.is_some() {
+                return Ok(Some(node(&format!("{name}.{index}"))));
+            }
+            Ok(self.children.get(&name).and_then(|children| children.get(index)).map(|child| node(child)))
+        }
+        fn name(&self, _node: &NodeRef) -> AtspiResult<String> {
+            Ok(String::new())
+        }
+        fn process_id(&self, node: &NodeRef) -> AtspiResult<u32> {
+            Ok(self.pids.get(&node.path).copied().unwrap_or(0))
+        }
+        fn states(&self, node: &NodeRef) -> AtspiResult<u64> {
+            Ok(u64::from(self.focused.contains(&node.path)) << ATSPI_STATE_FOCUSED)
+        }
+        fn role(&self, _node: &NodeRef) -> AtspiResult<u32> {
+            Ok(0)
+        }
+        fn has_interface(&self, node: &NodeRef, _interface: &str) -> AtspiResult<bool> {
+            Ok(self.texts.contains(&node.path))
+        }
+        fn n_selections(&self, _node: &NodeRef) -> AtspiResult<i32> {
+            Ok(0)
+        }
+        fn caret_offset(&self, _node: &NodeRef) -> AtspiResult<i32> {
+            Ok(self.caret)
+        }
+        fn character_count(&self, _node: &NodeRef) -> AtspiResult<i32> {
+            Ok(0)
+        }
+        fn get_text(&self, _node: &NodeRef, _start: i32, _end: i32) -> AtspiResult<String> {
+            Ok(String::new())
+        }
+        fn get_selection(&self, _node: &NodeRef, _number: i32) -> AtspiResult<(i32, i32)> {
+            Ok((0, 0))
+        }
+        fn set_selection(&self, _node: &NodeRef, _number: i32, _start: i32, _end: i32) -> AtspiResult<bool> {
+            Ok(false)
+        }
+        fn delete_text(&self, _node: &NodeRef, _start: i32, _end: i32) -> AtspiResult<bool> {
+            Ok(false)
+        }
+        fn insert_text(&self, _node: &NodeRef, _position: i32, _text: &str, _length: i32) -> AtspiResult<bool> {
+            Ok(false)
+        }
+        fn character_extents(&self, _node: &NodeRef, _offset: i32) -> AtspiResult<(i32, i32, i32, i32)> {
+            Ok(self.extents)
+        }
+    }
+
+    fn tree() -> Tree {
+        let mut tree = Tree::default();
+        tree.children.insert("desktop".to_owned(), vec!["other".to_owned(), "app".to_owned()]);
+        tree.children.insert("app".to_owned(), vec!["label".to_owned(), "field".to_owned()]);
+        tree.focused = vec!["label".to_owned(), "field".to_owned()];
+        tree.texts = vec!["field".to_owned()];
+        tree.pids.insert("app".to_owned(), 7);
+        tree.extents = (10, 20, 3, 4);
+        tree
+    }
+
+    #[test]
+    fn the_caret_stands_after_the_character_before_it() {
+        let mut tree = tree();
+        assert_eq!(focused_caret_anchor(&tree, 0), Some((10, 24)), "at the start of the text it stands before the first character");
+        tree.caret = 2;
+        assert_eq!(focused_caret_anchor(&tree, 0), Some((13, 24)));
+    }
+
+    #[test]
+    fn a_field_that_has_not_laid_its_text_out_has_no_caret() {
+        let mut tree = tree();
+        for extents in [(0, 0, 0, 0), (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)] {
+            tree.extents = extents;
+            assert_eq!(focused_caret_anchor(&tree, 0).is_none(), extents == (0, 0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn a_window_process_narrows_the_search_to_its_applications() {
+        let tree = tree();
+        assert_eq!(focused_caret_anchor(&tree, 7), Some((10, 24)));
+        assert_eq!(focused_caret_anchor(&tree, 8), None);
+        let mut broken = self::tree();
+        broken.gone = vec!["desktop".to_owned()];
+        assert_eq!(focused_caret_anchor(&broken, 7), None);
+        assert_eq!(focused_caret_anchor(&broken, 0), None);
+    }
+
+    #[test]
+    fn a_tree_too_big_to_walk_ends_the_search() {
+        let tree = Tree { all_children: Some(MAX_CARET_SEARCH_CHILDREN), ..Tree::default() };
+        assert_eq!(focused_caret_anchor(&tree, 0), None);
+    }
+
+    #[test]
+    fn a_session_with_accessibility_turned_off_is_not_asked() {
+        const CHILD: &str = "KS_CARET_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert_eq!(focused_caret_anchor(&tree(), 0), None);
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+            .args(["--exact", "atspi_caret::tree_tests::a_session_with_accessibility_turned_off_is_not_asked"])
+            .env(CHILD, "1")
+            .env("GTK_A11Y", " None ")
+            .status()
+            .expect("a child");
+        assert!(status.success());
+    }
+}

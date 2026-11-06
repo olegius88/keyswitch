@@ -76,9 +76,7 @@ pub trait AtspiApi: Send + Sync {
     /// `length` is the byte count of the text.
     fn insert_text(&self, node: &NodeRef, position: i32, text: &str, length: i32) -> AtspiResult<bool>;
     /// `Atspi.Text.get_character_extents` in screen coordinates: x, y, width, height of the character at `offset`.
-    fn character_extents(&self, _node: &NodeRef, _offset: i32) -> AtspiResult<(i32, i32, i32, i32)> {
-        Err(AtspiError::Call("character extents are not offered".to_owned()))
-    }
+    fn character_extents(&self, node: &NodeRef, offset: i32) -> AtspiResult<(i32, i32, i32, i32)>;
 }
 
 /// Where the last selection was read: the field and the selection's bounds and text.

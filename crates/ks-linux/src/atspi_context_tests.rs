@@ -44,6 +44,15 @@ struct Tree {
     fail: bool,
     texts_asked: Vec<(i32, i32)>,
     inserted: Vec<String>,
+    /// How many more times the field says it has the focus; None for always.
+    focus_left: Option<usize>,
+    fail_role: bool,
+    /// The children of the application are slow to count: a walk runs out of its time there.
+    slow_children: Duration,
+    /// The application itself is slow to come: a walk runs out of its time before it begins.
+    slow_application: Duration,
+    no_application: bool,
+    no_field: bool,
 }
 
 struct Fake(Mutex<Tree>);
@@ -68,6 +77,12 @@ impl Fake {
             fail: false,
             texts_asked: Vec::new(),
             inserted: Vec::new(),
+            focus_left: None,
+            fail_role: false,
+            slow_children: Duration::ZERO,
+            slow_application: Duration::ZERO,
+            no_application: false,
+            no_field: false,
         })))
     }
 
@@ -89,7 +104,13 @@ fn check(tree: &Tree) -> AtspiResult<()> {
 }
 
 impl AtspiApi for Shared {
+    fn character_extents(&self, _node: &NodeRef, _offset: i32) -> AtspiResult<(i32, i32, i32, i32)> {
+        Err(AtspiError::Call("character extents are not offered".to_owned()))
+    }
     fn child_count(&self, node: Option<&NodeRef>) -> AtspiResult<usize> {
+        if node == Some(&app()) {
+            std::thread::sleep(self.0.with(|tree| tree.slow_children));
+        }
         self.0.with(|tree| {
             check(tree)?;
             Ok(match node {
@@ -100,9 +121,13 @@ impl AtspiApi for Shared {
         })
     }
     fn child_at(&self, node: Option<&NodeRef>, _index: usize) -> AtspiResult<Option<NodeRef>> {
+        let (slow, no_application, no_field) = self.0.with(|tree| (tree.slow_application, tree.no_application, tree.no_field));
         Ok(match node {
-            None => Some(app()),
-            Some(node) if *node == app() => Some(field()),
+            None => {
+                std::thread::sleep(slow);
+                (!no_application).then(app)
+            }
+            Some(node) if *node == app() => (!no_field).then(field),
             Some(_) => None,
         })
     }
@@ -113,10 +138,21 @@ impl AtspiApi for Shared {
         Ok(self.0.with(|tree| tree.app_pid))
     }
     fn states(&self, node: &NodeRef) -> AtspiResult<u64> {
-        Ok(if *node == field() { self.0.with(|tree| tree.field_states) } else { 0 })
+        Ok(if *node == field() {
+            self.0.with(|tree| match &mut tree.focus_left {
+                Some(0) => 0,
+                Some(left) => {
+                    *left -= 1;
+                    tree.field_states
+                }
+                None => tree.field_states,
+            })
+        } else {
+            0
+        })
     }
     fn role(&self, _node: &NodeRef) -> AtspiResult<u32> {
-        Ok(self.0.with(|tree| tree.role))
+        self.0.with(|tree| if tree.fail_role { Err(AtspiError::Call("timed out".to_owned())) } else { Ok(tree.role) })
     }
     fn has_interface(&self, _node: &NodeRef, interface: &str) -> AtspiResult<bool> {
         Ok(self.0.with(|tree| tree.interfaces.contains(&interface)))
@@ -393,4 +429,101 @@ fn the_selection_source_connects_on_first_use_and_a_missing_bus_is_unsupported()
     assert_eq!(source.read_selection("editor", WINDOW).expect("read").text, "ghbdtn");
     let mut offline = AtspiSelectionReader::new(Box::new(|| Err(AtspiError::Unavailable("no bus".to_owned()))), process);
     assert_eq!(reason(offline.read_selection("editor", WINDOW)), "unsupported");
+}
+
+#[test]
+fn a_mask_is_all_a_hidden_entry_shows() {
+    assert!(only_password_masks(" \u{2022}\u{2022} "));
+    assert!(!only_password_masks(" "));
+    assert!(!only_password_masks("\u{2022}a"));
+}
+
+#[test]
+fn a_failed_call_says_only_its_class() {
+    let text = |error| match call_failed(error) {
+        SelectionError::Failed(error) => error.to_string(),
+        SelectionError::Refused(_) => String::new(),
+    };
+    assert_eq!(text(AtspiError::Unavailable("what was typed".to_owned())), "AT-SPI недоступен");
+    assert_eq!(text(AtspiError::Call("what was typed".to_owned())), "Вызов AT-SPI не удался");
+}
+
+#[test]
+fn a_walk_stops_at_its_deadline_wherever_that_finds_it() {
+    let future = || Instant::now() + Duration::from_millis(20);
+    let slow = Duration::from_millis(60);
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    fake.with(|tree| tree.slow_children = slow);
+    assert_eq!(reader.focused("editor", WINDOW, future()), Ok(None));
+    fake.with(|tree| {
+        tree.slow_children = Duration::ZERO;
+        tree.slow_application = slow;
+    });
+    assert_eq!(reader.focused("editor", WINDOW, future()), Ok(None));
+    fake.with(|tree| {
+        tree.slow_application = Duration::ZERO;
+        tree.no_application = true;
+    });
+    assert_eq!(reader.focused("editor", WINDOW, future()), Ok(None));
+    fake.with(|tree| {
+        tree.no_application = false;
+        tree.no_field = true;
+    });
+    assert_eq!(reader.focused("editor", WINDOW, future()), Ok(None));
+}
+
+#[test]
+fn a_field_that_lost_the_focus_while_it_was_read_says_nothing_of_its_text() {
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    // Found focused by the walk, not any more when read.
+    fake.with(|tree| tree.focus_left = Some(1));
+    let shown = reader.read("editor", WINDOW).expect("read").expect("a field");
+    assert!(shown.before.is_empty());
+    let fake = Fake::new();
+    fake.with(|tree| tree.carets = Queue::of(&[40, 41]));
+    let shown = fake.reader(None).read("editor", WINDOW).expect("read").expect("a field");
+    assert!(shown.before.is_empty());
+}
+
+#[test]
+fn a_selection_is_refused_when_the_field_will_not_say_what_it_is() {
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    fake.with(|tree| tree.fail_role = true);
+    assert_eq!(reason(select(&fake, &reader, "x")), "unsupported");
+}
+
+#[test]
+fn a_selection_gone_before_the_write_is_a_changed_focus_and_the_text_that_did_not_come_back_is_said() {
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    let selected = select(&fake, &reader, "ghbdtn").expect("selected");
+    fake.with(|tree| tree.selections = Queue::of(&[0]));
+    assert!(matches!(reader.write_selection(&selected, "y"), Err(SelectionError::Refused(refusal)) if refusal.reason == RefusalReason::FocusChanged));
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    let selected = select(&fake, &reader, "ghbdtn").expect("selected");
+    fake.with(|tree| tree.insert_results = Queue::of(&[false]));
+    match reader.write_selection(&selected, "y") {
+        Err(SelectionError::Failed(error)) => assert!(error.to_string().ends_with("не вернулся")),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_reader_has_nothing_to_close_and_a_source_connects_once() {
+    let fake = Fake::new();
+    ManagedFieldReader::close(&mut fake.reader(None));
+    let shared = fake.clone();
+    let process: ProcessForWindow = Arc::new(|_| 0);
+    let mut source = AtspiSelectionReader::new(Box::new(move || Ok(Box::new(Shared(shared.clone())))), process);
+    fake.with(|tree| {
+        tree.selections = Queue::of(&[1]);
+        tree.texts = Queue::of(&["ghbdtn".to_owned()]);
+    });
+    let selected = source.read_selection("editor", WINDOW).expect("read");
+    assert_eq!(source.read_selection("editor", WINDOW).expect("read again"), selected);
+    assert!(source.write_selection(&selected, "y").is_ok());
 }
