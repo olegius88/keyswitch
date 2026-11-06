@@ -8,6 +8,6 @@ use std::process::Command;
 #[test]
 fn the_engine_replays_every_recorded_trace() {
     let traces = concat!(env!("CARGO_MANIFEST_DIR"), "/traces");
-    let status = Command::new(env!("CARGO_BIN_EXE_ks-trace")).args(["--all", traces, "--jobs", "4"]).status().expect("ks-trace");
+    let status = Command::new(env!("CARGO_BIN_EXE_ks-trace")).args(["--all", traces, "--jobs", "4", "--strict"]).status().expect("ks-trace");
     assert!(status.success(), "a trace differed; ks-trace printed which");
 }

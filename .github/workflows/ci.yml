@@ -41,7 +41,7 @@ jobs:
       - name: Tests
         run: |
           sudo apt-get update
-          sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru
+          sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data
           cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-hunspell -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win -p ks-train
       - name: The engine against the recorded traces
         run: cargo test --release -p ks-replay
@@ -341,7 +341,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils onboard-data
       - name: Linux measure
         if: runner.os == 'Linux'
         run: packaging/coverage.sh coverage-linux.json

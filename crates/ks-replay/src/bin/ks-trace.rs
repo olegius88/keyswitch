@@ -2,7 +2,7 @@
 //! focus, foreign input, hook gaps, the queue, sensitive fields, typo correction and backend failures.
 //!
 //!     ks-trace <trace.json.gz> [--verbose]
-//!     ks-trace --all <dir> [--jobs N] [--report <file>]
+//!     ks-trace --all <dir> [--jobs N] [--report <file>] [--strict]
 //!
 //! A trace is what the Python engine did in one test: the settings it started with, each entry into it from outside,
 //! every call it made on its backend and field reader with the answer, and what could be seen from outside after each
@@ -41,7 +41,7 @@ fn list_traces(directory: &Path, found: &mut Vec<PathBuf>) {
 
 /// The parent of `--all`: one process per job, each loading the models once and taking many traces, because the log of
 /// an engine goes to one file per process.
-fn run_all(directory: &Path, jobs: usize, report: Option<&Path>, filter: Option<&str>) -> i32 {
+fn run_all(directory: &Path, jobs: usize, report: Option<&Path>, filter: Option<&str>, strict: bool) -> i32 {
     let mut traces = Vec::new();
     list_traces(directory, &mut traces);
     traces.sort();
@@ -91,6 +91,7 @@ fn run_all(directory: &Path, jobs: usize, report: Option<&Path>, filter: Option<
         }
     }
     println!("traces {} passed {passed} differed {differed} not_run {not_run} left_out {left_out} (cut short by the test: {partial}); entries compared {steps}", results.len());
+    let causes_seen: Vec<String> = causes.keys().cloned().collect();
     let mut sorted: Vec<_> = causes.into_iter().collect();
     sorted.sort_by_key(|(_, (count, _))| -*count);
     for (cause, (count, test)) in sorted.iter().take(60) {
@@ -102,7 +103,9 @@ fn run_all(directory: &Path, jobs: usize, report: Option<&Path>, filter: Option<
         summary.insert("truncated".to_owned(), json!(truncated));
         let _ = std::fs::write(report, serde_json::to_vec(&Value::Object(summary)).unwrap_or_default());
     }
-    i32::from(differed != 0)
+    // Strict: the models the traces were recorded on are there, or nearly every trace is skipped without a word.
+    let wrong_models = causes_seen.iter().any(|cause| cause.starts_with("not run: language models"));
+    i32::from(differed != 0 || (strict && wrong_models))
 }
 
 fn run_chunk(mut chunk: Vec<PathBuf>, results: &std::sync::Mutex<Vec<Value>>) {
@@ -157,7 +160,7 @@ fn main() {
         let jobs = option("--jobs").and_then(|text| text.parse().ok()).unwrap_or(4);
         let report = option("--report").map(PathBuf::from);
         let filter = option("--filter");
-        std::process::exit(run_all(Path::new(directory), jobs, report.as_deref(), filter.as_deref()));
+        std::process::exit(run_all(Path::new(directory), jobs, report.as_deref(), filter.as_deref(), args.iter().any(|argument| argument == "--strict")));
     }
     let Some(path) = args.first() else {
         eprintln!("usage: ks-trace <trace.json.gz> | --all <dir> [--jobs N] [--report file] [--filter text]");
