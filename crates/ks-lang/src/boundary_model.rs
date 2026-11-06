@@ -137,6 +137,11 @@ impl BoundaryModel {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_value_is_held_between_its_bounds() {
+        assert_eq!((clamped(5.0, 0.0, 1.0), clamped(-5.0, 0.0, 1.0), clamped(0.5, 0.0, 1.0)), (1.0, 0.0, 0.5));
+    }
+
     fn candidate(pairs: &[(&str, f64)]) -> Features {
         pairs.iter().map(|&(name, value)| (name.to_string(), value)).collect()
     }

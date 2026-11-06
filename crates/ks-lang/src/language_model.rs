@@ -590,6 +590,42 @@ impl LanguageModel {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_lexicon_of_more_letters_than_the_packed_keys_hold_and_the_sizes_of_its_grams() {
+        let words: Vec<(String, i64)> = (0x4e00..0x4e00 + 300_u32).map(|code| (format!("{0}{0}{0}", char::from_u32(code).unwrap()), 5)).collect();
+        let frequencies = WordTable::from_pairs(words.iter().map(|(word, count)| (word.as_str(), *count)));
+        let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert!(model.gram_size(2).0 > 0);
+        assert!(model.gram_size(2).1 > 0);
+        let known = format!("{0}{0}{0}", '\u{4e00}');
+        assert!(model.raw_ngram_score(&known) > f64::NEG_INFINITY);
+        assert!(model.score(&known).gram_ratio > 0.0);
+        assert!(model.score("\u{4e00}a\u{4e01}").gram_ratio >= 0.0);
+    }
+
+    #[test]
+    fn a_word_or_pair_of_nothing_but_signs_is_left_out() {
+        let folder = std::env::temp_dir().join(format!("ks-lang-arpa-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("signs.lm");
+        std::fs::write(&path, "\\1-grams:\n-1 hello\n\\2-grams:\n-1 !!! hello\n-1 hello !!!\n-1 hello world\n").unwrap();
+        let (unigrams, bigrams) = LanguageModel::_read_arpa(&path);
+        assert!(unigrams.get("hello").is_some());
+        assert_eq!(bigrams.len(), 1);
+        let tables = LanguageModel::load_tables("en_US", ["!!!", "word"], std::slice::from_ref(&folder));
+        assert!(tables.frequencies.get("word").is_some());
+        assert!(tables.frequencies.get("!!!").is_none());
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn the_most_natural_of_words_is_held_at_the_ceiling() {
+        let words: Vec<(String, i64)> = vec![("aaaa".to_owned(), i64::MAX / 4), ("bbbb".to_owned(), 1)];
+        let frequencies = WordTable::from_pairs(words.iter().map(|(word, count)| (word.as_str(), *count)));
+        let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
+        assert!(model.score("aaaaaaaa").ngram_score <= LANGUAGE_MODEL_NATURALNESS_MAX);
+    }
     use crate::spellcheck::FnSpellChecker;
 
     #[test]

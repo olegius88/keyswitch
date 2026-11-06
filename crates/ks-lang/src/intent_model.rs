@@ -1165,6 +1165,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn orders_of_any_number_are_checked_and_a_home_folder_is_expanded() {
+        let huge = serde_json::json!(u64::MAX);
+        assert!(validate_orders_values(&[huge]).is_err());
+        assert!(expanduser("/plain").ends_with("plain"));
+        let _ = expanduser("~/x");
+    }
+
+    #[test]
     fn a_status_as_a_dictionary_and_what_is_left_of_the_checks() {
         let status = IntentModelStatus { available: false, path: Some(PathBuf::from("/x")), version: None, checksum: None, error: Some("e".to_owned()) };
         assert_eq!(status.as_dict()["path"], "/x");

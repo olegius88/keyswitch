@@ -253,3 +253,25 @@ pub fn trusted_short_word_decision(
     }
     Ok(max_by_key_first(candidates, |item| item.confidence))
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::tables::WordTable;
+
+    #[test]
+    fn a_layout_without_a_language_has_no_short_words() {
+        assert!(trusted_short_words(5).is_empty());
+        assert!(!trusted_short_words(0).is_empty());
+        assert!(!trusted_short_words(1).is_empty());
+    }
+
+    #[test]
+    fn the_starts_of_words_count_what_they_hold() {
+        let frequencies = WordTable::from_pairs([("hello", 5), ("help", 5)]);
+        let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
+        let starts = word_starts(&model);
+        assert_eq!(starts.is_empty(), starts.len() == 0);
+    }
+}

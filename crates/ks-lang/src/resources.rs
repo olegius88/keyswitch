@@ -183,3 +183,16 @@ impl Resources {
         LanguageDetector::new(models, intent, self.protected_tokens())
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_was_read_once_is_kept() {
+        let shipped = Resources::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
+        let first = shipped.plain_frequencies("en_US");
+        assert!(Arc::ptr_eq(&first, &shipped.plain_frequencies("en_US")));
+    }
+}

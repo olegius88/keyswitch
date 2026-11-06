@@ -251,6 +251,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_table_counts_its_grams() {
+        let plain = GramTable::Plain { table: WordTable::default(), scale: 1.0, longest: 0 };
+        assert_eq!(plain.len(), 0);
+    }
+
+    #[test]
     fn a_plain_table_and_an_empty_packed_one() {
         let packed = GramTable::from_raw(std::iter::empty::<&str>(), &[]);
         assert_eq!((packed.longest(), packed.len()), (0, 0));

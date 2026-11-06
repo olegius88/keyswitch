@@ -150,7 +150,7 @@ impl BoundaryPolicy {
         let value = json_loads(&raw)?;
         // `value in (2, 3)`: 2.0 is 2, and `true` is 1, which is no version here.
         let feature_version = match value.get("feature_version") {
-            Some(Value::Number(number)) if value.is_object() => number.as_f64().map(ks_cast::To::to::<i64>).filter(|version| {
+            Some(Value::Number(number)) => number.as_f64().map(ks_cast::To::to::<i64>).filter(|version| {
                 SUPPORTED_FEATURE_VERSIONS.contains(version) && number.as_f64() == Some((*version).to::<f64>())
             }),
             _ => None,
@@ -163,5 +163,29 @@ impl BoundaryPolicy {
             return Err(LoadError::value("invalid boundary policy"));
         }
         Ok(BoundaryPolicy::new(weights, threshold, version, feature_version))
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::tables::WordTable;
+
+    #[test]
+    fn a_policy_file_past_its_limit_is_refused() {
+        let path = std::env::temp_dir().join(format!("ks-policy-{}.json", std::process::id()));
+        std::fs::write(&path, " ".repeat(BOUNDARY_POLICY_MAX_BYTES + 1)).unwrap();
+        assert!(BoundaryPolicy::load(&path).is_err());
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn the_first_schema_reads_only_the_first_features() {
+        let frequencies = WordTable::from_pairs([("hello", 5)]);
+        let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
+        let first = features("hello", "руддщ", 0, &model, &model, BOUNDARY_V1_FEATURE_VERSION);
+        let later = features("hello", "руддщ", 0, &model, &model, FEATURE_VERSION);
+        assert!(first.len() < later.len());
     }
 }

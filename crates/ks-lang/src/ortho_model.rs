@@ -1037,6 +1037,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_schema_number_is_a_whole_number_of_any_spelling() {
+        use serde_json::json;
+        assert_eq!(schema_number(&json!(true)), Some(1));
+        assert_eq!(schema_number(&json!(5)), Some(5));
+        assert_eq!(schema_number(&json!(5.0)), Some(5));
+        assert_eq!(schema_number(&json!(5.5)), None);
+        assert_eq!(schema_number(&json!(1e300)), None);
+        assert_eq!(schema_number(&json!("5")), None);
+    }
+
+    #[test]
+    fn channels_read_as_they_are_written_and_nothing_else() {
+        let read = |text: &str| serde_json::from_str::<RawChannel>(text).map(|_| ());
+        assert!(read(r#"{"grams": "", "logprob": [], "backoff": [], "uniform": -1, "other": 7}"#).is_ok());
+        assert!(read(r#"{"grams": "a", "logprob": [], "backoff": [], "uniform": -1}"#).is_err());
+        assert!(read(r#"{"logprob": [], "backoff": [], "uniform": -1}"#).is_err());
+    }
+
+    #[test]
     fn text_helpers() {
         assert!(reduplicated("у-у") && reduplicated("мда-а") && reduplicated("ну-ну"));
         assert!(!reduplicated("а-б") && !reduplicated("абв") && !reduplicated("а-") && !reduplicated("а-а-а"));
