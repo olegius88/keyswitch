@@ -10,7 +10,8 @@ use ks_config::learning::{LearnedRule, LearningStore};
 use ks_engine::engine::{EngineError, KeySwitchEngine, QueueItem};
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_engine::rule_editor::pattern_group;
-use ks_replay::harness::{Bundle, SWALLOWS};
+use ks_config::selection_commands::SelectionCommand;
+use ks_replay::harness::{Bundle, PAUSE_KEYCODE, SWALLOWS};
 use serde_json::json;
 
 fn key(name: &str, state: u32) -> KeyEvent {
@@ -154,4 +155,47 @@ fn a_pattern_of_letters_of_neither_alphabet_has_no_layout() {
     assert_eq!(pattern_group("中"), None);
     assert_eq!(pattern_group("a中"), None);
     assert_eq!(pattern_group("123"), None);
+}
+
+#[test]
+fn a_selection_is_changed_or_refused_with_its_reason() {
+    let mut bundle = Bundle::load(None);
+    let commands = [SelectionCommand::Layout, SelectionCommand::Case, SelectionCommand::Transliterate];
+    let texts = [None, Some(""), Some("ghbdtn"), Some("привет"), Some("Hello World"), Some("line\nbreak"), Some("\u{1f600}"), Some("hello руддщ")];
+    for command in commands {
+        for text in texts {
+            for failing in [false, true] {
+                for own in [false, true] {
+                    let mut session = bundle.session("app", 0, Vec::new());
+                    session.backend.set_selection(text);
+                    session.backend.set_own(own);
+                    session.backend.set_failing(failing);
+                    session.core.run_selection_command(command);
+                    session.backend.set_failing(false);
+                    bundle.give_back(session);
+                }
+            }
+        }
+    }
+    let mut session = bundle.session("firefox", 0, Vec::new());
+    session.core.settings.set("exclusions.applications", json!(["firefox"]), false).unwrap();
+    session.core.settings.set("diagnostics.technical_logging", json!(true), false).unwrap();
+    session.backend.set_selection(Some("ghbdtn"));
+    session.core.run_selection_command(SelectionCommand::Layout);
+    session.core.settings.set("exclusions.applications", json!([]), false).unwrap();
+    session.core.settings.set("enabled", json!(false), false).unwrap();
+    session.core.run_selection_command(SelectionCommand::Layout);
+    session.core.settings.set("enabled", json!(true), false).unwrap();
+    for (name, keycode, state) in [("Pause", PAUSE_KEYCODE, SHIFT_MASK), ("Pause", PAUSE_KEYCODE, ALT_MASK), ("Scroll_Lock", 78, ALT_MASK)] {
+        session.tap(KeyEvent { pressed: true, keycode, key_name: name.to_owned(), characters: vec![String::new(), String::new()], state, ..KeyEvent::default() });
+        session.idle(1.0);
+    }
+    // A hotkey whose keys are held past the wait changes nothing.
+    session.handle(KeyEvent { pressed: true, keycode: 37, key_name: "Control_L".to_owned(), characters: vec![String::new(), String::new()], ..KeyEvent::default() });
+    session.handle(KeyEvent { pressed: true, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), characters: vec![String::new(), String::new()], state: SHIFT_MASK, ..KeyEvent::default() });
+    session.core.advance_selection_command();
+    session.advance(100.0);
+    session.idle(0.01);
+    bundle.give_back(session);
+    bundle.clean();
 }

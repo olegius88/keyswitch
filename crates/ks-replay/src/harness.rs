@@ -1,7 +1,7 @@
 //! The model editor and the fake clock a battery is typed over, and the models one replay shares between its engines.
 
 use ks_cast::To as _;
-use ks_backend::{BackendError, BackendProbe, FieldContext, FieldReader, FieldRole, FocusInfo, InputBackend, Injection, KeyEvent, KeyFilter, KeyListener};
+use ks_backend::{BackendError, BackendProbe, FieldContext, FieldReader, FieldRole, FocusInfo, InputBackend, RefusalReason, SelectedText, SelectionError, SelectionRefused, Injection, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
 use ks_config::history::HistoryStore;
 use ks_config::logsetup;
@@ -82,6 +82,8 @@ struct EditorState {
     failing: bool,
     panicking: bool,
     swallows: bool,
+    selection: Option<String>,
+    own: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -109,7 +111,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed) }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -156,6 +158,16 @@ impl Backend {
     /// The next question about the active program stops whoever asks, as an error nobody foresaw does.
     pub fn set_panicking(&self, panicking: bool) {
         self.lock().panicking = panicking;
+    }
+
+    /// What the window has selected; None for nothing.
+    pub fn set_selection(&self, selection: Option<&str>) {
+        self.lock().selection = selection.map(str::to_owned);
+    }
+
+    /// Whether the window in front is the program's own.
+    pub fn set_own(&self, own: bool) {
+        self.lock().own = own;
     }
 
     /// The next corrections and layout switches fail, as when a window closes under them.
@@ -280,6 +292,36 @@ impl InputBackend for Backend {
         self.lock().swallows
     }
 
+    fn try_hold_input(&self) -> Result<(), BackendError> {
+        if self.lock().failing {
+            return Err(BackendError::Failed("the window is gone".to_owned()));
+        }
+        Ok(())
+    }
+
+    fn supports_selection(&self) -> bool {
+        true
+    }
+
+    fn read_selection(&self, _application: &str, _window: i64) -> Result<SelectedText, SelectionError> {
+        match self.lock().selection.clone() {
+            Some(text) => Ok(SelectedText { text, source: "clipboard".to_owned() }),
+            None => Err(SelectionRefused::new(RefusalReason::NoSelection).into()),
+        }
+    }
+
+    fn replace_selection(&self, _selected: &SelectedText, replacement: &str, final_group: Option<i32>) -> Result<bool, SelectionError> {
+        let mut state = self.lock();
+        if state.failing {
+            return Err(SelectionError::Failed(BackendError::Failed("the window is gone".to_owned())));
+        }
+        state.selection = Some(replacement.to_owned());
+        if let Some(group) = final_group {
+            state.group = group;
+        }
+        Ok(true)
+    }
+
     fn active_application(&self) -> String {
         let (application, panicking) = {
             let state = self.lock();
@@ -290,7 +332,8 @@ impl InputBackend for Backend {
     }
 
     fn focused_window(&self) -> Option<FocusInfo> {
-        Some(FocusInfo { window: self.lock().window, own: false, isolated_layout: false })
+        let state = self.lock();
+        Some(FocusInfo { window: state.window, own: state.own, isolated_layout: false })
     }
 
     fn probe(&self) -> BackendProbe {
