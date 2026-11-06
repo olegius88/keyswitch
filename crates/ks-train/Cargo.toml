@@ -41,3 +41,7 @@ flate2.workspace = true
 
 [lints]
 workspace = true
+
+[[test]]
+name = "release_tools"
+harness = false

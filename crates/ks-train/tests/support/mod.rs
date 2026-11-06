@@ -40,7 +40,10 @@ pub(crate) fn refused(output: &Output, words: &str) {
 }
 
 /// The files a cycle writes or reads as its own; everything else of a small tree is the repository's, through links.
-const OWN_FILES: [&str; 16] = [
+const OWN_FILES: [&str; 19] = [
+    "packaging/keyswitch-archive-keyring.asc",
+    "Cargo.toml",
+    "packaging/debian/keyswitch.sources",
     "resources/typo-frequency.receipt.json",
     "resources/typo-frequency-ru_RU.bin",
     "resources/typo-frequency-en_US.bin",

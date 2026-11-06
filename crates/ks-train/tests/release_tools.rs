@@ -1,0 +1,374 @@
+//! The tools around a release, over stubs of the system programs: the APT repository built and read back, the Debian package checked.
+//! This program is its own packaged binary as well: asked as `keyswitch --version` or `--diagnose`, it answers as the program would.
+#![expect(clippy::unwrap_used, clippy::expect_used, reason = "a test or a probe stops on what it did not expect")]
+
+mod support;
+
+use serde_json::{Value, json};
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use support::{digest, recipe, scratch, small_tree, trainer, tree};
+
+const CONTROL: &str = "Package: keyswitch\nVersion: 9.9.9\nArchitecture: amd64\nDepends: libc6, libgtk-4-1\nDescription: the keyboard\n";
+
+fn executable(path: &Path, body: &str) {
+    std::fs::write(path, body).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// The system programs the tools call, answering by the environment.
+fn stubs(folder: &Path) -> std::ffi::OsString {
+    let bin = folder.join("stub-bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    executable(&bin.join("dpkg"), "#!/bin/sh\n[ -z \"$KS_NO_DPKG\" ] || exit 3\necho amd64\n");
+    executable(
+        &bin.join("dpkg-deb"),
+        "#!/bin/sh\ncontrol=\"$2.control\"\ncase \"$1\" in\n  --field)\n    if [ -z \"$3\" ]; then cat \"$control\"; else sed -n \"s/^$3: //p\" \"$control\"; fi ;;\n  --extract) cp -r \"$2.root/.\" \"$3\" ;;\n  --control) cp -r \"$2.meta/.\" \"$3\" ;;\nesac\n",
+    );
+    executable(&bin.join("gpg"), "#!/bin/sh\n[ -z \"$KS_NO_GPG\" ] || exit 2\nwhile [ $# -gt 0 ]; do\n  case \"$1\" in --output) output=\"$2\"; shift ;; esac\n  last=\"$1\"\n  shift\ndone\ncp \"$last\" \"$output\"\n");
+    executable(&bin.join("gpgv"), "#!/bin/sh\n[ -z \"$KS_NO_GPGV\" ]\n");
+    executable(&bin.join("apt-get"), "#!/bin/sh\n[ -z \"$KS_NO_APT\" ]\n");
+    executable(&bin.join("apt-cache"), "#!/bin/sh\n[ -n \"$KS_NO_CANDIDATE\" ] || echo \"  Candidate: ${KS_CANDIDATE:-9.9.9}\"\n");
+    let mut path = bin.into_os_string();
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap());
+    path
+}
+
+fn said(output: &Output) -> String {
+    format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr))
+}
+
+/// A package the stub of `dpkg-deb` reads.
+fn plain_package(folder: &Path, control: &str) -> PathBuf {
+    let package = folder.join("keyswitch_9.9.9_amd64.deb");
+    std::fs::write(&package, b"a package").unwrap();
+    std::fs::write(folder.join("keyswitch_9.9.9_amd64.deb.control"), control).unwrap();
+    package
+}
+
+struct Apt {
+    tree: PathBuf,
+    folder: PathBuf,
+    path: std::ffi::OsString,
+}
+
+impl Apt {
+    fn build(&self, repository: &Path, package: Option<&Path>, passphrase: bool) -> Output {
+        let mut command = trainer();
+        command.arg("apt-build").arg("--tree").arg(&self.tree).arg("--repository").arg(repository).env("PATH", &self.path);
+        if let Some(package) = package {
+            command.arg("--package").arg(package);
+        }
+        if passphrase {
+            command.arg("--passphrase-file").arg(self.folder.join("passphrase"));
+        }
+        command.output().unwrap()
+    }
+
+    fn verify(&self, repository: &Path) -> Command {
+        let mut command = trainer();
+        command.arg("apt-verify").arg("--tree").arg(&self.tree).arg("--repository").arg(repository).args(["--expect-version", "9.9.9"]).env("PATH", &self.path);
+        command
+    }
+}
+
+fn set_version(tree: &Path, version: &str) {
+    let path = tree.join("Cargo.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<String> = text.lines().map(|line| if line.starts_with("version = \"") { format!("version = \"{version}\"") } else { line.to_owned() }).collect();
+    std::fs::write(path, lines.join("\n") + "\n").unwrap();
+}
+
+fn apt_repository() {
+    let folder = scratch("apt");
+    let tree = small_tree("apt-tree", &recipe());
+    set_version(&tree, "9.9.9");
+    let apt = Apt { tree: tree.clone(), path: stubs(&folder), folder: folder.clone() };
+    let package = plain_package(&folder, CONTROL);
+    let repository = folder.join("repository");
+    let built = apt.build(&repository, Some(&package), true);
+    assert!(built.status.success(), "{}", said(&built));
+    assert!(repository.join("dists/stable/InRelease").is_file() && repository.join("index.html").is_file());
+    let read = apt.verify(&repository).output().unwrap();
+    assert!(read.status.success() && said(&read).contains("APT_REPOSITORY_OK"), "{}", said(&read));
+    assert!(apt.verify(&repository).arg("--public-key").arg(tree.join("packaging/keyswitch-archive-keyring.asc")).output().unwrap().status.success());
+    // What it refuses to build.
+    let refused = |package: Option<&Path>, words: &str| {
+        let answer = apt.build(&folder.join("refused"), package, false);
+        assert!(!answer.status.success() && said(&answer).contains(words), "{words}: {}", said(&answer));
+    };
+    refused(None, "at least one package");
+    let other_folder = folder.join("other-architecture");
+    std::fs::create_dir_all(&other_folder).unwrap();
+    refused(Some(&plain_package(&other_folder, &CONTROL.replace("amd64", "arm64"))), "built for arm64");
+    let other_folder = folder.join("other-name");
+    std::fs::create_dir_all(&other_folder).unwrap();
+    refused(Some(&plain_package(&other_folder, &CONTROL.replace("Package: keyswitch", "Package: other"))), "is not a keyswitch package");
+    let other_folder = folder.join("computed");
+    std::fs::create_dir_all(&other_folder).unwrap();
+    refused(Some(&plain_package(&other_folder, &format!("{CONTROL}Size: 1\n"))), "carries a Size");
+    refused(Some(Path::new("/nonexistent/package.deb")), "");
+    let signing = trainer().arg("apt-build").arg("--tree").arg(&tree).arg("--repository").arg(folder.join("unsigned")).arg("--package").arg(&package).env("PATH", &apt.path).env("KS_NO_GPG", "1").output().unwrap();
+    assert!(!signing.status.success());
+    // The stanza that says where the repository is.
+    let stanza = tree.join("packaging/debian/keyswitch.sources");
+    let good = std::fs::read_to_string(&stanza).unwrap();
+    for (changed, words) in [
+        (good.replace("URIs: https://olegius88.github.io/keyswitch/", "URIs: http://example.com/"), "must serve HTTPS"),
+        (good.replace("URIs: https://olegius88.github.io/keyswitch/", "URIs: https://example.com"), "must serve HTTPS"),
+        (good.replace("Types: deb", "Types: deb-src"), "declare a binary repository"),
+        (good.replace("Suites: stable", "Suites: stable testing"), "exactly one Suites"),
+        (good.replace("Components: main", ""), "missing the Components"),
+    ] {
+        std::fs::write(&stanza, changed).unwrap();
+        refused(Some(&package), words);
+    }
+    std::fs::write(&stanza, &good).unwrap();
+    // A landing page with a hole, a manifest with no version.
+    let cargo = tree.join("Cargo.toml");
+    let manifest = std::fs::read_to_string(&cargo).unwrap();
+    std::fs::write(&cargo, "[package]\n").unwrap();
+    refused(Some(&package), "");
+    std::fs::write(&cargo, manifest).unwrap();
+    // What it refuses to read back.
+    let refuses = |environment: &[(&str, &str)], words: &str| {
+        let answer = apt.verify(&repository).envs(environment.iter().copied()).output().unwrap();
+        assert!(!answer.status.success() && said(&answer).contains(words), "{words}: {}", said(&answer));
+    };
+    refuses(&[("KS_NO_GPG", "1")], "");
+    refuses(&[("KS_NO_GPGV", "1")], "");
+    refuses(&[("KS_NO_APT", "1")], "");
+    refuses(&[("KS_NO_CANDIDATE", "1")], "no candidate");
+    refuses(&[("KS_CANDIDATE", "1.0.0")], "APT offers 1.0.0");
+    let dists = repository.join("dists/stable");
+    let release = std::fs::read_to_string(dists.join("Release")).unwrap();
+    let inline = std::fs::read_to_string(dists.join("InRelease")).unwrap();
+    let with = |text: &str, words: &str| {
+        std::fs::write(dists.join("Release"), text).unwrap();
+        std::fs::write(dists.join("InRelease"), text).unwrap();
+        refuses(&[], words);
+    };
+    std::fs::write(dists.join("InRelease"), "something else").unwrap();
+    refuses(&[], "does not cover");
+    let first_line = release.lines().find(|line| line.starts_with(' ')).unwrap().to_owned();
+    with(&format!(" {first_line}\n{release}"), "before naming it");
+    with(&release.replace(&first_line, " one two"), "malformed digest");
+    with(&release.replace(&first_line, &format!(" {} 1 {}", "0".repeat(32), first_line.split_whitespace().last().unwrap())), "misstates");
+    with(&release.replace(&first_line, &format!(" {} 1 {}", first_line.split_whitespace().next().unwrap(), first_line.split_whitespace().last().unwrap())), "misstates");
+    let mut fewer = String::new();
+    for line in release.lines() {
+        if line != first_line {
+            fewer.push_str(line);
+            fewer.push('\n');
+        }
+    }
+    with(&fewer, "does not cover both");
+    std::fs::write(dists.join("Release"), &release).unwrap();
+    std::fs::write(dists.join("InRelease"), &inline).unwrap();
+    assert!(apt.verify(&repository).output().unwrap().status.success());
+    assert!(!apt.verify(&folder.join("gone")).output().unwrap().status.success());
+}
+
+const PACKED: [(&str, &str); 13] = [
+    ("resources/models/layout_intent_v1.ksm", "usr/lib/keyswitch/resources/models/layout_intent_v1.ksm"),
+    ("resources/models/context_policy_v1.json", "usr/lib/keyswitch/resources/models/context_policy_v1.json"),
+    ("resources/models/prefix_policy_v1.json", "usr/lib/keyswitch/resources/models/prefix_policy_v1.json"),
+    ("resources/models/boundary-v2.json", "usr/lib/keyswitch/resources/models/boundary-v2.json"),
+    ("resources/models/ortho_v1.json", "usr/lib/keyswitch/resources/models/ortho_v1.json"),
+    ("model/intent_v1/sources/en_US.lm", "usr/lib/keyswitch/resources/models/en_US.lm"),
+    ("model/intent_v1/sources/ru_RU.lm", "usr/lib/keyswitch/resources/models/ru_RU.lm"),
+    ("model/intent_v1/sources/COPYRIGHT.onboard-data", "usr/share/doc/keyswitch/licenses/copyright.onboard-data"),
+    ("packaging/third-party-licenses/linux.txt", "usr/share/doc/keyswitch/licenses/third-party-rust.txt"),
+    ("resources/wayland-input/60-keyswitch.rules", "usr/lib/keyswitch/resources/wayland-input/60-keyswitch.rules"),
+    ("resources/wayland-input/keyswitch.modules-load.conf", "usr/lib/keyswitch/resources/wayland-input/keyswitch.modules-load.conf"),
+    ("packaging/gnome-shell/keyswitch@io.github.olegius88.KeySwitch/metadata.json", "usr/share/gnome-shell/extensions/keyswitch@io.github.olegius88.KeySwitch/metadata.json"),
+    ("packaging/gnome-shell/keyswitch@io.github.olegius88.KeySwitch/extension.js", "usr/share/gnome-shell/extensions/keyswitch@io.github.olegius88.KeySwitch/extension.js"),
+];
+
+/// A package whose files are those of the tree, with this very program as its binary.
+fn whole_package(folder: &Path, tree: &Path) -> PathBuf {
+    let package = plain_package(folder, CONTROL);
+    let root = folder.join("keyswitch_9.9.9_amd64.deb.root");
+    for (known, packed) in PACKED {
+        let target = root.join(packed);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(tree.join(known), target).unwrap();
+    }
+    for (known, packed) in [("packaging/debian/keyswitch.sources", "etc/apt/sources.list.d/keyswitch.sources"), ("packaging/keyswitch-archive-keyring.asc", "etc/apt/keyrings/keyswitch-archive-keyring.asc")] {
+        let target = root.join(packed);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(tree.join(known), target).unwrap();
+    }
+    let binary = root.join("usr/bin/keyswitch");
+    std::fs::create_dir_all(binary.parent().unwrap()).unwrap();
+    std::fs::copy(std::env::current_exe().unwrap(), &binary).unwrap();
+    let meta = folder.join("keyswitch_9.9.9_amd64.deb.meta");
+    std::fs::create_dir_all(&meta).unwrap();
+    std::fs::write(meta.join("conffiles"), "/etc/apt/sources.list.d/keyswitch.sources\n/etc/apt/keyrings/keyswitch-archive-keyring.asc\n").unwrap();
+    package
+}
+
+fn deb_check_of(tree: &Path, package: &Path, path: &std::ffi::OsString, environment: &[(&str, &str)]) -> Output {
+    trainer().arg("deb-check").arg("--tree").arg(tree).arg(package).env("PATH", path).envs(environment.iter().copied()).output().unwrap()
+}
+
+fn debian_package() {
+    let folder = scratch("deb");
+    let tree = small_tree("deb-tree", &recipe());
+    set_version(&tree, "9.9.9");
+    let path = stubs(&folder);
+    let package = whole_package(&folder, &tree);
+    let root = folder.join("keyswitch_9.9.9_amd64.deb.root");
+    let meta = folder.join("keyswitch_9.9.9_amd64.deb.meta");
+    let good = deb_check_of(&tree, &package, &path, &[]);
+    assert!(good.status.success() && said(&good).contains("NATIVE_DEB_OK"), "{}", said(&good));
+    let refused = |words: &str, environment: &[(&str, &str)]| {
+        let answer = deb_check_of(&tree, &package, &path, environment);
+        assert!(!answer.status.success() && said(&answer).contains(words), "{words}: {}", said(&answer));
+    };
+    // Each file changed, or gone.
+    let changing = |relative: &str, bytes: &[u8], words: &str| {
+        let target = root.join(relative);
+        let before = std::fs::read(&target).unwrap();
+        std::fs::write(&target, bytes).unwrap();
+        refused(words, &[]);
+        std::fs::write(&target, before).unwrap();
+    };
+    changing("usr/lib/keyswitch/resources/models/boundary-v2.json", b"{}", "differs from");
+    changing("usr/share/doc/keyswitch/licenses/copyright.onboard-data", b"changed", "differs from");
+    changing("etc/apt/sources.list.d/keyswitch.sources", b"changed", "differs from");
+    // The model container.
+    let model = "usr/lib/keyswitch/resources/models/layout_intent_v1.ksm";
+    changing(model, &vec![0; 15 << 20], "exceeds its packaging bound");
+    changing(model, b"short", "header is truncated");
+    changing(model, &[b'K'; 60], "header is truncated");
+    let real = std::fs::read(root.join(model)).unwrap();
+    let mut bounds = real.clone();
+    bounds[8..12].copy_from_slice(&0_u32.to_le_bytes());
+    changing(model, &bounds, "invalid bounds");
+    let mut payload = real.clone();
+    payload[12..16].copy_from_slice(&(13_u32 << 20).to_le_bytes());
+    changing(model, &payload, "invalid bounds");
+    let mut extra = real.clone();
+    extra.push(0);
+    changing(model, &extra, "invalid bounds");
+    // What the program does with its files.
+    for absent in ["usr/lib/udev/rules.d/60-keyswitch.rules", "usr/lib/modules-load.d/keyswitch.conf"] {
+        let target = root.join(absent);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"x").unwrap();
+        refused("must only offer", &[]);
+        std::fs::remove_file(&target).unwrap();
+    }
+    std::fs::write(meta.join("postinst"), b"x").unwrap();
+    refused("must only offer", &[]);
+    std::fs::remove_file(meta.join("postinst")).unwrap();
+    let conffiles = std::fs::read(meta.join("conffiles")).unwrap();
+    std::fs::write(meta.join("conffiles"), "/etc/apt/keyrings/keyswitch-archive-keyring.asc\n").unwrap();
+    refused("is not a conffile", &[]);
+    std::fs::write(meta.join("conffiles"), &conffiles).unwrap();
+    // The APT source and its key, changed in the tree and the package alike.
+    let stanza = tree.join("packaging/debian/keyswitch.sources");
+    let packed_stanza = root.join("etc/apt/sources.list.d/keyswitch.sources");
+    let stanza_text = std::fs::read_to_string(&stanza).unwrap();
+    for (changed, words) in [
+        (stanza_text.replace("https://olegius88.github.io/keyswitch/", "http://example.com/"), "does not serve HTTPS"),
+        (stanza_text.replace("https://olegius88.github.io/keyswitch/", "https://example.com"), "does not serve HTTPS"),
+        (stanza_text.replace("Signed-By:", "Signed:"), "has no Signed-By"),
+    ] {
+        std::fs::write(&stanza, &changed).unwrap();
+        std::fs::write(&packed_stanza, &changed).unwrap();
+        refused(words, &[]);
+    }
+    std::fs::write(&stanza, &stanza_text).unwrap();
+    std::fs::write(&packed_stanza, &stanza_text).unwrap();
+    let key = tree.join("packaging/keyswitch-archive-keyring.asc");
+    let packed_key = root.join("etc/apt/keyrings/keyswitch-archive-keyring.asc");
+    let real_key = std::fs::read_to_string(&packed_key).unwrap();
+    for changed in ["no block at all", "-----BEGIN PGP PUBLIC KEY BLOCK-----\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n"] {
+        std::fs::write(&key, changed).unwrap();
+        std::fs::write(&packed_key, changed).unwrap();
+        refused("the public key alone", &[]);
+    }
+    std::fs::write(&key, &real_key).unwrap();
+    std::fs::write(&packed_key, &real_key).unwrap();
+    // The binary.
+    let binary = root.join("usr/bin/keyswitch");
+    let program = std::fs::read(&binary).unwrap();
+    std::fs::write(&binary, b"#!/bin/sh\n").unwrap();
+    refused("no ELF executable", &[]);
+    std::fs::write(&binary, &program).unwrap();
+    let python = root.join("usr/lib/keyswitch/left.py");
+    std::fs::write(&python, b"").unwrap();
+    refused("contains Python", &[]);
+    std::fs::remove_file(&python).unwrap();
+    refused("the program says", &[("KS_FAKE_VERSION", "KeySwitch 1.0")]);
+    refused("ended with", &[("KS_FAKE_DIAGNOSE", "9")]);
+    refused("the diagnostic:", &[("KS_FAKE_DIAGNOSE", "garbage")]);
+    refused("names no model", &[("KS_FAKE_DIAGNOSE", "nomodel")]);
+    refused("did not load the exact", &[("KS_FAKE_DIAGNOSE", "other")]);
+    // The fields of the package.
+    for (changed, words) in [
+        (CONTROL.replace("Package: keyswitch", "Package: other"), "Package is other"),
+        (CONTROL.replace("9.9.9", "1.0.0"), "Version is 1.0.0"),
+        (CONTROL.replace("amd64", "arm64"), "Architecture is arm64"),
+        (CONTROL.replace("libgtk-4-1", "python3:any"), "depends on the Python"),
+    ] {
+        std::fs::write(folder.join("keyswitch_9.9.9_amd64.deb.control"), &changed).unwrap();
+        refused(words, &[]);
+    }
+    std::fs::write(folder.join("keyswitch_9.9.9_amd64.deb.control"), CONTROL).unwrap();
+    refused("", &[("KS_NO_DPKG", "1")]);
+    let cargo = tree.join("Cargo.toml");
+    let manifest = std::fs::read(&cargo).unwrap();
+    std::fs::write(&cargo, "[package]\n").unwrap();
+    refused("no version", &[]);
+    std::fs::write(&cargo, manifest).unwrap();
+    let answer = trainer().arg("deb-check").arg("--tree").arg("/nonexistent").arg(&package).env("PATH", &path).output().unwrap();
+    assert!(!answer.status.success());
+}
+
+fn answer_as_the_program(arguments: &[String]) -> bool {
+    match arguments.first().map(String::as_str) {
+        Some("--version") => {
+            println!("{}", std::env::var("KS_FAKE_VERSION").unwrap_or_else(|_| "KeySwitch 9.9.9".to_owned()));
+            true
+        }
+        Some("--diagnose") => {
+            let kind = std::env::var("KS_FAKE_DIAGNOSE").unwrap_or_default();
+            if kind == "9" {
+                std::process::exit(9);
+            }
+            if kind == "garbage" {
+                println!("not json");
+                return true;
+            }
+            if kind == "nomodel" {
+                println!("{}", json!({"intent_model": {}}));
+                return true;
+            }
+            let resources = PathBuf::from(std::env::var("KEYSWITCH_RESOURCES").unwrap());
+            let intent = resources.join("models/layout_intent_v1.ksm");
+            let bytes = std::fs::read(&intent).unwrap();
+            let manifest_length = usize::try_from(u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]])).unwrap();
+            let manifest: Value = serde_json::from_slice(&bytes[52..52 + manifest_length]).unwrap();
+            let checksum = if kind == "other" { "0".to_owned() } else { digest(&bytes) };
+            println!("{}", json!({"intent_model": {"available": true, "path": intent, "checksum": checksum, "version": manifest["model_version"]}}));
+            true
+        }
+        _ => false,
+    }
+}
+
+fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if answer_as_the_program(&arguments) {
+        return;
+    }
+    let _ = tree();
+    apt_repository();
+    debian_package();
+    println!("the release tools answer as they should");
+}
