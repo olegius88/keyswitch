@@ -165,9 +165,7 @@ impl<'a> Collector<'a> {
             found = true;
             let identity = identity_of(&stream)?;
             let size = stream.metadata()?.len();
-            let mut cursor: Option<(i64, String)> = db
-                .query_row("SELECT offset,anchor FROM cursors WHERE source=? AND identity=?", params![source.id, identity], |row| Ok((row.get(0)?, row.get(1)?)))
-                .optional()?;
+            let mut cursor: Option<(i64, String)> = db.query_row("SELECT offset,anchor FROM cursors WHERE source=? AND identity=?", params![source.id, identity], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
             if cursor.is_none() {
                 cursor = self.adopt_copy(&source.id, &identity, &mut stream, size)?;
             }
@@ -179,17 +177,12 @@ impl<'a> Collector<'a> {
             if reset {
                 offset = 0;
             }
-            let context: Option<Option<String>> = db
-                .query_row("SELECT version FROM cursor_context WHERE source=? AND identity=?", params![source.id, identity], |row| row.get(0))
-                .optional()?;
+            let context: Option<Option<String>> = db.query_row("SELECT version FROM cursor_context WHERE source=? AND identity=?", params![source.id, identity], |row| row.get(0)).optional()?;
             let mut version = if cursor.is_some() && !reset { context.flatten() } else { None };
             while offset < size && count < budget {
                 stream.seek(SeekFrom::Start(offset))?;
                 let mut data = Vec::new();
                 stream.by_ref().take(self.chunk_size.to::<u64>().min(size - offset)).read_to_end(&mut data)?;
-                if data.is_empty() {
-                    break;
-                }
                 // Prefer line boundaries; huge individual lines remain byte-exact fragments.
                 if let Some(newline) = data.iter().rposition(|byte| *byte == b'\n')
                     && newline < data.len() - 1 {

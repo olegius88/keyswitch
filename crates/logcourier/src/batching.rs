@@ -69,9 +69,6 @@ pub fn compact_with(store: &Store, config: &Config, limit: usize, max_fragments:
     }
     archive.write("manifest.json", dumps(&json!({"schema": 1, "fragments": manifest}), false).as_bytes(), false);
     let payload = archive.finish();
-    if payload.len() > limit {
-        return Err(Error::value("Пакет превысил допустимый размер; исходная очередь сохранена."));
-    }
     let identifier = new_id();
     let mut meta = json!({
         "schema": BATCH_SCHEMA_VERSION, "batch": true, "bundle_id": identifier, "device_id": config.device_id, "device_name": config.device_name,
@@ -83,20 +80,46 @@ pub fn compact_with(store: &Store, config: &Config, limit: usize, max_fragments:
     if first["keyswitch_version"].as_str().is_some_and(|text| !text.is_empty()) {
         meta["source_id"] = first["source_id"].clone();
     }
+    replace_fragments(store, &selected, &destination, &identifier, &meta, &payload)?;
+    Ok(selected.len())
+}
+
+/// The package takes the place of its fragments in one transaction, or nothing changes.
+fn replace_fragments(store: &Store, selected: &[&Bundle], destination: &str, identifier: &str, meta: &Value, payload: &[u8]) -> Result<()> {
     let transaction = store.db.unchecked_transaction()?;
     let before: usize = selected.iter().map(|row| row.payload.as_ref().map_or(0, Vec::len)).sum();
     if store.queue_bytes()? - before.to::<i64>() + payload.len().to::<i64>() > store.capacity {
         return Err(Error::QueueFull("Для упаковки не хватает места в очереди. Фрагменты сохранены.".to_owned()));
     }
-    for row in &selected {
+    for row in selected {
         if store.db.execute("DELETE FROM bundles WHERE id=? AND file_id IS NULL AND indexed=0", [&row.id])? != 1 {
             return Err(Error::Runtime("Очередь изменилась во время упаковки; упаковка отменена.".to_owned()));
         }
     }
     store.db.execute(
         "INSERT INTO bundles(id,destination,created,name,meta,payload) VALUES (?,?,?,?,?,?)",
-        params![identifier, destination, selected[0].created, format!("lc-batch-{identifier}.zip"), dumps(&meta, false), payload],
+        params![identifier, destination, selected[0].created, format!("lc-batch-{identifier}.zip"), dumps(meta, false), payload],
     )?;
     transaction.commit()?;
-    Ok(selected.len())
+    Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_queue_that_changed_under_the_packing_stays_as_it_is() {
+        let folder = std::env::temp_dir().join(format!("lc-batching-{}", new_id()));
+        let store = Store::open(&folder).expect("the queue");
+        let metadata = json!({"bundle_id": "a"});
+        store.enqueue_event("place", &metadata, b"x", "a.zip", &[]).expect("queued");
+        let rows = store.queue("place").expect("the queue");
+        let selected: Vec<&Bundle> = rows.iter().collect();
+        store.db.execute("DELETE FROM bundles", []).expect("deleted");
+        let refused = replace_fragments(&store, &selected, "place", "b", &metadata, b"y");
+        assert!(matches!(refused, Err(Error::Runtime(_))), "{refused:?}");
+        std::fs::remove_dir_all(&folder).expect("cleaned");
+    }
 }

@@ -329,6 +329,69 @@ Error::Runtime(_) | Error::Other(_)) => panic!("{other:?}"),
     }
 
     #[test]
+    fn a_response_of_the_wrong_shape_or_size_is_refused() {
+        let ok = |result: &str| format!("{{\"ok\":true,\"result\":{result}}}").into_bytes();
+        assert!(client(vec![(200, b"not json".to_vec())]).0.call("getMe", json!({})).is_err());
+        assert!(client(vec![(200, b"{\"ok\":false}".to_vec())]).0.call("getMe", json!({})).is_err());
+        assert!(client(vec![(200, b"{\"ok\":true}".to_vec())]).0.call("getMe", json!({})).is_err());
+        assert!(client(vec![(200, vec![b' '; TELEGRAM_RESPONSE_MAX_BYTES + 1])]).0.call("getMe", json!({})).is_err());
+        assert_eq!(client(vec![(200, ok("7"))]).0.call("getMe", json!({})).unwrap(), json!(7));
+    }
+
+    #[test]
+    fn groups_come_from_the_updates_unless_a_webhook_takes_them() {
+        let ok = |result: Value| json!({"ok": true, "result": result}).to_string().into_bytes();
+        let hooked = client(vec![(200, ok(json!({"url": "https://x"})))]).0.groups();
+        assert!(hooked.is_err());
+        let updates = json!([
+            {"message": {"chat": {"id": 1, "type": "group", "title": "one"}}},
+            {"my_chat_member": {"chat": {"id": 1, "type": "group", "title": "renamed"}}},
+            {"channel_post": {"chat": {"id": 2, "type": "supergroup", "title": "two"}}},
+            {"message": {"chat": {"id": 3, "type": "private"}}},
+            {"other": {}},
+        ]);
+        let groups = client(vec![(200, ok(json!({"url": ""}))), (200, ok(updates))]).0.groups().unwrap();
+        assert_eq!(groups.iter().map(|group| group["title"].as_str().unwrap()).collect::<Vec<_>>(), ["renamed", "two"]);
+        let none = client(vec![(200, ok(json!({}))), (200, ok(json!(1)))]).0.groups().unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn a_document_must_be_confirmed_in_the_chosen_group() {
+        let ok = |result: Value| json!({"ok": true, "result": result}).to_string().into_bytes();
+        let sent = |answer: Value| client(vec![(200, ok(answer))]).0.send_document("-1001", "file.zip", b"x", "caption");
+        assert!(sent(json!({"document": {"file_id": "abc"}, "chat": {"id": -1001}, "message_id": 5})).is_ok());
+        assert!(sent(json!({"document": {"file_id": "!"}, "chat": {"id": -1001}, "message_id": 5})).is_err());
+        assert!(sent(json!({"document": {"file_id": "abc"}, "chat": {"id": 7}, "message_id": 5})).is_err());
+        assert!(sent(json!({"document": {"file_id": "abc"}, "chat": {"id": "-1001"}, "message_id": 5})).is_err());
+        assert!(sent(json!({"document": {"file_id": "abc"}, "chat": {"id": -1001}})).is_err());
+        let (nothing, _) = client(Vec::new());
+        assert!(nothing.send_document("-1001", "", b"x", "c").is_err());
+        assert!(nothing.send_document("-1001", &"x".repeat(161), b"x", "c").is_err());
+        assert!(nothing.send_document("-1001", "bad name", b"x", "c").is_err());
+        assert!(nothing.send_document("-1001", "file.zip", &vec![0; MAX_DOWNLOAD + 1], "c").is_err());
+    }
+
+    #[test]
+    fn a_download_takes_only_a_plain_path_within_its_limit() {
+        let ok = |result: Value| json!({"ok": true, "result": result}).to_string().into_bytes();
+        let got = |info: Value, limit: usize| client(vec![(200, ok(info)), (200, b"data".to_vec())]).0.download("abc", limit);
+        assert_eq!(got(json!({"file_path": "documents/file_1.zip", "file_size": 4}), 10).unwrap(), b"data");
+        for path in [json!({}), json!({"file_path": ""}), json!({"file_path": "/abs"}), json!({"file_path": "a/../b"}), json!({"file_path": "a b"}), json!({"file_path": "a", "file_size": 11})] {
+            assert!(got(path.clone(), 10).is_err(), "{path}");
+        }
+        assert!(client(Vec::new()).0.download("!", 10).is_err());
+        assert!(client(Vec::new()).0.download("", 10).is_err());
+        assert!(!is_file_id(&"x".repeat(513)));
+    }
+
+    #[test]
+    fn the_real_transport_is_there() {
+        assert!(Telegram::new(TOKEN).is_ok());
+        assert!(Telegram::new("no token").is_err());
+    }
+
+    #[test]
     fn redirects_and_unknown_methods_stop_the_request() {
         let (client_a, _) = client(vec![(302, Vec::new())]);
         assert!(matches!(client_a.call("getMe", json!({})), Err(Error::Telegram { .. })));
