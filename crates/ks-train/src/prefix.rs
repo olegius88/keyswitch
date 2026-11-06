@@ -280,6 +280,10 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                     let original = pystr::slice(&full, None, Some(length.to::<i64>())).to_owned();
                     let (source_layout, target_layout) = if source != 0 { ("ru", "us") } else { ("us", "ru") };
                     let alternate = pair().translate(&original, source_layout, target_layout).expect("the pair of layouts");
+                    // A prefix is that many keys of one side of the pair, read in both layouts key for key: the runtime's
+                    // checks of length and side hold for every frame here.
+                    assert_eq!((pystr::len(&original), pystr::len(&alternate)), (length, length), "a prefix of that many letters");
+                    assert!((0..=1).contains(&source), "a side of the pair");
                     let ambiguous = indexes.portable[source.to::<usize>()].completions(&original).completions > 0;
                     let label = if *desired {
                         if length < PREFIX_V2_SHORT_PREFIX_CHARACTERS || ambiguous { PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL } else { 1 }
@@ -304,11 +308,8 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                         .collect();
                     // The prefix decision requires four to twelve letters and no interior capitals.
                     let supported = (PREFIX_MIN_CHARACTERS..=PREFIX_MAX_CHARACTERS).contains(&length)
-                        && pystr::len(&original) == length
-                        && pystr::len(&alternate) == length
                         && pystr::isalpha(&original)
                         && pystr::isalpha(&alternate)
-                        && (source == 0 || source == 1)
                         && !original.chars().skip(1).chain(alternate.chars().skip(1)).any(|character| pystr::isupper(character.encode_utf8(&mut [0_u8; 4])));
                     out.frames.push(PrefixFrame {
                         label,
@@ -385,7 +386,6 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
 fn feature_vocabulary(split: &SplitFrames, minimum: f64, maximum: usize) -> Vec<String> {
     let mut totals = vec![0.0_f64; split.names.len()];
     let mut errors = vec![0.0_f64; split.names.len()];
-    let mut seen = vec![false; split.names.len()];
     for frame in &split.frames {
         for (id, value) in &frame.features {
             assert!(value.is_finite(), "invalid feature value");
@@ -395,12 +395,12 @@ fn feature_vocabulary(split: &SplitFrames, minimum: f64, maximum: usize) -> Vec<
             let total = previous + corrected;
             errors[id] = (total - previous) - corrected;
             totals[id] = total;
-            seen[id] = true;
         }
     }
-    // Quantised ordering and a 1e-9 cutoff tolerate divided-parent roundoff.
+    // Quantised ordering and a 1e-9 cutoff tolerate divided-parent roundoff. Every name is of a feature some frame holds:
+    // `generate_frames` names only those.
     let mut ranked: Vec<(f64, &String)> = (0..split.names.len())
-        .filter(|id| seen[*id] && totals[*id] + FEATURE_MASS_TOLERANCE >= minimum)
+        .filter(|id| totals[*id] + FEATURE_MASS_TOLERANCE >= minimum)
         .map(|id| (py_round_ndigits(totals[id], DETERMINISTIC_ROUNDING_DECIMALS).expect("a finite mass"), &split.names[id]))
         .collect();
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(b.1)));
@@ -461,10 +461,9 @@ fn sequence_scores(split: &SplitFrames, probabilities: &[f64]) -> Vec<Sequence> 
     let mut sequences = vec![Sequence::default(); count];
     for (index, frame) in split.frames.iter().enumerate() {
         let scores = &probabilities[index * ACTIONS..(index + 1) * ACTIONS];
-        assert!(
-            scores.iter().all(|value| value.is_finite() && (0.0..=1.0).contains(value)) && (ks_lang::py_sum(scores.iter().copied()) - 1.0).abs() <= PROBABILITY_SUM_TOLERANCE,
-            "invalid prefix probabilities"
-        );
+        assert!(scores.iter().all(|value| value.is_finite()), "invalid prefix probabilities");
+        assert!(scores.iter().all(|value| (0.0..=1.0).contains(value)), "invalid prefix probabilities");
+        assert!((ks_lang::py_sum(scores.iter().copied()) - 1.0).abs() <= PROBABILITY_SUM_TOLERANCE, "invalid prefix probabilities");
         let value = &mut sequences[frame.sequence.to::<usize>()];
         value.profile = frame.profile;
         value.desired = frame.desired;
@@ -540,7 +539,8 @@ fn assess(scores: &[Sequence], thresholds: &[f64], loss: f64) -> Option<Selectio
     grid.dedup();
     for threshold in grid {
         let metrics = sequence_metrics(scores, threshold);
-        assert!(metrics.iter().all(|row| row.desired != 0 && row.desired != row.sequences), "prefix development requires both classes in both lexical profiles");
+        assert!(metrics.iter().all(|row| row.desired != 0), "prefix development requires both classes in both lexical profiles");
+        assert!(metrics.iter().all(|row| row.desired != row.sequences), "prefix development requires both classes in both lexical profiles");
         if metrics.iter().any(|row| row.false_conversions != 0) {
             continue;
         }
@@ -565,6 +565,16 @@ fn assess(scores: &[Sequence], thresholds: &[f64], loss: f64) -> Option<Selectio
     best
 }
 
+/// The serving threshold: the first candidate that passes calibration, or 1.0 and a candidate that did not pass.
+fn calibrated_threshold(scores: &[Sequence], thresholds: &[f64], minimum_recall: f64) -> (f64, bool) {
+    for candidate in thresholds {
+        if calibration_passed(&sequence_metrics(scores, *candidate), minimum_recall) {
+            return (*candidate, true);
+        }
+    }
+    (1.0, false)
+}
+
 fn calibration_passed(metrics: &[Metrics; 2], minimum_recall: f64) -> bool {
     if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
         return false;
@@ -579,6 +589,14 @@ fn prefix_provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String,
         result.insert(name.to_owned(), checksum(&root.join(name))?);
     }
     Ok(result)
+}
+
+/// The inputs a fit read at its start are the ones it seals.
+fn prefix_inputs_unchanged(root: &Path, recipe_path: &Path, frozen: &BTreeMap<String, String>) -> Result<(), String> {
+    if prefix_provenance(root, recipe_path)? != *frozen {
+        return Err("prefix fit inputs changed".to_owned());
+    }
+    Ok(())
 }
 
 pub struct PrefixRequest<'a> {
@@ -649,7 +667,9 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let train = packed_rows(&train_frames, &names, &cfg);
     let development_frames = frames_of(DEVELOPMENT);
     let development = packed_rows(&development_frames, &names, &cfg);
-    if train.rows() == 0 || development.rows() == 0 {
+    // A feature survived, so a TRAIN frame holds it.
+    assert!(train.rows() != 0, "TRAIN frames under the surviving features");
+    if development.rows() == 0 {
         return Err("empty training or development split".to_owned());
     }
     let mut weights = vec![0.0; names.len() * ACTIONS];
@@ -702,16 +722,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         probabilities.extend_from_slice(&model.predict_features(&values).probabilities);
     }
     let scores = sequence_scores(&calibration_frames, &probabilities);
-    let minimum_recall = cfg.float("minimum_early_recall");
-    let mut threshold = 1.0;
-    let mut passed = false;
-    for candidate in &thresholds {
-        if calibration_passed(&sequence_metrics(&scores, *candidate), minimum_recall) {
-            threshold = *candidate;
-            passed = true;
-            break;
-        }
-    }
+    let (threshold, passed) = calibrated_threshold(&scores, &thresholds, cfg.float("minimum_early_recall"));
     let actions: Vec<&str> = ks_context::context_model::ACTIONS.iter().map(|action| action.as_str()).collect();
     let payload = json!({"kind": "keyswitch.prefix-policy", "feature_version": feature_version, "prefix_feature_version": feature_version, "actions": actions,
         "version": version, "conversion_threshold": threshold, "weights_sha256": weight_digest, "weights": learned});
@@ -745,9 +756,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         "development": metrics_value(&sequence_metrics(&final_development, threshold)), "calibration": metrics_value(&sequence_metrics(&scores, threshold)), "calibration_passed": passed,
         "promotion_accepted": false, "independent_test_evaluated": false, "scope": cfg["scope"],
     });
-    if prefix_provenance(request.root, request.recipe)? != frozen {
-        return Err("prefix fit inputs changed".to_owned());
-    }
+    prefix_inputs_unchanged(request.root, request.recipe, &frozen)?;
     let write = |name: &str, bytes: &[u8]| std::fs::write(output.join(name), bytes).map_err(|error| error.to_string());
     write("prefix-candidate.json", &raw)?;
     ks_context::prefix_schema::VersionedPrefixModel::load(&output.join("prefix-candidate.json")).map_err(|error| format!("prefix export does not load: {}", error.name))?;
@@ -758,4 +767,72 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
 
 mod indexmap_like {
     pub(super) type Map = ks_context::context_action_features::FeatureMap;
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn sequence(profile: u8, desired: bool, candidates: &[(u32, f64)]) -> Sequence {
+        Sequence { profile, desired, full_length: 6, candidates: candidates.to_vec() }
+    }
+
+    /// Each profile: a sequence to convert, converted early at 0.99, and one to keep, converted at 0.9.
+    fn development() -> Vec<Sequence> {
+        (0..2).flat_map(|profile| [sequence(profile, true, &[(4, 0.99), (6, 0.999)]), sequence(profile, false, &[(5, 0.9)])]).collect()
+    }
+
+    #[test]
+    fn an_operating_point_with_a_false_conversion_is_never_chosen() {
+        let chosen = assess(&development(), &[0.95, 0.5, 0.95], 0.25).expect("a point without false conversions");
+        assert_eq!((chosen.threshold, chosen.minimum_recall, chosen.pooled_recall), (0.95, 1.0, 1.0));
+        assert!(assess(&development(), &[0.5], 0.25).is_none());
+        assert!(assess(&development(), &[], 0.25).is_none());
+    }
+
+    #[test]
+    fn calibration_passes_on_both_classes_in_both_profiles_with_no_false_conversion_and_enough_recall() {
+        let counts = |sequences: i64, desired: i64, early: i64, false_conversions: i64| {
+            let row = Metrics { sequences, desired, converted: early, converted_before_end: early, false_conversions };
+            [row, row]
+        };
+        assert!(calibration_passed(&counts(4, 2, 2, 0), 0.7));
+        assert!(!calibration_passed(&counts(4, 2, 2, 0), 0.5));
+        assert!(!calibration_passed(&counts(4, 2, 1, 0), 0.7));
+        assert!(!calibration_passed(&counts(4, 0, 0, 0), 0.7));
+        assert!(!calibration_passed(&counts(2, 2, 2, 0), 0.7));
+        assert!(!calibration_passed(&counts(4, 2, 2, 1), 0.7));
+        // The first candidate that passes serves; with none, the candidate serves at 1.0 and has not passed.
+        assert_eq!(calibrated_threshold(&development(), &[0.5, 0.95, 0.995], 0.7), (0.95, true));
+        assert_eq!(calibrated_threshold(&development(), &[0.5], 0.7), (1.0, false));
+    }
+
+    #[test]
+    fn a_prefix_fit_whose_inputs_changed_while_it_ran_is_not_sealed() {
+        let root = std::env::temp_dir().join(format!("ks-train-prefix-unchanged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let write = |name: &str, text: &str| {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        for name in ["ks-text", "ks-backend", "ks-config", "ks-lang", "ks-context", "ks-engine", "ks-replay", "ks-train", "ks-hunspell"] {
+            write(&format!("crates/{name}/src/lib.rs"), name);
+        }
+        for name in [
+            "Cargo.lock", "resources/models/model.json", "model/context_v1/scenarios.json", "model/context_v1/captured/manifest.json", "model/context_v3/captured/manifest.json",
+            "model/context_v3/baseline-context-v1.json", "model/intent_v1/config.json", "model/intent_v1/sources/en_US.lm", "model/intent_v1/sources/ru_RU.lm", "resources/protected_tokens.txt",
+            "resources/identifiers.json", "resources/lexicon-supplement-ru_RU.json", "recipe.json", "model/prefix_v1/corpus.json", "model/prefix_v1/config.json",
+            "model/prefix_v1/train.jsonl.gz", "model/prefix_v1/development.jsonl.gz", "model/prefix_v1/calibration.jsonl.gz",
+        ] {
+            write(name, name);
+        }
+        let recipe = root.join("recipe.json");
+        let frozen = prefix_provenance(&root, &recipe).unwrap();
+        assert!(frozen.contains_key("model/prefix_v1/train.jsonl.gz"));
+        prefix_inputs_unchanged(&root, &recipe, &frozen).unwrap();
+        write("model/prefix_v1/development.jsonl.gz", "other");
+        assert!(prefix_inputs_unchanged(&root, &recipe, &frozen).unwrap_err().contains("inputs changed"));
+    }
 }
