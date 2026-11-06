@@ -10,6 +10,9 @@ cd "$project_dir"
 # Branch coverage needs a nightly compiler; the program itself is built with stable.
 # https://github.com/taiki-e/cargo-llvm-cov#get-coverage-of-external-tests
 export RUSTUP_TOOLCHAIN="${KS_COVERAGE_TOOLCHAIN:-nightly-2026-11-05}"
+# A small function of a library is otherwise compiled into whatever calls it, and a program that does not call it keeps an
+# empty record that llvm-cov may read first: tested code would read as never run.
+export RUSTFLAGS="${RUSTFLAGS:-} -Zcross-crate-inline-threshold=never"
 source <(cargo llvm-cov show-env --sh --branch)
 cargo llvm-cov clean --workspace
 

@@ -159,13 +159,17 @@ pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -
 /// The target of this very build.
 #[must_use]
 pub fn detect_build_update_target() -> Option<UpdateTarget> {
-    let build_platform = match std::env::consts::ARCH {
+    detect_update_target(std::env::consts::OS, std::env::consts::ARCH, build_platform_of(std::env::consts::ARCH))
+}
+
+/// The name of the Windows build of a processor.
+fn build_platform_of(architecture: &str) -> &'static str {
+    match architecture {
         "x86_64" => "win-amd64",
         "aarch64" => "win-arm64",
         "x86" => "win32",
         _ => "",
-    };
-    detect_update_target(std::env::consts::OS, std::env::consts::ARCH, build_platform)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -945,5 +949,35 @@ impl UpdateChecks {
 impl Drop for UpdateChecks {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_processor_has_its_build_name() {
+        for (architecture, name) in [("x86_64", "win-amd64"), ("aarch64", "win-arm64"), ("x86", "win32"), ("riscv64", "")] {
+            assert_eq!(build_platform_of(architecture), name);
+        }
+    }
+
+    #[test]
+    fn a_host_is_read_without_user_and_port() {
+        let host = |url: &str| split_url(url).map(|(_, host, _)| host);
+        assert_eq!(host("https://user@GitHub.com:443/x").as_deref(), Some("github.com"));
+        assert_eq!(host("https://github.com:x/y").as_deref(), Some("github.com:x"));
+        assert_eq!(host("https://[::1]/y").as_deref(), Some("[::1]"));
+        assert_eq!(host("https://[::1]:1/y").as_deref(), Some("[::1]:1"));
+        assert_eq!(host("https://a]:1/y").as_deref(), Some("a]:1"));
+        assert_eq!(host("nothing"), None);
+        assert_eq!(host("https:/one-slash"), None);
+    }
+
+    #[test]
+    fn a_name_is_quoted_as_python_does() {
+        assert_eq!(quote("v1.0-rc_1~a b/c\u{e9}"), "v1.0-rc_1~a%20b%2Fc%C3%A9");
     }
 }

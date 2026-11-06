@@ -348,6 +348,9 @@ jobs:
       - name: Measure
         if: runner.os != 'Linux'
         shell: bash
+        env:
+          # The reason is in packaging/coverage.sh.
+          RUSTFLAGS: -Zcross-crate-inline-threshold=never
         run: cargo +nightly-2026-11-05 llvm-cov --branch ${{ matrix.packages }} --profile coverage --no-fail-fast --json --output-path "coverage-$RUNNER_OS.json"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}

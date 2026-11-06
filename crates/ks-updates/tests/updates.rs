@@ -364,6 +364,7 @@ struct FakeReleaseClient {
     latest_error: Mutex<Option<String>>,
     download_error: Mutex<Option<String>>,
     download_hook: Mutex<Option<Box<dyn Fn() + Send>>>,
+    latest_hook: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 impl FakeReleaseClient {
@@ -375,6 +376,7 @@ impl FakeReleaseClient {
             latest_error: Mutex::default(),
             download_error: Mutex::default(),
             download_hook: Mutex::default(),
+            latest_hook: Mutex::default(),
         })
     }
 }
@@ -382,6 +384,9 @@ impl FakeReleaseClient {
 impl ReleaseClient for FakeReleaseClient {
     fn latest_release(&self, target: UpdateTarget) -> Result<UpdateRelease, UpdateError> {
         self.latest_targets.lock().unwrap().push(target);
+        if let Some(hook) = self.latest_hook.lock().unwrap().as_ref() {
+            hook();
+        }
         if let Some(message) = self.latest_error.lock().unwrap().clone() {
             return Err(UpdateError::new(message));
         }
@@ -766,4 +771,139 @@ fn an_empty_string_field_and_an_odd_installer_name() {
     assert!(directory.join("KeySwitch-Setup-1.0.0.exe").exists() && !directory.join("KeySwitch-Setup-1.0.0-x64.exe").exists());
     assert!(unlink_if_exists(&directory).is_err());
     assert!(unlink_if_exists(&directory.join("nothing")).is_ok());
+}
+
+#[test]
+fn every_phase_has_its_name_and_the_target_is_kept() {
+    for (phase, name) in [
+        (UpdatePhase::Idle, "idle"),
+        (UpdatePhase::Checking, "checking"),
+        (UpdatePhase::Current, "current"),
+        (UpdatePhase::Available, "available"),
+        (UpdatePhase::Downloading, "downloading"),
+        (UpdatePhase::Installing, "installing"),
+        (UpdatePhase::Error, "error"),
+    ] {
+        assert_eq!(phase.value(), name);
+    }
+    let release = available("9.0.0");
+    let update = manager("1.0.0", FakeReleaseClient::new(release), UpdateTarget::UbuntuAmd64);
+    assert_eq!(update.target(), Some(UpdateTarget::UbuntuAmd64));
+}
+
+#[test]
+fn an_empty_field_of_a_release_is_refused() {
+    let mut payload = release_payload("9.0.0", UpdateTarget::UbuntuAmd64, b"x");
+    payload["tag_name"] = json!("");
+    assert!(latest_for(&payload, UpdateTarget::UbuntuAmd64).is_err());
+}
+
+#[test]
+fn closing_while_the_release_is_being_read() {
+    let client = FakeReleaseClient::new(available("1.0.0"));
+    let closing = manager("0.4.0", client.clone(), UpdateTarget::WindowsX64);
+    let handle = closing.clone();
+    *client.latest_hook.lock().unwrap() = Some(Box::new(move || handle.close()));
+    assert!(closing.check(true, true));
+    assert_eq!(client.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(closing.snapshot().phase, UpdatePhase::Checking, "a closed manager publishes nothing more");
+}
+
+#[test]
+fn closing_when_the_release_is_announced() {
+    let update = manager("0.4.0", FakeReleaseClient::new(available("1.0.0")), UpdateTarget::UbuntuAmd64);
+    let handle = update.clone();
+    update.subscribe(Arc::new(move |snapshot| {
+        if snapshot.phase == UpdatePhase::Available {
+            handle.close();
+        }
+    }));
+    assert!(update.check(false, false));
+    assert_eq!(update.snapshot().phase, UpdatePhase::Available);
+}
+
+#[test]
+fn an_automatic_check_without_automatic_install_only_tells() {
+    let client = FakeReleaseClient::new(available("1.0.0"));
+    let (request, installed) = recording_installer();
+    let update = manager("0.4.0", client.clone(), UpdateTarget::WindowsX64).with_install_request(request);
+    assert!(update.check(true, false));
+    assert_eq!(update.snapshot().phase, UpdatePhase::Available);
+    assert_eq!(client.downloads.load(Ordering::SeqCst), 0);
+    assert!(installed.lock().unwrap().is_empty());
+}
+
+#[test]
+fn an_install_needs_an_open_and_free_manager() {
+    let client = FakeReleaseClient::new(available("1.0.0"));
+    let closed = manager("0.4.0", client.clone(), UpdateTarget::WindowsX64);
+    assert!(closed.check(false, false));
+    closed.close();
+    assert!(!closed.install_available());
+
+    let holding = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let held = Arc::new(Mutex::new(Vec::new()));
+    let runner: BackgroundRunner = {
+        let (holding, held) = (holding.clone(), held.clone());
+        Arc::new(move |job| {
+            if holding.load(Ordering::SeqCst) {
+                held.lock().unwrap().push(job);
+            } else {
+                job();
+            }
+            Ok(())
+        })
+    };
+    let busy = UpdateManager::new("0.4.0", PathBuf::from("updates"), client).unwrap().with_target(Some(UpdateTarget::WindowsX64)).with_runner(runner);
+    assert!(busy.check(false, false));
+    holding.store(true, Ordering::SeqCst);
+    assert!(busy.check(false, false));
+    assert!(!busy.install_available());
+    held.lock().unwrap().drain(..).for_each(|job| job());
+}
+
+#[test]
+fn checks_stop_when_the_setting_goes_off_after_the_first() {
+    let controller = Arc::new(CountingController::default());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let asked = calls.clone();
+    let checks = UpdateChecks::start_with(controller.clone(), move || asked.fetch_add(1, Ordering::SeqCst) == 0, Duration::from_millis(1), Duration::from_millis(1)).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    checks.stop();
+    assert_eq!(controller.checks.lock().unwrap().len(), 1);
+    let default = UpdateChecks::start(controller, || true).unwrap();
+    default.stop();
+}
+
+#[test]
+fn a_download_into_a_place_that_is_a_file_is_an_error() {
+    let directory = temp_dir("download-into-file");
+    let blocked = directory.join("blocked");
+    std::fs::write(&blocked, b"a file").expect("the file");
+    let content = b"content";
+    let release = checked_release("9.0.0", UpdateTarget::WindowsX64, content);
+    let client = GitHubReleaseClient::new("1.0.0", FakeOpener::with(Vec::new()));
+    let error = client.download(&release, &blocked, &mut |_, _| {}).expect_err("no folder there");
+    assert!(error.to_string().contains("Не удалось загрузить обновление"), "{error}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_name_that_is_no_text_is_passed_over() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let directory = temp_dir("bytes");
+    let name = std::ffi::OsStr::from_bytes(b"\xff.exe");
+    std::fs::write(directory.join(name), b"x").expect("the file");
+    remove_previous_installers(&directory, "none").expect("removed");
+    assert!(directory.join(name).exists());
+}
+
+#[test]
+fn only_earlier_installers_are_removed() {
+    let directory = temp_dir("names");
+    std::fs::write(directory.join("KeySwitch-Setup-1.0.0-x64.exe"), b"old").expect("the file");
+    std::fs::write(directory.join("keep.txt"), b"other").expect("the file");
+    remove_previous_installers(&directory, "none").expect("removed");
+    assert!(!directory.join("KeySwitch-Setup-1.0.0-x64.exe").exists());
+    assert!(directory.join("keep.txt").exists());
 }

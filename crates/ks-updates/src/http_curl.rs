@@ -5,7 +5,7 @@
 //! address a response ended at is not reported, so `url()` is the address asked for.
 
 use std::io::{self, Read};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use crate::{ResponseOpener, UpdateRequest, UpdateResponse};
@@ -14,9 +14,9 @@ const MAX_REDIRECTS: &str = "10";
 
 pub struct CurlOpener;
 
-struct CurlResponse {
+struct CurlResponse<R> {
     child: Child,
-    stdout: ChildStdout,
+    stdout: R,
     /// The byte read to learn that the request did not fail, handed out first.
     first: Option<u8>,
     url: String,
@@ -51,31 +51,33 @@ impl ResponseOpener for CurlOpener {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| io::Error::new(error.kind(), format!("curl is not available: {error}")))?;
-        let Some(mut stdout) = child.stdout.take() else {
+        let stdout = child.stdout.take().expect("stdout is piped above");
+        first_answer(child, stdout, &request.url)
+    }
+}
+
+/// What curl answered: its first byte shows that the transfer started, and an empty answer says why it did not.
+fn first_answer<R: Read + Send + 'static>(mut child: Child, mut stdout: R, url: &str) -> io::Result<Box<dyn UpdateResponse>> {
+    let mut first = [0_u8; 1];
+    match stdout.read(&mut first) {
+        Ok(1) => Ok(Box::new(CurlResponse { child, stdout, first: Some(first[0]), url: url.to_owned() })),
+        Ok(_) => {
+            // An empty body: fine when curl succeeded, else its message says what failed (status 400 and above included).
+            let output = child.wait_with_output()?;
+            if output.status.success() {
+                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the response is empty"));
+            }
+            Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()))
+        }
+        Err(error) => {
             let _ = child.kill();
-            return Err(io::Error::other("curl gave no output"));
-        };
-        let mut first = [0_u8; 1];
-        match stdout.read(&mut first) {
-            Ok(1) => Ok(Box::new(CurlResponse { child, stdout, first: Some(first[0]), url: request.url.clone() })),
-            Ok(_) => {
-                // An empty body: fine when curl succeeded, else its message says what failed (status 400 and above included).
-                let output = child.wait_with_output()?;
-                if output.status.success() {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "the response is empty"));
-                }
-                Err(io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()))
-            }
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                Err(error)
-            }
+            let _ = child.wait();
+            Err(error)
         }
     }
 }
 
-impl UpdateResponse for CurlResponse {
+impl<R: Read + Send> UpdateResponse for CurlResponse<R> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         if buffer.is_empty() {
             return Ok(0);
@@ -92,7 +94,7 @@ impl UpdateResponse for CurlResponse {
     }
 }
 
-impl Drop for CurlResponse {
+impl<R> Drop for CurlResponse<R> {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -110,6 +112,20 @@ mod tests {
         let arguments = arguments(&request, Duration::from_secs(15));
         let joined = arguments.join(" ");
         assert!(joined.contains("--proto =https --proto-redir =https --max-redirs 10 --max-time 15 --header Accept: a/b -- https://api.github.com/x"), "{joined}");
+    }
+
+    /// A reader that always fails, on a program that ends by itself.
+    #[test]
+    fn a_failed_read_ends_curl_and_is_reported() {
+        struct Broken;
+        impl Read for Broken {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::other("the pipe broke"))
+            }
+        }
+        let child = Command::new(std::env::current_exe().expect("this test")).arg("--list").stdout(Stdio::null()).spawn().expect("started");
+        let failure = first_answer(child, Broken, "https://x").err().expect("it failed");
+        assert_eq!(failure.to_string(), "the pipe broke");
     }
 
     #[test]
