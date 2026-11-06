@@ -737,3 +737,70 @@ impl EngineCore {
         self.backend.inject_correction(injection)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SUPER_MASK};
+
+    fn key(name: &str, character: &str, state: u32) -> KeyEvent {
+        KeyEvent { pressed: true, key_name: name.to_owned(), character: character.to_owned(), state, ..KeyEvent::default() }
+    }
+
+    #[test]
+    fn a_late_key_is_named_by_its_kind() {
+        for (event, kind) in [
+            (key("Shift_L", "", 0), "modifier"),
+            (key("a", "a", CONTROL_MASK), "shortcut"),
+            (key("a", "a", ALT_MASK), "shortcut"),
+            (key("a", "a", SUPER_MASK), "shortcut"),
+            (key("BackSpace", "", 0), "backspace"),
+            (key("Left", "", 0), "navigation"),
+            (key("space", " ", 0), "space"),
+            (key("a", "a", 0), "composed"),
+            (key("F1", "", 0), "other_key"),
+            (key("a", "\u{7}", 0), "other_key"),
+        ] {
+            assert_eq!(EngineCore::_late_key_kind(&event), kind, "{}", event.key_name);
+        }
+    }
+
+    #[test]
+    fn only_text_is_late_text() {
+        assert!(EngineCore::_late_text_key(&key("a", "a", 0)));
+        for event in [
+            KeyEvent { pressed: false, ..key("a", "a", 0) },
+            key("F1", "", 0),
+            key("a", "\u{7}", 0),
+            key("space", " ", 0),
+            key("Shift_L", "x", 0),
+            key("Left", "x", 0),
+            key("BackSpace", "x", 0),
+            key("a", "a", CONTROL_MASK),
+            key("a", "a", ALT_MASK),
+            key("a", "a", SUPER_MASK),
+        ] {
+            assert!(!EngineCore::_late_text_key(&event), "{}", event.key_name);
+        }
+    }
+
+    #[test]
+    fn a_field_that_shows_anything_but_the_word_refuses_the_correction() {
+        let mut plan = CorrectionPlan::new(Vec::new(), None, 0, 1, "ghbdtn".to_owned(), "привет".to_owned(), 1.0, "app");
+        "field".clone_into(&mut plan.context_field);
+        let shown = |field_id: &str, application: &str, before: &str, sensitive: bool, selection: bool| {
+            let mut field = FieldContext::new(application, field_id);
+            field.before = before.to_owned();
+            field.sensitive = sensitive;
+            field.selection = selection;
+            field
+        };
+        assert_eq!(EngineCore::_field_refusal(&plan, None, "", ""), "unread");
+        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("other", "app", "ghbdtn", false, false)), "", ""), "other_field");
+        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "other", "ghbdtn", false, false)), "", ""), "other_field");
+        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", true, false)), "", ""), "sensitive_or_selected");
+        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, true)), "", ""), "sensitive_or_selected");
+        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, false)), "", ""), "");
+    }
+}

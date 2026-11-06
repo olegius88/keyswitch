@@ -352,8 +352,18 @@ fn overlapping_keys(session: &mut Session, dice: &mut Dice) {
     }
 }
 
+/// Keys no layout table has: a character beyond the first plane, a composed one, a sign that prints nothing.
+fn strange_key(session: &mut Session, dice: &mut Dice) {
+    let character = *dice.of(&["\u{1f600}", "\u{e9}", "\u{301}", "\u{7f}", "\u{200b}", "ab", ""]);
+    let group = session.backend.group();
+    let key_name = *dice.of(&["dead_acute", "Multi_key", "a", "U1F600", "VoidSymbol"]);
+    let shown = character.to_owned();
+    session.tap(KeyEvent { pressed: true, keycode: 200, key_name: key_name.to_owned(), character: shown.clone(), characters: vec![shown.clone(), shown], group, ..KeyEvent::default() });
+}
+
 fn step(session: &mut Session, dice: &mut Dice, window: &mut i64) {
-    match dice.below(116) {
+    match dice.below(120) {
+        116..=119 => strange_key(session, dice),
         112..=115 => overlapping_keys(session, dice),
         100..=103 => age_what_is_held(session, dice),
         104..=105 => session.advance(*dice.of(IDLES)),
