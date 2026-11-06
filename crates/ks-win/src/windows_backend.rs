@@ -161,9 +161,7 @@ pub trait WindowsAPI: Send + Sync {
     fn run_keyboard_hook(&self, listener: HookListener, ready: HookReady) -> Result<(), WindowsBackendError>;
     fn stop_keyboard_hook(&self);
     /// The clipboard calls, where this Windows has them (Python: `isinstance(api, WindowsSelectionAPI)`).
-    fn selection_api(&self) -> Option<&dyn WindowsSelectionAPI> {
-        None
-    }
+    fn selection_api(&self) -> Option<&dyn WindowsSelectionAPI>;
 }
 
 fn named_key(virtual_key: u32) -> Option<&'static str> {
@@ -251,6 +249,7 @@ pub type JobStarter = Box<dyn Fn(Box<dyn FnOnce() + Send>) -> Result<(), Windows
 
 /// UI Automation, built on the engine worker that asks it (COM objects belong to their thread).
 #[cfg(windows)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Only the native reader, checked on Windows by the live test.
 fn uia_selection_reader() -> Result<Box<dyn SelectionReader>, WindowsBackendError> {
     match crate::windows_context::WindowsFieldReader::new() {
         Ok(reader) => Ok(Box::new(reader)),
@@ -325,6 +324,11 @@ pub fn key_name(virtual_key: u32) -> String {
         return char::from_u32(virtual_key).map_or_else(String::new, |key| key.to_ascii_lowercase().to_string());
     }
     format!("VK_{virtual_key:02X}")
+}
+
+/// A thread the system refused.
+fn spawn_failed(error: std::io::Error) -> WindowsBackendError {
+    failed(error.to_string())
 }
 
 /// A key time after another on the 32-bit tick clock, which wraps after 49.7 days.
@@ -715,7 +719,7 @@ impl Inner {
                 let _finished = finished_sender;
                 inner.hook_loop(ready_sender);
             })
-            .map_err(|error| failed(error.to_string()))?;
+            .map_err(spawn_failed)?;
         *lock(&self.thread) = Some(HookThread { id: handle.thread().id(), finished });
         // Not joined: as a daemon thread of the Python, it ends with the process.
         drop(handle);
@@ -1111,7 +1115,7 @@ impl Inner {
         };
         let repeated_answer = !event.synthetic && event.pressed && lock(&self.hook).consumed_keys.contains(event.keycode);
         let consumed = self.consumes(&event);
-        if consumed != KeyDisposition::Pass && event.pressed && !event.synthetic && self.alt_or_super_down() {
+        if consumed != KeyDisposition::Pass && event.pressed && self.alt_or_super_down() {
             self.mask_menu();
         }
         if consumed == KeyDisposition::Defer {

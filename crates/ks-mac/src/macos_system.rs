@@ -206,6 +206,8 @@ mod tests {
         std::fs::create_dir_all(folder.join("a/Same.app")).expect("the folder");
         std::fs::create_dir_all(folder.join("b/same.app")).expect("the folder");
         std::fs::create_dir_all(folder.join("b/Other")).expect("the folder");
+        // A bundle with no name is no program.
+        std::fs::create_dir_all(folder.join("b/.app")).expect("the folder");
         let catalog = MacApplicationCatalog::with_directories(vec![folder.join("a"), folder.join("b"), folder.join("missing")]);
         let names: Vec<String> = catalog.installed().into_iter().map(|application| application.identifier).collect();
         assert_eq!(names, ["same"]);

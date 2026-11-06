@@ -117,6 +117,7 @@ struct FakeState {
     restores: Vec<bool>,
     written: Vec<ClipboardContents>,
     text_limit: usize,
+    no_control: bool,
 }
 
 struct FakeWindowsAPI {
@@ -175,6 +176,7 @@ impl FakeWindowsAPI {
                 restores: Vec::new(),
                 written: Vec::new(),
                 text_limit: 0,
+                no_control: false,
             }),
             stop_event: Condvar::new(),
             clipboard,
@@ -280,7 +282,8 @@ impl WindowsAPI for FakeWindowsAPI {
     }
 
     fn focused_control(&self) -> i64 {
-        self.state().foreground
+        let state = self.state();
+        if state.no_control { 0 } else { state.foreground }
     }
 
     fn window_process_id(&self, window: i64) -> i64 {
@@ -606,6 +609,103 @@ fn replayed_scan(pressed: bool, scan_code: u32) -> NativeInput {
 }
 
 // ------------------------------------------------------------------------------------------- helpers and lifecycle
+
+#[test]
+fn small_answers_of_the_backend() {
+    assert!(!later(5, 5));
+    assert!(later(6, 5));
+    assert!(!later(5, 6));
+    assert!(message(&spawn_failed(std::io::Error::other("no threads"))).contains("no threads"));
+    let api = FakeWindowsAPI::plain();
+    let shared: Arc<dyn WindowsAPI> = api.clone();
+    assert!(WindowsBackend::new(Some(shared)).is_ok());
+}
+
+#[test]
+fn a_window_without_a_focused_control_is_its_own_place() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    {
+        let mut state = api.state();
+        state.foreground = 77;
+        state.no_control = true;
+    }
+    let info = subject.focused_window().expect("a window");
+    assert_eq!(info.window, 77);
+}
+
+#[test]
+fn a_layout_nobody_can_name_lets_the_key_pass() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    api.state().layout_values.clear();
+    assert!(!subject.handle_native(native(true, VK_A, VK_A, false, 10)));
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    api.state().current_layout = 999;
+    assert!(!subject.handle_native(native(true, VK_A, VK_A, false, 11)));
+    assert!(subject.switch_group(2).is_err());
+}
+
+#[test]
+fn modifiers_lost_on_the_way_are_named_together() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let (first, second) = (MODIFIER_KEYS[0], MODIFIER_KEYS[1]);
+    let _ = subject.handle_native(native(true, first, first, false, 20));
+    let _ = subject.handle_native(native(true, second, second, false, 21));
+    {
+        let mut state = api.state();
+        state.released_keys.insert(first);
+        state.released_keys.insert(second);
+    }
+    let _ = subject.handle_native(native(true, VK_A, VK_A, false, 21 + i64::from(MODIFIER_RECHECK_GAP_MS) + 1));
+    let hook = lock(&subject.inner.hook);
+    assert!(!hook.pressed.contains(first) && !hook.pressed.contains(second));
+}
+
+#[test]
+fn a_mask_key_that_cannot_be_sent_is_only_noted() {
+    let api = FakeWindowsAPI::plain();
+    let parts = BackendParts {
+        clock: FakeClock::stepping(0.0),
+        start_job: Box::new(|_| Err(failed("no thread"))),
+        selection_reader_factory: Box::new(|| Err(failed("no UI Automation"))),
+        listener_start_timeout_seconds: KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
+    };
+    let subject = WindowsBackend::with_parts(api.clone(), parts);
+    subject.set_key_filter(Some(Arc::new(|_: &KeyEvent| KeyDisposition::Consume)));
+    let _ = subject.handle_native(native(true, ALT_KEYS[1], ALT_KEYS[1], false, 30));
+    assert!(subject.handle_native(native(true, VK_A, VK_A, false, 31)));
+}
+
+#[test]
+fn a_stop_with_keys_that_cannot_be_given_back_leaves_the_hook_in_place() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let events = collected();
+    subject.start(collecting(&events)).unwrap();
+    subject.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.key_name == "Return" { KeyDisposition::Defer } else { KeyDisposition::Pass })));
+    let hook = api.hook();
+    assert!(hook(native(true, VK_RETURN, SCAN_CODE_ENTER, false, 40)));
+    let _ = hook(native(true, VK_A, VK_A, false, 41));
+    api.state().send_error = true;
+    subject.stop();
+    assert!(subject.running());
+    api.state().send_error = false;
+    subject.set_key_filter(None);
+    let _ = subject.complete_action(false);
+    subject.stop();
+}
+
+#[test]
+fn a_replacement_goes_on_while_the_input_held_is_where_it_was() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let subject = reading_backend(&api, &script(|_| {}));
+    subject.try_hold_input().unwrap();
+    assert!(subject.replace_selection(&selected_by(SOURCE_UIA, "ghbdtn"), "пр", None).unwrap());
+    let _ = subject.release_input();
+}
 
 #[test]
 fn layout_languages_pair_selection_and_key_names() {

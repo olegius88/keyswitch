@@ -173,9 +173,7 @@ pub trait MacAPI: Send + Sync {
     fn enable_event_tap(&self);
     fn stop_event_tap(&self);
     /// The pasteboard of the selection hotkeys' paste, where the system has one.
-    fn pasteboard(&self) -> Option<&dyn MacPasteboardAPI> {
-        None
-    }
+    fn pasteboard(&self) -> Option<&dyn MacPasteboardAPI>;
 }
 
 /// Whether a flags-changed event leaves its modifier key down.
@@ -294,6 +292,7 @@ impl Default for BackendParts {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(coverage_nightly, coverage(off))] // Only the native access, checked on the Mac by the live test.
 fn default_selection_access() -> Box<dyn SelectionAccess> {
     Box::new(MacSelectionAccess::new(crate::macos_native::NativeAccessibilityAPI::new()))
 }
@@ -623,6 +622,12 @@ impl Inner {
         answer.unwrap_or_else(|error| unavailable("—", "—", "—", error.to_string()))
     }
 
+    /// A thread the system refused: nothing runs.
+    fn spawn_failed(&self, error: &std::io::Error) -> MacBackendError {
+        self.running.store(false, Ordering::Release);
+        failed(error.to_string())
+    }
+
     fn start(self: &Arc<Self>, listener: KeyListener) -> Result<(), MacBackendError> {
         if self.running.load(Ordering::Acquire) {
             return Ok(());
@@ -639,13 +644,7 @@ impl Inner {
             let _finished = finished_sender;
             inner.tap_loop(ready_sender);
         });
-        let handle = match spawned {
-            Ok(handle) => handle,
-            Err(error) => {
-                self.running.store(false, Ordering::Release);
-                return Err(failed(error.to_string()));
-            }
-        };
+        let handle = spawned.map_err(|error| self.spawn_failed(&error))?;
         *lock(&self.thread) = Some(TapThread { id: handle.thread().id(), finished });
         // Not joined: as a daemon thread of the Python, it ends with the process.
         drop(handle);

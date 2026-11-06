@@ -17,20 +17,26 @@ struct Board {
     contents: Mutex<Option<PasteboardContents>>,
     text: Mutex<String>,
     complete: bool,
+    no_put: AtomicBool,
+    no_write: AtomicBool,
+    moved: AtomicBool,
 }
 
 impl MacPasteboardAPI for Board {
     fn pasteboard_change_count(&self) -> i64 {
-        *self.changes.lock().unwrap()
+        *self.changes.lock().unwrap() + i64::from(self.moved.load(Ordering::SeqCst))
     }
     fn read_pasteboard(&self, _limit: usize) -> PasteboardContents {
         PasteboardContents { items: vec![vec![("public.utf8-plain-text".into(), b"mine".to_vec())]], complete: self.complete }
     }
     fn write_pasteboard(&self, contents: &PasteboardContents) -> bool {
         *self.contents.lock().unwrap() = Some(contents.clone());
-        true
+        !self.no_write.load(Ordering::SeqCst)
     }
     fn put_text(&self, text: &str) -> Option<i64> {
+        if self.no_put.load(Ordering::SeqCst) {
+            return None;
+        }
         *self.text.lock().unwrap() = text.to_owned();
         *self.changes.lock().unwrap() += 1;
         Some(*self.changes.lock().unwrap())
@@ -53,6 +59,10 @@ struct FakeMac {
     tap_error: Mutex<Option<MacBackendError>>,
     enabled: AtomicUsize,
     board: Board,
+    /// How many more posts the system takes; None for all.
+    fails_after: Mutex<Option<usize>>,
+    refuses_switch: AtomicBool,
+    no_board: AtomicBool,
 }
 
 impl FakeMac {
@@ -71,6 +81,9 @@ impl FakeMac {
             tap_error: Mutex::new(None),
             enabled: AtomicUsize::new(0),
             board: Board { complete: true, ..Board::default() },
+            fails_after: Mutex::new(None),
+            refuses_switch: AtomicBool::new(false),
+            no_board: AtomicBool::new(false),
         })
     }
 
@@ -87,6 +100,9 @@ impl MacAPI for FakeMac {
         self.current.lock().unwrap().clone()
     }
     fn select_input_source(&self, identifier: &str) -> bool {
+        if self.refuses_switch.load(Ordering::SeqCst) {
+            return false;
+        }
         if !self.switch_ignored.load(Ordering::SeqCst) {
             *self.current.lock().unwrap() = identifier.to_owned();
         }
@@ -105,6 +121,12 @@ impl MacAPI for FakeMac {
         if state & (SHIFT_MASK | LOCK_MASK) != 0 { letter.to_uppercase() } else { letter.to_owned() }
     }
     fn post_inputs(&self, inputs: &[NativeInput]) -> usize {
+        if let Some(left) = self.fails_after.lock().unwrap().as_mut() {
+            if *left == 0 {
+                return 0;
+            }
+            *left -= 1;
+        }
         let count = self.take.lock().unwrap().map_or(inputs.len(), |limit| limit.min(inputs.len()));
         self.posted.lock().unwrap().extend_from_slice(&inputs[..count]);
         count
@@ -157,6 +179,9 @@ impl MacAPI for FakeMac {
         self.tap_stopped.1.notify_all();
     }
     fn pasteboard(&self) -> Option<&dyn MacPasteboardAPI> {
+        if self.no_board.load(Ordering::SeqCst) {
+            return None;
+        }
         Some(&self.board)
     }
 }
@@ -240,6 +265,10 @@ fn the_layouts_are_chosen_by_what_a_key_types() {
     };
     let sources: Vec<String> = ["emoji", "british", "us", "ru-win", "british"].iter().map(|s| (*s).to_owned()).collect();
     assert_eq!(select_source_pair(&sources, &translate), Ok(("british".to_owned(), "ru-win".to_owned())));
+    // A key that types something of neither alphabet chooses nothing, and a second English layout is no Russian one.
+    let others = |_: u32, _: u32, source: &str| if source == "greek" { "\u{3b1}".to_owned() } else if source == "digit" { "1".to_owned() } else { translate(0, 0, source) };
+    let mixed: Vec<String> = ["greek", "digit", "us", "british", "ru-win"].iter().map(|s| (*s).to_owned()).collect();
+    assert_eq!(select_source_pair(&mixed, &others), Ok(("us".to_owned(), "ru-win".to_owned())));
     let no_russian: Vec<String> = vec!["us".to_owned()];
     assert!(select_source_pair(&no_russian, &translate).is_err());
 }
@@ -251,6 +280,7 @@ fn keys_are_named_by_position_then_by_their_english_letter() {
     assert_eq!(key_name(KEY_Z, "Z"), "z");
     assert_eq!(key_name(0x2B, ","), "VK_2B");
     assert_eq!(key_name(0x7F, ""), "VK_7F");
+    assert_eq!(key_name(0x2B, "я"), "VK_2B");
 }
 
 #[test]
@@ -857,4 +887,136 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
         let _ = mac.complete_action(false);
         let _ = mac.release_input();
     }
+}
+
+#[test]
+fn starting_twice_is_starting_once_and_a_refused_thread_stops_it() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    let (listener, _) = collector();
+    backend.inner.running.store(true, Ordering::Release);
+    assert_eq!(backend.start(listener), Ok(()));
+    assert!(backend.inner.spawn_failed(&std::io::Error::other("no threads")).to_string().contains("no threads"));
+    assert!(!backend.inner.running.load(Ordering::Acquire));
+    api.refuses_switch.store(true, Ordering::SeqCst);
+    assert!(backend.switch_group(1).is_err());
+}
+
+#[test]
+fn the_stop_of_a_tap_that_never_had_a_thread_or_is_its_own_thread_waits_for_nothing() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    backend.inner.running.store(true, Ordering::Release);
+    backend.stop();
+    assert!(!backend.inner.running.load(Ordering::Acquire));
+    let (finished_sender, finished) = mpsc::channel::<()>();
+    backend.inner.running.store(true, Ordering::Release);
+    *lock(&backend.inner.thread) = Some(TapThread { id: thread::current().id(), finished });
+    backend.stop();
+    drop(finished_sender);
+}
+
+#[test]
+fn a_tap_switched_off_by_the_person_is_switched_on_again_too() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    let mut event = native(true, KEY_Z);
+    event.event_type = EVENT_TAP_DISABLED_BY_USER_INPUT;
+    assert!(!backend.handle_native(event));
+    assert_eq!(api.enabled.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn with_no_layouts_a_key_passes() {
+    let mut api = FakeMac::new();
+    Arc::get_mut(&mut api).unwrap().sources = Vec::new();
+    let backend = backend(&api);
+    assert!(!backend.handle_native(native(true, KEY_Z)));
+}
+
+#[test]
+fn a_release_lets_only_the_key_ups_before_the_waiting_enter_through() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    let (listener, _) = collector();
+    backend.set_listener(Some(listener));
+    backend.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.keycode == MAC_VK_RETURN { KeyDisposition::Defer } else { KeyDisposition::Pass })));
+    assert!(backend.handle_native(native(true, MAC_VK_RETURN)));
+    // `z` was down as the Enter came and its key-up was held with what follows it: it goes first, the rest waits.
+    {
+        let mut hold = lock(&backend.inner.hold);
+        hold.action_prior_keys = vec![KEY_Z];
+        hold.held.push_back(native(true, KEY_Q));
+        hold.held.push_back(native(false, KEY_Z));
+    }
+    assert!(backend.release_input().is_ok());
+    assert_eq!(api.posted().len(), 1);
+    assert_eq!(backend.release_input(), Ok(0));
+    assert!(lock(&backend.inner.hold).holding);
+    let _ = backend.complete_action(false);
+}
+
+#[test]
+fn a_post_that_fails_at_any_step_of_a_correction_is_an_error_and_ends_the_hold() {
+    let strokes = [stroke(KEY_Z, 0, 0), stroke(KEY_Z, 0, 0)];
+    let late = [stroke(KEY_Q, 0, 0)];
+    let boundary = stroke(KEY_Q, 0, 0);
+    for fails_after in 0..8 {
+        for (keep, with_boundary) in [(0, false), (1, false), (0, true)] {
+            let api = FakeMac::new();
+            let backend = backend(&api);
+            let (listener, _) = collector();
+            backend.set_listener(Some(listener));
+            backend.hold_input();
+            // A key held for later: its post is the last thing a correction does.
+            assert!(backend.handle_native(native(true, KEY_Q)));
+            *api.fails_after.lock().unwrap() = Some(fails_after);
+            let answer = backend.inject_correction(Injection { late: &late, kept_tail: keep, boundary: with_boundary.then_some(&boundary), ..injection(&strokes, 1) });
+            assert!(answer.is_ok() || fails_after < 8, "{fails_after} {keep} {with_boundary}");
+            if fails_after == 0 {
+                assert!(answer.is_err());
+            }
+            assert!(!lock(&backend.inner.hold).holding);
+        }
+    }
+}
+
+#[test]
+fn a_selection_is_not_replaced_after_the_input_moved() {
+    let api = FakeMac::new();
+    let backend = selecting(&api, Ok(SelectionAfter::Kept), None);
+    backend.hold_input();
+    api.window.store(11, Ordering::SeqCst);
+    assert_eq!(
+        backend.replace_selection(&selected(), "привет", None),
+        Err(SelectionError::Refused(SelectionRefused::new(RefusalReason::FocusChanged)))
+    );
+    let _ = backend.release_input();
+}
+
+#[test]
+fn a_paste_says_what_kept_the_pasteboard_from_coming_back() {
+    let refused_field = || Err(SelectionError::Refused(SelectionRefused::new(RefusalReason::NotSettable)));
+    // No pasteboard at all.
+    let api = FakeMac::new();
+    api.no_board.store(true, Ordering::SeqCst);
+    assert!(selecting(&api, refused_field(), Some((0, 0))).replace_selection(&selected(), "привет", None).is_err());
+    // The system took no text.
+    let api = FakeMac::new();
+    api.board.no_put.store(true, Ordering::SeqCst);
+    assert!(selecting(&api, refused_field(), Some((0, 0))).replace_selection(&selected(), "привет", None).is_err());
+    assert!(api.posted().is_empty());
+    // The keys did not go.
+    let api = FakeMac::new();
+    *api.take.lock().unwrap() = Some(0);
+    assert!(selecting(&api, refused_field(), Some((0, 0))).replace_selection(&selected(), "привет", None).is_err());
+    // Something else was copied meanwhile: that is the person's, and it stays.
+    let api = FakeMac::new();
+    api.board.moved.store(true, Ordering::SeqCst);
+    assert!(selecting(&api, refused_field(), Some((0, 0))).replace_selection(&selected(), "привет", None).is_ok());
+    assert!(api.board.contents.lock().unwrap().is_none());
+    // It could not be put back.
+    let api = FakeMac::new();
+    api.board.no_write.store(true, Ordering::SeqCst);
+    assert!(selecting(&api, refused_field(), Some((0, 0))).replace_selection(&selected(), "привет", None).is_err());
 }

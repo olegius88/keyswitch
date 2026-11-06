@@ -288,6 +288,7 @@ mod tests {
         settable: bool,
         released: Mutex<Vec<usize>>,
         written: Mutex<Vec<String>>,
+        refuses_writes: bool,
     }
 
     impl AccessibilityAPI for &FakeTree {
@@ -312,7 +313,7 @@ mod tests {
         }
         fn set_string_attribute(&self, _element: usize, _name: &str, value: &str) -> bool {
             self.written.lock().unwrap().push(value.to_owned());
-            true
+            !self.refuses_writes
         }
     }
 
@@ -466,6 +467,12 @@ mod tests {
         let access = MacSelectionAccess::new(&tree);
         assert_eq!(access.replace("abc", "xy"), Err(refused(RefusalReason::NotSettable)));
         assert!(tree.written.lock().unwrap().is_empty());
+        // Settable by its own word, and the write refused all the same.
+        let mut refusing = field("abc", (0, 3));
+        refusing.strings.insert(SELECTED_TEXT_ATTRIBUTE.into(), "abc".into());
+        refusing.settable = true;
+        refusing.refuses_writes = true;
+        assert_eq!(MacSelectionAccess::new(&refusing).replace("abc", "xy"), Err(refused(RefusalReason::NotSettable)));
         assert_eq!(access.replace("other", "xy"), Err(refused(RefusalReason::FocusChanged)));
         tree.settable = true;
         *tree.ranges.lock().unwrap() = vec![(0, 3), (0, 2)];

@@ -407,6 +407,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_icon_index_is_cut_only_when_it_is_a_number() {
+        assert_eq!(clean_windows_executable("C:\\\\x\\\\a.exe,0"), "C:\\\\x\\\\a.exe");
+        assert_eq!(clean_windows_executable("C:\\\\x\\\\a.exe,-3"), "C:\\\\x\\\\a.exe");
+        assert_eq!(clean_windows_executable("C:\\\\x\\\\a,b.exe"), "C:\\\\x\\\\a,b.exe");
+    }
+
+    #[test]
     fn an_error_of_the_system_prints_its_own_words() {
         let error: WindowsSystemError = std::io::Error::other("no access").into();
         assert_eq!(error.to_string(), "no access");
@@ -503,6 +510,26 @@ mod tests {
         assert!(registry.autostart.lock().unwrap()["KeySwitch"].contains("--hidden"));
         manager.set_enabled(false, true, false).unwrap();
         assert!(!manager.enabled().unwrap());
+    }
+
+    #[test]
+    fn a_program_registered_under_no_name_goes_by_its_file() {
+        let registry = Arc::new(FakeRegistry::default());
+        registry.apps.lock().unwrap().push((String::new(), "C:\\x\\Tool.exe".to_owned()));
+        let catalog = WindowsApplicationCatalog::new(Some(registry)).unwrap();
+        assert_eq!(catalog.installed().unwrap()[0].name, "tool");
+    }
+
+    #[test]
+    fn an_empty_command_is_no_command() {
+        let registry = Arc::new(FakeRegistry::default());
+        registry.autostart.lock().unwrap().insert(AUTOSTART_VALUE_NAME.to_owned(), String::new());
+        assert!(!manager(&registry, "", true).status().unwrap().target_missing);
+        registry.autostart.lock().unwrap().insert(AUTOSTART_VALUE_NAME.to_owned(), "\"\"".to_owned());
+        assert!(manager(&registry, "", true).status().unwrap().target_missing);
+        // No command given: the program names itself.
+        manager(&registry, "", true).set_enabled(true, false, false).unwrap();
+        assert!(!registry.autostart.lock().unwrap()[AUTOSTART_VALUE_NAME].is_empty());
     }
 
     #[test]
