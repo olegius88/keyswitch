@@ -485,9 +485,16 @@ fn a_long_walk_stops_nowhere() {
                 for character in word.chars() {
                     type_character(&mut session, &mut dice, character, 0);
                 }
-                let boundary = *dice.of(&[" ", " ", " ", ",", ".", "'", "-"]);
-                for character in boundary.chars() {
-                    type_character(&mut session, &mut dice, character, 0);
+                if dice.one_in(5) {
+                    // Enter or Tab held back for its correction: the window has not had it yet.
+                    let name = *dice.of(&["Return", "Tab", "KP_Enter", "ISO_Left_Tab"]);
+                    let group = session.backend.group();
+                    session.handle(KeyEvent { pressed: true, key_name: name.to_owned(), characters: vec![String::new(), String::new()], deferred: true, group, ..KeyEvent::default() });
+                } else {
+                    let boundary = *dice.of(&[" ", " ", " ", ",", ".", "'", "-"]);
+                    for character in boundary.chars() {
+                        type_character(&mut session, &mut dice, character, 0);
+                    }
                 }
             }
             let (text, caret) = (session.backend.text(), session.backend.caret());
