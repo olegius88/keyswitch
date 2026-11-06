@@ -241,9 +241,22 @@ fn write_standard(error: bool, text: &str) {
 mod tests {
     use super::*;
 
+    /// It installs the program's logging, which goes once per process: it runs in a process of its own.
     #[test]
     fn the_diagnostic_mode_says_what_it_found_and_ends() {
-        assert!(main(&["--diagnose".to_owned()]) <= 1);
+        const CHILD: &str = "KS_TEST_DIAGNOSE_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert!(main(&["--diagnose".to_owned()]) <= 1);
+            return;
+        }
+        let name = "windows_app::tests::the_diagnostic_mode_says_what_it_found_and_ends";
+        let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+            .args(["--exact", name])
+            .env(CHILD, "1")
+            .env("KEYSWITCH_DATA_DIR", std::env::temp_dir().join(format!("ks-diagnose-{}", std::process::id())))
+            .status()
+            .expect("started");
+        assert!(status.success());
         assert!(matches!(parse(&["--"]), Parsed::Exit { code: 2, .. }));
     }
 
