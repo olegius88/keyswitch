@@ -404,10 +404,12 @@ pub struct Session {
 
 impl Session {
     fn settled(&mut self, result: EngineResult<()>) {
-        match result {
-            Ok(()) => {}
-            Err(error) if self.recovers => self.core.recover_from_error(&error),
-            Err(error) => panic!("the engine failed in a replay: {error:?}"),
+        if self.recovers {
+            if let Err(error) = result {
+                self.core.recover_from_error(&error);
+            }
+        } else {
+            result.expect("the engine does not fail in a replay");
         }
     }
 

@@ -207,7 +207,7 @@ fn replacing_a_rule() {
     let store = LearningStore::new(Some(directory.join("rules.json")), None).expect("the store");
     let old = store.add_rule(rule("word", 0, 1)).expect("added");
     let new = store.replace_rule(&old, rule("other", 0, 1)).expect("replaced");
-    assert_eq!(store.rules(), [new.clone()]);
+    assert_eq!(store.rules(), std::slice::from_ref(&new));
     let refused = store.replace_rule(&new, rule("", 0, 1));
     assert!(matches!(refused, Err(LearningError::Invalid(_))), "{refused:?}");
     assert_eq!(store.rules(), [new]);
