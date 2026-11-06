@@ -812,3 +812,109 @@ fn without_a_reader_the_selection_is_unsupported() {
     let backend = opened(&fake);
     assert!(matches!(backend.read_selection("app", 5), Err(SelectionError::Refused(_))));
 }
+
+// ---------------------------------------------------------------- a long walk
+
+/// A small generator with a fixed start: the walk is the same on every run.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, limit: usize) -> usize {
+        (self.next() % limit.to::<u64>()).to::<usize>()
+    }
+    fn of<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+    fn one_in(&mut self, odds: usize) -> bool {
+        self.below(odds) == 0
+    }
+}
+
+const WALK_KEYS: [u8; 9] = [A, COMMA, SPACE, BACKSPACE, SHIFT_L, LEFT, RETURN, TAB, 200];
+
+fn walk_stroke(dice: &mut Dice) -> KeyEvent {
+    let code = *dice.of(&WALK_KEYS);
+    key(code, *dice.of(&["a", "comma", "space", "Return", "ISO_Left_Tab"]), *dice.of(&["a", "A", ",", " ", ""]), *dice.of(&[0, 0, 1, 1, -1, 5]), *dice.of(&[0, 0, SHIFT, LOCK_MASK]))
+}
+
+#[test]
+fn a_long_walk_through_the_backend_stops_nowhere() {
+    for seed in 1..=300_u64 {
+        let mut dice = Dice(0x9e37_79b9_7f4a_7c15 ^ seed.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+        let fake = Fake::new();
+        let backend = opened(&fake);
+        let api = backend.shared.api().expect("open");
+        for _ in 0..60 {
+            let code = *dice.of(&WALK_KEYS);
+            match dice.below(24) {
+                0..=7 => {
+                    let state = *dice.of(&[0_u16, 0, 1, 2, 0x2000, 0x2001, 0x4000]);
+                    backend.shared.handle_record_data(&*api, RecordChunk { category: 0, client_swapped: false, data: payload(2, code, state, 1) });
+                    backend.shared.handle_record_data(&*api, RecordChunk { category: 0, client_swapped: false, data: payload(3, code, state, 2) });
+                }
+                8 => backend.shared.handle_record_data(&*api, RecordChunk { category: 0, client_swapped: false, data: payload(*dice.of(&[4_u8, 5, 6, 33]), code, 0, 3) }),
+                9 => backend.shared.handle_record_data(&*api, RecordChunk { category: 0, client_swapped: false, data: vec![2, 3] }),
+                10..=12 => {
+                    let strokes: Vec<KeyEvent> = (0..dice.below(4)).map(|_| walk_stroke(&mut dice)).collect();
+                    let trailing: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let late: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(&mut dice)).collect();
+                    let boundary = dice.one_in(2).then(|| walk_stroke(&mut dice));
+                    let _ = backend.inject_correction(Injection {
+                        strokes: &strokes,
+                        target_group: *dice.of(&[0, 1, -1, 7]),
+                        boundary: boundary.as_ref(),
+                        source_group: *dice.of(&[None, None, Some(0), Some(1), Some(-1), Some(9)]),
+                        late: &late,
+                        trailing: &trailing,
+                        kept_tail: *dice.of(&[0, 0, 1, 9]),
+                        erased: *dice.of(&[None, None, Some(1)]),
+                    });
+                }
+                13 => fake.with(|state| {
+                    state.fail_lock = *dice.of(&[None, None, Some(0), Some(1)]);
+                    state.fail_fake = *dice.of(&[None, None, Some(0), Some(1)]);
+                    state.locks_seen = 0;
+                    state.fakes_seen = 0;
+                }),
+                14 => fake.with(|state| state.focus = *dice.of(&[None, Some(0), Some(1), Some(5)])),
+                15 => fake.with(|state| {
+                    state.parents.insert(5, *dice.of(&[0, 5, 6]));
+                    state.parents.insert(6, 0);
+                    state.pids.insert(6, *dice.of(&[0, 42, std::process::id()]));
+                    state.classes.insert(6, ("instance".to_owned(), "Class".to_owned()));
+                }),
+                16 => fake.with(|state| {
+                    state.group = *dice.of(&[0, 1, 2]);
+                    state.locked_mods = *dice.of(&[0, 2]);
+                }),
+                17 => {
+                    let _ = backend.switch_group(*dice.of(&[0, 1, -1, 9]));
+                }
+                18 => {
+                    let _ = backend.position_window(*dice.of(&[0, 5, 6]), 1, 2);
+                    let _ = backend.window_process_id(*dice.of(&[0, 5, 6]));
+                    let _ = (backend.process_for_window())(5);
+                }
+                19 => {
+                    let _ = backend.character_for_keycode(code, *dice.of(&[0, 1, 5]), *dice.of(&[0, 1, 2]));
+                }
+                20 => backend.hold_input(),
+                21 => {
+                    let _ = backend.release_input();
+                    let _ = backend.complete_action(dice.one_in(2));
+                }
+                _ => {
+                    let _ = (backend.current_group(), backend.active_application(), backend.focused_window(), backend.probe(), backend.input_anchor());
+                }
+            }
+        }
+        backend.close_backend();
+        assert!(backend.shared.api().is_none());
+    }
+}
