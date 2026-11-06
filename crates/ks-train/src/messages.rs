@@ -45,7 +45,6 @@ const CHOICE_HEX_DIGITS: usize = 8;
 const XZ_PRESET: u32 = 9;
 const SPLITS: [&str; 3] = ["train", "dev", "test"];
 const DEVCHAT_NAMESPACE: &str = "keyswitch:devchat-2026-10-15:question";
-const DEVCHAT_DUMP_SHA256: &str = "e3f6eda2b3df7de1d3cc4a45ce2e69bb1e439b7736cd8d81e911129bd512dab9";
 const DEVCHAT_CODE_SIGNS: &str = "\\{}|^$";
 const DEVCHAT_PROSE_SIGNS: &str = ".,!?():-\"'";
 const DEVCHAT_SIGN_RUN: usize = 3;
@@ -983,7 +982,8 @@ fn content_checksum(path: &Path) -> Result<String, String> {
 
 /// `build_devchat_messages`: messages of fresh comments, by the question they discuss; a members file beside each split.
 pub fn build_devchat(root: &Path, comments: &Path, dump: &Path, out: &Path, earlier_files: &[PathBuf]) -> Result<Value, String> {
-    if checksum(dump)? != DEVCHAT_DUMP_SHA256 {
+    let pinned = read_json(&root.join("model/context_v3/devchat-test-batches.json"))?["dump_sha256"].as_str().unwrap_or("").to_owned();
+    if checksum(dump)? != pinned {
         return Err("the 2023 dump differs from the pinned one".to_owned());
     }
     let mut known: HashSet<String> = HashSet::new();
@@ -1076,7 +1076,7 @@ Value::Object(_)) => value.as_i64().ok_or("a post")?,
         paths.iter().map(|path| Ok((path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), Value::String(hash(path)?)))).collect()
     };
     let receipt = json!({"namespace": DEVCHAT_NAMESPACE, "split": "by question", "counts": counts, "content_sha256": hashes(&written, &content_checksum)?, "comments_sha256": hashes(&files, &checksum)?,
-        "posts_sha256": checksum(&posts)?, "dump_sha256": DEVCHAT_DUMP_SHA256, "builder_sha256": checksum(&root.join("crates/ks-train/src/messages.rs"))?, "earlier_members_sha256": hashes(earlier_files, &content_checksum)?});
+        "posts_sha256": checksum(&posts)?, "dump_sha256": pinned, "builder_sha256": checksum(&root.join("crates/ks-train/src/messages.rs"))?, "earlier_members_sha256": hashes(earlier_files, &content_checksum)?});
     std::fs::write(out.join("receipt.json"), json_dumps(&receipt, &JsonOptions { indent: Some(Indent::Spaces(1)), ..JsonOptions::default() }) + "\n").map_err(|error| error.to_string())?;
     Ok(json!(counts))
 }
