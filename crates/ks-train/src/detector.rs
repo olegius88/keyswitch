@@ -143,7 +143,8 @@ fn table_order(model: &LanguageModel, locale: &str) -> Vec<(String, i64)> {
 }
 
 /// `hunspell_words`: a deterministic broad-word sample from the active dictionary.
-fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
+#[must_use]
+pub fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
     let dictionary = Path::new(source);
     let Ok(affix) = std::fs::read(dictionary.with_extension("aff")) else { return Vec::new() };
     let header = String::from_utf8_lossy(&affix);

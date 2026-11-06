@@ -26,7 +26,7 @@ fn digest_of(table: &Map<String, Value>, field: &str) -> Option<String> {
 }
 
 /// The accepted boundary model: the candidate its report accepted is the one installed, and it restores the regressions.
-fn boundary(root: &Path) -> Result<Value, String> {
+pub fn boundary(root: &Path) -> Result<Value, String> {
     let directory = root.join("model/boundary_v2");
     let candidate = checksum(&directory.join("candidate.json"))?;
     let (seal, report) = (read_json(&directory.join("seal.json"))?, read_json(&directory.join("report.json"))?);
@@ -45,7 +45,7 @@ fn boundary(root: &Path) -> Result<Value, String> {
 
 /// The orthotactic model: its corpus, dictionary verdict, word lists and independent test still describe the installed
 /// candidate. Pins of the tools that wrote it are not in this tree; pins of data are compared.
-fn ortho(root: &Path) -> Result<Value, String> {
+pub fn ortho(root: &Path) -> Result<Value, String> {
     let directory = root.join(ORTHO_DIRECTORY);
     let tokens = checksum(&directory.join("tokens.jsonl.gz"))?;
     let receipt = object_with_schema(&directory.join("corpus-receipt.json"), ORTHO_EVIDENCE_SCHEMA)?;
