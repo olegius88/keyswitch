@@ -7,7 +7,7 @@ use ks_config::history::HistoryStore;
 use ks_config::logsetup;
 use ks_context::input_context::{Clock, InputContext};
 use ks_context::{ContextPolicy, VersionedPrefixModel};
-use ks_engine::engine::{EngineCore, EngineParts};
+use ks_engine::engine::{EngineCore, EngineParts, EngineResult};
 use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::detector::ProtectedTokens;
 use ks_lang::early_switch::PrefixIndex;
@@ -79,6 +79,7 @@ struct EditorState {
     delivered: Option<String>,
     corrections: Vec<Correction>,
     serial: usize,
+    failing: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -103,7 +104,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0 }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -138,6 +139,18 @@ impl Backend {
 
     pub fn group(&self) -> i32 {
         self.lock().group
+    }
+
+    /// Another window, in the same program or another.
+    pub fn focus(&self, window: i64, application: &str) {
+        let mut state = self.lock();
+        state.window = window;
+        application.clone_into(&mut state.application);
+    }
+
+    /// The next corrections and layout switches fail, as when a window closes under them.
+    pub fn set_failing(&self, failing: bool) {
+        self.lock().failing = failing;
     }
 
     pub fn set_group(&self, group: i32) {
@@ -238,7 +251,11 @@ impl InputBackend for Backend {
     }
 
     fn switch_group(&self, group: i32) -> Result<(), BackendError> {
-        self.lock().group = group;
+        let mut state = self.lock();
+        if state.failing {
+            return Err(BackendError::Failed("the window is gone".to_owned()));
+        }
+        state.group = group;
         Ok(())
     }
 
@@ -256,6 +273,9 @@ impl InputBackend for Backend {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError> {
         let mut state = self.lock();
+        if state.failing {
+            return Err(BackendError::Failed("the window is gone".to_owned()));
+        }
         let (initial_text, initial_group, initial_caret): (String, i32, usize) = (state.text.iter().collect(), state.group, state.caret);
         let word = injection.strokes;
         let count = word.len() + injection.trailing.len() + usize::from(injection.boundary.is_some()) + injection.late.len();
@@ -378,14 +398,27 @@ pub struct Session {
     pub core: EngineCore,
     pub backend: Arc<Backend>,
     clock: FakeClock,
+    /// A failure of the engine goes to its recovery, as in the running program; a replay stops on one.
+    pub recovers: bool,
 }
 
 impl Session {
+    fn settled(&mut self, result: EngineResult<()>) {
+        match result {
+            Ok(()) => {}
+            Err(error) if self.recovers => self.core.recover_from_error(&error),
+            Err(error) => panic!("the engine failed in a replay: {error:?}"),
+        }
+    }
+
     fn timers(&mut self) {
-        self.core.expire_deferred_action().expect("a timer of the harness");
+        let result = self.core.expire_deferred_action();
+        self.settled(result);
         self.core.expire_manual_correction();
-        self.core.poll_current_group().expect("a timer of the harness");
-        self.core.maybe_correct_after_pause(None).expect("a timer of the harness");
+        let result = self.core.poll_current_group();
+        self.settled(result);
+        let result = self.core.maybe_correct_after_pause(None);
+        self.settled(result);
         self.core.expire_learning_prompt(None);
     }
 
@@ -394,13 +427,20 @@ impl Session {
         self.timers();
     }
 
+    /// Time passes and the worker's timers have not run yet: a key may come before them.
+    pub fn advance(&self, seconds: f64) {
+        self.clock.advance(seconds);
+    }
+
     pub fn select_layout(&mut self, group: i32) {
         self.backend.set_group(group);
-        self.core.poll_current_group().expect("the layout of the editor");
+        let result = self.core.poll_current_group();
+        self.settled(result);
     }
 
     pub fn handle(&mut self, event: KeyEvent) {
-        self.core.handle_inner(Arc::new(event)).expect("a key the engine handles");
+        let result = self.core.handle_inner(Arc::new(event));
+        self.settled(result);
     }
 
     fn stamp(&self) -> i64 {
@@ -538,7 +578,7 @@ impl Bundle {
         })
         .expect("an engine over the shared models");
         core.executed = Some(Vec::new());
-        Session { core, backend, clock }
+        Session { core, backend, clock, recovers: false }
     }
 
     /// `field.close()`: the policy goes on to the next engine.
