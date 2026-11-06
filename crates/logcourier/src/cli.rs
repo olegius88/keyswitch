@@ -188,14 +188,14 @@ fn gui(arguments: &[String]) -> Result<i32> {
         let output = parse_output(&arguments[1..]);
         return crate::gui_win::smoke_test(output.as_deref());
     }
-    open_window(arguments)
+    Ok(open_window(arguments))
 }
 
 /// The window, until the person closes it.
 #[cfg(windows)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn open_window(arguments: &[String]) -> Result<i32> {
-    Ok(crate::gui_win::run(arguments.iter().any(|argument| argument == "--minimized")))
+fn open_window(arguments: &[String]) -> i32 {
+    crate::gui_win::run(arguments.iter().any(|argument| argument == "--minimized"))
 }
 
 #[cfg(target_os = "linux")]

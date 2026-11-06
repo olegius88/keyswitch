@@ -272,6 +272,7 @@ mod tests {
         let frequencies = WordTable::from_pairs([("hello", 5), ("help", 5)]);
         let model = LanguageModel::new("en_US", frequencies, "test", WordTable::default(), LanguageModel::disabled_speller());
         let starts = word_starts(&model);
-        assert_eq!(starts.is_empty(), starts.len() == 0);
+        assert_eq!(starts.is_empty(), starts.items().is_empty());
+        assert!(starts.len() < 100);
     }
 }

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ks_lang::detector::{DecideOptions, LanguageDetector, LanguageScorer, ProtectedTokens};
 use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, early_switch_decision};
-use ks_lang::language_model::{LanguageModel, WordScore};
+use ks_lang::language_model::WordScore;
 use ks_lang::lexicon_supplement::supplement_words;
 use ks_lang::ortho_model::OrthoModel;
 use ks_lang::short_words::trusted_short_word_decision;
