@@ -23,15 +23,15 @@ fn gz(text: &str) -> Vec<u8> {
 fn sentence(words: &[&str], seed: usize) -> String {
     let chosen: Vec<&str> = (0..6).map(|place| words[(seed * 7 + place * 11) % words.len()]).collect();
     let mut text = chosen.join(" ");
-    if seed % 3 == 0 {
+    if seed.is_multiple_of(3) {
         let mut letters = text.chars();
         let first = letters.next().expect("a letter");
         text = first.to_uppercase().chain(letters).collect();
     }
-    if seed % 5 == 0 {
+    if seed.is_multiple_of(5) {
         text.push('.');
     }
-    if seed % 7 == 0 {
+    if seed.is_multiple_of(7) {
         text.push_str(" Новое Предложение КАПС Тутсмесь mix-слово 42");
     }
     text

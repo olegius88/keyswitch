@@ -349,7 +349,7 @@ fn the_chat_pools_are_made_from_fresh_comments() {
     for reason in ["dropped:code", "dropped:dump", "dropped:earlier", "dropped:lookalike"] {
         assert!(counts.get(reason).is_some(), "{reason}: {counts}");
     }
-    assert!(serde_json::from_slice::<Value>(&std::fs::read(out.join("receipt.json")).expect("a receipt")).expect("json")["dump_sha256"] == json!(ks_train::corpus::checksum(&dump).expect("a checksum")));
+    assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(out.join("receipt.json")).expect("a receipt")).expect("json")["dump_sha256"], json!(ks_train::corpus::checksum(&dump).expect("a checksum")));
     // Another dump, a post that is no post.
     assert!(!run(&sources.so).status.success());
     gz_write(&comments.join("comments-2.json.gz"), serde_json::to_vec(&json!([{"post_id": "no", "body": "текст"}])).expect("json").as_slice());

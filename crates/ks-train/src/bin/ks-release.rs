@@ -43,6 +43,8 @@ struct Options {
     field_root: Option<PathBuf>,
     field_released: Option<PathBuf>,
     message_file: Option<PathBuf>,
+    poll_seconds: u64,
+    timeout_seconds: u64,
 }
 
 fn fail(message: impl Into<String>) -> String {
@@ -253,7 +255,7 @@ fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
 }
 
 /// The workflow run of this tag, by polling: `completed` with `success`, or the reason it is not.
-fn wait_for_workflow(root: &Path, tag: &str) -> Result<(), String> {
+fn wait_for_workflow(root: &Path, tag: &str, options: &Options) -> Result<(), String> {
     let started = std::time::Instant::now();
     loop {
         let listed = output(root, "gh", &["run", "list", "--workflow", WORKFLOW, "--branch", tag, "--limit", "1", "--json", "status,conclusion,url"])?;
@@ -267,10 +269,10 @@ fn wait_for_workflow(root: &Path, tag: &str) -> Result<(), String> {
             }
             return Err(format!("the release workflow ended with {}: {}", run["conclusion"], run["url"]));
         }
-        if started.elapsed().as_secs() > CI_TIMEOUT_SECONDS {
+        if started.elapsed().as_secs() >= options.timeout_seconds {
             return Err(format!("the release workflow of {tag} did not finish in time"));
         }
-        std::thread::sleep(std::time::Duration::from_secs(CI_POLL_SECONDS));
+        std::thread::sleep(std::time::Duration::from_secs(options.poll_seconds));
     }
 }
 
@@ -326,7 +328,7 @@ fn release(root: &Path, options: &Options) -> Result<(), String> {
         return Ok(());
     }
     println!("[7] waiting for the release workflow");
-    wait_for_workflow(root, &tag)?;
+    wait_for_workflow(root, &tag, options)?;
     println!("[8] verifying the published release");
     let url = verify_published(root, options, &tag)?;
     println!("\nKeySwitch {tag} is released: {url}");
@@ -359,6 +361,8 @@ fn main() {
         field_root: value("--field-root").map(PathBuf::from),
         field_released: value("--field-released").map(PathBuf::from),
         message_file: value("--message-file").map(PathBuf::from),
+        poll_seconds: value("--poll-seconds").and_then(|seconds| seconds.parse().ok()).unwrap_or(CI_POLL_SECONDS),
+        timeout_seconds: value("--timeout-seconds").and_then(|seconds| seconds.parse().ok()).unwrap_or(CI_TIMEOUT_SECONDS),
     };
     let root = match output(Path::new("."), "git", &["rev-parse", "--show-toplevel"]) {
         Ok(root) => PathBuf::from(root),

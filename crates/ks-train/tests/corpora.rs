@@ -155,7 +155,7 @@ fn arch_source(folder: &Path) {
     let mut databases = json!({});
     for repository in ["core", "extra"] {
         let mut files = Vec::new();
-        for (number, name) in commands(&format!("{}a", &repository[..1]), 20).iter().enumerate() {
+        for (number, name) in commands(&repository.replace(['o', 'r', 'e', 'x', 't'], "a"), 20).iter().enumerate() {
             let directory = format!("pkg{number}-1.0-1");
             files.push((format!("{directory}/desc"), format!("%FILENAME%\nx\n\n%NAME%\npkg{number}\n").into_bytes()));
             files.push((format!("{directory}/files"), format!("%FILES%\nusr/\nusr/bin/\nusr/bin/{name}\nusr/share/doc\n").into_bytes()));

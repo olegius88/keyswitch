@@ -235,7 +235,7 @@ fn chat(name: &str, test_count: u64) -> Chat {
     let (ledger, sequences) = (folder.join("ledger"), folder.join("sequences"));
     std::fs::create_dir_all(&ledger).expect("a folder");
     std::fs::create_dir_all(&sequences).expect("a folder");
-    Chat { tree, directory, ledger, sequences, candidate, baseline, folder }
+    Chat { tree, directory, folder, ledger, sequences, candidate, baseline }
 }
 
 fn run_chat(chat: &Chat, split: &str, output: &Path, candidate: &Path, baseline: &Path) -> Result<Value, String> {

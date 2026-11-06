@@ -330,6 +330,157 @@ fn debian_package() {
     assert!(!answer.status.success());
 }
 
+/// A repository of the shape a release reads, with a bare remote, and the programs around a release as stubs.
+struct Project {
+    root: PathBuf,
+    path: std::ffi::OsString,
+    gh_runs: PathBuf,
+    gh_release: PathBuf,
+}
+
+fn in_git(root: &Path, arguments: &[&str]) -> String {
+    let done = Command::new("git").current_dir(root).args(arguments).output().unwrap();
+    assert!(done.status.success(), "git {arguments:?}: {}", said(&done));
+    String::from_utf8_lossy(&done.stdout).trim().to_owned()
+}
+
+fn notes(version: &str) -> String {
+    let files = [
+        format!("KeySwitch-Setup-{version}-x64.exe"),
+        format!("KeySwitch-Setup-{version}-arm64.exe"),
+        format!("KeySwitch-Setup-{version}-x86.exe"),
+        format!("KeySwitch-{version}-windows-x64.zip"),
+        format!("KeySwitch-{version}-windows-arm64.zip"),
+        format!("KeySwitch-{version}-windows-x86.zip"),
+        format!("keyswitch_{version}_amd64.deb"),
+        format!("KeySwitch-{version}-macos-arm64.zip"),
+        format!("KeySwitch-{version}-macos-x86_64.zip"),
+    ];
+    format!("# KeySwitch {version}\n\nThe files: {}.\n", files.join(", "))
+}
+
+fn project(name: &str) -> Project {
+    let folder = scratch(name);
+    let remote = folder.join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    in_git(&remote, &["init", "--bare", "-q", "-b", "main"]);
+    let root = folder.join("tree");
+    std::fs::create_dir_all(root.join("packaging")).unwrap();
+    std::fs::create_dir_all(root.join("target/train")).unwrap();
+    in_git(&root, &["init", "-q", "-b", "main"]);
+    in_git(&root, &["config", "user.email", "test@example.org"]);
+    in_git(&root, &["config", "user.name", "Test"]);
+    in_git(&root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    std::fs::write(root.join("Cargo.toml"), "[workspace.package]\nversion = \"1.2.3\"\n").unwrap();
+    std::fs::write(root.join("packaging/keyswitch.1"), ".TH KEYSWITCH 1 \"2026\" \"KeySwitch 1.2.3\"\n").unwrap();
+    std::fs::write(root.join("README.md"), "[скачать](https://example.org/releases/tag/v1.2.3)\n").unwrap();
+    std::fs::write(root.join("README.en.md"), "[download](https://example.org/releases/tag/v1.2.3)\n").unwrap();
+    std::fs::write(root.join("CHANGELOG.md"), "# Changes\n\n## Unreleased\n\n- a change\n\n## 1.2.3 — 2026-01-01\n\n- old\n").unwrap();
+    std::fs::write(root.join("RELEASE_NOTES.md"), notes("1.3.0")).unwrap();
+    std::fs::write(root.join(".gitignore"), "target\n").unwrap();
+    in_git(&root, &["add", "-A"]);
+    in_git(&root, &["commit", "-q", "-m", "start"]);
+    in_git(&root, &["push", "-q", "origin", "main"]);
+    let bin = folder.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let trainer_stub = root.join("target/train/ks-train");
+    executable(&trainer_stub, "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
+    executable(&bin.join("cargo"), "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_CARGO\" ]\n");
+    executable(&bin.join("dbus-run-session"), "#!/bin/sh\nshift\nexec \"$@\"\n");
+    executable(&bin.join("bash"), "#!/bin/sh\nexit 0\n");
+    executable(&bin.join("dpkg"), "#!/bin/sh\necho amd64\n");
+    let (gh_runs, gh_release) = (folder.join("runs.jsonl"), folder.join("release.json"));
+    executable(&bin.join("gh"), &format!("#!/bin/sh\nif [ \"$1\" = run ]; then\n  head -n 1 {runs}\n  sed -i 1d {runs}\nelse\n  cat {release}\nfi\n", runs = gh_runs.display(), release = gh_release.display()));
+    let mut path = bin.into_os_string();
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap());
+    Project { root, path, gh_runs, gh_release }
+}
+
+impl Project {
+    fn release(&self, arguments: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&self.root).args(arguments).env("PATH", &self.path).output().unwrap()
+    }
+}
+
+fn the_release_command() {
+    let refused = |output: &Output, words: &str| assert!(!output.status.success() && said(output).contains(words), "{words}: {}", said(output));
+    let release = Command::new(env!("CARGO_BIN_EXE_ks-release"));
+    let mut bare = release;
+    refused(&bare.output().unwrap(), "usage");
+    let outside = scratch("no-git");
+    refused(&Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&outside).args(["--version", "1.3.0"]).env("GIT_CEILING_DIRECTORIES", outside.parent().unwrap()).output().unwrap(), "git");
+    // A dry run writes nothing.
+    let tree = project("release-dry");
+    let dry = tree.release(&["--version", "1.3.0", "--dry-run"]);
+    assert!(dry.status.success() && said(&dry).contains("dry run"), "{}", said(&dry));
+    assert_eq!(in_git(&tree.root, &["status", "--porcelain"]), "");
+    refused(&tree.release(&["--version", "1.3.0", "--candidate", "many"]), "takes a number");
+    refused(&tree.release(&["--version", "1.3.0", "--branch", "other", "--dry-run"]), "not on other");
+    refused(&tree.release(&["--version", "1.3"]), "no version");
+    refused(&tree.release(&["--version", "1.4.0", "--skip-checks", "--skip-ci"]), "notes");
+    // Committed, tagged, pushed; then nothing left to do but to say so.
+    let tree = project("release-push");
+    let done = tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci"]);
+    assert!(done.status.success() && said(&done).contains("pushed"), "{}", said(&done));
+    assert!(in_git(&tree.root, &["log", "-1", "--format=%s"]).contains("Release KeySwitch 1.3.0"));
+    assert_eq!(in_git(&tree.root, &["tag", "--list", "v1.3.0"]), "v1.3.0");
+    let again = tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci"]);
+    assert!(again.status.success(), "{}", said(&again));
+    // Published, and the tree has moved on.
+    std::fs::write(tree.root.join("new"), b"").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci"]), "already published");
+    // A message of its own, a candidate's own tag.
+    let tree = project("release-message");
+    let message = tree.root.parent().unwrap().join("message.txt");
+    std::fs::write(&message, "Its own words\n").unwrap();
+    let done = tree.release(&["--version", "1.3.0", "--candidate", "1", "--skip-checks", "--skip-ci", "--message-file", message.to_str().unwrap()]);
+    assert!(done.status.success(), "{}", said(&done));
+    assert_eq!(in_git(&tree.root, &["log", "-1", "--format=%s"]), "Its own words");
+    assert_eq!(in_git(&tree.root, &["tag", "--list", "v1.3.0-rc1"]), "v1.3.0-rc1");
+    let tree = project("release-gone-message");
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci", "--message-file", "/nonexistent"]), "/nonexistent");
+    // The whole way: the checks, the workflow polled until it ends, the assets.
+    let names: Vec<Value> = notes("1.3.0").split(": ").nth(1).unwrap().trim_end().trim_end_matches('.').split(", ").map(|name| json!({"name": name})).collect();
+    let tree = project("release-whole");
+    let whole_arguments = ["--version", "1.3.0", "--field-root", ".", "--field-released", ".", "--poll-seconds", "0", "--timeout-seconds", "60"];
+    std::fs::write(&tree.gh_runs, "[]\n[{\"status\": \"in_progress\"}]\n[{\"status\": \"completed\", \"conclusion\": \"success\", \"url\": \"https://example.org/run\"}]\n").unwrap();
+    std::fs::write(&tree.gh_release, json!({"url": "https://example.org/release", "assets": names}).to_string()).unwrap();
+    let whole = tree.release(&whole_arguments);
+    assert!(whole.status.success() && said(&whole).contains("is released"), "{}", said(&whole));
+    // Each way the workflow or the release can disappoint.
+    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"failure\", \"url\": \"https://example.org/run\"}]\n").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "workflow ended with");
+    std::fs::write(&tree.gh_runs, "[{\"status\": \"queued\"}]\n[{\"status\": \"queued\"}]\n").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "did not finish in time");
+    std::fs::write(&tree.gh_runs, "not json\n").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "");
+    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"success\"}]\n").unwrap();
+    std::fs::write(&tree.gh_release, json!({"url": "https://example.org/release", "assets": []}).to_string()).unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "is missing");
+    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"success\"}]\n").unwrap();
+    std::fs::write(&tree.gh_release, "not json").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "");
+    // Each check that fails stops it; the owner's typing is not skipped.
+    let tree = project("release-checks");
+    refused(&tree.release(&["--version", "1.3.0"]), "a release does not skip them");
+    let failing = |variable: &str, value: &str, words: &str| {
+        let tree = project(&format!("release-check-{value}"));
+        let answer = Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&tree.root).args(whole_arguments).env("PATH", &tree.path).env(variable, value).output().unwrap();
+        refused(&answer, words);
+    };
+    failing("KS_FAIL_CARGO", "test", "the tests of the engine");
+    failing("KS_FAIL_CARGO", "build", "the trainer failed");
+    failing("KS_FAIL_CARGO", "run", "the owner's typing");
+    failing("KS_FAIL_STEP", "gates", "the evidence");
+    failing("KS_FAIL_STEP", "retired", "rejected or retired");
+    failing("KS_FAIL_STEP", "engine", "the boundary regressions");
+    // Nothing to describe.
+    let tree = project("release-no-entries");
+    std::fs::write(tree.root.join("CHANGELOG.md"), "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n").unwrap();
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci"]), "nothing to describe");
+}
+
 fn answer_as_the_program(arguments: &[String]) -> bool {
     match arguments.first().map(String::as_str) {
         Some("--version") => {
@@ -368,6 +519,7 @@ fn main() {
         return;
     }
     let _ = tree();
+    the_release_command();
     apt_repository();
     debian_package();
     println!("the release tools answer as they should");

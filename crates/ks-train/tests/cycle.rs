@@ -775,7 +775,7 @@ fn a_candidate_is_installed_after_every_check_and_only_then() {
     let (held, said) = told(&mut promote(&run));
     assert!(held && said.contains("installed"), "{said}");
     assert_eq!(checksum(&run.tree.join("resources/models/context_policy_v1.json")).expect("a checksum"), checksum(&FITTED.model).expect("a checksum"));
-    assert!(read(&run.tree.join("model/context_v3/release-receipt.json"))["quality_gates_passed"] == json!(true));
+    assert_eq!(read(&run.tree.join("model/context_v3/release-receipt.json"))["quality_gates_passed"], json!(true));
 }
 
 #[test]

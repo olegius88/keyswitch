@@ -40,7 +40,17 @@ pub(crate) fn refused(output: &Output, words: &str) {
 }
 
 /// The files a cycle writes or reads as its own; everything else of a small tree is the repository's, through links.
-const OWN_FILES: [&str; 19] = [
+const OWN_FILES: [&str; 29] = [
+    "resources/models/boundary-v2.json",
+    "resources/models/ortho_v1.json",
+    "model/boundary_v1/engine-regression.json",
+    "model/prefix_v1/engine-report.json",
+    "model/archive-sha256.json",
+    "packaging/third-party-licenses/linux.txt",
+    "packaging/third-party-licenses/macos.txt",
+    "packaging/third-party-licenses/windows.txt",
+    "model/prefix_v1/corpus.json",
+    "model/prefix_v1/config.json",
     "packaging/keyswitch-archive-keyring.asc",
     "Cargo.toml",
     "packaging/debian/keyswitch.sources",
