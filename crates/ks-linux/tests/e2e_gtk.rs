@@ -22,6 +22,8 @@ use ks_updates::{UpdatePhase, UpdateSnapshot};
 use serde_json::json;
 use ks_linux::gtk_app;
 
+const ROWS_TRIED: i32 = 30;
+
 /// What the walk did last, for the watchdog to say.
 static LAST: Mutex<String> = Mutex::new(String::new());
 
@@ -97,11 +99,12 @@ fn change(widget: &gtk::Widget) {
             button.emit_clicked();
         }
     } else if let Some(list) = widget.downcast_ref::<gtk::ListBox>() {
-        let mut index = 0;
-        while let Some(row) = list.row_at_index(index) {
-            list.select_row(Some(&row));
-            row.emit_activate();
-            index += 1;
+        // A row can add a row (a program chosen from the catalog goes on the list): only the first ones are tried.
+        for index in 0..ROWS_TRIED {
+            if let Some(row) = list.row_at_index(index) {
+                list.select_row(Some(&row));
+                row.emit_activate();
+            }
         }
     }
 }
