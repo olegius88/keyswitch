@@ -111,9 +111,13 @@ fn changelog_sections(text: &str) -> Vec<(String, Vec<String>)> {
     sections
 }
 
-/// Today in the UTC calendar: days since the epoch to a date (Howard Hinnant's `civil_from_days`).
+/// Today in the UTC calendar.
 fn today() -> String {
-    let seconds = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>();
+    date_of((std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>())
+}
+
+/// The UTC date of a moment, in seconds since the epoch: days since the epoch to a date (Howard Hinnant's `civil_from_days`).
+fn date_of(seconds: i64) -> String {
     let days = seconds / SECONDS_PER_DAY + 719_468;
     let era = days.div_euclid(146_097);
     let of_era = days.rem_euclid(146_097);
@@ -514,6 +518,25 @@ mod tests {
     #[test]
     fn wrapped_lines_are_found() {
         assert_eq!(wrapped_lines("# KeySwitch 1\n\nOne paragraph\ncontinued\n\n- item\n- item\n\n```\nfree\ntext\n```\n"), vec![4]);
+    }
+
+    #[test]
+    fn a_version_with_an_empty_part_is_refused() {
+        let tree = Tree::new("empty-part").with_version_sites();
+        assert!(check_preconditions(&tree.0, &options("1..3", false)).unwrap_err().contains("no version"));
+    }
+
+    #[test]
+    fn a_date_is_that_of_the_utc_calendar_in_every_month() {
+        assert_eq!(date_of(0), "1970-01-01");
+        assert_eq!(date_of(951_782_400), "2000-02-29");
+        assert_eq!(date_of(1_700_000_000), "2023-11-14");
+        assert_eq!(today().len(), "2026-01-01".len());
+    }
+
+    #[test]
+    fn a_numbered_item_starts_a_block_and_a_dotted_word_does_not() {
+        assert_eq!(wrapped_lines("1. one\n2. two\n\nWords\nand. more\n. dotted\n12a. not a number\n"), vec![5, 6, 7]);
     }
 
     #[test]

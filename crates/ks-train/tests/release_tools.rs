@@ -515,12 +515,175 @@ fn answer_as_the_program(arguments: &[String]) -> bool {
 
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
-    if answer_as_the_program(&arguments) {
+    if answer_with_another_model(&arguments) || answer_as_the_program(&arguments) {
         return;
     }
     let _ = tree();
     the_release_command();
     apt_repository();
+    apt_landing_page();
     debian_package();
+    more_of_the_debian_package();
     println!("the release tools answer as they should");
+}
+
+/// A tree of the files a package check reads: the repository's, with the notice of the word lists and the manifest copied.
+fn package_tree(name: &str) -> PathBuf {
+    let root = scratch(name);
+    let linked = PACKED.iter().map(|(known, _)| *known).chain(["packaging/debian/keyswitch.sources", "packaging/keyswitch-archive-keyring.asc"]);
+    for relative in linked {
+        let target = root.join(relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        if relative.ends_with("COPYRIGHT.onboard-data") {
+            std::fs::copy(tree().join(relative), target).unwrap();
+        } else {
+            std::os::unix::fs::symlink(tree().join(relative), target).unwrap();
+        }
+    }
+    std::fs::copy(tree().join("Cargo.toml"), root.join("Cargo.toml")).unwrap();
+    set_version(&root, "9.9.9");
+    root
+}
+
+/// A model container of this manifest and a payload of so many bytes.
+fn container(manifest: &[u8], payload: usize) -> Vec<u8> {
+    let mut bytes = b"KSLM\x04\0\0\0".to_vec();
+    bytes.extend_from_slice(&u32::try_from(manifest.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(&u32::try_from(payload).unwrap().to_le_bytes());
+    bytes.resize(52, 0);
+    bytes.extend_from_slice(manifest);
+    bytes.resize(bytes.len() + payload, 0);
+    bytes
+}
+
+fn more_of_the_debian_package() {
+    let folder = scratch("deb-more");
+    let tree = package_tree("deb-more-tree");
+    let path = stubs(&folder);
+    let package = whole_package(&folder, &tree);
+    let root = folder.join("keyswitch_9.9.9_amd64.deb.root");
+    let check = |path: &std::ffi::OsString, environment: &[(&str, &str)]| deb_check_of(&tree, &package, path, environment);
+    let refused = |words: &str, environment: &[(&str, &str)]| {
+        let answer = check(&path, environment);
+        assert!(!answer.status.success() && said(&answer).contains(words), "{words}: {}", said(&answer));
+    };
+    let passed = |path: &std::ffi::OsString, environment: &[(&str, &str)]| {
+        let answer = check(path, environment);
+        assert!(answer.status.success() && said(&answer).contains("NATIVE_DEB_OK"), "{}", said(&answer));
+    };
+    // A file too short to be a program is not one; a diagnostic that ends with 1 has still reported.
+    std::fs::write(root.join("usr/lib/keyswitch/two"), b"ab").unwrap();
+    passed(&path, &[]);
+    passed(&path, &[("KS_OTHER_MODEL", "status-one")]);
+    // The diagnostic names another model than the one the package carries.
+    refused("did not load the exact", &[("KS_OTHER_MODEL", "unavailable")]);
+    refused("did not load the exact", &[("KS_OTHER_MODEL", "elsewhere")]);
+    refused("did not load the exact", &[("KS_OTHER_MODEL", "another-version")]);
+    // Python in any of its forms.
+    for name in ["left.pyc", "left.pyo"] {
+        let python = root.join("usr/lib/keyswitch").join(name);
+        std::fs::write(&python, b"").unwrap();
+        refused("contains Python", &[]);
+        std::fs::remove_file(&python).unwrap();
+    }
+    // A program whose libraries are not all there, and a linker that cannot tell.
+    let linker = folder.join("linker-bin");
+    std::fs::create_dir_all(&linker).unwrap();
+    executable(&linker.join("ldd"), "#!/bin/sh\n[ -z \"$KS_LDD_FAILS\" ] || exit 1\necho '\tlibmissing.so.1 => not found'\n");
+    let mut with_linker = linker.into_os_string();
+    with_linker.push(":");
+    with_linker.push(&path);
+    let answer = check(&with_linker, &[]);
+    assert!(!answer.status.success() && said(&answer).contains("unresolved shared libraries"), "{}", said(&answer));
+    let answer = check(&with_linker, &[("KS_LDD_FAILS", "1")]);
+    assert!(!answer.status.success() && said(&answer).contains("ldd"), "{}", said(&answer));
+    // A system without `timeout` cannot run the diagnostic at all.
+    let bare = folder.join("bare-bin");
+    std::fs::create_dir_all(&bare).unwrap();
+    for program in ["sed", "cat", "cp"] {
+        let found = std::env::split_paths(&std::env::var_os("PATH").unwrap()).map(|folder| folder.join(program)).find(|candidate| candidate.is_file()).unwrap();
+        std::os::unix::fs::symlink(found, bare.join(program)).unwrap();
+    }
+    executable(&bare.join("ldd"), "#!/bin/sh\necho '\tlinux-vdso.so.1'\n");
+    let mut without_timeout = folder.join("stub-bin").into_os_string();
+    without_timeout.push(":");
+    without_timeout.push(&bare);
+    let answer = check(&without_timeout, &[]);
+    assert!(!answer.status.success() && said(&answer).lines().any(|line| line == "No such file or directory (os error 2)"), "{}", said(&answer));
+    // The notice of the word lists, short of a line in the tree and the package alike.
+    let notice = tree.join("model/intent_v1/sources/COPYRIGHT.onboard-data");
+    let packed_notice = root.join("usr/share/doc/keyswitch/licenses/copyright.onboard-data");
+    let full = std::fs::read_to_string(&notice).unwrap();
+    let short: String = full.lines().filter(|line| *line != "License: GPL-3+").map(|line| format!("{line}\n")).collect();
+    std::fs::write(&notice, &short).unwrap();
+    std::fs::write(&packed_notice, &short).unwrap();
+    refused("notice lost a line: License: GPL-3+", &[]);
+    std::fs::write(&notice, &full).unwrap();
+    std::fs::write(&packed_notice, &full).unwrap();
+    // The packaged key alone changed.
+    let packed_key = root.join("etc/apt/keyrings/keyswitch-archive-keyring.asc");
+    let key = std::fs::read(&packed_key).unwrap();
+    std::fs::write(&packed_key, b"another key").unwrap();
+    refused("differs from", &[]);
+    std::fs::write(&packed_key, &key).unwrap();
+    // Containers whose manifest does not describe their payload.
+    let model = root.join("usr/lib/keyswitch/resources/models/layout_intent_v1.ksm");
+    let real = std::fs::read(&model).unwrap();
+    for (manifest, payload, words) in [
+        (json!({"supported_fingerprint_count": (1 << 20) + 1, "dimension": 1}), 10, "payload shape"),
+        (json!({"dimension": 1}), 10, "payload shape"),
+        (json!({"supported_fingerprint_count": 1, "dimension": 0}), 8, "payload shape"),
+        (json!({"supported_fingerprint_count": 1}), 8, "payload shape"),
+        (json!({"supported_fingerprint_count": 1, "dimension": 1}), 9, "payload shape"),
+        (json!({"supported_fingerprint_count": 1, "dimension": 1}), 10, "a manifest without a version"),
+    ] {
+        std::fs::write(&model, container(manifest.to_string().as_bytes(), payload)).unwrap();
+        refused(words, &[]);
+    }
+    std::fs::write(&model, container(b"{x", 0)).unwrap();
+    refused("", &[]);
+    std::fs::write(&model, &real).unwrap();
+    passed(&path, &[]);
+}
+
+/// More answers of the program: its diagnostic naming a model other than the one it carries, or ending with 1.
+fn answer_with_another_model(arguments: &[String]) -> bool {
+    let kind = std::env::var("KS_OTHER_MODEL").unwrap_or_default();
+    if kind.is_empty() || arguments.first().map(String::as_str) != Some("--diagnose") {
+        return false;
+    }
+    let resources = PathBuf::from(std::env::var("KEYSWITCH_RESOURCES").unwrap());
+    let intent = resources.join("models/layout_intent_v1.ksm");
+    let bytes = std::fs::read(&intent).unwrap();
+    let manifest_length = usize::try_from(u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]])).unwrap();
+    let manifest: Value = serde_json::from_slice(&bytes[52..52 + manifest_length]).unwrap();
+    let mut model = json!({"available": true, "path": intent, "checksum": digest(&bytes), "version": manifest["model_version"]});
+    match kind.as_str() {
+        "unavailable" => model["available"] = json!(false),
+        "elsewhere" => model["path"] = json!(resources.join("models/boundary-v2.json")),
+        "another-version" => model["version"] = json!("intent-v1-another"),
+        _ => {}
+    }
+    println!("{}", json!({"intent_model": model}));
+    if kind == "status-one" {
+        std::process::exit(1);
+    }
+    true
+}
+
+/// A landing page with a placeholder the build does not know is not published.
+fn apt_landing_page() {
+    let folder = scratch("apt-page");
+    let root = folder.join("tree");
+    for relative in ["packaging/debian/keyswitch.sources", "packaging/keyswitch-archive-keyring.asc", "packaging/site/img"] {
+        let target = root.join(relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(tree().join(relative), target).unwrap();
+    }
+    std::fs::copy(tree().join("Cargo.toml"), root.join("Cargo.toml")).unwrap();
+    std::fs::write(root.join("packaging/site/index.html"), "<p>KeySwitch @VERSION@ from @URI@, signed by @UNHEARD_OF@</p>\n").unwrap();
+    let apt = Apt { tree: root, path: stubs(&folder), folder: folder.clone() };
+    let package = plain_package(&folder, CONTROL);
+    let answer = apt.build(&folder.join("repository"), Some(&package), false);
+    assert!(!answer.status.success() && said(&answer).contains("keeps @UNHEARD_OF@ unfilled"), "{}", said(&answer));
 }

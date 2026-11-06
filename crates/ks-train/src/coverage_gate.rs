@@ -179,6 +179,15 @@ mod tests {
     }
 
     #[test]
+    fn a_count_that_enters_no_region_or_fills_a_gap_is_not_a_line_count() {
+        // On line 1 a count that is no region's entry, a gap region and a region; line 2 follows a segment without a count.
+        let segments = [json!([1, 1, 5, true, false, false]), json!([1, 3, 7, true, true, true]), json!([1, 5, 2, true, true, false]), json!([1, 9, 0, false, false, false]), json!([3, 1, 1, true, true, false])];
+        assert_eq!(line_counts(&segments), BTreeMap::from([(1, 2), (3, 1)]));
+        let native = native_files("crates/x/\n");
+        assert!(listed(&native, "crates/x/a.rs") && !listed(&native, "crates/y/a.rs"));
+    }
+
+    #[test]
     fn the_list_of_native_files_and_the_check() {
         assert_eq!(native_files("# all\n a.rs # why\n\n").into_iter().collect::<Vec<_>>(), ["a.rs"]);
         let folder = std::env::temp_dir().join(format!("ks-coverage-gate-{}", std::process::id()));

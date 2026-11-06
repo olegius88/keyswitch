@@ -381,3 +381,39 @@ fn a_recall_below_the_floor_of_the_policy_is_refused() {
     let said = validate_evidence(&changed, &models.join("context_policy_v1.json"), &tree, &models.join("prefix_policy_v1.json"), &models).unwrap_err();
     assert!(said.contains("calibration gate failed"), "{said}");
 }
+
+/// A digest that names the version a model carries and still is not the digest of its weights.
+fn other_tail(digest: &Value) -> Value {
+    let text = digest.as_str().unwrap();
+    let (head, last) = text.split_at(text.len() - 1);
+    json!(format!("{head}{}", if last == "0" { "1" } else { "0" }))
+}
+
+#[test]
+fn a_field_renamed_or_a_digest_that_only_begins_the_same_is_refused() {
+    refuses("missing or extra fields: receipt", |value| {
+        let table = value.as_object_mut().unwrap();
+        let scope = table.remove("scope").unwrap();
+        table.insert("scope_of_it".to_owned(), scope);
+    });
+    refuses("context weights, version or threshold", |value| value["weights_sha256"] = other_tail(&value["weights_sha256"]));
+    refuses("prefix weights, version or threshold", |value| value["prefix_weights_sha256"] = other_tail(&value["prefix_weights_sha256"]));
+}
+
+/// `validate_receipt` over a tree whose recipe is of another schema, feature version or set of profiles.
+#[test]
+fn a_recipe_of_another_kind_than_the_receipt_knows_is_refused() {
+    for (field, value) in [("schema_version", json!(2)), ("feature_version", json!(4)), ("profiles", json!(["portable"]))] {
+        let mut recipe = read_json(&root().join("model/context_v3/recipe.json")).unwrap();
+        recipe[field] = value;
+        let tree = support::small_tree("recipe-kind", &recipe);
+        let models = tree.join("resources/models");
+        let recipe_path = tree.join("model/context_v3/recipe.json");
+        let mut changed = receipt();
+        changed["provenance"] = json!(ks_train::fit::provenance(&tree, &recipe_path).unwrap());
+        changed["recipe_sha256"] = json!(ks_train::corpus::checksum(&recipe_path).unwrap());
+        changed["prefix_baseline_sha256"] = json!(ks_train::corpus::checksum(&tree.join("model/prefix_v2/baseline-prefix-v1.json")).unwrap());
+        let said = validate_receipt(&changed, &models.join("context_policy_v1.json"), &tree, &models.join("prefix_policy_v1.json"), &models).unwrap_err();
+        assert!(said.contains("recipe or gate policy"), "{field}: {said}");
+    }
+}
