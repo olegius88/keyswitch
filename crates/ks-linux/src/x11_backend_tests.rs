@@ -840,7 +840,7 @@ const WALK_KEYS: [u8; 9] = [A, COMMA, SPACE, BACKSPACE, SHIFT_L, LEFT, RETURN, T
 
 fn walk_stroke(dice: &mut Dice) -> KeyEvent {
     let code = *dice.of(&WALK_KEYS);
-    key(code, *dice.of(&["a", "comma", "space", "Return", "ISO_Left_Tab"]), *dice.of(&["a", "A", ",", " ", ""]), *dice.of(&[0, 0, 1, 1, -1, 5]), *dice.of(&[0, 0, SHIFT, LOCK_MASK]))
+    key(code, dice.of(&["a", "comma", "space", "Return", "ISO_Left_Tab"]), dice.of(&["a", "A", ",", " ", ""]), *dice.of(&[0, 0, 1, 1, -1, 5]), *dice.of(&[0, 0, SHIFT, LOCK_MASK]))
 }
 
 #[test]
