@@ -29,11 +29,11 @@ use std::sync::{Arc, Mutex};
 const STEP: usize = if cfg!(debug_assertions) { 10 } else { 1 };
 
 fn golden_root() -> PathBuf {
-    PathBuf::from(std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden".to_string()))
+    PathBuf::from(std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string()))
 }
 
 fn resource_dir() -> Option<PathBuf> {
-    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/src/keyswitch/resources".to_string()));
+    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").to_string()));
     if path.join("models/context_policy_v1.json").exists() {
         Some(path)
     } else {

@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 fn lines(name: &str) -> Option<Vec<Value>> {
     let root = std::env::var("KS_GOLDEN_DIR")
-        .unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden".to_string());
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string());
     let path = PathBuf::from(root).join("config").join(name);
     if !path.exists() {
         eprintln!("SKIPPED: golden file {} is absent", path.display());

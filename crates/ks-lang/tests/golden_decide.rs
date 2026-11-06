@@ -28,7 +28,7 @@ const SIGNS: [&str; 9] = ["", " ", ",", ".", "?", "!", ":", "#", "x"];
 const CONFIDENCES: [f64; 4] = [2.0, 0.5, 1.0, 10.0];
 
 fn golden_root() -> PathBuf {
-    PathBuf::from(std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden".to_string()))
+    PathBuf::from(std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string()))
 }
 
 fn golden(folder: &str, name: &str) -> Option<PathBuf> {
@@ -42,7 +42,7 @@ fn golden(folder: &str, name: &str) -> Option<PathBuf> {
 }
 
 fn resource_dir() -> Option<PathBuf> {
-    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/src/keyswitch/resources".to_string()));
+    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").to_string()));
     if path.join("models/layout_intent_v1.ksm").exists() {
         Some(path)
     } else {

@@ -29,7 +29,7 @@ const THREADS: usize = 4;
 const BATCH: usize = 8192;
 
 fn golden(name: &str) -> Option<PathBuf> {
-    let root = std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden".to_string());
+    let root = std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string());
     let path = PathBuf::from(root).join("lang").join(name);
     if path.exists() {
         Some(path)
@@ -40,7 +40,7 @@ fn golden(name: &str) -> Option<PathBuf> {
 }
 
 fn resource_dir() -> Option<PathBuf> {
-    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/src/keyswitch/resources".to_string()));
+    let path = PathBuf::from(std::env::var("KS_RESOURCES").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").to_string()));
     if path.join("models/ortho_v1.json").exists() {
         Some(path)
     } else {

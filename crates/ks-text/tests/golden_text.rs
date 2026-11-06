@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 fn golden(name: &str) -> Option<PathBuf> {
     let root = std::env::var("KS_GOLDEN_DIR")
-        .unwrap_or_else(|_| "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden".to_string());
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden").to_string());
     let path = PathBuf::from(root).join("text").join(name);
     if path.exists() {
         Some(path)

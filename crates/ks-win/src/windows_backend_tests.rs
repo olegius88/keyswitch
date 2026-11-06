@@ -2110,7 +2110,7 @@ mod golden {
 
     use super::*;
 
-    const DEFAULT_GOLDEN_DIR: &str = "/mnt/data2/_projects/puntoswitcher/.t/rust-2026-11-04/golden";
+    const DEFAULT_GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../.t/golden");
 
     fn golden_file() -> PathBuf {
         let root = std::env::var("KS_GOLDEN_DIR").unwrap_or_else(|_| DEFAULT_GOLDEN_DIR.to_owned());
