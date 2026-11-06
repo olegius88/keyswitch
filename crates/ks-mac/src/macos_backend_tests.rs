@@ -63,6 +63,8 @@ struct FakeMac {
     fails_after: Mutex<Option<usize>>,
     refuses_switch: AtomicBool,
     no_board: AtomicBool,
+    /// Runs once after the next post, as the tap's answer to a key posted again does.
+    after_post: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl FakeMac {
@@ -84,6 +86,7 @@ impl FakeMac {
             fails_after: Mutex::new(None),
             refuses_switch: AtomicBool::new(false),
             no_board: AtomicBool::new(false),
+            after_post: Mutex::new(None),
         })
     }
 
@@ -129,6 +132,10 @@ impl MacAPI for FakeMac {
         }
         let count = self.take.lock().unwrap().map_or(inputs.len(), |limit| limit.min(inputs.len()));
         self.posted.lock().unwrap().extend_from_slice(&inputs[..count]);
+        let after = self.after_post.lock().unwrap().take();
+        if let Some(after) = after {
+            after();
+        }
         count
     }
     fn active_application(&self) -> String {
@@ -935,25 +942,29 @@ fn with_no_layouts_a_key_passes() {
 }
 
 #[test]
-fn a_release_lets_only_the_key_ups_before_the_waiting_enter_through() {
+fn a_second_enter_posted_again_lets_only_the_key_ups_before_it_through() {
     let api = FakeMac::new();
     let backend = backend(&api);
-    let (listener, _) = collector();
-    backend.set_listener(Some(listener));
-    backend.set_key_filter(Some(Arc::new(|event: &KeyEvent| if event.keycode == MAC_VK_RETURN { KeyDisposition::Defer } else { KeyDisposition::Pass })));
-    assert!(backend.handle_native(native(true, MAC_VK_RETURN)));
-    // `z` was down as the Enter came and its key-up was held with what follows it: it goes first, the rest waits.
     {
         let mut hold = lock(&backend.inner.hold);
-        hold.action_prior_keys = vec![KEY_Z];
+        hold.holding = true;
+        hold.held.push_back(native(true, MAC_VK_RETURN));
         hold.held.push_back(native(true, KEY_Q));
         hold.held.push_back(native(false, KEY_Z));
     }
-    assert!(backend.release_input().is_ok());
-    assert_eq!(lock(&backend.inner.hold).held.len(), 1);
-    assert_eq!(backend.release_input(), Ok(0));
-    assert!(lock(&backend.inner.hold).holding);
-    let _ = backend.complete_action(false);
+    // The tap answers the Enter posted again by holding it back, with `z` still down from before it.
+    let inner = backend.inner.clone();
+    *api.after_post.lock().unwrap() = Some(Box::new(move || {
+        let mut hold = lock(&inner.hold);
+        hold.deferred_action = Some(native(true, MAC_VK_RETURN));
+        hold.action_prior_keys = vec![KEY_Z];
+    }));
+    assert_eq!(backend.release_input(), Ok(2));
+    let posted: Vec<(bool, u32)> = api.posted().iter().map(|input| (input.pressed, input.keycode)).collect();
+    assert_eq!(posted, [(true, MAC_VK_RETURN), (false, KEY_Z)]);
+    let hold = lock(&backend.inner.hold);
+    assert!(hold.holding);
+    assert_eq!(hold.held.len(), 1);
 }
 
 #[test]
