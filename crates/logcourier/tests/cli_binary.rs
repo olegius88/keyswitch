@@ -73,40 +73,35 @@ fn a_damaged_configuration_is_reported_in_words() {
     assert!(!failed.status.success() && said(&failed).contains("не выполнена"), "{}", said(&failed));
 }
 
-/// With a fake `curl` first on the path the program talks to nobody.
+/// A `curl` of its own, first on the path, so the program talks to nobody. It reads what it is told, as the real one does.
+#[cfg(unix)]
+fn listing_with_curl_answering(data: &Folder, name: &str, answer: &str) -> Output {
+    use std::os::unix::fs::PermissionsExt as _;
+    let bin = data.0.join(name);
+    std::fs::create_dir_all(&bin).expect("the folder");
+    let curl = bin.join("curl");
+    std::fs::write(&curl, format!("#!/bin/sh\ncat > /dev/null\nprintf '%s' '{answer}'\nexit 0\n")).expect("the file");
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).expect("the mode");
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    Command::new(env!("CARGO_BIN_EXE_logcourier-cli"))
+        .args(["list", "--chat-id", "-1001"])
+        .env("LOGCOURIER_DATA_DIR", &data.0)
+        .env("LOGCOURIER_BOT_TOKEN", TOKEN)
+        .env("PATH", path)
+        .output()
+        .expect("it runs")
+}
+
 #[cfg(unix)]
 #[test]
 fn a_token_in_the_environment_reaches_the_server_and_a_failure_hides_it() {
-    use std::os::unix::fs::PermissionsExt as _;
     let data = Folder::new("token");
-    let bin = data.0.join("bin");
-    std::fs::create_dir_all(&bin).expect("the folder");
-    let curl = bin.join("curl");
-    std::fs::write(&curl, "#!/bin/sh\nprintf '{\"ok\":false,\"description\":\"no\"}\\n\\n401'\nexit 0\n").expect("the file");
-    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).expect("the mode");
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let output = Command::new(env!("CARGO_BIN_EXE_logcourier-cli"))
-        .args(["list", "--chat-id", "-1001"])
-        .env("LOGCOURIER_DATA_DIR", &data.0)
-        .env("LOGCOURIER_BOT_TOKEN", TOKEN)
-        .env("PATH", path)
-        .output()
-        .expect("it runs");
-    assert!(!said(&output).contains("AAAAAAAA"), "{}", said(&output));
-    assert!(!output.status.success(), "{}", said(&output));
-    let refused = run(&data.0, &["list", "--chat-id", "-1001"], Some("no token"));
+    let refused = listing_with_curl_answering(&data, "refusing", "{\"ok\":false,\"description\":\"no\"}\n401");
+    assert!(!said(&refused).contains("AAAAAAAA"), "{}", said(&refused));
     assert!(!refused.status.success(), "{}", said(&refused));
-
-    let answering = bin.join("curl");
-    std::fs::write(&answering, "#!/bin/sh\nprintf '{\"ok\":true,\"result\":{\"type\":\"supergroup\"}}\\n200'\nexit 0\n").expect("the file");
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let listed = Command::new(env!("CARGO_BIN_EXE_logcourier-cli"))
-        .args(["list", "--chat-id", "-1001"])
-        .env("LOGCOURIER_DATA_DIR", &data.0)
-        .env("LOGCOURIER_BOT_TOKEN", TOKEN)
-        .env("PATH", path)
-        .output()
-        .expect("it runs");
+    let no_token = run(&data.0, &["list", "--chat-id", "-1001"], Some("no token"));
+    assert!(!no_token.status.success(), "{}", said(&no_token));
+    let listed = listing_with_curl_answering(&data, "answering", "{\"ok\":true,\"result\":{\"type\":\"supergroup\"}}\n200");
     assert!(listed.status.success(), "{}", said(&listed));
 }
 

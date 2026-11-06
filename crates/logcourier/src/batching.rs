@@ -119,7 +119,10 @@ mod tests {
         let selected: Vec<&Bundle> = rows.iter().collect();
         store.db.execute("DELETE FROM bundles", []).expect("deleted");
         let refused = replace_fragments(&store, &selected, "place", "b", &metadata, b"y");
+        drop(selected);
         assert!(matches!(refused, Err(Error::Runtime(_))), "{refused:?}");
-        std::fs::remove_dir_all(&folder).expect("cleaned");
+        drop(rows);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }
