@@ -2,11 +2,13 @@
 #![cfg(any(not(debug_assertions), coverage))]
 
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use ks_config::learning::LearningStore;
 use ks_engine::engine::{EngineError, KeySwitchEngine};
 use ks_engine::engine_loader::{Build, DeferredEngine, Post, StartFailed, LOADING_ACTION};
-use ks_replay::harness::Bundle;
+use ks_backend::KeyEvent;
+use ks_replay::harness::{Bundle, KEYS};
 
 type Posted = Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>;
 
@@ -100,4 +102,34 @@ fn a_window_closed_while_the_models_load_never_starts_the_engine() {
     deferred.stop();
     run(&posted);
     assert!(!deferred.snapshot().enabled || deferred.ready());
+}
+
+/// The worker goes on after a failure nobody foresaw: the word is forgotten and the next one is corrected.
+#[test]
+fn the_worker_survives_what_nobody_foresaw() {
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let backend = session.backend.clone();
+    let engine = KeySwitchEngine::of(session.core);
+    engine.start().unwrap();
+    let press = |character: char| {
+        let key = KEYS.iter().find(|key| key.characters[0] == character).expect("a key of the first layout");
+        engine.enqueue(KeyEvent { pressed: true, keycode: key.keycode, key_name: character.to_string(), character: character.to_string(), characters: key.strings(), ..KeyEvent::default() });
+    };
+    let wait_for = |what: &dyn Fn() -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !what() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(what());
+    };
+    backend.set_panicking(true);
+    press('a');
+    press(' ');
+    wait_for(&|| engine.snapshot().last_error.contains("nobody foresaw"));
+    backend.set_panicking(false);
+    press('b');
+    wait_for(&|| engine.snapshot().current_word == "b");
+    engine.stop();
+    bundle.clean();
 }

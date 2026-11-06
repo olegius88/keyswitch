@@ -273,7 +273,7 @@ impl KeySwitchEngine {
 fn run(mut core: EngineCore) -> EngineCore {
     let shared = core.shared.clone();
     while shared.running.load(Ordering::Relaxed) {
-        if !core.turn(core.loop_timeout()) {
+        if !turn_surviving(&mut core) {
             break;
         }
     }
@@ -281,6 +281,20 @@ fn run(mut core: EngineCore) -> EngineCore {
         reader.close();
     }
     core
+}
+
+/// One turn of the worker. A failure nobody foresaw forgets the word and the worker goes on, as with any other error:
+/// typing must not lose its corrections for the rest of the session over one word.
+fn turn_surviving(core: &mut EngineCore) -> bool {
+    let timeout = core.loop_timeout();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| core.turn(timeout))) {
+        Ok(goes_on) => goes_on,
+        Err(payload) => {
+            let message = payload.downcast_ref::<&str>().map(|text| (*text).to_owned()).or_else(|| payload.downcast_ref::<String>().cloned());
+            core.recover_from_error(&EngineError(message.unwrap_or_else(|| "internal error".to_owned())));
+            true
+        }
+    }
 }
 
 impl EngineCore {

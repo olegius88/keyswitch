@@ -80,6 +80,7 @@ struct EditorState {
     corrections: Vec<Correction>,
     serial: usize,
     failing: bool,
+    panicking: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -104,7 +105,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -146,6 +147,11 @@ impl Backend {
         let mut state = self.lock();
         state.window = window;
         application.clone_into(&mut state.application);
+    }
+
+    /// The next question about the active program stops whoever asks, as an error nobody foresaw does.
+    pub fn set_panicking(&self, panicking: bool) {
+        self.lock().panicking = panicking;
     }
 
     /// The next corrections and layout switches fail, as when a window closes under them.
@@ -260,7 +266,12 @@ impl InputBackend for Backend {
     }
 
     fn active_application(&self) -> String {
-        self.lock().application.clone()
+        let (application, panicking) = {
+            let state = self.lock();
+            (state.application.clone(), state.panicking)
+        };
+        assert!(!panicking, "the backend failed in a way nobody foresaw");
+        application
     }
 
     fn focused_window(&self) -> Option<FocusInfo> {

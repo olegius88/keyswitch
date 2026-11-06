@@ -102,7 +102,6 @@ dbg_macro = "deny"
 opt-level = "s"
 lto = "fat"
 codegen-units = 1
-panic = "abort"
 strip = true
 
 # Parity runs replay tens of thousands of words: the same code, optimised, with its checks left on.
