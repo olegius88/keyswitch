@@ -99,6 +99,7 @@ pub fn main(arguments: &[String]) -> i32 {
 }
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(coverage_nightly, coverage(off))] // The whole program: the live test `packaging/e2e-mac.command` starts it.
 fn run(hidden: bool, wants_diagnose: bool, no_engine: bool) -> i32 {
     crate::desktop_app::install_platform();
     let _ = ks_config::logsetup::configure_logging(None);
@@ -121,6 +122,29 @@ fn run(_hidden: bool, wants_diagnose: bool, _no_engine: bool) -> i32 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    /// Nothing but what ends at once: off macOS the program says where it runs; the resources may be named from outside.
+    #[test]
+    fn every_way_a_command_line_can_go() {
+        assert_eq!(main(&["--version".to_owned()]), 0);
+        assert_eq!(main(&["-h".to_owned()]), 0);
+        assert_eq!(main(&["--help".to_owned()]), 0);
+        assert!(main(&["--hidden".to_owned(), "--no-engine".to_owned(), "--diagnose".to_owned()]) <= 1);
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(main(&["--hidden".to_owned(), "--no-engine".to_owned()]), 1);
+        const CHILD: &str = "KS_TEST_RESOURCES_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            assert_eq!(resource_dir(), PathBuf::from("/named/here"));
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+            .args(["--exact", "macos_app::tests::every_way_a_command_line_can_go"])
+            .env(CHILD, "1")
+            .env("KEYSWITCH_RESOURCES", "/named/here")
+            .status()
+            .expect("started");
+        assert!(status.success());
+    }
 
     #[test]
     fn the_program_answers_for_itself() {

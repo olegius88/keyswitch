@@ -174,6 +174,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_argument_is_quoted_only_when_it_needs_it() {
+        assert_eq!(quoted("plain"), "plain");
+        assert_eq!(quoted(""), "''");
+        assert_eq!(quoted("a b"), "'a b'");
+        assert_eq!(quoted("it's"), "'it'\"'\"'s'");
+    }
+
+    #[test]
     fn a_document_cut_short_registers_nothing_more() {
         let run = "<key>RunAtLoad</key><true/>";
         assert_eq!(registered_arguments(run), Vec::<String>::new());

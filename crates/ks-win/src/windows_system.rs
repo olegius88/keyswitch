@@ -406,6 +406,49 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_error_of_the_system_prints_its_own_words() {
+        let error: WindowsSystemError = std::io::Error::other("no access").into();
+        assert_eq!(error.to_string(), "no access");
+    }
+
+    #[test]
+    fn explorer_is_only_started_and_nothing_starts_for_nothing() {
+        assert!(spawn_explorer(&[]).is_ok());
+        assert!(spawn_explorer(&["no-such-program-at-all".to_owned()]).is_err());
+        assert!(open_directory(Path::new("/no/such/folder"), None).is_err());
+        assert!(open_directory(&std::env::temp_dir(), None).is_ok() || cfg!(not(windows)));
+    }
+
+    #[test]
+    fn the_startup_command_names_the_program_or_the_one_installed_beside_it() {
+        let this = windows_launcher_command(false, None).expect("the running program");
+        assert!(!this.is_empty());
+        assert_eq!(windows_launcher_command(true, Some(Path::new("KeySwitch.exe"))).expect("named"), "KeySwitch.exe --hidden");
+        assert_eq!(windows_launcher_command(false, Some(Path::new("C:\\x\\keyswitch.exe"))).expect("named"), "C:\\x\\keyswitch.exe");
+        assert!(installed_executable().is_none(), "no such file beside a test");
+    }
+
+    #[test]
+    fn paths_of_every_form_have_their_tail() {
+        for (path, tail) in [
+            ("//server/share/rest", "rest"),
+            ("\\\\server\\share\\rest", "rest"),
+            ("\\\\server", ""),
+            ("\\\\server\\share", ""),
+            ("//?/UNC/server/share/rest", "rest"),
+            ("\\Windows", "Windows"),
+            ("/Windows", "Windows"),
+            ("X:\\Windows", "Windows"),
+            ("X:Windows", "Windows"),
+            ("X:/Windows", "Windows"),
+            ("plain", "plain"),
+            ("", ""),
+        ] {
+            assert_eq!(ntpath_tail(path), tail, "{path:?}");
+        }
+    }
+
     #[derive(Default)]
     struct FakeRegistry {
         autostart: Mutex<HashMap<String, String>>,

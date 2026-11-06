@@ -94,10 +94,8 @@ impl MainThreadRunner {
             lock(&job.state).started = true;
             job
         };
-        let function = lock(&job.function).take();
-        if let Some(function) = function {
-            function();
-        }
+        let function = lock(&job.function).take().expect("a job runs once: it left the list above");
+        function();
         lock(&job.state).done = true;
         job.finished.notify_all();
     }
@@ -113,6 +111,25 @@ mod tests {
     static ON_MAIN: AtomicBool = AtomicBool::new(false);
     static RUNNER: MainThreadRunner = MainThreadRunner::new(|| ON_MAIN.load(Ordering::SeqCst), |_| {});
     static POSTING: MainThreadRunner = MainThreadRunner::new(|| false, |_| {});
+
+    /// The main thread began the job just as the wait ran out: the caller waits for its end, however long.
+    #[test]
+    fn a_call_the_main_thread_began_late_is_waited_for() {
+        static LATE: MainThreadRunner = MainThreadRunner::new(|| false, |number| {
+            thread::spawn(move || LATE.run(number));
+        });
+        let answer = LATE.call(
+            || {
+                thread::sleep(Duration::from_millis(300));
+                7
+            },
+            0,
+            0.05,
+        );
+        assert_eq!(answer, 7);
+        let here = MainThreadRunner::new(|| true, |_| {});
+        assert_eq!(here.call(|| 1, 0, 0.1), 1);
+    }
 
     #[test]
     fn the_main_thread_calls_directly() {

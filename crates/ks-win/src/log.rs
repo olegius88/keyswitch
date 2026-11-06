@@ -42,6 +42,33 @@ pub fn info_with_error(logger: &str, message: &str, error: &dyn std::fmt::Displa
     }
 }
 
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    /// Before the program sets its journal the lines go nowhere: in a process of its own, where no test has set one.
+    #[test]
+    fn lines_go_nowhere_until_a_journal_is_set() {
+        const CHILD: &str = "KS_TEST_NO_SINK";
+        if std::env::var_os(CHILD).is_some() {
+            info("logger", "a line");
+            error("logger", "a line");
+            info_with_error("logger", "a line", &"and why");
+            assert!(set_sink(|_level, _logger, _message| {}));
+            assert!(!set_sink(|_level, _logger, _message| {}));
+            error("logger", "a line");
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+            .args(["--exact", "log::tests::lines_go_nowhere_until_a_journal_is_set"])
+            .env(CHILD, "1")
+            .status()
+            .expect("started");
+        assert!(status.success());
+    }
+}
+
 /// The lines every test of the crate wrote, for the tests to look through.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

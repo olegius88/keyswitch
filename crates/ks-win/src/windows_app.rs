@@ -241,6 +241,12 @@ fn write_standard(error: bool, text: &str) {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_the_program_says_where_it_runs() {
+        assert_eq!(main(&["--hidden".to_owned()]), 1);
+    }
+
     /// It installs the program's logging, which goes once per process: it runs in a process of its own.
     #[test]
     fn the_diagnostic_mode_says_what_it_found_and_ends() {
