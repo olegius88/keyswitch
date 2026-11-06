@@ -262,6 +262,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn whole_limbs_carries_and_zero_on_the_left() {
+        assert_eq!(big(1 << 40).shr(32), big(1 << 8));
+        assert_eq!(big(u128::from(u32::MAX)).add(&big(1)), big(1 << 32));
+        assert_eq!(BigUint::zero().mul(&big(5)), BigUint::zero());
+    }
+
+    #[test]
     fn a_bit_past_the_end_is_clear_and_zero_times_anything_is_zero() {
         assert!(!big(1).bit(100));
         assert_eq!(big(5).mul(&BigUint::zero()), BigUint::zero());

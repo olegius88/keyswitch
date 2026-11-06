@@ -1,7 +1,7 @@
 //! The edges of the Python functions, with the answers CPython gives: what the larger recorded sets happen to pass by.
 
 use ks_text::normalize::{combining_class, nfc, nfd};
-use ks_text::pystr::{center, char_at, count, find, ljust, lower, rfind, rjust, rsplit_sep, slice, split_max, zfill};
+use ks_text::pystr::{casefold, center, char_at, count, find, isascii, istitle, ljust, lower, lstrip, lstrip_chars, rfind, rjust, rsplit_sep, rstrip, rstrip_chars, slice, split_max, zfill};
 use ks_text::{FsumError, Indent, JsonOptions, exp, float_repr, fmean, fsum, json_dumps, log, log2, log_base, pstdev, py_float, py_int, py_round_ndigits, py_round_to_int, sqrt};
 use serde_json::json;
 
@@ -141,4 +141,87 @@ fn json_writes_every_escape_and_any_indent() {
     assert_eq!(json_dumps(&json!([1]), &options), "[\n\t1\n]");
     let plain = JsonOptions::default();
     assert_eq!(json_dumps(&json!("\r\t\n\"\\\u{8}\u{c}\u{1}"), &plain), r#""\r\t\n\"\\\b\f\u0001""#);
+}
+
+#[test]
+fn the_rest_of_the_numbers() {
+    for (x, digits, value) in [(96.0, -1, 100.0), (-96.0, -1, -100.0), (999.0, -1, 1000.0), (95.0, -1, 100.0), (85.0, -1, 80.0), (85.5, -1, 90.0), (0.0, 2, 0.0), (9.5, 0, 10.0), (0.95, 1, 0.9)] {
+        assert_eq!(py_round_ndigits(x, digits).map(f64::to_bits), Some(f64::to_bits(value)), "{x} {digits}");
+    }
+    assert_eq!(py_int("0"), Some(0));
+    assert_eq!(py_int("000"), Some(0));
+    for text in ["1\t2", "é", "1e5x", "1e+5x"] {
+        assert_eq!(py_float(text), None, "{text:?}");
+    }
+    assert_eq!(py_float("\u{a0}1"), Some(1.0));
+    for (values, sum) in [(vec![1e16, 1.0, 1e-5], 1.000_000_000_000_000_2e16), (vec![-1e16, -1.0, -1e-5], -1.000_000_000_000_000_2e16), (vec![1e16, 1.0, -1e-5], 1e16), (vec![-1e16, -1.0, 1e-5], -1e16), (vec![1.0, 1e-16], 1.0), (vec![-1.0, -1e-16], -1.0), (vec![1e16, 1.0], 1e16), (vec![-1e16, -1.0], -1e16)] {
+        assert_eq!(fsum(&values), Ok(sum), "{values:?}");
+    }
+    assert_eq!(pstdev(&[0.0, 1.0]), Some(0.5));
+    assert_eq!(pstdev(&[-1.0, 1.0]), Some(1.0));
+    assert_eq!(pstdev(&[-3.0, 1.0]), Some(2.0));
+    assert_eq!(pstdev(&[0.1, 0.2, 0.4]), Some(0.124_721_912_892_464_72));
+}
+
+#[test]
+fn normal_forms_of_plain_and_blocked_text() {
+    assert_eq!((nfd("abc"), nfc("abc")), ("abc".to_owned(), "abc".to_owned()));
+    assert_eq!(nfc("a\u{305}\u{301}"), "a\u{305}\u{301}");
+    assert_eq!(nfd("a\u{301}b\u{323}\u{301}"), "a\u{301}b\u{323}\u{301}");
+}
+
+#[test]
+fn json_truth() {
+    assert_eq!(json_dumps(&json!([true, false, null]), &JsonOptions::default()), "[true, false, null]");
+}
+
+#[test]
+fn sums_that_stay_exact_or_round_half_even() {
+    assert_eq!(fsum(&[0.5, -1e16, 9_007_199_254_740_992.0]), Ok(-992_800_745_259_007.5));
+    assert_eq!(fsum(&[1e16, 1.0, 1e-20]), Ok(1.000_000_000_000_000_2e16));
+    assert_eq!(fsum(&[-1e16, -1.0, -1e-20]), Ok(-1.000_000_000_000_000_2e16));
+}
+
+#[test]
+fn deviations_with_odd_and_even_roots() {
+    for (values, deviation) in [
+        (vec![1.0, 2.0, 4.0], 1.247_219_128_924_647),
+        (vec![0.0, 0.0, 1e-300], 4.714_045_207_910_317e-301),
+        (vec![1e300, 3e300, 7e300], 2.494_438_257_849_294e300),
+        (vec![1.0, 2.0, 3.0, 10.0], 3.535_533_905_932_737_8),
+        (vec![0.3, 0.7, 0.9], 0.249_443_825_784_929_43),
+        (vec![5.0, 7.0, 11.0, 13.0], 3.162_277_660_168_379_5),
+        (vec![2.5, 3.5, 8.25], 2.508_319_490_548_735),
+        (vec![1.0, 10.0, 100.0, 1000.0], 418.784_177_709_712_4),
+        (vec![0.001, 0.002, 0.005], 0.001_699_673_171_197_595),
+        (vec![17.0, 19.0, 23.0], 2.494_438_257_849_294),
+    ] {
+        assert_eq!(pstdev(&values), Some(deviation), "{values:?}");
+    }
+}
+
+#[test]
+fn a_space_inside_a_number_of_another_script() {
+    assert_eq!(py_float("\u{661}\t\u{662}"), None);
+}
+
+#[test]
+fn the_rest_of_the_strings() {
+    assert_eq!(lower("AbC"), "abc");
+    assert_eq!(lower("\u{101}"), "\u{101}");
+    assert_eq!(casefold("AbC"), "abc");
+    assert_eq!(casefold("\u{c0}bC"), "\u{e0}bc");
+    for (text, answer) in [("Ab Cd", true), ("AB", false), ("A1B", true), ("ab", false), ("", false), ("A b", false)] {
+        assert_eq!(istitle(text), answer, "{text:?}");
+    }
+    assert_eq!(split_max("a b c", 1), ["a", "b c"]);
+    assert_eq!(split_max("a b c", 5), ["a", "b", "c"]);
+    assert_eq!(split_max("a ", 5), ["a"]);
+    assert_eq!(split_max("abc", 5), ["abc"]);
+    assert_eq!(split_max("a b", 0), ["a b"]);
+    assert_eq!(rfind("\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442}", "z", Some(0), Some(6)), -1);
+    assert_eq!(rfind("\u{43f}\u{440}\u{438}\u{432}\u{435}\u{442}", "\u{432}", Some(0), Some(6)), 3);
+    assert_eq!((lstrip("  x  "), rstrip("  x  ")), ("x  ", "  x"));
+    assert_eq!((lstrip_chars("xxaxx", "x"), rstrip_chars("xxaxx", "x")), ("axx", "xxa"));
+    assert_eq!((isascii("ab"), isascii("\u{e9}")), (true, false));
 }

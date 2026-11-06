@@ -134,6 +134,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_map_back_is_there() {
+        assert!(LayoutPair::new("us", "ru").unwrap().ru_to_us().contains(&('й', 'q')));
+    }
+
+    #[test]
     fn only_the_two_layouts_in_either_order() {
         assert!(LayoutPair::new("us", "ru").is_ok());
         assert!(LayoutPair::new("ru", "us").is_ok());
