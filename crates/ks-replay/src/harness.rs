@@ -228,6 +228,9 @@ impl Backend {
 
 impl InputBackend for Backend {
     fn start(&self, _listener: KeyListener) -> Result<(), BackendError> {
+        if self.lock().failing {
+            return Err(BackendError::Failed("no keyboard to listen to".to_owned()));
+        }
         Ok(())
     }
 

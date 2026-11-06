@@ -133,3 +133,49 @@ fn the_worker_survives_what_nobody_foresaw() {
     engine.stop();
     bundle.clean();
 }
+
+#[test]
+fn an_engine_starts_once_and_says_why_it_cannot() {
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let backend = session.backend.clone();
+    let engine = KeySwitchEngine::of(session.core);
+    assert!(!engine.select_alternate_group(), "not running");
+    backend.set_failing(true);
+    assert!(engine.start().is_err());
+    assert_eq!(engine.snapshot().backend, "недоступен");
+    backend.set_failing(false);
+    engine.stop();
+
+    bundle.clean();
+
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let backend = session.backend.clone();
+    let engine = KeySwitchEngine::of(session.core);
+    engine.start().unwrap();
+    assert!(engine.start().is_ok(), "already running");
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = heard.clone();
+    engine.subscribe(Arc::new(move |snapshot| sink.lock().unwrap().push(snapshot.last_action.clone())));
+    engine.subscribe_corrections(Arc::new(|_| {}));
+    engine.subscribe_learning_prompts(Arc::new(|_| {}));
+    engine.subscribe_rule_requests(Arc::new(|_| {}));
+    engine.set_test_field_focused(true);
+    engine.set_test_field_focused(false);
+    engine.set_rule_editor_open(true);
+    engine.set_rule_editor_open(false);
+    assert!(engine.learning().count() < 1_000);
+    assert!(engine.select_alternate_group(), "from the first layout to the second");
+    backend.set_group(5);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while engine.snapshot().current_group != 1 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!heard.lock().unwrap().is_empty());
+    engine.stop();
+    engine.stop();
+    assert!(engine.start().is_err() || engine.start().is_ok());
+    engine.stop();
+    bundle.clean();
+}

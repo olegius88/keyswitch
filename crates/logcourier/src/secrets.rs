@@ -173,6 +173,75 @@ mod tests {
 
     const TOKEN: &str = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+    /// The real credential store of Windows, under a name of this test, removed after.
+    #[cfg(windows)]
+    #[test]
+    fn the_credential_store_keeps_a_token_for_each_bot() {
+        let service = format!("LogCourier.Test.{}", std::process::id());
+        let forget = |target: &str| {
+            let _ = std::process::Command::new("cmdkey").arg(format!("/delete:{target}")).output();
+        };
+        assert_eq!(platform::read(&service, "one"), Ok(None));
+        platform::write(&service, "one", "first").expect("stored");
+        assert_eq!(platform::read(&service, "one"), Ok(Some("first".to_owned())));
+        platform::write(&service, "two", "second").expect("stored");
+        assert_eq!(platform::read(&service, "two"), Ok(Some("second".to_owned())));
+        assert_eq!(platform::read(&service, "one"), Ok(Some("first".to_owned())), "the earlier bot moved aside");
+        assert_eq!(platform::read(&service, "three"), Ok(None));
+        forget(&service);
+        forget(&format!("one@{service}"));
+    }
+
+    /// A program of its own first on the path stands for the secret store; the environment is set by starting this test again.
+    #[cfg(unix)]
+    #[test]
+    fn the_secret_store_is_asked_through_its_tool() {
+        use std::os::unix::fs::PermissionsExt as _;
+        const CHILD: &str = "KS_TEST_SECRET_TOOL";
+        match std::env::var(CHILD).as_deref() {
+            Ok("answers") => {
+                assert_eq!(read_token("123456789").as_deref(), Ok("the token"));
+                assert!(store_token(TOKEN).is_ok());
+                assert!(store_token("no token").is_err());
+                assert_eq!(read_token("").as_deref(), Ok(""));
+                return;
+            }
+            Ok("fails") => {
+                assert_eq!(read_token("123456789").as_deref(), Ok(""));
+                assert!(matches!(store_token(TOKEN), Err(Error::Runtime(_))));
+                return;
+            }
+            Ok(_) => {
+                assert!(matches!(read_token("123456789"), Err(Error::Runtime(_))));
+                assert!(matches!(store_token(TOKEN), Err(Error::Runtime(_))));
+                return;
+            }
+            Err(_) => {}
+        }
+        let folder = std::env::temp_dir().join(format!("lc-secrets-{}", std::process::id()));
+        let tool = folder.join("secret-tool");
+        std::fs::create_dir_all(&folder).expect("the folder");
+        let run = |kind: &str, path: &std::ffi::OsStr| {
+            let status = std::process::Command::new(std::env::current_exe().expect("this test"))
+                .args(["--exact", "secrets::tests::the_secret_store_is_asked_through_its_tool"])
+                .env(CHILD, kind)
+                .env("PATH", path)
+                .status()
+                .expect("started");
+            assert!(status.success(), "{kind}");
+        };
+        std::fs::write(&tool, "#!/bin/sh\ncat > /dev/null\necho 'the token'\n").expect("the file");
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("the mode");
+        let path = std::env::join_paths(std::iter::once(folder.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).expect("a path");
+        run("answers", &path);
+        std::fs::remove_file(&tool).expect("removed");
+        std::fs::write(&tool, "#!/bin/sh\ncat > /dev/null\nexit 1\n").expect("the file");
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).expect("the mode");
+        run("fails", &path);
+        run("missing", std::ffi::OsStr::new("/nonexistent"));
+        std::fs::remove_dir_all(&folder).expect("cleaned");
+    }
+
     #[test]
     fn a_token_is_recognised_and_cut_out() {
         assert_eq!(token_bot_id(TOKEN).as_deref(), Ok("123456789"));
@@ -180,5 +249,6 @@ mod tests {
         assert!(token_bot_id(&format!("{TOKEN} ")).is_err());
         assert_eq!(redact(&format!("ошибка https://api/bot{TOKEN}/x конец")), "ошибка https://api/bot<TOKEN>/x конец");
         assert_eq!(redact("нет 12345 токена"), "нет 12345 токена");
+        assert_eq!(redact("a 123456789:AAAAAAAAAA_AAAAAAAAAA-AAAAAAAAAAAAAAA b"), "a <TOKEN> b");
     }
 }
