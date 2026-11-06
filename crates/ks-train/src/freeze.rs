@@ -38,7 +38,7 @@ const PRIOR_TEST: &str = "prior-accessed-test";
 const ALIAS_SCOPE: &str = "expanded physical aliases of each held-out row's form, lemmas and typo variants";
 const TATOEBA_BASE: &str = "https://downloads.tatoeba.org/exports/per_language/";
 const CAPTURED_TATOEBA: &str = "model/context_v1/captured/tatoeba-authors.tsv.xz";
-const PINS: [(&str, &str); 12] = [
+pub const PINS: [(&str, &str); 12] = [
     ("UD_Russian-GSD", "9acc9d677327043bd416fcc89e4b3407c620d885"),
     ("UD_English-GUM", "b58e74bc22d17220c9198864c253a50a897bf27f"),
     ("UD_Russian-PUD", "1228be1571bca125ac19c922ef52ae71d3cdbb83"),
