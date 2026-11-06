@@ -86,11 +86,10 @@ struct Names {
 }
 
 impl Names {
-    fn push(&mut self, name: &str) -> Result<(), String> {
+    /// The files these tables come from are limited to far below 4 GiB, so the end of a name fits.
+    fn push(&mut self, name: &str) {
         self.arena.push_str(name);
-        let end = u32::try_from(self.arena.len()).map_err(|_| "the table is too large".to_string())?;
-        self.ends.push(end);
-        Ok(())
+        self.ends.push(self.arena.len().to::<u32>());
     }
 
     fn len(&self) -> usize {
@@ -170,18 +169,19 @@ struct CountsBuilder {
 struct NameSeed<'a>(&'a mut Names);
 
 impl<'de> DeserializeSeed<'de> for NameSeed<'_> {
-    type Value = Result<(), String>;
+    type Value = ();
 
     fn deserialize<D: de::Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
         struct NameVisitor<'a>(&'a mut Names);
         impl Visitor<'_> for NameVisitor<'_> {
-            type Value = Result<(), String>;
+            type Value = ();
             #[cfg_attr(coverage_nightly, coverage(off))] // The wording of a type error, which the program replaces with its own.
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a string")
             }
             fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
-                Ok(self.0.push(value))
+                self.0.push(value);
+                Ok(())
             }
         }
         deserializer.deserialize_str(NameVisitor(self.0))
@@ -248,10 +248,7 @@ impl<'de> Deserialize<'de> for Counts {
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Counts, A::Error> {
                 let mut builder = CountsBuilder { names: Names::default(), counts: Vec::new(), valid: true };
-                while let Some(pushed) = map.next_key_seed(NameSeed(&mut builder.names))? {
-                    if pushed.is_err() {
-                        builder.valid = false;
-                    }
+                while map.next_key_seed(NameSeed(&mut builder.names))?.is_some() {
                     match map.next_value::<Count>()? {
                         Count::Good(count) => builder.counts.push(count),
                         Count::Bad => {
@@ -348,12 +345,9 @@ impl<'de> Visitor<'de> for TablesVisitor {
     }
 }
 
+/// The readers of this module take any value where they expect one, so what stops them is the text not being JSON.
 fn json_error(error: &serde_json::Error) -> LoadError {
-    use serde_json::error::Category;
-    match error.classify() {
-        Category::Data => LoadError::value(error.to_string()),
-        Category::Io | Category::Syntax | Category::Eof => LoadError { name: "JSONDecodeError", message: error.to_string() },
-    }
+    LoadError { name: "JSONDecodeError", message: error.to_string() }
 }
 
 fn open_limited(path: &Path, limit: usize, too_large: &str) -> Result<BufReader<std::fs::File>, LoadError> {
@@ -449,7 +443,7 @@ impl WeightTable {
         let mut names = Names::default();
         let mut values = Vec::new();
         for (name, weights) in entries {
-            names.push(name).expect("a small table");
+            names.push(name);
             values.extend(weights);
         }
         WeightTable { index: names.index(), values }
@@ -590,19 +584,15 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
                 let mut values: Vec<f64> = Vec::new();
                 let mut integers: Vec<u8> = Vec::new();
                 let mut refusal: Option<&'static str> = None;
-                while let Some(pushed) = map.next_key_seed(NameSeed(&mut names))? {
-                    let entry = names.len().wrapping_sub(1);
-                    if pushed.is_err() && refusal.is_none() {
-                        refusal = Some("the table is too large");
-                    }
+                while map.next_key_seed(NameSeed(&mut names))?.is_some() {
                     let item = map.next_value::<Entry>()?;
-                    let name = if entry < names.len() { names.name(entry) } else { "" };
+                    let name = names.name(names.len() - 1);
                     if refusal.is_none() {
                         let bad_name = (spec.name_required && name.is_empty()) || ks_text::pystr::len(name) > spec.max_name_characters;
                         if bad_name || item.items != Some(ACTION_COUNT) {
                             refusal = Some(spec.entry_error);
                         } else if item.weights.iter().any(|weight| {
-                            !weight.valid || !weight.value.is_finite() || spec.max_magnitude.is_some_and(|bound| weight.value.abs() > bound)
+                            !weight.valid || spec.max_magnitude.is_some_and(|bound| weight.value.abs() > bound)
                         }) {
                             refusal = Some(spec.weight_error);
                         }
@@ -789,6 +779,8 @@ mod tests {
         assert_eq!(latin.words().collect::<Vec<_>>(), ["the"]);
         assert!(tables.alphabet("nothing").is_empty());
         assert!(load_term_frequency(&good, &["latin"], 1000).is_err());
+        let twice = file("twice", r#"{"latin": {"a": 1}, "latin": {"b": 2}}"#);
+        assert!(load_term_frequency(&twice, &["latin"], 1000).is_ok_and(|tables| tables.alphabet("latin").contains("b")));
         assert!(load_term_frequency(&good, &["cyrillic", "latin"], 5).is_err());
         let values = ["1", "0", "-1", "1.5", "true", "\"x\"", "null", "[1, 2]", "{\"a\": 1, \"b\": 2}", "99999999999"];
         for value in values {
@@ -841,7 +833,7 @@ mod tests {
         // json.dumps({"b": [0, 0.5, 1e-05, -2.0], "a": [1, 1, 1, 1]}, sort_keys=True, separators=(",", ":"))
         let mut names = Names::default();
         for name in ["b", "a"] {
-            names.push(name).expect("small");
+            names.push(name);
         }
         let table = WeightTable { index: names.index(), values: vec![0.0, 0.5, 1e-5, -2.0, 1.0, 1.0, 1.0, 1.0] };
         let digest = checksum(&table, &[0b0001, 0b1111]);
