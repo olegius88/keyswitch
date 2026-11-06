@@ -1381,6 +1381,11 @@ pub struct FreezeRequest<'a> {
     pub max_sentences_per_document: usize,
 }
 
+/// A table with the entries of another, both made above.
+fn with_metadata(table: &mut Value, metadata: &Value) {
+    table.as_object_mut().expect("a table").extend(metadata.as_object().expect("a table").clone());
+}
+
 /// The technical source of a holdout: exactly one.
 pub enum TechnicalSource<'a> {
     Sid(&'a Path),
@@ -1403,6 +1408,12 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         chosen
     };
     let (paths, sources) = if pins.is_empty() { (Vec::new(), Vec::new()) } else { source_inventory(source_root, &pins)? };
+    let source = match technical {
+        TechnicalSource::Sid(directory) => sid_source(directory)?,
+        TechnicalSource::Arch(directory) => arch_source(directory)?,
+        TechnicalSource::Rpm(directory) => rpm_source(directory)?,
+        TechnicalSource::Alpine(directory) => alpine_source(directory)?,
+    };
     let exclusions = load_exclusions(request.root, request.base, request.ud_origin, request.technical_origin, request.prefix_inventory, request.lexicon, &request.extra_exposure, request.ledger)?;
     let mut sentences = Vec::new();
     for (source, path) in &paths {
@@ -1433,12 +1444,6 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
     sampling["lookalike_typo_sentences_dropped"] = json!(dropped);
     let (mut ud_rows, ud_summary) = holdout_rows(&selected, &exclusions)?;
     drop(selected);
-    let source = match technical {
-        TechnicalSource::Sid(directory) => sid_source(directory)?,
-        TechnicalSource::Arch(directory) => arch_source(directory)?,
-        TechnicalSource::Rpm(directory) => rpm_source(directory)?,
-        TechnicalSource::Alpine(directory) => alpine_source(directory)?,
-    };
     let (mut technical_rows, technical_summary) = technical_holdout_rows(&source.commands, &exclusions, request.namespace, &source.source, source.source_file, &source.document_prefix);
     let mut provenance = exclusions.provenance.clone();
     provenance.extend(source.provenance.clone());
@@ -1477,12 +1482,9 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         "exclusion_counts": {"base_aliases": exclusions.base_aliases.len(), "prior_test_aliases": exclusions.prior_test_aliases.len(), "prefix_aliases": exclusions.prefix_aliases.len(),
             "prior_test_families": exclusions.prior_test_families.len(), "exposed_physical": exclusions.exposed_physical.len(), "historical_aliases": exclusions.historical_aliases.len(), "lexicon": exclusions.lexicon.len()}});
     let mut report = json!({"namespace": request.namespace, "test_scored": false, "test_text_printed": false});
-    if let (Some(table), Some(extra)) = (report.as_object_mut(), metadata.as_object()) {
-        table.extend(extra.clone());
-    }
-    if overlap.values().any(|count| *count != 0) {
-        return Err(format!("holdout overlaps a previously accessed test: {overlap:?}"));
-    }
+    with_metadata(&mut report, &metadata);
+    // Rows, families and documents of an earlier test were all quarantined above.
+    assert!(overlap.values().all(|count| *count == 0), "holdout overlaps a previously accessed test: {overlap:?}");
     if let Some(output) = request.output {
         let generator = include_str!("freeze.rs");
         let base_manifest = begin_output(request.base, output, generator)?;
@@ -1530,9 +1532,7 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
         let membership_path = output.join("test-membership.json");
         std::fs::write(&membership_path, crate::artifact::canonical(&membership)).map_err(|error| error.to_string())?;
         let mut partitioning = json!({"mode": "test-only-holdout-extension"});
-        if let (Some(table), Some(extra)) = (partitioning.as_object_mut(), metadata.as_object()) {
-            table.extend(extra.clone());
-        }
+        with_metadata(&mut partitioning, &metadata);
         let manifest = json!({"schema_version": 1, "namespace": request.namespace, "label": "keep", "splits": files,
             "scope": "holdout extension: base train/development/calibration byte-identical; TEST from new treebanks and commands outside the shipped identifier lexicon; not globally unseen lexicon or verified human intent",
             "token_language": "surface alphabet determines RU/Latin group; ASCII command alphabet uses group 0",
@@ -1690,9 +1690,7 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
         "test_membership_sha256": checksum(&output.join("test-membership.json"))?, "splits": files, "provenance": provenance, "metadata": metadata, "generator_sha256": hex(&Sha256::digest(generator.as_bytes()))});
     std::fs::write(output.join("manifest.json"), crate::artifact::canonical(&manifest)).map_err(|error| error.to_string())?;
     let mut report = json!({"manifest_sha256": checksum(&output.join("manifest.json"))?, "splits": manifest["splits"]});
-    if let (Some(table), Some(extra)) = (report.as_object_mut(), metadata.as_object()) {
-        table.extend(extra.clone());
-    }
+    with_metadata(&mut report, &metadata);
     if let Some(path) = request.report {
         let options = ks_text::JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() };
         std::fs::write(path, ks_text::json_dumps(&report, &options) + "\n").map_err(|error| error.to_string())?;

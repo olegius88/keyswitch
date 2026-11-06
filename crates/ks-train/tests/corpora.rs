@@ -261,7 +261,13 @@ static CHAIN: LazyLock<Chain> = LazyLock::new(|| {
     deb_source(&trixie, "https://deb.debian.org/debian/dists/trixie/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/trixie/InRelease", "main/Contents-amd64.gz", "tx", true);
     done(&run(base("technical").arg("--source-directory").arg(&trixie).arg("--ud-corpus").arg(&reconciled).arg("--preview-report").arg(folder.join("technical-preview.json")).arg("--output").arg(&technical)));
     done(&run(base("merge").arg("--base").arg(&reconciled).arg("--technical").arg(&technical).arg("--output").arg(&merged)));
-    done(&run(base("inventory").arg("--output").arg(&prefix)));
+    let prefix_corpus = folder.join("prefix-corpus");
+    std::fs::create_dir_all(&prefix_corpus).expect("a folder");
+    for split in ["train", "development", "calibration"] {
+        std::fs::write(prefix_corpus.join(format!("{split}.jsonl.gz")), gz(format!("{}\n", json!({"text": format!("{split}слово"), "family": "семья"})).as_bytes())).expect("a split");
+    }
+    std::fs::write(prefix_corpus.join("corpus.json"), b"{}").expect("a receipt");
+    done(&run(base("inventory").arg("--corpus").arg(&prefix_corpus).arg("--output").arg(&prefix)));
     let holdout_sources = folder.join("holdout-sources");
     for (index, (name, commit)) in PINS.iter().enumerate() {
         let syllables = if name.contains("Russian") { &RUSSIAN } else { &ENGLISH };
@@ -374,4 +380,529 @@ fn a_fitting_extension_adds_to_the_splits_of_its_base() {
     assert!(said(&run(&mut fitting(chain, "small-no-words", &chain.folder.join("fitting-2"), &chain.merged, &tatoeba))).contains("names no words"));
     let manifest: Value = serde_json::from_slice(&std::fs::read(output.join("manifest.json")).expect("a manifest")).expect("json");
     assert_eq!(manifest["kind"], json!("fitting-extension"));
+}
+
+/// A file of a corpus changed with what it has to say about it, and put back.
+fn edited(path: &Path, edit: &dyn Fn(&mut Value), then: &dyn Fn()) {
+    let bytes = std::fs::read(path).expect("a file");
+    let mut value: Value = serde_json::from_slice(&bytes).expect("json");
+    edit(&mut value);
+    std::fs::write(path, serde_json::to_vec(&value).expect("json")).expect("a file");
+    then();
+    std::fs::write(path, bytes).expect("a file");
+}
+
+fn refused(output: &Output, words: &str) {
+    assert!(!output.status.success() && said(output).contains(words), "{words}: {}", said(output));
+}
+
+#[test]
+fn a_receipt_that_does_not_hold_stops_a_holdout_before_anything_long() {
+    let chain = &*CHAIN;
+    let holdout_of = |flag: &str, directory: &Path, words: &str| {
+        let answer = run(holdout(chain, "small-refused", &chain.folder.join("h-refused")).arg(flag).arg(directory).args(["--treebank", "none"]));
+        refused(&answer, words);
+    };
+    // A Contents index.
+    let sid = chain.folder.join("refused-sid");
+    deb_source(&sid, "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "rs", true);
+    let receipt = sid.join("source-receipt.json");
+    let known = "does not identify verified TLS downloads of a known";
+    let sums = "Contents index checksum mismatch";
+    let edits: [(&dyn Fn(&mut Value), &str); 8] = [
+        (&|value| value["contents"]["url"] = json!("https://example.org/"), known),
+        (&|value| value["release"]["url"] = json!("https://example.org/"), known),
+        (&|value| value["contents"]["status"] = json!(404), known),
+        (&|value| value["release"]["status"] = json!(404), known),
+        (&|value| value["tls_certificate_verification"] = json!(false), known),
+        (&|value| value["contents_sha256"] = json!("0"), sums),
+        (&|value| value["contents_bytes"] = json!(1), sums),
+        (&|value| value["release_sha256"] = json!("0"), sums),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| holdout_of("--sid-directory", &sid, words));
+    }
+    // A release file that names another checksum: the receipt still holds, and the section ends without it.
+    let release = sid.join("InRelease");
+    let text = std::fs::read_to_string(&release).expect("a file");
+    let other = "Origin: test\nSHA256:\n other 1 main/Contents-amd64.gz\n\nAcquire-By-Hash: yes\n".to_owned();
+    std::fs::write(&release, &other).expect("a file");
+    edited(&receipt, &|value| value["release_sha256"] = json!(digest(other.as_bytes())), &|| holdout_of("--sid-directory", &sid, "absent from InRelease"));
+    std::fs::write(&release, &text).expect("a file");
+    // Who owns what, in the index itself.
+    let contents = sid.join("Contents-amd64.gz");
+    let packed = gz(b"usr/bin/badowner     Not/Valid\n");
+    let original = std::fs::read(&contents).expect("a file");
+    std::fs::write(&contents, &packed).expect("a file");
+    let listed = format!("SHA256:\n {} {} main/Contents-amd64.gz\n", digest(&packed), packed.len());
+    std::fs::write(&release, &listed).expect("a file");
+    edited(&receipt, &|value| {
+        value["contents_sha256"] = json!(digest(&packed));
+        value["contents_bytes"] = json!(packed.len());
+        value["release_sha256"] = json!(digest(listed.as_bytes()));
+    }, &|| holdout_of("--sid-directory", &sid, "invalid package ownership"));
+    std::fs::write(&contents, original).expect("a file");
+    std::fs::write(&release, text).expect("a file");
+    // A database of Arch.
+    let arch = chain.folder.join("refused-arch");
+    arch_source(&arch);
+    let receipt = arch.join("source-receipt.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 7] = [
+        (&|value| value["tls_certificate_verification"] = json!(false), "verified TLS Arch"),
+        (&|value| value["mirror"] = json!("https://example.org/"), "verified TLS Arch"),
+        (&|value| value["databases"]["core"]["download"]["status"] = json!(404), "files database download"),
+        (&|value| value["databases"]["core"]["download"]["url"] = json!("x"), "files database download"),
+        (&|value| value["databases"]["core"]["file"] = json!("x"), "files database download"),
+        (&|value| value["databases"]["core"]["sha256"] = json!("0"), "checksum mismatch"),
+        (&|value| value["databases"]["extra"]["bytes"] = json!(1), "checksum mismatch"),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| holdout_of("--arch-directory", &arch, words));
+    }
+    // Packages that say nothing of themselves.
+    let database = arch.join("core.files");
+    let original = std::fs::read(&database).expect("a file");
+    for (files, words) in [
+        (vec![("pkg-1/files".to_owned(), b"usr/bin/thing\n".to_vec())], "without a description"),
+        (vec![("pkg-1/desc".to_owned(), b"%OTHER%\nx\n".to_vec()), ("pkg-1/files".to_owned(), b"usr/bin/thing\n".to_vec())], "package descri"),
+    ] {
+        let packed = gz(&tar(&files));
+        std::fs::write(&database, &packed).expect("a file");
+        edited(&receipt, &|value| {
+            value["databases"]["core"]["sha256"] = json!(digest(&packed));
+            value["databases"]["core"]["bytes"] = json!(packed.len());
+        }, &|| holdout_of("--arch-directory", &arch, words));
+    }
+    std::fs::write(&database, original).expect("a file");
+    // An index of Alpine.
+    let alpine = chain.folder.join("refused-alpine");
+    alpine_source(&alpine);
+    let receipt = alpine.join("source-receipt.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 6] = [
+        (&|value| value["base_url"] = json!("https://example.org/"), "verified TLS Alpine"),
+        (&|value| value["archive"]["status"] = json!(404), "verified TLS Alpine"),
+        (&|value| value["tls_certificate_verification"] = json!(false), "verified TLS Alpine"),
+        (&|value| value["archive"]["url"] = json!("x"), "verified TLS Alpine"),
+        (&|value| value["archive"]["sha256"] = json!("0"), "index checksum mismatch"),
+        (&|value| value["archive"]["bytes"] = json!(1), "index checksum mismatch"),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| holdout_of("--alpine-directory", &alpine, words));
+    }
+    let archive = alpine.join("APKINDEX.tar.gz");
+    let packed = gz(&tar(&[("OTHER".to_owned(), b"x".to_vec())]));
+    std::fs::write(&archive, &packed).expect("a file");
+    edited(&receipt, &|value| {
+        value["archive"]["sha256"] = json!(digest(&packed));
+        value["archive"]["bytes"] = json!(packed.len());
+    }, &|| holdout_of("--alpine-directory", &alpine, "no APKINDEX member"));
+    // An index of RPM packages.
+    let rpm = chain.folder.join("refused-rpm");
+    rpm_source(&rpm, Some("sha512"));
+    let receipt = rpm.join("source-receipt.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 9] = [
+        (&|value| value["base_url"] = json!("https://example.org/"), "verified TLS RPM"),
+        (&|value| value["tls_certificate_verification"] = json!(false), "verified TLS RPM"),
+        (&|value| value["repomd"]["status"] = json!(404), "verified TLS RPM"),
+        (&|value| value["repomd_sha256"] = json!("0"), "RPM index checksum mismatch"),
+        (&|value| value["primary"]["sha256"] = json!("0"), "RPM index checksum mismatch"),
+        (&|value| value["primary"]["checksum_type"] = json!("md5"), "unknown checksum"),
+        (&|value| value["primary"]["checksum"] = json!("0"), "does not match the checksum"),
+        (&|value| value["primary"]["href"] = json!("x"), "not the one repomd.xml names"),
+        (&|value| { value["primary"].as_object_mut().expect("a table").remove("checksum"); value["primary"]["checksum_type"] = json!("sha256"); }, "not the one repomd.xml names"),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| holdout_of("--rpm-directory", &rpm, words));
+    }
+    // A receipt of Tatoeba.
+    let tatoeba = chain.folder.join("refused-tatoeba");
+    tatoeba_source(&tatoeba);
+    let receipt = tatoeba.join("source-receipt.json");
+    let with_tatoeba = |directory: &Path, words: &str, languages: &[&str]| {
+        let mut command = holdout(chain, "small-refused", &chain.folder.join("h-refused"));
+        command.arg("--sid-directory").arg(&sid).args(["--treebank", "none"]).arg("--tatoeba-directory").arg(directory);
+        for language in languages {
+            command.args(["--tatoeba-language", language]);
+        }
+        refused(&run(&mut command), words);
+    };
+    let identifies = "does not identify verified TLS Tatoeba";
+    let mismatch = "receipt mismatch";
+    let edits: [(&dyn Fn(&mut Value), &str); 9] = [
+        (&|value| value["licence"] = json!("All rights reserved"), identifies),
+        (&|value| value["files"] = json!(1), identifies),
+        (&|value| value["tls_certificate_verification"] = json!(false), identifies),
+        (&|value| value["base_url"] = json!("x"), identifies),
+        (&|value| value["files"]["rus_sentences.tsv.bz2"]["status"] = json!(404), mismatch),
+        (&|value| value["files"]["rus_sentences.tsv.bz2"]["language"] = json!("eng"), mismatch),
+        (&|value| value["files"]["rus_sentences.tsv.bz2"]["url"] = json!("x"), mismatch),
+        (&|value| value["files"]["rus_sentences.tsv.bz2"]["sha256"] = json!("0"), mismatch),
+        (&|value| value["files"]["rus_sentences.tsv.bz2"]["bytes"] = json!(1), mismatch),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| with_tatoeba(&tatoeba, words, &["rus"]));
+    }
+    with_tatoeba(&tatoeba, "at least one --tatoeba-language", &[]);
+    refused(&run(holdout(chain, "small-refused", &chain.folder.join("h-refused")).arg("--sid-directory").arg(&sid).args(["--treebank", "none", "--tatoeba-language", "rus"])), "needs --tatoeba-directory");
+    // Exports that are not what they say.
+    for (fixture, words) in [("tatoeba-bad", "must be id, language, text"), ("tatoeba-mislabelled", "holds a eng sentence")] {
+        let bad = chain.folder.join(fixture);
+        std::fs::create_dir_all(&bad).expect("a folder");
+        let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(fixture).join("rus_sentences.tsv.bz2")).expect("a sample");
+        std::fs::write(bad.join("rus_sentences.tsv.bz2"), &bytes).expect("a file");
+        let base = "https://downloads.tatoeba.org/exports/per_language/";
+        std::fs::write(bad.join("source-receipt.json"), serde_json::to_vec(&json!({"licence": "CC BY", "tls_certificate_verification": true, "base_url": base, "files": {"rus_sentences.tsv.bz2": {"status": 200, "language": "rus", "url": format!("{base}rus/rus_sentences.tsv.bz2"), "sha256": digest(&bytes), "bytes": bytes.len()}}})).expect("json")).expect("a receipt");
+        with_tatoeba(&bad, words, &["rus"]);
+    }
+    // The treebanks a holdout names.
+    refused(&run(holdout(chain, "small-refused", &chain.folder.join("h-refused")).arg("--sid-directory").arg(&sid).args(["--treebank", "UD_Nothing"])), "unpinned treebank");
+    let answer = run(holdout(chain, "small-refused", &chain.folder.join("h-refused")).args(["--treebank", "none"]));
+    refused(&answer, "exactly one technical source");
+    let two = run(holdout(chain, "small-refused", &chain.folder.join("h-refused")).arg("--sid-directory").arg(&sid).arg("--arch-directory").arg(&arch));
+    refused(&two, "exactly one technical source");
+}
+
+#[test]
+fn a_pinned_treebank_is_exactly_what_was_pinned() {
+    let chain = &*CHAIN;
+    let sources = chain.folder.join("refused-sources");
+    let (name, commit) = PINS[0];
+    pinned_treebank(&sources, name, commit, &RUSSIAN, 9000, 2);
+    let sid = chain.folder.join("treebank-sid");
+    deb_source(&sid, "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "ts", true);
+    let check = |words: &str| {
+        let mut command = trainer();
+        command.arg("holdout").arg("--tree").arg(tree()).arg("--base").arg(&chain.merged).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).arg("--ledger").arg(chain.folder.join("no-ledger")).args(["--namespace", "n", "--treebank", name]).arg("--source-root").arg(&sources).arg("--sid-directory").arg(&sid);
+        refused(&run(&mut command), words);
+    };
+    let pin = sources.join(name).join("pin.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 6] = [
+        (&|value| value["commit"] = json!("0"), "pinned commit differs"),
+        (&|value| value["repository"] = json!("x"), "pinned commit differs"),
+        (&|value| value["files"] = json!([]), "invalid pinned holdout inventory"),
+        (&|value| value["files"][0]["path"] = json!("thing.exe"), "invalid pinned holdout filename"),
+        (&|value| value["files"][0]["sha256"] = json!("0"), "pinned holdout checksum differs"),
+        (&|value| value["files"][0]["sha"] = json!("0"), "disagrees with pinned Git tree blob"),
+    ];
+    for (edit, words) in edits {
+        edited(&pin, edit, &|| check(words));
+    }
+    // A list of a note and a text is fine; a treebank that breaks its format is not.
+    let file = sources.join(name).join(format!("{}-ud-test.conllu", name.to_lowercase()));
+    let original = std::fs::read(&file).expect("a file");
+    let broken = |content: &str, words: &str| {
+        std::fs::write(&file, content).expect("a file");
+        let bytes = content.as_bytes();
+        edited(&pin, &|value| {
+            value["files"][0]["sha256"] = json!(digest(bytes));
+            value["files"][0]["sha"] = json!(blob_sha(bytes));
+        }, &|| check(words));
+    };
+    broken("1\tслово\n", "must have ten columns");
+    broken("2-1\tслово\t_\t_\t_\t_\t_\t_\t_\t_\n", "invalid or overlapping");
+    broken("1-2\tслово\t_\t_\t_\t_\t_\t_\t_\t_\n1\tсло\t_\t_\t_\t_\t_\t_\t_\t_\n", "invalid or overlapping");
+    broken("1-2\tслово\t_\t_\t_\t_\t_\t_\t_\t_\n1\tсло\t_\t_\t_\t_\t_\t_\t_\t_\n2\tво\t_\t_\t_\t_\t_\t_\t_\t_\n1-2\tснова\t_\t_\t_\t_\t_\t_\t_\t_\n", "invalid or overlapping");
+    broken("# sent_id = a\n1\tслово\t_\t_\t_\t_\t_\t_\t_\t_\n\n# sent_id = a\n1\tслово\t_\t_\t_\t_\t_\t_\t_\t_\n", "duplicate holdout sentence identity");
+    std::fs::write(&file, original).expect("a file");
+}
+
+#[test]
+fn what_stands_in_the_way_of_a_new_corpus_says_so() {
+    let chain = &*CHAIN;
+    let sid = chain.folder.join("way-sid");
+    deb_source(&sid, "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "wy", true);
+    let plain = |output: &Path| {
+        let mut command = holdout(chain, "small-way", output);
+        command.arg("--sid-directory").arg(&sid).args(["--treebank", "none"]);
+        run(&mut command)
+    };
+    // Into the base, over itself, over what is there.
+    refused(&plain(&chain.merged), "refusing to overwrite");
+    refused(&plain(&chain.merged.join("inside")), "must not be inside the base");
+    let there = chain.folder.join("there");
+    std::fs::create_dir_all(&there).expect("a folder");
+    refused(&plain(&there), "refusing to overwrite");
+    // A base that no longer holds what its manifest says.
+    let copy = chain.folder.join("changed-base");
+    std::fs::create_dir_all(&copy).expect("a folder");
+    for entry in std::fs::read_dir(&chain.merged).expect("the corpus").flatten() {
+        if entry.path().is_file() {
+            std::fs::copy(entry.path(), copy.join(entry.file_name())).expect("a copy");
+        }
+    }
+    let with_base = |output: &Path, words: &str| {
+        let mut command = trainer();
+        command.arg("holdout").arg("--tree").arg(tree()).arg("--base").arg(&copy).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).arg("--ledger").arg(chain.folder.join("no-ledger")).args(["--namespace", "n", "--treebank", "none"]).arg("--source-root").arg(&chain.holdout_sources).arg("--sid-directory").arg(&sid).arg("--output").arg(output);
+        refused(&run(&mut command), words);
+    };
+    let manifest = copy.join("manifest.json");
+    edited(&manifest, &|value| value["test_membership_sha256"] = json!("0"), &|| with_base(&chain.folder.join("o1"), "differs from its manifest"));
+    edited(&manifest, &|value| value["splits"]["train"]["sha256"] = json!("0"), &|| with_base(&chain.folder.join("o2"), "base split checksum mismatch"));
+    edited(&manifest, &|value| value["splits"]["quarantine"]["sha256"] = json!("0"), &|| with_base(&chain.folder.join("o3"), "base quarantine checksum mismatch"));
+    edited(&manifest, &|value| value["splits"]["quarantine"]["rows"] = json!(1_000_000), &|| with_base(&chain.folder.join("o4"), "row count mismatch"));
+    // An exposure file that is not there, or not of its form.
+    let mut extra = holdout(chain, "small-way", &chain.folder.join("o5"));
+    extra.arg("--sid-directory").arg(&sid).args(["--treebank", "none", "--extra-exposure", "/nonexistent/exposure.json"]);
+    refused(&run(&mut extra), "exposure input is absent");
+    let exposure = chain.folder.join("exposure.tsv.gz");
+    std::fs::write(&exposure, gz(b"only\ttwo\n")).expect("a file");
+    let mut extra = holdout(chain, "small-way", &chain.folder.join("o6"));
+    extra.arg("--sid-directory").arg(&sid).args(["--treebank", "none", "--extra-exposure"]).arg(&exposure);
+    refused(&run(&mut extra), "invalid prior context TSV");
+}
+
+/// A test read before, as a ledger holds it.
+fn ledger_of(folder: &Path, membership: &Value) -> PathBuf {
+    std::fs::create_dir_all(folder).expect("a folder");
+    std::fs::write(folder.join("read.access.json"), serde_json::to_vec(&json!({"test_membership": membership})).expect("json")).expect("a record");
+    std::fs::write(folder.join("other.access.json"), b"{}").expect("a record");
+    std::fs::write(folder.join("notes.txt"), b"").expect("a file");
+    folder.to_path_buf()
+}
+
+#[test]
+fn a_test_read_before_takes_its_rows_out_of_a_new_one() {
+    let chain = &*CHAIN;
+    let sid = chain.folder.join("ledger-sid");
+    deb_source(&sid, "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "lg", true);
+    let tatoeba = chain.folder.join("ledger-tatoeba");
+    tatoeba_source(&tatoeba);
+    let first = chain.folder.join("ledger-first");
+    done(&run(holdout(chain, "small-ledger", &first).arg("--sid-directory").arg(&sid).args(["--treebank", "UD_Russian-GSD"])));
+    let membership: Value = serde_json::from_slice(&std::fs::read(first.join("test-membership.json")).expect("a membership")).expect("json");
+    let whole = ledger_of(&chain.folder.join("ledger-whole"), &membership);
+    let run_with = |ledger: &Path, name: &str| {
+        let mut command = trainer();
+        command.arg("holdout").arg("--tree").arg(tree()).arg("--base").arg(&chain.merged).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).arg("--ledger").arg(ledger).args(["--namespace", "small-ledger", "--treebank", "UD_Russian-GSD"]).arg("--source-root").arg(&chain.holdout_sources).arg("--sid-directory").arg(&sid).arg("--output").arg(chain.folder.join(name));
+        done(&run(&mut command))
+    };
+    run_with(&whole, "ledger-second");
+    // Only the rows, or only the documents: the families were not known then.
+    let rows = ledger_of(&chain.folder.join("ledger-rows"), &json!({"row_ids_sha256": membership["row_ids_sha256"]}));
+    run_with(&rows, "ledger-third");
+    let documents = ledger_of(&chain.folder.join("ledger-documents"), &json!({"document_ids_sha256": membership["document_ids_sha256"]}));
+    run_with(&documents, "ledger-fourth");
+    // The fitting extension over the same.
+    let over = first;
+    let fit = |ledger: &Path, name: &str| {
+        let mut command = fitting(chain, name, &chain.folder.join(name), &over, &tatoeba);
+        command.arg("--ledger").arg(ledger);
+        command
+    };
+    // The option above is read first: a ledger of its own goes with its own call.
+    let mut own = trainer();
+    own.arg("fitting").arg("--tree").arg(tree()).arg("--base").arg(&over).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).arg("--ledger").arg(&whole).args(["--namespace", "fit-ledger", "--tatoeba-language", "rus", "--tatoeba-language", "eng"]).arg("--tatoeba-directory").arg(&tatoeba).arg("--output").arg(chain.folder.join("fit-ledger"));
+    done(&run(&mut own));
+    let _ = fit;
+    // A fitting extension needs somewhere to write, and something to read.
+    let mut none = trainer();
+    none.arg("fitting").arg("--tree").arg(tree()).arg("--base").arg(&over).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).args(["--namespace", "n"]);
+    refused(&run(&mut none), "needs an output");
+    let mut no_exports = trainer();
+    no_exports.arg("fitting").arg("--tree").arg(tree()).arg("--base").arg(&over).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).args(["--namespace", "n"]).arg("--output").arg(chain.folder.join("fit-none"));
+    refused(&run(&mut no_exports), "needs the Tatoeba exports");
+}
+
+fn copy_of(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("a folder");
+    for entry in std::fs::read_dir(from).expect("a corpus").flatten() {
+        if entry.path().is_file() {
+            std::fs::copy(entry.path(), to.join(entry.file_name())).expect("a copy");
+        }
+    }
+}
+
+#[test]
+fn a_merge_checks_both_corpora_to_the_byte() {
+    let chain = &*CHAIN;
+    let (base_copy, technical_copy) = (chain.folder.join("merge-base"), chain.folder.join("merge-technical"));
+    copy_of(&chain.reconciled, &base_copy);
+    copy_of(&chain.technical, &technical_copy);
+    let output = chain.folder.join("merge-output");
+    let merge = |words: &str| refused(&run(base("merge").arg("--base").arg(&base_copy).arg("--technical").arg(&technical_copy).arg("--output").arg(&output)), words);
+    let existing = chain.folder.join("merge-there");
+    std::fs::create_dir_all(&existing).expect("a folder");
+    refused(&run(base("merge").arg("--base").arg(&base_copy).arg("--technical").arg(&technical_copy).arg("--output").arg(&existing)), "refusing to overwrite combined");
+    let manifest = base_copy.join("manifest.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 15] = [
+        (&|value| value["namespace"] = json!(""), "invalid corpus manifest identity"),
+        (&|value| value["schema_version"] = json!(2), "invalid corpus manifest identity"),
+        (&|value| value["label"] = json!("other"), "invalid corpus manifest identity"),
+        (&|value| value["splits"]["train"]["path"] = json!("x"), "unexpected source split filename"),
+        (&|value| value["splits"]["train"]["sha256"] = json!("0"), "compressed checksum mismatch"),
+        (&|value| value["splits"]["train"]["content_sha256"] = json!("0"), "raw content checksum mismatch"),
+        (&|value| value["splits"]["train"]["rows"] = json!(1), "streamed row count mismatch"),
+        (&|value| value["generator_sha256"] = json!("0"), "origin generator checksum mismatch"),
+        (&|value| value["reconciliation"]["source_sha256"] = json!("0"), "reconciliation generator checksum mismatch"),
+        (&|value| value["test_membership_sha256"] = json!("0"), "test membership checksum mismatch"),
+        (&|value| value["reconciliation"]["closure_sha256"] = json!("0"), "base physical sidecar checksum mismatch"),
+        (&|value| value["namespace"] = json!("other"), "namespace mismatch"),
+        (&|value| value["generator_source"] = json!("gone.rs"), ""),
+        (&|value| value["splits"]["train"] = json!({}), "unexpected source split filename"),
+        (&|value| value["splits"] = json!({}), "unexpected source split filename"),
+    ];
+    for (edit, words) in edits {
+        edited(&manifest, edit, &|| merge(words));
+    }
+    edited(&technical_copy.join("manifest.json"), &|value| value["family_aliases_sha256"] = json!("0"), &|| merge("technical family sidecar checksum mismatch"));
+    // The membership of a test, with the manifest following it.
+    let pinned = |folder: &Path, edit: &dyn Fn(&mut Value), words: &str| {
+        let path = folder.join("test-membership.json");
+        let bytes = std::fs::read(&path).expect("a file");
+        let mut value: Value = serde_json::from_slice(&bytes).expect("json");
+        edit(&mut value);
+        let changed = serde_json::to_vec(&value).expect("json");
+        std::fs::write(&path, &changed).expect("a file");
+        edited(&folder.join("manifest.json"), &|manifest| manifest["test_membership_sha256"] = json!(digest(&changed)), &|| merge(words));
+        std::fs::write(&path, bytes).expect("a file");
+    };
+    pinned(&base_copy, &|value| value["row_ids_sha256"] = json!([]), "row count mismatch");
+    pinned(&base_copy, &|value| value["family_ids_sha256"] = json!([]), "requires family and document membership");
+    pinned(&base_copy, &|value| { let list = value["row_ids_sha256"].as_array_mut().expect("a list"); let first = list[0].clone(); list.push(first); }, "duplicate hashes");
+    pinned(&technical_copy, &|value| value["row_ids_sha256"] = json!(["0".repeat(64)]), "row count mismatch");
+    let membership: Value = serde_json::from_slice(&std::fs::read(chain.reconciled.join("test-membership.json")).expect("a file")).expect("json");
+    pinned(&technical_copy, &|value| value["family_ids_sha256"][0] = membership["family_ids_sha256"][0].clone(), "");
+    // The sidecars, with the manifests following them.
+    let sidecar = technical_copy.join("family-aliases.json");
+    let original = std::fs::read(&sidecar).expect("a file");
+    let good: Value = serde_json::from_slice(&original).expect("json");
+    let family = good["families"].as_object().expect("families").keys().next().expect("a family").clone();
+    let closure: Value = serde_json::from_slice(&std::fs::read(base_copy.join("physical-family-closure.json")).expect("a file")).expect("json");
+    let known_alias = closure["alias_sha256_to_closure_sha256"].as_object().expect("aliases").keys().next().expect("an alias").clone();
+    let with_sidecar = |edit: &dyn Fn(&mut Value), words: &str| {
+        let mut changed = good.clone();
+        edit(&mut changed);
+        let bytes = serde_json::to_vec(&changed).expect("json");
+        std::fs::write(&sidecar, &bytes).expect("a file");
+        edited(&technical_copy.join("manifest.json"), &|manifest| manifest["family_aliases_sha256"] = json!(digest(&bytes)), &|| merge(words));
+    };
+    with_sidecar(&|value| value["schema_version"] = json!(2), "unsupported technical family sidecar");
+    with_sidecar(&|value| value["families"] = json!(1), "expected corpus metadata object");
+    with_sidecar(&|value| value["families"][&family]["split"] = json!("nowhere"), "invalid retained split");
+    with_sidecar(&|value| value["families"][&family]["aliases_sha256"] = json!([]), "requires aliases and documents");
+    with_sidecar(&|value| value["families"][&family]["document_ids_sha256"] = json!([]), "requires aliases and documents");
+    with_sidecar(&|value| value["families"][&family]["aliases_sha256"] = json!([known_alias]), "overlaps base physical alias");
+    with_sidecar(&|value| value["families"]["another"] = value["families"][&family].clone(), "multiple families or splits");
+    with_sidecar(
+        &|value| {
+            let mut other = value["families"][&family].clone();
+            other["aliases_sha256"] = json!(["a".repeat(64)]);
+            other["split"] = json!(if other["split"] == json!("train") { "development" } else { "train" });
+            value["families"]["another"] = other;
+        },
+        "document spans multiple splits",
+    );
+    with_sidecar(
+        &|value| {
+            let test = value["families"].as_object_mut().expect("families").iter_mut().find(|(_, record)| record["split"] == json!("test"));
+            if let Some((_, record)) = test {
+                record["split"] = json!("train");
+            }
+        },
+        "",
+    );
+    std::fs::write(&sidecar, original).expect("a file");
+    // Files that are not whole lines, or no gzip at all.
+    let split = base_copy.join("train.jsonl.gz");
+    let bytes = std::fs::read(&split).expect("a file");
+    for content in [gz(b"no newline at the end"), gz(b"\n"), b"not gzip".to_vec()] {
+        std::fs::write(&split, content).expect("a file");
+        merge("");
+    }
+    std::fs::write(&split, bytes).expect("a file");
+    refused(&run(base("merge").arg("--base").arg("/nonexistent").arg("--technical").arg(&technical_copy).arg("--output").arg(&output)), "");
+    assert!(!output.exists());
+}
+
+#[test]
+fn what_changed_since_a_base_was_frozen_stops_its_reconciliation() {
+    let chain = &*CHAIN;
+    let sources = chain.folder.join("sources");
+    let copy = chain.folder.join("reconcile-copy");
+    copy_of(&chain.base, &copy);
+    let report = chain.folder.join("deep/er/reconcile.json");
+    let reconcile = |words: &str| refused(&run(base("reconcile").arg("--corpus").arg(&copy).arg("--source-root").arg(&sources).arg("--report").arg(&report)), words);
+    let manifest = copy.join("manifest.json");
+    let edits: [(&dyn Fn(&mut Value), &str); 6] = [
+        (&|value| value["namespace"] = json!(1), "a namespace"),
+        (&|value| value["sampling"]["max_documents_per_source"] = json!("many"), "sampling.max_documents_per_source"),
+        (&|value| value["sources"] = json!([]), "pinned source inventory differs"),
+        (&|value| value["sampling"]["sources"] = json!({}), "source sampling changed"),
+        (&|value| value["sampling"]["max_sentences_per_document"] = json!(1), "source sampling changed"),
+        (&|value| value["exposure_inputs"] = json!(1), "exposure inputs"),
+    ];
+    for (edit, words) in edits {
+        edited(&manifest, edit, &|| reconcile(words));
+    }
+    let edits: [(&dyn Fn(&mut Value), &str); 9] = [
+        (&|value| value["exposed_membership_sha256"] = json!("0"), "historical exposure reconstruction differs"),
+        (&|value| value["partitioning"] = json!({}), "original partitioning changed"),
+        (&|value| value["splits"]["train"]["path"] = json!("x"), "original compressed split changed"),
+        (&|value| value["splits"]["train"]["sha256"] = json!("0"), "original compressed split changed"),
+        (&|value| value["splits"]["train"]["rows"] = json!(1), "reconstructed original split differs"),
+        (&|value| value["splits"]["train"]["content_sha256"] = json!("0"), "reconstructed original split differs"),
+        (&|value| value["test_membership_sha256"] = json!("0"), "original test membership changed"),
+        (&|value| value["splits"]["development"]["content_sha256"] = json!("0"), "reconstructed original split differs"),
+        (&|value| value["exposure_inputs"] = json!({}), "historical exposure input changed"),
+    ];
+    for (edit, words) in edits {
+        edited(&manifest, edit, &|| reconcile(words));
+    }
+    // Over a folder that is there.
+    let there = chain.folder.join("reconcile-there");
+    std::fs::create_dir_all(&there).expect("a folder");
+    refused(&run(base("reconcile").arg("--corpus").arg(&copy).arg("--source-root").arg(&sources).arg("--report").arg(&report).arg("--output").arg(&there)), "refusing to overwrite");
+    assert!(report.is_file());
+}
+
+#[test]
+fn a_new_base_and_its_technical_corpus_have_their_own_refusals() {
+    let chain = &*CHAIN;
+    let sources = chain.folder.join("sources");
+    let freeze = |output: &Path, extra: &[&str]| run(base("freeze").arg("--source-root").arg(&sources).arg("--output").arg(output).args(["--namespace", "small:base"]).args(extra));
+    refused(&freeze(&chain.base, &[]), "refusing to overwrite a frozen corpus");
+    refused(&freeze(&chain.folder.join("b1"), &["--max-sentences-per-document", "0"]), "must be positive");
+    // The technical corpus, without writing anything, and its checks.
+    let trixie = chain.folder.join("refused-trixie");
+    deb_source(&trixie, "https://deb.debian.org/debian/dists/trixie/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/trixie/InRelease", "main/Contents-amd64.gz", "rt", true);
+    let preview = chain.folder.join("preview.json");
+    let technical = |corpus: &Path, words: &str| refused(&run(base("technical").arg("--source-directory").arg(&trixie).arg("--ud-corpus").arg(corpus).arg("--preview-report").arg(&preview)), words);
+    let receipt = trixie.join("source-receipt.json");
+    let identifies = "does not identify verified TLS Debian";
+    let sums = "Debian source checksum mismatch";
+    let edits: [(&dyn Fn(&mut Value), &str); 8] = [
+        (&|value| value["contents"]["status"] = json!(404), identifies),
+        (&|value| value["release"]["status"] = json!(404), identifies),
+        (&|value| value["tls_certificate_verification"] = json!(false), identifies),
+        (&|value| value["contents"]["url"] = json!("x"), identifies),
+        (&|value| value["release"]["url"] = json!("x"), identifies),
+        (&|value| value["contents_sha256"] = json!("0"), sums),
+        (&|value| value["contents_bytes"] = json!(1), sums),
+        (&|value| value["release_sha256"] = json!("0"), sums),
+    ];
+    for (edit, words) in edits {
+        edited(&receipt, edit, &|| technical(&chain.reconciled, words));
+    }
+    let release = trixie.join("InRelease");
+    let text = std::fs::read_to_string(&release).expect("a file");
+    let other = "SHA256:\n other 1 main/Contents-amd64.gz\n\nAcquire-By-Hash: yes\n".to_owned();
+    std::fs::write(&release, &other).expect("a file");
+    edited(&receipt, &|value| value["release_sha256"] = json!(digest(other.as_bytes())), &|| technical(&chain.reconciled, "absent from InRelease"));
+    std::fs::write(&release, text).expect("a file");
+    let copy = chain.folder.join("technical-copy");
+    copy_of(&chain.reconciled, &copy);
+    edited(&copy.join("manifest.json"), &|value| value["reconciliation"]["closure_sha256"] = json!("0"), &|| technical(&copy, "UD physical sidecar checksum mismatch"));
+    // The preview alone.
+    let done_preview = run(base("technical").arg("--source-directory").arg(&trixie).arg("--ud-corpus").arg(&chain.reconciled).arg("--preview-report").arg(&preview));
+    assert!(done_preview.status.success(), "{}", said(&done_preview));
+    refused(&run(base("technical").arg("--source-directory").arg(&trixie).arg("--ud-corpus").arg(&chain.reconciled).arg("--preview-report").arg(&preview).arg("--output").arg(&chain.technical)), "");
+    // The inventory, over what is there.
+    refused(&run(base("inventory").arg("--output").arg(&chain.prefix)), "refusing to overwrite");
+    let empty = chain.folder.join("inventory-gone");
+    refused(&run(base("inventory").arg("--corpus").arg(&empty).arg("--output").arg(chain.folder.join("i1.json"))), "");
+    std::fs::create_dir_all(&empty).expect("a folder");
+    for split in ["train", "development", "calibration"] {
+        std::fs::write(empty.join(format!("{split}.jsonl.gz")), gz(b"{\"text\": \"\"}\n")).expect("a split");
+    }
+    refused(&run(base("inventory").arg("--corpus").arg(&empty).arg("--output").arg(chain.folder.join("i2.json"))), "prefix row without a text");
 }
