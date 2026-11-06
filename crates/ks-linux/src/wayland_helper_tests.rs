@@ -46,6 +46,11 @@ struct OsState {
     sleeps: Vec<f64>,
     destroyed: bool,
     fail_create: bool,
+    polls: VecDeque<Vec<(i32, i16)>>,
+    inotify: Vec<String>,
+    failing_reads: HashSet<i32>,
+    failing_queries: HashSet<i32>,
+    no_leds: bool,
 }
 
 #[derive(Clone)]
@@ -87,7 +92,10 @@ impl HelperOs for FakeOs {
         Ok(())
     }
     fn read_uinput_leds(&mut self, _fd: i32) -> io::Result<Vec<(u32, i32)>> {
-        Ok(vec![(LED_CAPSL, 1)])
+        if self.st().no_leds {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+        Ok(vec![(LED_CAPSL, 1), (LED_CAPSL, 0), (LED_CAPSL, 0), (0, 1)])
     }
     fn list_event_devices(&mut self) -> Vec<InputDeviceInfo> {
         self.st().devices.clone()
@@ -115,12 +123,18 @@ impl HelperOs for FakeOs {
         Ok(())
     }
     fn query_keys_down(&mut self, fd: i32) -> io::Result<HashSet<u32>> {
+        if self.st().failing_queries.contains(&fd) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         Ok(self.st().keys_down.get(&fd).cloned().unwrap_or_default())
     }
     fn query_caps_lock(&mut self, _fd: i32) -> bool {
         false
     }
     fn read_events(&mut self, fd: i32) -> io::Result<Vec<RawInputEvent>> {
+        if self.st().failing_reads.contains(&fd) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         Ok(self.st().events.entry(fd).or_default().drain(..).collect())
     }
     fn write_led(&mut self, _fd: i32, _code: u32, _value: i32) -> io::Result<()> {
@@ -130,10 +144,10 @@ impl HelperOs for FakeOs {
         Ok(4)
     }
     fn read_inotify(&mut self, _fd: i32) -> Vec<String> {
-        Vec::new()
+        std::mem::take(&mut self.st().inotify)
     }
     fn poll(&mut self, _fds: &[i32], _timeout_ms: i32) -> Vec<(i32, i16)> {
-        Vec::new()
+        self.st().polls.pop_front().unwrap_or_default()
     }
     fn monotonic(&mut self) -> f64 {
         self.st().now
@@ -569,4 +583,227 @@ fn the_client_reports_a_helper_that_fails_or_stays_silent() {
     assert!(started.elapsed() >= seconds(WAYLAND_HELPER_COMMAND_TIMEOUT_SECONDS));
     client.close();
     drop(helper_side);
+}
+
+// ---------------------------------------------------------------- the main loop
+
+const UINPUT_FD: i32 = 3;
+const INOTIFY_FD: i32 = 4;
+const CHANNEL_FD: i32 = 2;
+
+impl Rig {
+    fn poll(&self, fd: i32, mask: i16) {
+        self.os.st().polls.push_back(vec![(fd, mask)]);
+    }
+}
+
+#[test]
+fn the_main_loop_answers_each_device_as_the_kernel_reports_it() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), pointer_info("/dev/input/event2")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    let pointer = rig.os.fd_of("/dev/input/event2");
+    rig.channel.sent();
+
+    // A quiet moment, then the lights the system asked for.
+    helper.step().unwrap();
+    rig.poll(UINPUT_FD, libc::POLLIN);
+    helper.step().unwrap();
+    let frames = rig.channel.sent();
+    assert_eq!(frames.iter().filter(|(kind, _)| *kind == HELPER_MSG_CAPS_LOCK).count(), 2, "on, then off");
+    rig.os.st().no_leds = true;
+    rig.poll(UINPUT_FD, libc::POLLIN);
+    helper.step().unwrap();
+    rig.poll(UINPUT_FD, libc::POLLOUT);
+    helper.step().unwrap();
+
+    // A device comes and another notice says nothing of devices.
+    rig.os.st().inotify = vec!["by-id".to_owned()];
+    rig.poll(INOTIFY_FD, libc::POLLIN);
+    helper.step().unwrap();
+    rig.os.st().devices.push(keyboard_info("/dev/input/event3"));
+    rig.os.st().inotify = vec!["event3".to_owned()];
+    rig.poll(INOTIFY_FD, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(rig.os.st().open.values().any(|path| path == "/dev/input/event3"));
+
+    // A key from the keyboard and a click from the pointer.
+    rig.os.press(keyboard, EVDEV_KEY_A, KEY_VALUE_PRESS);
+    rig.poll(keyboard, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(rig.channel.sent().iter().any(|(kind, _)| *kind == HELPER_MSG_KEY));
+    rig.os.st().events.entry(pointer).or_default().push_back(RawInputEvent { sec: 5, usec: 0, ev_type: EV_KEY, code: EVDEV_BTN_MOUSE, value: KEY_VALUE_PRESS });
+    rig.os.st().events.entry(pointer).or_default().push_back(RawInputEvent { sec: 5, usec: 0, ev_type: EV_KEY, code: EVDEV_BTN_MOUSE, value: KEY_VALUE_RELEASE });
+    rig.poll(pointer, libc::POLLIN);
+    helper.step().unwrap();
+    assert_eq!(rig.channel.sent().iter().filter(|(kind, _)| *kind == HELPER_MSG_POINTER).count(), 1);
+
+    // A device that stops answering, or is reported gone, is closed.
+    rig.os.st().failing_reads.insert(pointer);
+    rig.poll(pointer, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(!rig.os.st().open.contains_key(&pointer));
+    let second = rig.os.fd_of("/dev/input/event3");
+    rig.os.st().failing_reads.insert(second);
+    rig.poll(second, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(!rig.os.st().open.contains_key(&second));
+    rig.poll(keyboard, libc::POLLERR);
+    helper.step().unwrap();
+    assert!(!rig.os.st().open.contains_key(&keyboard));
+}
+
+#[test]
+fn a_pointer_reported_gone_is_closed_and_clicks_are_ignored_without_the_grab() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), pointer_info("/dev/input/event2")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let pointer = rig.os.fd_of("/dev/input/event2");
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    helper.grab_enabled = false;
+    rig.os.st().events.entry(pointer).or_default().push_back(RawInputEvent { sec: 5, usec: 0, ev_type: EV_KEY, code: EVDEV_BTN_MOUSE, value: KEY_VALUE_PRESS });
+    rig.channel.sent();
+    helper.read_pointer(pointer).unwrap();
+    helper.read_keyboard(keyboard).unwrap();
+    assert!(rig.channel.sent().is_empty());
+    helper.grab_enabled = true;
+    rig.poll(pointer, libc::POLLHUP);
+    helper.step().unwrap();
+    assert!(!rig.os.st().open.contains_key(&pointer));
+    rig.os.st().devices.retain(|device| device.path != "/dev/input/event1");
+    helper.rescan_devices(false).unwrap();
+    assert!(!rig.os.st().open.contains_key(&keyboard));
+}
+
+#[test]
+fn the_loop_ends_with_the_channel_and_on_stop() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    rig.poll(CHANNEL_FD, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(!helper.running, "nothing to read: the parent is gone");
+    helper.running = true;
+    rig.poll(CHANNEL_FD, libc::POLLHUP);
+    helper.step().unwrap();
+    assert!(!helper.running);
+    helper.running = true;
+    rig.poll(CHANNEL_FD, libc::POLLOUT);
+    helper.step().unwrap();
+    assert!(helper.running, "no words and no trouble");
+    rig.channel.command(HELPER_CMD_STOP, &[]);
+    rig.poll(CHANNEL_FD, libc::POLLIN);
+    helper.step().unwrap();
+    assert!(!helper.running);
+
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    rig.channel.command(HELPER_CMD_STOP, &[]);
+    rig.poll(CHANNEL_FD, libc::POLLIN);
+    assert_eq!(rig.helper().run(), 0, "a whole run ends well");
+
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let stopping = AtomicBool::new(true);
+    let mut helper = WaylandInputHelper::new(&*rig.channel, Box::new(rig.os.clone()), &stopping, WAYLAND_REPEAT_DEFAULT_DELAY_MS);
+    assert_eq!(helper.run(), 0, "the stop flag ends it");
+
+    // A helper that was not started has nothing to look after.
+    let rig = Rig::new(Vec::new());
+    rig.helper().step().unwrap();
+}
+
+#[test]
+fn a_command_cut_short_is_an_error_and_an_unknown_one_is_passed_over() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    for command in [HELPER_CMD_VERDICT, HELPER_CMD_EMIT_BATCH, HELPER_CMD_SEQ_ACK, HELPER_CMD_QUERY_KEY_DOWN, HELPER_CMD_SET_GRAB] {
+        assert!(helper.handle_command(command, &[1]).is_err(), "{command}");
+    }
+    assert!(helper.handle_command(HELPER_CMD_EMIT_BATCH, &batch(1, HELPER_EMIT_UNCHECKED, 0, &[(true, EVDEV_KEY_A)])[..12]).is_err());
+    assert!(helper.handle_command(9_999, &[]).unwrap());
+    assert!(!helper.handle_command(HELPER_CMD_STOP, &[]).unwrap());
+}
+
+#[test]
+fn the_parent_asks_whether_a_key_is_down() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), keyboard_info("/dev/input/event2")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    let other = rig.os.fd_of("/dev/input/event2");
+    rig.channel.sent();
+    let ask = |helper: &mut WaylandInputHelper<'_>, code: u32| {
+        let mut payload = 7_u32.to_be_bytes().to_vec();
+        payload.extend(code.low::<u16>().to_be_bytes());
+        assert!(helper.handle_command(HELPER_CMD_QUERY_KEY_DOWN, &payload).unwrap());
+        rig.channel.sent().last().unwrap().1[4]
+    };
+    assert_eq!(ask(&mut helper, EVDEV_KEY_A), 0);
+    rig.os.st().keys_down.insert(other, HashSet::from([EVDEV_KEY_A]));
+    assert_eq!(ask(&mut helper, EVDEV_KEY_A), 1);
+    rig.os.st().failing_queries.insert(keyboard);
+    assert_eq!(ask(&mut helper, EVDEV_KEY_Q), 0);
+    assert!(!rig.os.st().open.contains_key(&keyboard), "a device that does not answer is closed");
+}
+
+#[test]
+fn a_held_key_that_repeats_tells_the_parent_once_after_the_delay() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    rig.os.press(keyboard, EVDEV_KEY_A, KEY_VALUE_PRESS);
+    helper.read_keyboard(keyboard).unwrap();
+    let frames = rig.channel.sent();
+    let sequence = key_frame(&frames, frames.len() - 1).0;
+    verdict(&mut helper, sequence, false);
+    rig.channel.sent();
+    let resets = |helper: &mut WaylandInputHelper<'_>, code: u32| {
+        rig.os.press(keyboard, code, KEY_VALUE_REPEAT);
+        helper.read_keyboard(keyboard).unwrap();
+        rig.channel.sent().iter().filter(|(kind, _)| *kind == HELPER_MSG_REPEAT_RESET).count()
+    };
+    assert_eq!(resets(&mut helper, EVDEV_KEY_A), 0, "too soon");
+    rig.os.st().now += 10.0;
+    assert_eq!(resets(&mut helper, EVDEV_KEY_A), 1);
+    assert_eq!(resets(&mut helper, EVDEV_KEY_A), 0, "only once");
+    assert_eq!(resets(&mut helper, EVDEV_KEY_Z), 0, "a key that did not pass");
+    rig.os.st().events.entry(keyboard).or_default().push_back(RawInputEvent { sec: 5, usec: 0, ev_type: 4, code: 4, value: 1 });
+    helper.read_keyboard(keyboard).unwrap();
+}
+
+#[test]
+fn the_parent_changes_the_repeat_delay_with_the_grab() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let mut payload = 3_u32.to_be_bytes().to_vec();
+    payload.push(1);
+    payload.extend(450_u16.to_be_bytes());
+    assert!(helper.handle_command(HELPER_CMD_SET_GRAB, &payload).unwrap());
+    assert_eq!(helper.repeat_delay_ms, 450);
+    let mut zero = 3_u32.to_be_bytes().to_vec();
+    zero.push(1);
+    zero.extend(0_u16.to_be_bytes());
+    assert!(helper.handle_command(HELPER_CMD_SET_GRAB, &zero).unwrap());
+    assert_eq!(helper.repeat_delay_ms, 450, "zero keeps it");
+}
+
+#[test]
+fn devices_that_cannot_be_opened_or_grabbed_are_left_alone() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), pointer_info("/dev/input/event2")]);
+    rig.os.st().deny_all = true;
+    let mut helper = rig.helper();
+    let _ = helper.start_up();
+    assert!(rig.os.st().open.is_empty());
+    assert!(!helper.keyboards.iter().any(|(_, path)| path == "/dev/input/event1"));
+}
+
+#[test]
+fn the_event_flags_read_as_they_are_set() {
+    let forced = HelperKey { seq: 1, pressed: true, keycode: 2, timestamp_ms: 3, flags: HELPER_KEY_FORCED };
+    assert!(forced.forced() && !forced.needs_verdict());
+    let plain = HelperKey { seq: 1, pressed: true, keycode: 2, timestamp_ms: 3, flags: HELPER_KEY_NEEDS_VERDICT };
+    assert!(!plain.forced() && plain.needs_verdict());
 }

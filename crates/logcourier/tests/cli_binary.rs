@@ -56,8 +56,8 @@ fn it_says_what_is_missing() {
     assert!(!bad_option.status.success(), "{}", said(&bad_option));
     let no_output = run(&data.0, &["fetch", "--chat-id", "-1001"], None);
     assert!(said(&no_output).contains("--output"), "{}", said(&no_output));
-    let no_token = run(&data.0, &["list", "--chat-id", "-1001", "--bot-id", "123"], None);
-    assert!(said(&no_token).contains("токена") || !no_token.status.success(), "{}", said(&no_token));
+    let no_token = run(&data.0, &["list", "--chat-id", "-1001"], None);
+    assert!(said(&no_token).contains("токена"), "{}", said(&no_token));
 }
 
 #[test]
