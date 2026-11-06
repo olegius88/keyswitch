@@ -4,11 +4,12 @@
 #![cfg(any(not(debug_assertions), coverage))]
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::learning::{LearnedRule, RuleAction, RuleMatch};
-use ks_engine::engine::PlanRef;
+use ks_engine::engine::{PlanRef, QueueItem};
 use ks_replay::harness::{Backend, Bundle, CaretReader, KEYS, PAUSE_KEYCODE, Session, UnreadField};
 use serde_json::{Value, json};
 
@@ -82,7 +83,7 @@ const SETTINGS: &[(&str, &[&str])] = &[
     ("detection.intent_model_enabled", &["false"]),
     ("detection.correct_typos_english", &["true"]),
     ("detection.learning", &["false"]),
-    ("detection.field_catch_up", &["false", "true"]),
+    ("detection.field_catch_up", &["\"off\"", "\"100\"", "\"300\"", "\"nonsense\"", "1"]),
     ("detection.correct_typos", &["true"]),
     ("detection.injected_input", &["true"]),
     ("exclusions.words", &["[\"ghbdtn\", \"привет\", \"tot\"]"]),
@@ -114,6 +115,86 @@ impl FieldReader for Reported {
     fn status(&self) -> String {
         "available".to_owned()
     }
+}
+
+/// A field the reader sees a few letters behind the keys: the window has not taken them in yet.
+struct Lagging {
+    backend: Arc<Backend>,
+    behind: usize,
+}
+
+impl FieldReader for Lagging {
+    fn read(&self, application: &str, _window: i64) -> Option<FieldContext> {
+        let (text, caret) = (self.backend.text(), self.backend.caret());
+        let mut field = FieldContext::new(application, "1");
+        field.before = text[..caret.saturating_sub(self.behind)].iter().collect();
+        field.role = FieldRole::Text;
+        Some(field)
+    }
+
+    fn status(&self) -> String {
+        "available".to_owned()
+    }
+}
+
+fn key_event(session: &Session, character: char, state: u32) -> Option<KeyEvent> {
+    let key = KEYS.iter().find(|key| key.characters.contains(&character))?;
+    Some(KeyEvent {
+        pressed: true,
+        keycode: key.keycode,
+        key_name: character.to_string(),
+        character: character.to_string(),
+        characters: key.strings(),
+        group: session.backend.group(),
+        state: state | if key.shift { SHIFT_MASK } else { 0 },
+        ..KeyEvent::default()
+    })
+}
+
+/// Keys that came while the engine was busy, each in its own state, and what the worker makes of them after.
+fn queue_keys(session: &mut Session, dice: &mut Dice) {
+    let word = *dice.of(WORDS);
+    let mut ahead = word.to_owned();
+    if dice.one_in(2) {
+        ahead.push(' ');
+    }
+    for character in ahead.chars() {
+        let state = if dice.one_in(12) { *dice.of(&[CONTROL_MASK, ALT_MASK, SUPER_MASK]) } else { 0 };
+        if let Some(event) = key_event(session, character, state) {
+            let released = KeyEvent { pressed: false, ..event.clone() };
+            session.core.shared.put_nowait(QueueItem::Key(Arc::new(event)));
+            session.core.shared.put_nowait(QueueItem::Key(Arc::new(released)));
+        }
+    }
+    match dice.below(5) {
+        0 => {
+            let event = KeyEvent { pressed: true, key_name: "Shift_L".to_owned(), characters: vec![String::new(), String::new()], ..KeyEvent::default() };
+            session.core.shared.put_nowait(QueueItem::Key(Arc::new(event)));
+        }
+        1 => {
+            session.core.shared.put_nowait(QueueItem::LayoutSelection(i64::try_from(dice.below(3)).expect("small")));
+        }
+        _ => {}
+    }
+    match dice.below(4) {
+        0 => press_pause(session),
+        1 => session.core.schedule_manual_conversion(i64::from(PAUSE_KEYCODE)),
+        2 => {
+            let boundary = key_event(session, ' ', 0).expect("the space bar");
+            session.tap(boundary);
+        }
+        _ => {}
+    }
+    drain_queue(session);
+}
+
+fn drain_queue(session: &mut Session) {
+    while !session.core.shared.queued().is_empty() {
+        session.core.turn(0.0);
+    }
+    session.core.turn(0.0);
+    session.core.apply_commands();
+    let _ = session.core.loop_timeout();
 }
 
 fn type_character(session: &mut Session, dice: &mut Dice, character: char, state: u32) {
@@ -155,8 +236,10 @@ fn press_pause(session: &mut Session) {
 
 fn change_reader(session: &mut Session, dice: &mut Dice) {
     let backend = session.backend.clone();
-    let reader: Arc<dyn FieldReader> = match dice.below(8) {
+    let reader: Arc<dyn FieldReader> = match dice.below(10) {
         0 => Arc::new(UnreadField),
+        8 => Arc::new(Lagging { backend, behind: 1 }),
+        9 => Arc::new(Lagging { backend, behind: 3 }),
         1 => Arc::new(Reported { backend, role: FieldRole::Password, sensitive: true, selection: false, field_id: "secret" }),
         2 => Arc::new(Reported { backend, role: FieldRole::Terminal, sensitive: false, selection: false, field_id: "terminal" }),
         3 => Arc::new(Reported { backend, role: FieldRole::Code, sensitive: false, selection: false, field_id: "code" }),
@@ -239,9 +322,28 @@ fn age_what_is_held(session: &mut Session, dice: &mut Dice) {
 }
 
 fn step(session: &mut Session, dice: &mut Dice, window: &mut i64) {
-    match dice.below(106) {
+    match dice.below(112) {
         100..=103 => age_what_is_held(session, dice),
         104..=105 => session.advance(*dice.of(IDLES)),
+        106..=109 => queue_keys(session, dice),
+        110 => {
+            for _ in 0..3000 {
+                session.core.shared.put_nowait(QueueItem::Stop);
+            }
+            let boundary = key_event(session, ' ', 0).expect("the space bar");
+            session.tap(boundary);
+            session.core.shared.input_overflow.store(true, Ordering::Relaxed);
+            press_pause(session);
+            session.core.shared.input_overflow.store(false, Ordering::Relaxed);
+            while !session.core.shared.queued().is_empty() {
+                session.core.turn(0.0);
+            }
+        }
+        111 => {
+            let _ = session.core.report_unseen_input();
+            session.core.report_input_delay();
+            let _ = session.core.run_timers();
+        }
         0..=54 => {
             let word = *dice.of(WORDS);
             for character in word.chars() {

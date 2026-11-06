@@ -365,7 +365,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
     }
 
     /// `tuple(self._events.queue)`, under the inbox's lock.
-    pub(crate) fn queued(&self) -> Vec<QueueItem> {
+    pub fn queued(&self) -> Vec<QueueItem> {
         locked(&self.inbox).events.iter().cloned().collect()
     }
 

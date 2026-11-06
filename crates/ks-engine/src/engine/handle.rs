@@ -273,23 +273,8 @@ impl KeySwitchEngine {
 fn run(mut core: EngineCore) -> EngineCore {
     let shared = core.shared.clone();
     while shared.running.load(Ordering::Relaxed) {
-        match shared.next(core.loop_timeout()) {
-            Next::Command(Command::SettingsChanged(path, value)) => core.settings_changed(&path, &value),
-            Next::Timeout => {
-                // The timers replace text too (pause correction, deferred Enter):
-                // an error there must not end this thread while the hook keeps
-                // queueing keys and a held Enter waits for its release.
-                if let Err(error) = core.run_timers() {
-                    core.recover_from_error(&error);
-                }
-            }
-            Next::Item(QueueItem::Stop) => break,
-            Next::Item(QueueItem::LayoutSelection(group)) => core.apply_layout_selection(group),
-            Next::Item(QueueItem::Key(event)) => {
-                if let Err(error) = core.handle_inner(event) {
-                    core.recover_from_error(&error);
-                }
-            }
+        if !core.turn(core.loop_timeout()) {
+            break;
         }
     }
     if let Some(reader) = &core.platform_reader {
@@ -299,6 +284,30 @@ fn run(mut core: EngineCore) -> EngineCore {
 }
 
 impl EngineCore {
+    /// One turn of the worker's loop: the next thing in the queue, or the timers when `timeout` passes with nothing
+    /// there. False when the worker is told to stop.
+    pub fn turn(&mut self, timeout: f64) -> bool {
+        match self.shared.next(timeout) {
+            Next::Command(Command::SettingsChanged(path, value)) => self.settings_changed(&path, &value),
+            Next::Timeout => {
+                // The timers replace text too (pause correction, deferred Enter):
+                // an error there must not end this thread while the hook keeps
+                // queueing keys and a held Enter waits for its release.
+                if let Err(error) = self.run_timers() {
+                    self.recover_from_error(&error);
+                }
+            }
+            Next::Item(QueueItem::Stop) => return false,
+            Next::Item(QueueItem::LayoutSelection(group)) => self.apply_layout_selection(group),
+            Next::Item(QueueItem::Key(event)) => {
+                if let Err(error) = self.handle_inner(event) {
+                    self.recover_from_error(&error);
+                }
+            }
+        }
+        true
+    }
+
     /// What the worker does as it wakes: the settings other threads changed, applied on the engine's own thread.
     pub fn apply_commands(&mut self) {
         while let Some(Command::SettingsChanged(path, value)) = self.shared.take_command() {
