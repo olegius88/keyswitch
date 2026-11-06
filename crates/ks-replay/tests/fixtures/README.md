@@ -1,0 +1,1 @@
+Typing streams made of public words only (the dictionaries the program ships with and a few phrases, typed in the right and the wrong layout), and what the last Python build (0.66.2) did with each word. `battery.rs` types them through this engine and compares every word.
