@@ -1331,7 +1331,8 @@ fn a_token_of_a_sign_and_a_word_has_no_head_to_keep() {
 /// A word left as typed, in each state it can be asked in, beside a word that converts: at a boundary and at a pause.
 #[test]
 fn every_kept_word_is_asked_again_beside_a_converted_one() {
-    use ks_lang::short_words::SHORT_WORD_REASONS;
+    use ks_context::context_policy::STRANDED_SHORT_WORD_REASON;
+    use ks_lang::short_words::{ISOLATED_SHORT_WORD_REASON, SHORT_WORD_REASONS};
     let mut bundle = Bundle::load(None);
     let mut session = session(&mut bundle);
     let backend = session.backend.clone();
@@ -1341,7 +1342,7 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
     let score = core.models[0].score("lf");
     for (word, reading) in [("z", "я"), ("d", "в"), ("r", "к"), ("f", "а"), ("b", "и"), ("c", "с"), ("lf", "да"), ("yt", "не"), ("gj", "по"), ("rfr", "как")] {
         for convert in [false, true] {
-            for reason in ["test", SHORT_WORD_REASONS[0]] {
+            for reason in ["test", SHORT_WORD_REASONS[0], ISOLATED_SHORT_WORD_REASON, STRANDED_SHORT_WORD_REASON] {
                 for segmentation_open in [false, true] {
                     for before in ["", "начало ", "x ", "как дела "] {
                         let baseline = DetectionDecision::new(convert, word, reading, 0, 1, 0.9, reason, score.clone(), score.clone());
@@ -1373,12 +1374,13 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
             }
         }
     }
-    // With no model to ask, the baseline answers.
+    // With no model to ask, the baseline answers: the word goes along with its neighbour.
     let model = core.context_policy.model.take();
     let baseline = DetectionDecision::new(true, "lf", "да", 0, 1, 0.9, SHORT_WORD_REASONS[0], score.clone(), score.clone());
-    let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("x ", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: true })];
-    "x lf ghbdtn ".clone_into(&mut core.context_policy.stream.text);
-    let _ = core.take_along(&kept, &next, 6, "firefox", false);
+    let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: false })];
+    "lf ghbdtn ".clone_into(&mut core.context_policy.stream.text);
+    let along = core.take_along(&kept, &next, 6, "firefox", false).expect("no failure");
+    assert_eq!(along.original, "lf ghbdtn");
     core.context_policy.model = model;
     bundle.give_back(session);
     bundle.clean();
@@ -1412,13 +1414,19 @@ fn a_waiting_word_and_its_neighbour_may_disagree() {
     let score = core.models[0].score("x");
     let space = key(' ');
     for (word, reading) in [("ghbdtn", "привет"), ("hello", "руддщ"), ("lf", "да"), ("z", "я"), ("d", "в"), ("x", "ч"), ("the", "еру"), ("git", "пше"), ("rfr", "как")] {
+        // A rule of the person's plans the conversion of any word: the pair may still say no.
+        core.learning.add_rule(ks_config::learning::LearnedRule::new(word, 0, 1)).expect("a rule");
         for (next, next_reading) in [("ghbdtn", "привет"), ("hello", "руддщ"), ("the", "еру"), ("git", "пше"), ("world", "цщкдв"), ("d", "в"), ("vbh", "мир")] {
             for convert in [false, true] {
                 for reason in ["test", SHORT_WORD_REASONS[0]] {
                     let decision = DetectionDecision::new(convert, word, reading, 0, 1, 0.9, reason, score.clone(), score.clone());
                     let held = ks_engine::engine::WaitingContextWord { plan: plan(word, reading, Some(' ')), decision, baseline: None, window: core.focus_or_zero(), deadline: f64::MAX, ..waiting.clone() };
-                    let neighbour = DetectionDecision::new(false, next, next_reading, 0, 1, 0.9, "test", score.clone(), score.clone());
-                    let _ = core.resolve_context_wait(Some(&held), &keys(next), Some(&space), &neighbour, "firefox", &vec![(1, next_reading.to_owned())], false);
+                    for neighbour_converts in [false, true] {
+                        let neighbour = DetectionDecision::new(neighbour_converts, next, next_reading, 0, 1, 0.9, "test", score.clone(), score.clone());
+                        // The text as the engine saw it typed, which the pair must match.
+                        core.context_policy.stream.text = format!("{word} {next} ");
+                        let _ = core.resolve_context_wait(Some(&held), &keys(next), Some(&space), &neighbour, "firefox", &vec![(1, next_reading.to_owned())], false);
+                    }
                 }
             }
         }

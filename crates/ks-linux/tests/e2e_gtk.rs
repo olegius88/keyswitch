@@ -360,6 +360,7 @@ fn app_calls() {
             ("general.autostart", json!(true)),
             ("appearance.show_indicator", json!(false)),
             ("appearance.show_indicator", json!(true)),
+            ("appearance.show_indicator", json!(true)),
             ("appearance.indicator_style", json!("flag")),
             ("appearance.theme", json!("dark")),
             ("updates.check_automatically", json!(false)),

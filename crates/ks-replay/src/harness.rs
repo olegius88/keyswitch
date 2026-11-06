@@ -16,7 +16,7 @@ use ks_lang::{LanguageModel, Resources};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 pub const PAUSE_KEYCODE: u32 = 127;
@@ -611,7 +611,9 @@ impl Bundle {
         // The reference lexicon names no Hunspell dictionary, so the index holds the words of that lexicon alone.
         let prefix_indexes = models.iter().map(|model| Arc::new(PrefixIndex::from_lexicon(model.frequencies.clone(), &model.source))).collect();
         let prefix_model = VersionedPrefixModel::default_model(&resources.resource_dir().join("models")).map(Arc::new);
-        let root = std::env::temp_dir().join(format!("ks-replay-{}", std::process::id()));
+        // Each its own: the tests of one program run side by side, and each cleans up after itself.
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!("ks-replay-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&root).expect("a folder for the stores");
         let debug = debug_log.is_some();
         if let Some(path) = debug_log {

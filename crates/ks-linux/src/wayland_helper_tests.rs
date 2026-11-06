@@ -1030,6 +1030,24 @@ fn key_message(seq: u32, flags: u32) -> Vec<u8> {
 }
 
 #[test]
+fn a_key_that_can_no_longer_be_answered_ends_the_handling_of_keys() {
+    let (client, mut helper_side, said) = callbacks_client();
+    let send = |side: &mut UnixStream, kind: u32, body: &[u8]| side.write_all(&pack_frame(kind, body).unwrap()).unwrap();
+    send(&mut helper_side, HELPER_MSG_READY, &[0]);
+    assert!(!client.start_default().unwrap());
+    helper_side.shutdown(std::net::Shutdown::Read).unwrap();
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(1, HELPER_KEY_NEEDS_VERDICT));
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(2, HELPER_KEY_NEEDS_VERDICT));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock(&said).is_empty() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(*lock(&said), ["key 1"], "the verdict for the first key had nowhere to go");
+    client.close();
+}
+
+#[test]
 fn the_client_hands_each_message_to_its_place() {
     let (client, mut helper_side, said) = callbacks_client();
     let send = |side: &mut UnixStream, kind: u32, body: &[u8]| side.write_all(&pack_frame(kind, body).unwrap()).unwrap();

@@ -1,0 +1,130 @@
+//! A small corpus and a small recipe, of plain words of both languages: the whole of a training run in a minute or two.
+#![allow(dead_code, reason = "each test program uses what it needs of this")]
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+pub(crate) fn tree() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("the repository")
+}
+
+pub(crate) fn scratch(name: &str) -> PathBuf {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!("ks-train-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&path).expect("a folder");
+    path
+}
+
+pub(crate) fn digest(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+const RUSSIAN: &[&str] = &[
+    "привет", "дела", "сегодня", "хорошая", "погода", "домой", "читаем", "новую", "книгу", "пишет", "длинное", "письмо", "делает", "работу", "этом", "городе", "много", "людей",
+    "машин", "есть", "время", "отдыха", "кто-то", "сказал", "завтра", "будет", "дождь",
+];
+const ENGLISH: &[&str] = &[
+    "hello", "today", "weather", "good", "read", "book", "writes", "long", "letters", "does", "work", "this", "town", "many", "people", "cars", "have", "time", "rest", "someone",
+    "said", "that", "tomorrow", "will", "rain",
+];
+
+/// A small generator with a fixed start: the same corpus on every machine.
+struct Dice(u64);
+
+impl Dice {
+    fn below(&mut self, limit: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        usize::try_from(self.0 % u64::try_from(limit).expect("small")).expect("small")
+    }
+}
+
+/// One row of a split, as a frozen corpus holds it.
+pub(crate) fn row(split: &str, index: usize, group: i64, words: &[&str], at: usize) -> Value {
+    let before = if at == 0 { String::new() } else { format!("{} ", words[..at].join(" ")) };
+    let after = if at + 1 < words.len() { format!(" {}", words[at + 1..].join(" ")) } else { String::new() };
+    json!({
+        "identifier": format!("{split}:{index}"), "original": words[at], "group": group, "before": before, "after": after, "family": format!("family{}", index % 37),
+        "document": format!("document{}", index % 23), "language": if group == 0 { "en" } else { "ru" }, "source": "test", "source_file": "file", "source_sentence": index.to_string(),
+        "source_token": at.to_string(), "spacing": " ", "space_before": " ", "literal_tail": "", "upos": "NOUN", "features": "", "misc": "", "alignment": "exact",
+        "layout_representable": true, "split": split, "quarantine_reasons": [], "lemma": words[at],
+    })
+}
+
+pub(crate) fn write_split(directory: &Path, split: &str, rows: &[Value], manifest: &mut Value) {
+    let mut raw = Vec::new();
+    for row in rows {
+        raw.extend_from_slice(serde_json::to_string(row).expect("json").as_bytes());
+        raw.push(b'\n');
+    }
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&raw).expect("in memory");
+    let packed = encoder.finish().expect("in memory");
+    std::fs::write(directory.join(format!("{split}.jsonl.gz")), &packed).expect("a split");
+    manifest["splits"][split] = json!({"path": format!("{split}.jsonl.gz"), "sha256": digest(&packed), "rows": rows.len(), "content_sha256": digest(&raw)});
+}
+
+/// A corpus of the four splits.
+pub(crate) fn corpus(directory: &Path) {
+    std::fs::create_dir_all(directory).expect("a folder");
+    let mut dice = Dice(0x9e37_79b9_7f4a_7c15);
+    let mut manifest = json!({"splits": {}});
+    for (split, size) in [("train", 400), ("development", 150), ("calibration", 150), ("test", 60)] {
+        let mut rows = Vec::new();
+        for index in 0..size {
+            let group = i64::try_from(index % 2).expect("small");
+            let source = if group == 0 { ENGLISH } else { RUSSIAN };
+            let words: Vec<&str> = (0..4 + dice.below(6)).map(|_| source[dice.below(source.len())]).collect();
+            let at = dice.below(words.len());
+            rows.push(row(split, index, group, &words, at));
+        }
+        write_split(directory, split, &rows, &mut manifest);
+    }
+    let membership = serde_json::to_vec(&json!({"alias_sha256": [], "document_ids_sha256": [], "family_ids_sha256": [], "row_ids_sha256": [], "namespace": "small"})).expect("json");
+    std::fs::write(directory.join("test-membership.json"), &membership).expect("a file");
+    manifest["test_membership_sha256"] = json!(digest(&membership));
+    std::fs::write(directory.join("manifest.json"), serde_json::to_vec(&manifest).expect("json")).expect("a file");
+}
+
+/// The recipe of the shipped model with its curricula cut down to a few frames each.
+pub(crate) fn recipe() -> Value {
+    let mut recipe: Value = serde_json::from_slice(&std::fs::read(tree().join("model/context_v3/recipe.json")).expect("the recipe")).expect("json");
+    recipe["epochs"] = json!(2);
+    recipe["maximum_source_rows"] = json!({"train": 400, "development": 150, "calibration": 150});
+    recipe["maximum_features"] = json!(2000);
+    recipe["span_maximum_families"] = json!({"train": 8, "development": 4, "calibration": 4});
+    for (name, families, seeds) in [("lookahead_curriculum", 8, 4), ("natural_lookahead_curriculum", 8, 2), ("lexical_short_pair_curriculum", 8, 2)] {
+        recipe[name]["maximum_families"] = json!(families);
+        recipe[name]["seeds_per_family"] = json!(seeds);
+    }
+    for (name, frames) in [("natural_frames", 40), ("term_frames", 30), ("abbreviation_frames", 20), ("typo_frames", 20), ("maximum_features", 500)] {
+        recipe["kept_neighbour_curriculum"][name] = json!(frames);
+    }
+    recipe["letter_curriculum"]["term_sentences"] = json!(20);
+    recipe["letter_curriculum"]["english_sentences"] = json!(20);
+    let names: Vec<String> = recipe.as_object().expect("an object").keys().filter(|name| name.ends_with("_curriculum")).cloned().collect();
+    for name in names {
+        let part = &mut recipe[&name];
+        for (field, value) in [
+            ("token_cap", 4), ("per_token", 1), ("per_piece", 1), ("repeat_words", 4), ("frames_per_form", 1), ("minimum_term_count", 2000), ("minimum_count", 5000), ("minimum_latin_count", 5000),
+            ("minimum_cyrillic_count", 5000),
+        ] {
+            if part.get(field).is_some() {
+                part[field] = json!(value);
+            }
+        }
+        if part.get("item_modulus").is_some() {
+            part["item_modulus"] = json!(97);
+        }
+    }
+    recipe
+}
+
+pub(crate) fn write_recipe(path: &Path, recipe: &Value) {
+    std::fs::write(path, serde_json::to_vec(recipe).expect("json")).expect("a recipe");
+}
