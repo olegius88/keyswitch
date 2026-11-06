@@ -115,6 +115,21 @@ impl AutostartManager {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_launcher_is_found_on_the_path_or_is_this_program() {
+        assert!(!launcher_command().is_empty());
+        assert!(find_in_path("no-such-program-at-all").is_none());
+        assert!(find_in_path("sh").is_some());
+        let unreadable = temporary("unreadable");
+        let manager = AutostartManager::new(Some(unreadable.join("entry.desktop")));
+        std::fs::write(unreadable.join("entry.desktop"), b"\xff\xfe not text").expect("the file");
+        assert!(!manager.enabled());
+        let at_the_root = AutostartManager::new(Some(PathBuf::from("/")));
+        assert!(!at_the_root.enabled());
+        assert!(at_the_root.set_enabled_with(true, false, "keyswitch").is_err());
+        assert!(!autostart_path().as_os_str().is_empty());
+    }
+
     fn temporary(name: &str) -> PathBuf {
         let directory = std::env::temp_dir().join(format!("ks-linux-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&directory);

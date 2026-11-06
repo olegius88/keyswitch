@@ -198,3 +198,16 @@ pub fn keysym_name(keysym: u32) -> Option<String> {
     }
     KEYSYM_NAMES.binary_search_by_key(&keysym, |entry| entry.0).ok().map(|index| KEYSYM_NAMES[index].1.to_owned())
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_keysym_of_a_unicode_character_is_named_by_its_number() {
+        assert_eq!(keysym_name(0x0100_0451).as_deref(), Some("U0451"));
+        assert_eq!(keysym_name(0xff0d).as_deref(), Some("Return"));
+        assert_eq!(keysym_name(0x7fff_ffff), None);
+    }
+}

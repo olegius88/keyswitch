@@ -161,6 +161,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_keys_of_control_have_their_characters() {
+        for (keysym, character) in [(0xff0a, 0x0a), (0xff0b, 0x0b), (0xff1b, 0x1b), (0xff80, 0x20), (0xffff, 0x7f), (0x0100_0000, 0), (0x0200_0000, 0), (0xff08, 0x08), (0xff09, 0x09), (0xff0d, 0x0d)] {
+            assert_eq!(keysym_to_utf32(keysym), character, "{keysym:#x}");
+        }
+    }
+
+    #[test]
     fn latin_cyrillic_keypad_and_unicode_keysyms() {
         assert_eq!(keysym_to_utf32(0x61), 0x61);
         assert_eq!(keysym_to_utf32(0xe9), 0xe9);
