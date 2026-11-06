@@ -128,6 +128,13 @@ fn the_serving_threshold_is_chosen_on_calibration_by_what_it_nets() {
     let sure = flat(&[SURE, SURE]);
     let (threshold, _, _) = choose_threshold(&[("one".to_owned(), sure.as_slice(), [1, 1].as_slice())], &[0.9, 0.5], &options(1)).expect("chosen");
     assert!(close(threshold, 0.5));
+    // The best balance in its worst profile at 0.5; at 0.9 one profile nets more and the other falls below half of the
+    // best worst profile, so 0.9 is not admissible.
+    let (first, second) = (flat(&[CONVERT, CONVERT, CONVERT, CONVERT, SURE]), flat(&[[SURE; 11].as_slice(), [LOW; 6].as_slice()].concat()));
+    let (first_labels, second_labels): ([u8; 5], Vec<u8>) = ([1; 5], [vec![1; 11], vec![0; 6]].concat());
+    let profiles = [("one".to_owned(), first.as_slice(), first_labels.as_slice()), ("two".to_owned(), second.as_slice(), second_labels.as_slice())];
+    let (threshold, report, _) = choose_threshold(&profiles, &[0.5, 0.9], &options(1)).expect("chosen");
+    assert!(close(threshold, 0.5) && report["admissible_thresholds"] == json!([0.5]), "{threshold} {report}");
     // A calibration without a row to convert recalls nothing.
     let keep = flat(&[KEEP]);
     let (_, report, _) = choose_threshold(&[("one".to_owned(), keep.as_slice(), [0].as_slice())], &[0.5], &options(0)).expect("chosen");

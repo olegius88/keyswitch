@@ -176,9 +176,7 @@ fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (Counts, V
         counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count().to::<i64>());
         counts.add_by("final_layout_mismatches", i64::from(!outcome.final_layout_matches));
         let mut case = json!({"identifier": plan.identifier, "document": plan.document, "group": plan.group, "initially_wrong": plan.initially_wrong, "expected": plan.expected, "trimmed_left": plan.trimmed_left, "trimmed_right": plan.trimmed_right});
-        if let (Some(table), Value::Object(outcome)) = (case.as_object_mut(), outcome.value()) {
-            table.extend(outcome);
-        }
+        case.as_object_mut().expect("a case is an object").extend(outcome.fields());
         results.push(case);
     }
     (counts, results)
@@ -206,7 +204,7 @@ pub struct Pairs {
 }
 
 /// `score_sequences`: every pair replayed in both settings modes; acceptance needs every gate in every mode and profile.
-pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Value, String> {
+pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Map<String, Value>, String> {
     let selected = select_rows(rows);
     let mut plans = Vec::new();
     for row in &selected {
@@ -311,7 +309,11 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
         profiles.insert(profile.to_owned(), block);
     }
     let _ = root;
-    Ok(json!({"selection": selection, "profiles": profiles, "promotion_passed": all_passed}))
+    let mut result = Map::new();
+    result.insert("selection".to_owned(), selection);
+    result.insert("profiles".to_owned(), Value::Object(profiles));
+    result.insert("promotion_passed".to_owned(), json!(all_passed));
+    Ok(result)
 }
 
 fn hash_list(value: &Value, name: &str) -> Result<Vec<String>, String> {
@@ -568,12 +570,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
         std::fs::write(request.output, crate::artifact::canonical(report)).map_err(|error| error.to_string())
     };
     match scored {
-        Ok(Value::Object(table)) => {
-            if let Some(object) = report.as_object_mut() {
-                object.extend(table);
-            }
-        }
-        Ok(_) => return Err("a scored report is an object".to_owned()),
+        Ok(table) => report.as_object_mut().expect("a report is an object").extend(table),
         Err(error) => {
             report["execution_error"] = json!(error);
             report["promotion_passed"] = json!(false);

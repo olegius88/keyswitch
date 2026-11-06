@@ -19,7 +19,7 @@ use ks_lang::early_switch::PrefixIndex;
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_replay::harness::{Backend, Correction, FakeClock, UnreadField};
 use ks_text::pystr;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -86,8 +86,9 @@ pub struct Outcome {
 }
 
 impl Outcome {
+    /// The fields of a case's outcome, in the order a report lists them.
     #[must_use]
-    pub fn value(&self) -> Value {
+    pub fn fields(&self) -> Map<String, Value> {
         let corrections: Vec<Value> = self
             .corrections
             .iter()
@@ -96,9 +97,20 @@ impl Outcome {
                     "actual_group": item.actual_group, "caret_before": item.caret_before, "caret_after": item.caret_after})
             })
             .collect();
-        json!({"mode": self.mode.as_str(), "actual": self.actual, "exact": self.exact, "length_mismatch": self.length_mismatch, "final_group": self.final_group,
-            "expected_final_group": self.expected_final_group, "final_layout_matches": self.final_layout_matches, "corrections": corrections,
-            "intervention": self.intervention, "error": self.error})
+        let mut fields = Map::new();
+        for (name, value) in [
+            ("mode", json!(self.mode.as_str())), ("actual", json!(self.actual)), ("exact", json!(self.exact)), ("length_mismatch", json!(self.length_mismatch)),
+            ("final_group", json!(self.final_group)), ("expected_final_group", json!(self.expected_final_group)), ("final_layout_matches", json!(self.final_layout_matches)),
+            ("corrections", json!(corrections)), ("intervention", self.intervention.clone()), ("error", json!(self.error)),
+        ] {
+            fields.insert(name.to_owned(), value);
+        }
+        fields
+    }
+
+    #[must_use]
+    pub fn value(&self) -> Value {
+        Value::Object(self.fields())
     }
 }
 

@@ -33,15 +33,19 @@ fn dictionaries(folder: &Path, files: &[(&str, &[u8])]) {
 
 /// Unigrams in the order a lexicon lists them, with what its reader leaves out: a marker, a repeat, a line without a
 /// count, a word too short to keep; then the bigrams, which the order does not read.
-const ENGLISH: &str = "\\data\\\nngram 1=7\n\n\\1-grams:\n900 <s>\n800 house\n700 house\n600 garden\n500 hello\nlonely\n5 ab\n400 window\n\\2-grams:\n3 the house\n\\end\\\n";
+const ENGLISH: &str = "\\data\\\nngram 1=8\n\n\\1-grams:\n900 <s>\n800 house\n700 house\n600 garden\n500 hello\nlonely\n5 ab\n400 window\n950 here\n\\2-grams:\n3 the house\n\\end\\\n";
 const RUSSIAN: &str = "\\data\\\nngram 1=4\n\n\\1-grams:\n900 дом\n800 сад\n700 привет\n600 окно\n\\end\\\n";
 
 #[test]
 fn a_detector_is_measured_over_small_lexicons_and_dictionaries() {
     let resources = resources_with_models("detector-small", &[("en_US.lm", ENGLISH), ("ru_RU.lm", RUSSIAN)]);
     let hunspell = resources.parent().expect("a folder").join("hunspell");
-    // An English dictionary in Latin-1, of two words that fit; a Russian one of none.
-    dictionaries(&hunspell, &[("en_US.aff", b"SET ISO8859-1\n"), ("en_US.dic", b"3\nhouse/S\ngarden\nab\n"), ("ru_RU.aff", b"SET UTF-8\n"), ("ru_RU.dic", "2\nаб\nя1\n".as_bytes())]);
+    // An English dictionary in Latin-1 of two words that fit, and of Russian words typed in the English layout that it
+    // forbids: each one the detector turns into the Russian word, against the dictionary. A Russian dictionary of no word
+    // that fits, so that `руку`, one of the authored cases, is no word there and becomes the English `here`.
+    let forbidden = ["ghbdtn", "ljv", "cfl", "jryj", "gjrf", "ctujlyz", "pfdnhf", "rkfdbfnehf", "hfcrkflrf", "ntcn", "ntrcn", "ckjdj", "rjulf", "jxtym", "vjq", "lkz", "rfr", "xnj", "zpsr", "heccrbq", "ghjuhfvvf", "yfcnhjqrb", "bcghfdbnm"];
+    let english = format!("{}\nhouse/S\ngarden\nab\n{}", forbidden.len() + 3, forbidden.iter().map(|word| format!("{word}/!\n")).collect::<String>());
+    dictionaries(&hunspell, &[("en_US.aff", b"SET ISO8859-1\nFORBIDDENWORD !\n"), ("en_US.dic", english.as_bytes()), ("ru_RU.aff", b"SET UTF-8\n"), ("ru_RU.dic", "2\nаб\nя1\n".as_bytes())]);
     let speller = ks_hunspell::hunspell_speller_in(vec![hunspell]);
     // One dictionary direction of two: the strict gate does not hold.
     assert_eq!(command(&Resources::with_speller(resources, speller), 5, 5, true), Ok(1));
@@ -72,4 +76,7 @@ fn a_dictionary_that_is_not_there_gives_no_sample() {
     // A sample smaller than the dictionary is spread over it, both ends included.
     dictionaries(&folder, &[("many.aff", b"SET UTF-8\n"), ("many.dic", b"5\napple\nberry\ncherry\ndate\nelder\n")]);
     assert_eq!(hunspell_words(&folder.join("many.dic").to_string_lossy(), 3), ["apple", "cherry", "elder"]);
+    // UTF-8 named without its dash is still UTF-8.
+    dictionaries(&folder, &[("plain.aff", b"SET UTF8\n"), ("plain.dic", b"1\napple\n")]);
+    assert_eq!(hunspell_words(&folder.join("plain.dic").to_string_lossy(), 5), ["apple"]);
 }

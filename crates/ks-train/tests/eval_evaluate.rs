@@ -1,10 +1,13 @@
 //! The sequences of a development replay, over rows written out by hand: the windows trimmed, the keys typed, the
 //! characters no layout has, and what a replay of the installed pair reports of them.
+mod eval_support;
 mod support;
 
 use ks_train::corpus::CorpusRow;
 use ks_train::evaluate::{select_rows, sequence_plan};
 use serde_json::{Value, json};
+use std::path::Path;
+use std::process::Output;
 use support::{row, scratch, trainer, tree, write_split};
 
 fn corpus_row(identifier: &str, original: &str, group: Option<i64>, before: &str, after: &str) -> CorpusRow {
@@ -105,11 +108,36 @@ fn development_row(index: usize, original: &str, group: Option<i64>, before: &st
     value
 }
 
+/// A development replay of the installed pair over these rows, in this tree.
+fn development_replay(root: &Path, folder: &Path, rows: &[Value]) -> Output {
+    let corpus = folder.join("corpus");
+    std::fs::create_dir_all(&corpus).expect("a folder");
+    let mut manifest = json!({"splits": {}});
+    write_split(&corpus, "development", rows, &mut manifest);
+    std::fs::write(corpus.join("manifest.json"), serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
+    let models = tree().join("resources/models");
+    trainer()
+        .arg("evaluate")
+        .arg("--tree")
+        .arg(root)
+        .arg("--candidate")
+        .arg(models.join("context_policy_v1.json"))
+        .arg("--prefix-candidate")
+        .arg(models.join("prefix_policy_v1.json"))
+        .arg("--corpus")
+        .arg(&corpus)
+        .arg("--output")
+        .arg(folder.join("report.json"))
+        .arg("--ledger")
+        .arg(folder.join("ledger"))
+        .args(["--unsealed", "--split", "development", "--jobs", "2"])
+        .output()
+        .expect("the trainer starts")
+}
+
 #[test]
 fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     let folder = scratch("evaluate-rows");
-    let corpus = folder.join("corpus");
-    std::fs::create_dir_all(&corpus).expect("a folder");
     let rows = [
         development_row(0, "hello", Some(0), "we say ", " to you"),
         development_row(1, "привет", Some(1), "мы скажем ", " вам"),
@@ -118,30 +146,9 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
         development_row(4, "café", Some(0), "a ", ""),
         development_row(5, "world", Some(0), &full_before("xxx"), &full_after("zzz")),
     ];
-    let mut manifest = json!({"splits": {}});
-    write_split(&corpus, "development", &rows, &mut manifest);
-    std::fs::write(corpus.join("manifest.json"), serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
-    let output = folder.join("report.json");
-    let models = tree().join("resources/models");
-    let answer = trainer()
-        .arg("evaluate")
-        .arg("--tree")
-        .arg(tree())
-        .arg("--candidate")
-        .arg(models.join("context_policy_v1.json"))
-        .arg("--prefix-candidate")
-        .arg(models.join("prefix_policy_v1.json"))
-        .arg("--corpus")
-        .arg(&corpus)
-        .arg("--output")
-        .arg(&output)
-        .arg("--ledger")
-        .arg(folder.join("ledger"))
-        .args(["--unsealed", "--split", "development", "--jobs", "2"])
-        .output()
-        .expect("the trainer starts");
+    let answer = development_replay(&tree(), &folder, &rows);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
-    let report: Value = serde_json::from_slice(&std::fs::read(&output).expect("a report")).expect("json");
+    let report: Value = serde_json::from_slice(&std::fs::read(folder.join("report.json")).expect("a report")).expect("json");
     let selection = &report["selection"];
     assert_eq!(selection["unsupported"], json!([{"identifier": "development:4", "codepoints": ["U+00E9"]}]));
     assert_eq!(selection["replayed_documents"], json!({"0": 2, "1": 2, "None": 1}));
@@ -150,4 +157,13 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     assert_eq!((gates["enough_documents_us"].clone(), gates["enough_documents_ru"].clone()), (json!(false), json!(false)));
     assert!(report["profiles"]["portable"]["ablation"]["candidate_context_baseline_prefix"]["cases"].is_array());
     assert!(!folder.join("ledger").exists(), "a development replay claims no test");
+}
+
+#[test]
+fn a_replay_without_an_orthotactic_model_still_runs() {
+    let root = eval_support::linked("evaluate-no-ortho");
+    std::fs::write(eval_support::own(&root, "resources/models/ortho_v1.json"), b"{}").expect("a file");
+    let folder = scratch("evaluate-no-ortho-rows");
+    let answer = development_replay(&root, &folder, &[development_row(0, "hello", Some(0), "we say ", "")]);
+    assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
 }

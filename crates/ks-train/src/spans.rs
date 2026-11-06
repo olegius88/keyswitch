@@ -95,12 +95,11 @@ fn label(capture: &Capture, expected: &str) -> Option<ContextAction> {
 
 /// `build_span_curriculum`: attainable labels captured without dictionary or candidate predictions.
 pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximum_families: i64, expected_split: &str) -> SpanCurriculum {
-    assert!(
-        (LAYOUT_GROUP_COUNT.to::<i64>()..=SPAN_MAXIMUM_FAMILIES).contains(&maximum_families) && maximum_families % LAYOUT_GROUP_COUNT.to::<i64>() == 0,
-        "span family budget"
-    );
+    assert!((LAYOUT_GROUP_COUNT.to::<i64>()..=SPAN_MAXIMUM_FAMILIES).contains(&maximum_families), "span family budget");
+    assert!(maximum_families % LAYOUT_GROUP_COUNT.to::<i64>() == 0, "span family budget");
     assert!([TRAIN, DEVELOPMENT, CALIBRATION].contains(&expected_split), "span curriculum never accepts the test split");
-    assert!(rows.iter().all(|row| row.split == expected_split && row.quarantine_reasons.is_empty()), "span curriculum accepts only rows from the declared split");
+    assert!(rows.iter().all(|row| row.split == expected_split), "span curriculum accepts only rows from the declared split");
+    assert!(rows.iter().all(|row| row.quarantine_reasons.is_empty()), "span curriculum accepts only rows from the declared split");
     let (selected, anchors) = select(rows, maximum_families.to::<usize>());
     let mut counts = Counts::default();
     counts.add_by("input_rows", rows.len().to::<i64>());
@@ -130,7 +129,8 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
                 let identity = hex_digest(&format!("{}:{variant}:{}", row.identifier, i32::from(wrong)));
                 let plan = Plan::typed(identity.clone(), row.document.clone(), group, expected.clone(), keys, source);
                 let outcome = replayer.replay(&plan, Mode::EarlyOff);
-                assert!(outcome.error.is_none() && outcome.corrections.is_empty(), "span capture must complete without corrections: {expected:?} gave {:?}", outcome.error);
+                assert!(outcome.error.is_none(), "span capture must complete without corrections: {expected:?} gave {:?}", outcome.error);
+                assert!(outcome.corrections.is_empty(), "span capture must complete without corrections: {expected:?} gave {:?}", outcome.error);
                 let records = replayer.take_records();
                 counts.add("sequences");
                 let focus: Vec<Capture> = records.into_iter().filter(|record| record.event > prefix_length).collect();
