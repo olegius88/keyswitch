@@ -5,6 +5,7 @@
 use ks_backend::constants::SHIFT_MASK;
 use ks_backend::KeyEvent;
 use ks_replay::harness::{Bundle, Session, KEYS, PAUSE_KEYCODE};
+use serde_json::{Value, json};
 
 fn type_character(session: &mut Session, character: char) {
     let wanted = session.backend.group();
@@ -74,6 +75,65 @@ const SCRIPTS: &[&str] = &[
     "ntcn123 ", "123ntcn ", "v67 ", "м67 ", "DKRCV ", "ЗОР ", "кз ", "rp ", "ghbdtn-vbh ", "привет-мир ", "ghbdtn_vbh ", "ghbdtn/vbh ", "ghbdtn.vbh ", "ghbdtn@vbh ", "t` ", "ё ", "'t ", "э ", "ю. ", "б, ", "ж; ", "х[ ", "ъ] ",
     "{ru}hello world ", "{ru}the ", "{en}руддщ ", "{en}да ", "{en}нет ", "ghbdtn{bs}{bs}{bs}{bs}{bs}{bs}{bs}", "a{bs}", "{bs}", "{del}", "{enter}", " ", "  ", "\n",
 ];
+
+/// Each setting a user can change, flipped one at a time, over every phrase.
+#[test]
+fn no_setting_stops_the_engine() {
+    let flips: &[(&str, Value)] = &[
+        ("enabled", json!(false)),
+        ("general.keep_history", json!(false)),
+        ("detection.minimum_length", json!(1)),
+        ("detection.minimum_length", json!("x")),
+        ("detection.confidence", json!(0.1)),
+        ("detection.confidence", json!("0.9")),
+        ("detection.confidence", json!(true)),
+        ("detection.confidence", json!(null)),
+        ("detection.correct_on_pause", json!(false)),
+        ("detection.pause_delay_seconds", json!(0.05)),
+        ("detection.early_switch", json!(false)),
+        ("detection.early_switch_min_length", json!(1)),
+        ("detection.correct_on_space", json!(false)),
+        ("detection.correct_on_enter", json!(false)),
+        ("detection.correct_on_tab", json!(false)),
+        ("detection.correct_on_punctuation", json!(false)),
+        ("detection.respect_manual_layout", json!(false)),
+        ("detection.fix_double_capitals", json!(false)),
+        ("detection.aggressive", json!(false)),
+        ("detection.context_aware", json!(false)),
+        ("detection.context_policy", json!("observe")),
+        ("detection.context_policy", json!("auto")),
+        ("detection.context_policy", json!("off")),
+        ("detection.context_policy", json!(5)),
+        ("detection.context_read_field", json!(false)),
+        ("detection.hold_after_caret_move", json!(false)),
+        ("detection.field_catch_up", json!("off")),
+        ("detection.field_catch_up", json!("nonsense")),
+        ("detection.protect_code", json!(false)),
+        ("detection.intent_model_enabled", json!(false)),
+        ("detection.correct_typos", json!(true)),
+        ("detection.correct_typos_english", json!(true)),
+        ("detection.learning", json!(false)),
+        ("detection.injected_input", json!(true)),
+        ("hotkeys.convert_last", json!("")),
+        ("applications.telegram_quote_mention", json!(false)),
+        ("exclusions.applications", json!(["firefox"])),
+        ("exclusions.applications", json!("firefox")),
+        ("exclusions.words", json!(["ghbdtn", "привет", "ghb"])),
+        ("diagnostics.technical_logging", json!(true)),
+    ];
+    let mut bundle = Bundle::load(None);
+    for (path, value) in flips {
+        for group in [0, 1] {
+            for script in SCRIPTS.iter().step_by(3) {
+                let mut session = bundle.session("firefox", group, "начало ".chars().collect());
+                session.core.settings.set(path, value.clone(), false).expect("in memory");
+                play(&mut session, script);
+                bundle.give_back(session);
+            }
+        }
+    }
+    bundle.clean();
+}
 
 #[test]
 fn no_sequence_of_keys_stops_the_engine() {
