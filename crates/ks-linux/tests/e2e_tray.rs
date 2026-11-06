@@ -37,9 +37,56 @@ fn run() -> Result<(), String> {
     for id in [MENU_SETTINGS, MENU_SWITCH_LAYOUT] {
         dbus_call(&destination, MENU_PATH, &event, &[&id.to_string(), "clicked", "<''>", "0"])?;
     }
+    // Everything else a tray host may ask: the answers are only looked at where a wrong one would show.
+    let all = "org.freedesktop.DBus.Properties.GetAll";
+    let properties_of_item = dbus_call(&destination, OBJECT_PATH, all, &[ITEM_INTERFACE])?;
+    let properties_of_menu = dbus_call(&destination, MENU_PATH, all, &[MENU_INTERFACE])?;
+    for method in ["Activate", "SecondaryActivate", "ContextMenu"] {
+        dbus_call(&destination, OBJECT_PATH, &format!("{ITEM_INTERFACE}.{method}"), &["1", "2"])?;
+    }
+    dbus_call(&destination, OBJECT_PATH, &format!("{ITEM_INTERFACE}.Scroll"), &["1", "vertical"])?;
+    let menu = |method: &str| format!("{MENU_INTERFACE}.{method}");
+    dbus_call(&destination, MENU_PATH, &menu("GetGroupProperties"), &["[]", "[]"])?;
+    dbus_call(&destination, MENU_PATH, &menu("GetGroupProperties"), &["[0, 1, 999]", "['label']"])?;
+    dbus_call(&destination, MENU_PATH, &menu("GetProperty"), &["1", "label"])?;
+    dbus_call(&destination, MENU_PATH, &menu("GetProperty"), &["0", "visible"])?;
+    let refused = [
+        dbus_call(&destination, MENU_PATH, &menu("GetProperty"), &["999", "label"]).is_err(),
+        dbus_call(&destination, MENU_PATH, &menu("GetProperty"), &["1", "nothing"]).is_err(),
+        dbus_call(&destination, MENU_PATH, &menu("GetLayout"), &["999", "1", "[]"]).is_err(),
+    ];
+    dbus_call(&destination, MENU_PATH, &menu("GetLayout"), &["1", "0", "['label']"])?;
+    dbus_call(&destination, MENU_PATH, &menu("GetLayout"), &["0", "0", "['label']"])?;
+    dbus_call(&destination, MENU_PATH, &menu("AboutToShow"), &["0"])?;
+    dbus_call(&destination, MENU_PATH, &menu("AboutToShowGroup"), &["[0, 1, 999]"])?;
+    dbus_call(&destination, MENU_PATH, &menu("EventGroup"), &["[(0, 'hovered', <''>, 0), (999, 'clicked', <''>, 0)]"])?;
+    for id in 0..30 {
+        let _ = dbus_call(&destination, MENU_PATH, &event, &[&id.to_string(), "clicked", "<''>", "0"]);
+    }
+    for name in ["type", "label", "icon-name", "toggle-type", "children-display", "toggle-state", "enabled", "visible"] {
+        let _ = dbus_call(&destination, MENU_PATH, &menu("GetProperty"), &["0", name]);
+    }
+    dbus_call(&destination, MENU_PATH, &event, &["0", "clicked", "<''>", "0"])?;
+    dbus_call(&destination, MENU_PATH, &event, &["999", "clicked", "<''>", "0"])?;
+    dbus_call(&destination, MENU_PATH, &event, &["1", "hovered", "<''>", "0"])?;
+    item.set_layout(0);
+    item.set_layout(0);
+    item.set_layout(-1);
+    item.set_enabled(false);
+    item.set_enabled(false);
+    item.set_enabled(true);
+    for style in ["letters", "letters", "flag", "nonsense"] {
+        item.set_indicator_style(&serde_json::json!(style));
+    }
+    item.set_indicator_style(&serde_json::json!(5));
+    for enabled in [false, false, true] {
+        item.set_sound_enabled(enabled);
+        item.set_notifications_enabled(enabled);
+    }
+    std::thread::sleep(Duration::from_millis(100));
     let mut actions = Vec::new();
-    while actions.len() < 2 {
-        match receiver.recv_timeout(EVENT_WAIT) {
+    while actions.len() < 12 {
+        match receiver.recv_timeout(Duration::from_millis(200).min(EVENT_WAIT)) {
             Ok(action) => actions.push(action),
             Err(_) => break,
         }
@@ -54,7 +101,11 @@ fn run() -> Result<(), String> {
         ("quit menu item", layout.contains("Выход")),
         ("clicked event", actions.contains(&TrayAction::ShowSettings)),
         ("layout clicked event", actions.contains(&TrayAction::SwitchLayout)),
+        ("item properties", properties_of_item.contains("KeySwitch") && properties_of_item.contains("ApplicationStatus")),
+        ("menu properties", properties_of_menu.contains("normal")),
+        ("what the menu does not have", refused.iter().all(|refused| *refused)),
     ];
+    item.close();
     let failed: Vec<&str> = checks.iter().filter(|(_, passed)| !passed).map(|(name, _)| *name).collect();
     if failed.is_empty() { Ok(()) } else { Err(format!("failed tray checks: {}", failed.join(", "))) }
 }
