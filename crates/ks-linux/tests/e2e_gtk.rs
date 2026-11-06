@@ -7,12 +7,16 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
+mod support;
+
 use adw::prelude::*;
 use gtk::glib;
 use ks_engine::rule_editor::RuleDraft;
 use ks_config::history::{HistoryEntry, HistoryStore};
 use ks_config::learning::{LearnedRule, LearningStore, RuleAction, RuleMatch};
-use ks_engine::engine::EngineSnapshot;
+use ks_engine::engine::{EngineSnapshot, LearningPrompt};
+use ks_linux::gtk_prompt::PromptAnchor;
+use ks_linux::tray::TrayAction;
 use ks_updates::{UpdatePhase, UpdateSnapshot};
 use serde_json::json;
 use ks_linux::gtk_app;
@@ -199,6 +203,56 @@ fn seed() {
     let _ = rules.save();
 }
 
+/// What the tray, the engine and the update check call on the application.
+fn app_calls() {
+    let phases = [UpdatePhase::Available, UpdatePhase::Error, UpdatePhase::Current, UpdatePhase::Idle];
+    gtk_app::with_app(|app| {
+        for action in [TrayAction::ShowSettings, TrayAction::ToggleEngine, TrayAction::ToggleEngine, TrayAction::SwitchLayout, TrayAction::ToggleSound, TrayAction::ToggleSound, TrayAction::ToggleNotifications, TrayAction::ToggleNotifications, TrayAction::ShowHistory, TrayAction::ShowExceptions, TrayAction::ShowAbout] {
+            app.tray_action(action);
+        }
+        for (path, value) in [
+            ("enabled", json!(false)),
+            ("enabled", json!(true)),
+            ("general.sound", json!(true)),
+            ("general.notifications", json!(false)),
+            ("general.notifications", json!(true)),
+            ("general.autostart", json!(false)),
+            ("general.autostart", json!(true)),
+            ("appearance.show_indicator", json!(false)),
+            ("appearance.show_indicator", json!(true)),
+            ("appearance.indicator_style", json!("flag")),
+            ("appearance.theme", json!("dark")),
+            ("updates.check_automatically", json!(false)),
+            ("updates.check_automatically", json!(true)),
+            ("*", json!(null)),
+            ("nothing", json!(1)),
+        ] {
+            app.apply_setting(path, &value);
+        }
+        app.engine_start_failed("проба");
+        for phase in phases {
+            app.apply_update_snapshot(&UpdateSnapshot { phase, message: "проба".to_owned(), current_version: "1".to_owned(), available_version: "9.9.9".to_owned(), release_url: String::new(), progress: 0 });
+        }
+        app.apply_engine_snapshot(&EngineSnapshot::default());
+        app.announce_correction(false, "ghbdtn", "привет");
+        app.announce_correction(true, "ПРивет", "Привет");
+        let prompt = LearningPrompt { source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: "app".to_owned(), action: RuleAction::Convert };
+        app.apply_learning_prompt(Some(prompt.clone()), Some(PromptAnchor { x: 10, y: 10, window: None }));
+        app.apply_learning_prompt(None, None);
+        app.apply_learning_prompt(Some(prompt), None);
+        app.apply_learning_prompt(None, None);
+        app.rule_editor_closed();
+        app.cancel_update_checks();
+        app.schedule_update_checks();
+        app.cancel_update_checks();
+        app.drop_window();
+        app.show_window();
+        app.show_page("history");
+        app.toggle("general.sound", false);
+    });
+    pump(200);
+}
+
 fn application_calls() {
     for theme in ["dark", "light", "system"] {
         gtk_app::set_theme(theme);
@@ -247,12 +301,15 @@ fn main() {
             println!("E2E_FAILED: {error}");
             failure.set(true);
         }
+        app_calls();
         application_calls();
         if let Some(application) = gtk::gio::Application::default() {
             application.quit();
         }
     });
-    let code = gtk_app::run(false, true);
+    let watcher = support::Watcher::new().unwrap();
+    let code = gtk_app::run(false, false);
+    drop(watcher);
     let _ = std::fs::remove_dir_all(&folder);
     if failed.get() || code != 0 {
         println!("E2E_FAILED: exit {code}");

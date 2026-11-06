@@ -455,18 +455,18 @@ impl App {
         window
     }
 
-    fn show_window(&self) {
+    pub fn show_window(&self) {
         self.ensure_window().window.present();
     }
 
-    fn show_page(&self, page: &str) {
+    pub fn show_page(&self, page: &str) {
         let window = self.ensure_window();
         window.show_page(page);
         window.window.present();
     }
 
     /// The window is taken apart so that a program in the tray holds none of its widgets.
-    fn drop_window(&self) {
+    pub fn drop_window(&self) {
         let window = self.window.borrow_mut().take();
         if let Some(window) = window {
             window.flush_pending_saves();
@@ -476,11 +476,11 @@ impl App {
         }
     }
 
-    fn toggle(&self, path: &str, default: bool) {
+    pub fn toggle(&self, path: &str, default: bool) {
         let _ = self.settings().set(path, json!(!self.flag(path, default)), true);
     }
 
-    fn engine_start_failed(&self, error: &str) {
+    pub fn engine_start_failed(&self, error: &str) {
         logsetup::error(LOGGER, &format!("Не удалось запустить движок\n{error}"));
         let window = self.ensure_window();
         window.window.present();
@@ -550,7 +550,7 @@ impl App {
         }
     }
 
-    fn tray_action(&self, action: TrayAction) {
+    pub fn tray_action(&self, action: TrayAction) {
         match action {
             TrayAction::ShowSettings => self.show_window(),
             TrayAction::ToggleEngine => self.toggle("enabled", true),
@@ -571,7 +571,7 @@ impl App {
 
     // --------------------------------------------------------------------------------------------------------- settings
 
-    fn apply_setting(&self, path: &str, value: &Value) {
+    pub fn apply_setting(&self, path: &str, value: &Value) {
         self.with_window(|window| window.apply_setting_update(path, value));
         let truth = crate::linux_app::truthy(value);
         match path {
@@ -617,7 +617,7 @@ impl App {
 
     // --------------------------------------------------------------------------------------------------------- updates
 
-    fn schedule_update_checks(&self) {
+    pub fn schedule_update_checks(&self) {
         if self.no_engine
             || !self.flag("updates.check_automatically", true)
             || self.update_initial.borrow().is_some()
@@ -643,7 +643,7 @@ impl App {
         *self.update_initial.borrow_mut() = Some(source);
     }
 
-    fn cancel_update_checks(&self) {
+    pub fn cancel_update_checks(&self) {
         for slot in [&self.update_initial, &self.update_periodic] {
             if let Some(source) = slot.borrow_mut().take() {
                 source.remove();
@@ -651,7 +651,7 @@ impl App {
         }
     }
 
-    fn apply_update_snapshot(&self, snapshot: &UpdateSnapshot) {
+    pub fn apply_update_snapshot(&self, snapshot: &UpdateSnapshot) {
         self.with_window(|window| window.apply_update_snapshot(snapshot));
         if snapshot.phase == UpdatePhase::Available && *self.last_update_notification.borrow() != snapshot.available_version {
             (*self.last_update_notification.borrow_mut()).clone_from(&snapshot.available_version);
@@ -667,7 +667,7 @@ impl App {
 
     // ----------------------------------------------------------------------------------------------------- the engine
 
-    fn apply_engine_snapshot(&self, snapshot: &EngineSnapshot) {
+    pub fn apply_engine_snapshot(&self, snapshot: &EngineSnapshot) {
         if let Some(tray) = self.tray.borrow().as_ref() {
             tray.set_layout(snapshot.current_group);
             tray.set_enabled(snapshot.enabled);
@@ -675,7 +675,7 @@ impl App {
         self.with_window(|window| window.apply_engine_snapshot(snapshot));
     }
 
-    fn announce_correction(&self, case_fix: bool, original: &str, replacement: &str) {
+    pub fn announce_correction(&self, case_fix: bool, original: &str, replacement: &str) {
         if self.flag("general.notifications", true) {
             let notification = gio::Notification::new(if case_fix { "Регистр исправлен" } else { "Раскладка исправлена" });
             notification.set_body(Some(&format!("{original}  →  {replacement}")));
@@ -696,7 +696,7 @@ impl App {
 
     // ------------------------------------------------------------------------------------------------ the rule windows
 
-    fn apply_learning_prompt(&self, prompt: Option<LearningPrompt>, anchor: Option<PromptAnchor>) {
+    pub fn apply_learning_prompt(&self, prompt: Option<LearningPrompt>, anchor: Option<PromptAnchor>) {
         let Some(prompt) = prompt else {
             if let Some(window) = self.prompt.borrow().as_ref() {
                 self.offer_window.set(window.anchor_window());
@@ -722,7 +722,7 @@ impl App {
     }
 
     /// Shows the rule window filled in with `draft`; one at a time. `return_window` gets the keyboard back when it closes.
-    fn open_rule_editor(&self, draft: RuleDraft, return_window: Option<i64>) {
+    pub fn open_rule_editor(&self, draft: RuleDraft, return_window: Option<i64>) {
         if let Some(editor) = self.rule_editor.borrow().as_ref() {
             editor.present();
             return;
@@ -740,7 +740,7 @@ impl App {
         *self.rule_editor.borrow_mut() = Some(editor);
     }
 
-    fn rule_editor_closed(&self) {
+    pub fn rule_editor_closed(&self) {
         self.rule_editor.borrow_mut().take();
         if let Some(window) = self.rule_return_window.take() {
             self.desktop.input.restore_window(Some(window));
