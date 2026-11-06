@@ -123,6 +123,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_program_answers_for_itself() {
+        assert!(!resource_dir().as_os_str().is_empty());
+        let _ = diagnose();
+        assert_eq!(main(&["--nothing".to_owned()]), 2);
+    }
+
+    #[test]
     fn the_bundle_folder_comes_first() {
         let executable = Path::new("/A.app/Contents/MacOS/KeySwitch");
         assert_eq!(resource_dir_from(executable, &|_| true), Path::new("/A.app/Contents/MacOS/../Resources/resources"));

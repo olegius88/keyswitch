@@ -382,6 +382,32 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
 mod tests {
     use super::*;
 
+    #[test]
+    fn numbers_truth_and_settings_as_python_reads_them() {
+        use serde_json::json;
+        for (value, truth) in [(json!(null), false), (json!(0), false), (json!(1), true), (json!(""), false), (json!("x"), true), (json!([]), false), (json!([1]), true), (json!({}), false), (json!({"a": 1}), true), (json!(true), true), (json!(0.0), false)] {
+            assert_eq!(truthy(&value), truth, "{value}");
+        }
+        assert_eq!((python_float(1.0), python_float(1.5), python_float(1e22)), ("1.0".to_owned(), "1.5".to_owned(), "1e+22".to_owned()));
+        let settings = SettingsStore::new(None);
+        assert!(setting_bool(&settings, "nothing.at.all", true));
+    }
+
+    #[test]
+    fn the_report_of_the_program_and_the_command_line() {
+        let (report, _) = diagnostics(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources"));
+        assert!(report.contains("intent_model"), "{report}");
+        assert!(matches!(parse(&["--version"]), Parsed::Exit { code: 0, .. }));
+        assert!(matches!(parse(&["-h"]), Parsed::Exit { code: 0, .. }));
+        assert!(matches!(parse(&["--hidden=x"]), Parsed::Exit { code: 2, .. }));
+        assert!(matches!(parse(&["--h"]), Parsed::Exit { code: 2, .. }));
+        assert!(matches!(parse(&["plain"]), Parsed::Exit { code: 2, .. }));
+        assert_eq!(main(&["--version".to_owned()]), 0);
+        assert_eq!(main(&["--nothing".to_owned()]), 2);
+        let _ = selection_factory();
+        let _ = resource_dir();
+    }
+
     fn parse(arguments: &[&str]) -> Parsed {
         parse_arguments(&arguments.iter().map(ToString::to_string).collect::<Vec<_>>())
     }

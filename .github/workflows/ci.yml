@@ -315,6 +315,69 @@ jobs:
             target/release/logcourier.exe
           retention-days: 14
 
+  coverage:
+    # Every line and branch of the program ran, on the system it is for. `ks-train coverage-gate` joins the reports.
+    name: Coverage (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-26.04
+            packages: --workspace
+          - os: windows-2025
+            packages: -p ks-win -p ks-backend -p ks-config -p ks-updates -p ks-ui -p logcourier
+          - os: macos-15
+            packages: -p ks-mac -p ks-backend -p ks-config -p ks-updates -p ks-ui -p logcourier
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        shell: bash
+        run: |
+          rustup toolchain install nightly-2026-11-05 --profile minimal --component llvm-tools
+          cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: System packages for the live tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils
+      - name: Linux measure
+        if: runner.os == 'Linux'
+        run: packaging/coverage.sh coverage-linux.json
+      - name: Measure
+        if: runner.os != 'Linux'
+        shell: bash
+        run: cargo +nightly-2026-11-05 llvm-cov --branch ${{ matrix.packages }} --profile coverage --no-fail-fast --json --output-path "coverage-$RUNNER_OS.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage-*.json
+          retention-days: 14
+
+  coverage-gate:
+    name: Every line and branch of the program ran
+    needs: [coverage]
+    # Reports what is left until the program is at the full mark; then this line goes and the release needs this job.
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: reports
+          merge-multiple: true
+      - run: rustup toolchain install stable --profile minimal
+      - name: The gate
+        run: |
+          arguments=()
+          for report in reports/*.json; do
+            arguments+=(--report "$report")
+          done
+          cargo run --release -p ks-train --bin ks-train -- coverage-gate --tree "$PWD" "${arguments[@]}"
+
   apt-repository:
     # The repository is what keeps an installed Linux KeySwitch up to date, and every package carries the source pointing
     # at it, so it has to be live before the release that hands out that package. A candidate tag (-rcN) stays out of it.

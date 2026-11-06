@@ -236,6 +236,30 @@ fn write_standard(error: bool, text: &str) {
 mod tests {
     use super::*;
 
+    #[test]
+    fn every_way_a_command_line_can_go() {
+        assert!(matches!(parse(&["--version"]), Parsed::Exit { code: 0, .. }));
+        assert!(matches!(parse(&["-h"]), Parsed::Exit { code: 0, .. }));
+        assert!(matches!(parse(&["--help=x"]), Parsed::Exit { code: 0, .. }));
+        assert!(matches!(parse(&["--hidden=x"]), Parsed::Exit { code: 2, .. }));
+        assert!(matches!(parse(&["--h"]), Parsed::Exit { code: 2, .. }));
+        assert!(matches!(parse(&["--nothing"]), Parsed::Exit { code: 2, .. }));
+        assert!(matches!(parse(&["plain"]), Parsed::Exit { code: 2, .. }));
+        assert_eq!(parse(&["--diag", "--no-e", "--hidden"]), Parsed::Run(Arguments { hidden: true, diagnose: true, no_engine: true, smoke_ui: false }));
+        assert_eq!(main(&["--version".to_owned()]), 0);
+        assert_eq!(main(&["--nothing".to_owned()]), 2);
+        assert!(resource_dir().ends_with("resources"));
+    }
+
+    #[test]
+    fn the_report_names_the_backend_the_models_and_autostart() {
+        let (report, _) = diagnostics(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources"));
+        assert!(report.contains("intent_model"), "{report}");
+        let (report, _) = diagnostics(Path::new("/nonexistent"));
+        assert!(report.contains("intent_model"));
+        assert!(autostart_status().is_object());
+    }
+
     fn parse(arguments: &[&str]) -> Parsed {
         parse_arguments(&arguments.iter().map(ToString::to_string).collect::<Vec<_>>())
     }
