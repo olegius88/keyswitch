@@ -275,6 +275,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_small_texts_of_the_window() {
+        assert_eq!((table_text(&[("a", "б")], "a"), table_text(&[("a", "б")], "z")), ("б", ""));
+        assert_eq!((index_of(&["a", "b"], "b", 7), index_of(&["a", "b"], "z", 7)), (1, 7));
+        assert!(!os_description().is_empty());
+        let loading = EngineSnapshot { running: false, last_action: ks_engine::engine_loader::LOADING_ACTION.to_owned(), ..EngineSnapshot::default() };
+        assert_eq!(engine_view(&loading, false).pill, "ЗАГРУЗКА");
+        let other = EngineSnapshot { running: true, enabled: true, current_group: 5, ..EngineSnapshot::default() };
+        let view = engine_view(&other, true);
+        assert_eq!((view.layout, view.active_language, view.backend), ("—", "—", "Wayland"));
+        let english = EngineSnapshot { running: true, enabled: true, current_group: 0, ..EngineSnapshot::default() };
+        assert_eq!(engine_view(&english, false).layout, "EN");
+        assert_eq!(engine_view(&english, false).active_language, "EN · группа 1");
+        let probe = BackendProbe { session_type: "wayland".to_owned(), display: "d".to_owned(), ..BackendProbe::default() };
+        let text = String::new;
+        let context = ReportContext { version: text(), os: text(), intent_model: text(), context_model: text(), context_mode: text(), read_field: text(), technical_logging: false, technical_log: text(), log_state: text() };
+        assert!(diagnostics_report(&probe, &context).contains("Desktop: d"));
+    }
+
+    #[test]
     fn the_snapshot_reads_as_the_window_says() {
         let mut snapshot = EngineSnapshot { running: true, enabled: true, current_group: 1, correction_count: 7, ..EngineSnapshot::default() };
         let view = engine_view(&snapshot, false);
