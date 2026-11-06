@@ -645,6 +645,7 @@ fn a_layout_nobody_can_name_lets_the_key_pass() {
     api.state().current_layout = 999;
     assert!(!subject.handle_native(native(true, VK_A, VK_A, false, 11)));
     assert!(subject.switch_group(2).is_err());
+    assert!(subject.inner.switch_group_inner(2).is_err());
 }
 
 #[test]

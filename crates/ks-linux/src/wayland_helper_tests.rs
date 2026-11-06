@@ -51,7 +51,8 @@ struct OsState {
     failing_reads: HashSet<i32>,
     failing_queries: HashSet<i32>,
     no_leds: bool,
-    /// A device that cannot be opened at all, or only read.
+    /// A device nobody may open, a device that cannot be opened at all, or only read.
+    denied: HashSet<String>,
     broken: HashSet<String>,
     broken_read_only: HashSet<String>,
     /// Keys that come up after so many looks.
@@ -110,7 +111,7 @@ impl HelperOs for FakeOs {
         if state.broken.contains(path) || (!writable && state.broken_read_only.contains(path)) {
             return Err(io::Error::from(io::ErrorKind::NotFound));
         }
-        if state.deny_all || (writable && state.deny_writable.contains(path)) {
+        if state.deny_all || state.denied.contains(path) || (writable && state.deny_writable.contains(path)) {
             return Err(io::Error::from(io::ErrorKind::PermissionDenied));
         }
         state.next_fd += 1;
@@ -180,11 +181,12 @@ struct FakeChannel {
     outbound: Mutex<Vec<u8>>,
     fd: AtomicI32,
     broken: AtomicBool,
+    send_broken: AtomicBool,
 }
 
 impl FakeChannel {
     fn new() -> FakeChannel {
-        FakeChannel { inbound: Mutex::new(VecDeque::new()), outbound: Mutex::new(Vec::new()), broken: AtomicBool::new(false), fd: AtomicI32::new(2) }
+        FakeChannel { inbound: Mutex::new(VecDeque::new()), outbound: Mutex::new(Vec::new()), broken: AtomicBool::new(false), send_broken: AtomicBool::new(false), fd: AtomicI32::new(2) }
     }
     fn command(&self, msg_type: u32, payload: &[u8]) {
         lock(&self.inbound).extend(pack_frame(msg_type, payload).unwrap());
@@ -208,6 +210,9 @@ impl ByteChannel for FakeChannel {
         Ok(count)
     }
     fn send_all(&self, data: &[u8]) -> io::Result<()> {
+        if self.send_broken.load(Ordering::SeqCst) {
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        }
         lock(&self.outbound).extend_from_slice(data);
         Ok(())
     }
@@ -1131,11 +1136,10 @@ fn a_device_that_will_not_open_is_passed_over_unless_it_is_all_there_is() {
     assert_eq!(helper.keyboards.len(), 1);
     // One keyboard denied and another open: no failure.
     let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), keyboard_info("/dev/input/event2")]);
-    rig.os.st().deny_writable.insert("/dev/input/event1".to_owned());
+    rig.os.st().denied.insert("/dev/input/event1".to_owned());
     let mut helper = rig.helper();
-    let open = Rig::new(vec![keyboard_info("/dev/input/event2")]);
-    drop(open);
     assert!(helper.start_up().is_ok());
+    assert_eq!(helper.keyboards.len(), 1);
 }
 
 #[test]
@@ -1233,4 +1237,36 @@ fn a_key_answered_after_the_socket_went_ends_the_loop_and_a_read_after_the_close
         thread::sleep(Duration::from_millis(1));
     }
     client.close();
+}
+
+#[test]
+fn a_client_with_nowhere_to_answer_and_nobody_to_tell_ends_its_threads() {
+    // A key whose answer cannot be sent: the thread that answers keys ends.
+    let channel = Arc::new(FakeChannel::new());
+    channel.command(HELPER_MSG_READY, &[0]);
+    channel.command(HELPER_MSG_KEY, &key_message(1, 0));
+    channel.send_broken.store(true, Ordering::SeqCst);
+    let said = Arc::new(Mutex::new(0));
+    let sink = said.clone();
+    let callbacks = HelperCallbacks {
+        on_key: Box::new(move |_| {
+            *lock(&sink) += 1;
+            false
+        }),
+        on_pointer: Box::new(|_| {}),
+        on_repeat_reset: Box::new(|_| {}),
+        on_caps_lock: Box::new(|_| {}),
+        on_input_reset: Box::new(|| {}),
+    };
+    let client = HelperClient::new(channel, callbacks);
+    let _ = client.start(1.0);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while *lock(&said) == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(*lock(&said), 1);
+    client.close();
+    // Closed already: a read ends at once, and a message after the close has nobody to go to.
+    client.shared.read_loop();
+    assert!(client.shared.route_incoming(HELPER_MSG_POINTER, vec![0; 4]).is_ok());
 }

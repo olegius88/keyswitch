@@ -53,6 +53,8 @@ struct Tree {
     slow_application: Duration,
     no_application: bool,
     no_field: bool,
+    /// The field holds itself as a child: a walk runs out of its nodes.
+    endless: bool,
 }
 
 struct Fake(Mutex<Tree>);
@@ -83,6 +85,7 @@ impl Fake {
             slow_application: Duration::ZERO,
             no_application: false,
             no_field: false,
+            endless: false,
         })))
     }
 
@@ -116,7 +119,7 @@ impl AtspiApi for Shared {
             Ok(match node {
                 None => tree.desktop_children,
                 Some(node) if *node == app() => 1,
-                Some(_) => 0,
+                Some(_) => usize::from(tree.endless),
             })
         })
     }
@@ -128,7 +131,7 @@ impl AtspiApi for Shared {
                 (!no_application).then(app)
             }
             Some(node) if *node == app() => (!no_field).then(field),
-            Some(_) => None,
+            Some(_) => Some(field()),
         })
     }
     fn name(&self, _node: &NodeRef) -> AtspiResult<String> {
@@ -526,4 +529,15 @@ fn a_reader_has_nothing_to_close_and_a_source_connects_once() {
     let selected = source.read_selection("editor", WINDOW).expect("read");
     assert_eq!(source.read_selection("editor", WINDOW).expect("read again"), selected);
     assert!(source.write_selection(&selected, "y").is_ok());
+}
+
+#[test]
+fn a_tree_that_never_ends_ends_the_walk() {
+    let fake = Fake::new();
+    let reader = fake.reader(None);
+    fake.with(|tree| {
+        tree.endless = true;
+        tree.field_states = 0;
+    });
+    assert_eq!(reader.focused("editor", WINDOW, Instant::now() + Duration::from_secs(5)), Ok(None));
 }

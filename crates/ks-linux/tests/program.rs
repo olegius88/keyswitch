@@ -30,7 +30,9 @@ fn program(folder: &Folder, arguments: &[&str]) -> Command {
         .env("XDG_RUNTIME_DIR", &folder.0)
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
-        .env_remove("XDG_SESSION_TYPE");
+        .env_remove("XDG_SESSION_TYPE")
+        // The live tests run under this; it names X11 whatever else the environment says.
+        .env_remove("GDK_BACKEND");
     command
 }
 

@@ -1065,6 +1065,9 @@ fn a_selection_is_read_and_written_as_far_as_the_server_lets_it() {
     let written = selection_backend(&fake, Some(false));
     assert!(written.read_selection("app", 5).is_ok());
     assert_eq!(written.replace_selection(&selected, "привет", None), Ok(false));
+    // A field nobody read yet takes the keys.
+    let unread = opened(&fake);
+    assert_eq!(unread.replace_selection(&selected, "a", None), Ok(true));
     // What the keys need.
     fake.with(|state| state.no_keyboard_state = true);
     assert!(backend.replace_selection(&selected, "a", None).is_err());

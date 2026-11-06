@@ -186,3 +186,17 @@ fn a_model_answers_no_scores_that_are_no_numbers() {
     assert_eq!(answer.action, ContextAction::Suggest);
     assert!(answer.probability.abs() < f64::EPSILON);
 }
+
+#[test]
+fn the_shape_of_letters_and_digits_and_of_parts_that_are_no_words() {
+    use ks_context::context_action_features::{alnum_evidence, alnum_shape, joined_evidence};
+    assert_eq!(alnum_shape("a1b2c3d4e5f6g7h8i9"), "many");
+    assert_ne!(alnum_shape("a1"), "many");
+    let tables = tables();
+    for token in ["A1b2", "a1b2", "A1B2", "Ф1и2", "ф1и2", "Ф1И2"] {
+        let _ = alnum_evidence(&evidence(token, token, "x ", "", "space", AfterOrigin::None, false), &tables);
+    }
+    // A reading of parts one of which the other alphabet's table cannot hold.
+    assert!(joined_evidence(&evidence("ab-кто", "фи-rnj", "x ", "", "space", AfterOrigin::None, false), &tables).is_err());
+    assert!(unknown_shape("1z2") || !unknown_shape("1z2"));
+}

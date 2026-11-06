@@ -606,6 +606,19 @@ mod tests {
     }
 
     #[test]
+    fn a_menu_asked_for_before_the_bus_is_there_asks_nobody() {
+        let item = Item {
+            shared: Arc::new(Shared {
+                item: Mutex::new(ItemState { status: String::new(), icon_name: String::new(), subtitle: String::new(), enabled: true, group: 0, indicator_style: "text", icon_theme_path: String::new() }),
+                menu: Mutex::new(MenuState::default()),
+                on_action: Arc::new(|_| {}),
+            }),
+            connection: Arc::new(Mutex::new(None)),
+        };
+        item.request_open();
+    }
+
+    #[test]
     fn the_menu_has_thirteen_lines_and_toggles_carry_their_state() {
         let state = MenuState { group: 0, sound_enabled: true, ..MenuState::default() };
         assert_eq!(MENU_ITEM_IDS.len(), 13);

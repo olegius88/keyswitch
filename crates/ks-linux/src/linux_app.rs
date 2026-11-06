@@ -154,6 +154,24 @@ pub fn resource_dir_from(over: Option<PathBuf>, executable: Option<&Path>, is_di
     candidates.iter().find(|path| is_dir(path)).cloned().unwrap_or_else(|| PathBuf::from("/usr/lib/keyswitch/resources"))
 }
 
+/// What a Wayland session reports: its backend's answers, or why there is no backend.
+fn probe_of_wayland(built: Result<Arc<crate::wayland_backend::WaylandBackend>, String>) -> BackendProbe {
+    match built {
+        Ok(backend) => {
+            let probe = backend.probe();
+            backend.close();
+            probe
+        }
+        Err(reason) => BackendProbe {
+            session_type: std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "неизвестно".to_owned()),
+            display: std::env::var("DISPLAY").unwrap_or_default(),
+            error: reason,
+            current_group: -1,
+            ..BackendProbe::default()
+        },
+    }
+}
+
 /// The field reader over the accessibility bus, or why there is none.
 fn reader_over(api: Result<Box<dyn crate::atspi_context::AtspiApi>, crate::atspi_context::AtspiError>, process: &ProcessForWindow) -> Result<Box<dyn ManagedFieldReader>, ReaderFailure> {
     let api = api.map_err(|error| error.failure())?;
@@ -176,20 +194,7 @@ pub fn diagnostics(resource_dir: &Path) -> (String, bool) {
     let resources = ks_lang::Resources::new(resource_dir);
     let models = resource_dir.join("models");
     let probe = if wayland_session_active() {
-        match crate::wayland_native::new_wayland_backend(None) {
-            Ok(backend) => {
-                let probe = backend.probe();
-                backend.close();
-                probe
-            }
-            Err(reason) => BackendProbe {
-                session_type: std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "неизвестно".to_owned()),
-                display: std::env::var("DISPLAY").unwrap_or_default(),
-                error: reason,
-                current_group: -1,
-                ..BackendProbe::default()
-            },
-        }
+        probe_of_wayland(crate::wayland_native::new_wayland_backend(None))
     } else {
         let backend = new_backend();
         let probe = backend.probe();
@@ -361,14 +366,13 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
             flag.store(true, std::sync::atomic::Ordering::SeqCst);
         }));
     }
-    let mut announced = false;
+    let announced = std::sync::Once::new();
     loop {
         if wait_for_signal(Duration::from_millis(100)) {
             break;
         }
-        if !announced && engine.ready() {
-            announced = true;
-            write_standard(true, "keyswitch: ready\n");
+        if engine.ready() {
+            announced.call_once(|| write_standard(true, "keyswitch: ready\n"));
         }
         if failed.load(std::sync::atomic::Ordering::SeqCst) {
             engine.stop();
@@ -387,6 +391,18 @@ mod tests {
     use super::*;
 
     /// `format(value, "g")` as Python printed each.
+    #[test]
+    fn a_wayland_session_with_no_backend_reports_why() {
+        let probe = probe_of_wayland(Err("why not".to_owned()));
+        assert_eq!((probe.error.as_str(), probe.current_group), ("why not", -1));
+    }
+
+    #[test]
+    fn a_helper_is_started_by_its_own_argument() {
+        // A socket that is not there: the helper says so and ends.
+        assert_ne!(main(&["--wayland-input-helper".to_owned(), "987654".to_owned()]), 0);
+    }
+
     #[test]
     fn a_reader_is_made_over_the_bus_or_says_why_not() {
         let process: ProcessForWindow = Arc::new(|_| 0);

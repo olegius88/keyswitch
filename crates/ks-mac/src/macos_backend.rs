@@ -932,11 +932,7 @@ impl Inner {
     fn inject_correction(&self, injection: &Injection<'_>) -> Result<i32, MacBackendError> {
         let outcome = self.inject(injection);
         let released = self.release_input();
-        match (outcome, released) {
-            (Err(error), _) => Err(error),
-            (Ok(_), Err(error)) => Err(error),
-            (Ok(held), Ok(_)) => Ok(held),
-        }
+        outcome.and_then(|held| released.map(|_| held))
     }
 
     fn stroke_inputs(&self, stroke: &KeyEvent, synthetic: bool, group: Option<i32>) -> Vec<NativeInput> {

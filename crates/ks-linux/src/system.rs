@@ -116,6 +116,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_program_is_found_on_the_path_and_the_settings_in_the_home_folder() {
+        use std::os::unix::fs::PermissionsExt as _;
+        const CHILD: &str = "KS_SYSTEM_CHILD";
+        if let Some(found) = std::env::var_os(CHILD) {
+            // A folder of that name and a file that cannot run are passed over.
+            assert_eq!(launcher_command(), Path::new(&found).join("keyswitch").to_string_lossy());
+            assert!(autostart_path().starts_with("/home/nobody/.config"));
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("ks-system-{}", std::process::id()));
+        let (folder, plain, program) = (root.join("a"), root.join("b"), root.join("c"));
+        std::fs::create_dir_all(folder.join("keyswitch")).unwrap();
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("keyswitch"), "").unwrap();
+        std::fs::create_dir_all(&program).unwrap();
+        std::fs::write(program.join("keyswitch"), "").unwrap();
+        std::fs::set_permissions(program.join("keyswitch"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "system::tests::the_program_is_found_on_the_path_and_the_settings_in_the_home_folder"])
+            .env(CHILD, &program)
+            .env("PATH", format!("{}::{}:{}", folder.display(), plain.display(), program.display()))
+            .env("HOME", "/home/nobody")
+            .env_remove("XDG_CONFIG_HOME")
+            .status()
+            .unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
     fn the_launcher_is_found_on_the_path_or_is_this_program() {
         assert!(!launcher_command().is_empty());
         assert!(find_in_path("no-such-program-at-all").is_none());

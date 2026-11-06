@@ -54,7 +54,12 @@ pub fn new_desktop_backend() -> DesktopBackend {
     if !wayland_session_active() {
         return x11_backend();
     }
-    wayland_backend().unwrap_or_else(|reason| DesktopBackend {
+    desktop_or_reason(wayland_backend())
+}
+
+/// A Wayland session's backend, or one that says why there is none.
+fn desktop_or_reason(built: Result<DesktopBackend, String>) -> DesktopBackend {
+    built.unwrap_or_else(|reason| DesktopBackend {
         input: Arc::new(UnavailableBackend { reason }),
         process_for_window: Arc::new(|_| 0),
         position_window: Arc::new(|_, _, _| false),
@@ -117,6 +122,15 @@ impl InputBackend for UnavailableBackend {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_without_its_backend_gets_one_that_says_why() {
+        let desktop = desktop_or_reason(Err("why not".to_owned()));
+        assert!(desktop.wayland);
+        assert_eq!((desktop.process_for_window)(5), 0);
+        assert!(!(desktop.position_window)(5, 1, 2));
+        assert_eq!(desktop.input.probe().error, "why not");
+    }
 
     #[test]
     fn an_unavailable_backend_says_why() {

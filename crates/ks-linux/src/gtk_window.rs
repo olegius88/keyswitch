@@ -540,13 +540,8 @@ impl MainWindow {
 
     pub fn show_page(&self, page: &str) -> bool {
         let Some(index) = NAVIGATION.iter().position(|(name, _, _)| *name == page) else { return false };
-        match self.nav_list.row_at_index(index.low::<i32>()) {
-            Some(row) => {
-                self.nav_list.select_row(Some(&row));
-                true
-            }
-            None => false,
-        }
+        self.nav_list.select_row(self.nav_list.row_at_index(index.low::<i32>()).as_ref());
+        true
     }
 
     // ---------------------------------------------------------------------------------------------------- live updates
@@ -844,6 +839,8 @@ impl MainWindow {
         let catalog = self.application_catalog();
         for choice in catalog.iter() {
             let row = action_row(&choice.name, &format!("{} · {}", choice.identifier, choice.desktop_id));
+            // An action row answers no click by itself.
+            row.set_activatable(true);
             if let Some(icon) = &choice.icon {
                 row.add_prefix(&gtk::Image::from_gicon(icon));
             }
@@ -1124,15 +1121,7 @@ impl Builder<'_> {
         row.set_selected(selected);
         let settings = self.settings();
         let key = path.to_owned();
-        row.connect_selected_notify(move |row| {
-            if let Some(value) = keys.get(row.selected().to::<usize>()) {
-                if key == "appearance.theme" {
-                    gtk_app::set_theme(value);
-                } else {
-                    store(&settings, &key, json!(value));
-                }
-            }
-        });
+        row.connect_selected_notify(move |row| choose_value(&settings, &key, &keys, row.selected()));
         if track {
             self.register(path, Control::Combo(row.clone()));
         }
@@ -1692,6 +1681,17 @@ impl Builder<'_> {
     }
 }
 
+/// The value of the row chosen in a list; a list with nothing chosen changes nothing.
+fn choose_value(settings: &SettingsStore, key: &str, keys: &[String], selected: u32) {
+    if let Some(value) = keys.get(selected.to::<usize>()) {
+        if key == "appearance.theme" {
+            gtk_app::set_theme(value);
+        } else {
+            store(settings, key, json!(value));
+        }
+    }
+}
+
 fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry) {
     let value = entry.text().trim().to_owned();
     if value.is_empty() {
@@ -1710,6 +1710,16 @@ pub type Rule = LearnedRule;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_list_with_nothing_chosen_changes_nothing() {
+        let settings = SettingsStore::new(None);
+        let keys = ["a".to_owned(), "b".to_owned()];
+        choose_value(&settings, "some.list", &keys, 1);
+        assert_eq!(settings.get("some.list"), Some(json!("b")));
+        choose_value(&settings, "some.list", &keys, gtk::INVALID_LIST_POSITION);
+        assert_eq!(settings.get("some.list"), Some(json!("b")));
+    }
 
     #[test]
     fn programs_are_named_and_listed_once() {

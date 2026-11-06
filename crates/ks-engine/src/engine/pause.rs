@@ -387,11 +387,11 @@ impl EngineCore {
         }
         let plan = if let Some((plan, _)) = joint { plan } else {
             let mention = self.mention_head(&application);
-            let closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, None));
             let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
             let base = base.replaced_with(|plan| {
                 plan.trailing.clone_from(&trailing);
-                plan.head = if !mention.is_empty() && closed { Vec::new() } else { mention.clone() };
+                // A sign left after the word at a pause is a key with a letter on it: never the quote that opened it.
+                plan.head.clone_from(&mention);
             });
             let mut plan = self.with_signs(&base, &signs);
             if inside.is_none()
@@ -399,11 +399,11 @@ impl EngineCore {
                 && head == 0
                 && signs.is_empty()
                 && mention.is_empty()
-                && let Some(baseline) = self.last_baseline.clone()
             {
                 // Asked again if the next word goes back the other way (provisional_after_pause).
                 let field = self.context_result.as_ref().and_then(|result| result.field.clone());
-                plan = plan.replaced_with(|plan| plan.revisit = Some(Arc::new((baseline, field))));
+                let revisit = self.last_baseline.clone().map(|baseline| Arc::new((baseline, field)));
+                plan = plan.replaced_with(|plan| plan.revisit = revisit);
             }
             plan
         };

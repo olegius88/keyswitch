@@ -289,6 +289,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_word_being_typed_is_what_the_window_shows_and_a_failure_is_in_the_report() {
+        let typing = EngineSnapshot { running: true, enabled: true, current_word: "ghb".to_owned(), last_action: "старое".to_owned(), ..EngineSnapshot::default() };
+        assert_eq!(engine_view(&typing, false).action, "ghb");
+        let probe = BackendProbe { error: "нет доступа".to_owned(), ..BackendProbe::default() };
+        let context = ReportContext { version: String::new(), os: String::new(), intent_model: String::new(), context_model: String::new(), context_mode: String::new(), read_field: String::new(), technical_logging: false, technical_log: String::new(), log_state: String::new() };
+        assert!(diagnostics_report(&probe, &context).contains("Backend error: нет доступа"));
+    }
+
+    #[test]
     fn a_handler_finds_its_widget_or_does_nothing() {
         use gtk::prelude::*;
         let object = gtk::gio::SimpleAction::new("x", None);

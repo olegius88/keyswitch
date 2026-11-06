@@ -273,8 +273,13 @@ fn the_layouts_are_chosen_by_what_a_key_types() {
     let sources: Vec<String> = ["emoji", "british", "us", "ru-win", "british"].iter().map(|s| (*s).to_owned()).collect();
     assert_eq!(select_source_pair(&sources, &translate), Ok(("british".to_owned(), "ru-win".to_owned())));
     // A key that types something of neither alphabet chooses nothing, and a second English layout is no Russian one.
-    let others = |_: u32, _: u32, source: &str| if source == "greek" { "\u{3b1}".to_owned() } else if source == "digit" { "1".to_owned() } else { translate(0, 0, source) };
-    let mixed: Vec<String> = ["greek", "digit", "us", "british", "ru-win"].iter().map(|s| (*s).to_owned()).collect();
+    let others = |_: u32, _: u32, source: &str| match source {
+        "greek" => "\u{3b1}".to_owned(),
+        "digit" => "1".to_owned(),
+        "ru-other" => "ц".to_owned(),
+        other => translate(0, 0, other),
+    };
+    let mixed: Vec<String> = ["greek", "digit", "us", "british", "ru-win", "ru-other"].iter().map(|s| (*s).to_owned()).collect();
     assert_eq!(select_source_pair(&mixed, &others), Ok(("us".to_owned(), "ru-win".to_owned())));
     let no_russian: Vec<String> = vec!["us".to_owned()];
     assert!(select_source_pair(&no_russian, &translate).is_err());

@@ -635,10 +635,14 @@ mod tests {
         // An active layout past the list is the first one.
         let past = json!([{"type": "keyboard", "xkb_layout_names": ["English (US)", "Russian"], "xkb_active_layout_index": 5}]);
         assert_eq!(parse_sway_inputs(&past).1, 0);
+        let negative = json!([{"type": "keyboard", "xkb_layout_names": ["English (US)", "Russian"], "xkb_active_layout_index": -1}]);
+        assert_eq!(parse_sway_inputs(&negative).1, 0);
         // A focused container with no process is passed over; a class left empty gives way to the instance.
         assert_eq!(parse_sway_focused_window(&json!({"id": 5, "pid": 0, "focused": true})), None);
         let instance = json!({"id": 77, "pid": 5151, "focused": true, "window_properties": {"class": "", "instance": "xterm"}});
         assert_eq!(parse_sway_focused_window(&instance), Some(info(77, "xterm", 5151)));
+        let class = json!({"id": 77, "pid": 5151, "focused": true, "window_properties": {"class": "xterm", "instance": "other"}});
+        assert_eq!(parse_sway_focused_window(&class), Some(info(77, "xterm", 5151)));
         // GNOME: the class, the application, the instance, each in its turn; a pointer without both numbers is none.
         let named = |window: Value| parse_gnome_state(&json!({"window": window}).to_string()).unwrap().window.map(|window| window.application);
         assert_eq!(named(json!({"id": 1, "wm_class": "a"})).as_deref(), Some("a"));

@@ -1276,3 +1276,141 @@ fn a_word_nobody_can_place_is_noted_without_a_second_opinion() {
     bundle.give_back(session);
     bundle.clean();
 }
+
+struct KnowsEverything;
+
+impl ks_lang::spellcheck::SpellChecker for KnowsEverything {
+    fn available(&self) -> bool {
+        true
+    }
+    fn source(&self) -> &str {
+        ""
+    }
+    fn check(&self, _word: &str) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_word_the_speller_knows_keeps_its_capitals() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let roots = [std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models"))];
+    let saved = core.models[0].clone();
+    core.models[0] = Arc::new(ks_lang::language_model::LanguageModel::load("en_US", Vec::<String>::new(), &roots, Box::new(KnowsEverything)));
+    assert_eq!(core.fix_double_capitals(&plan("HEllo", "?", Some(' ')), &key(' ')).original, "HEllo");
+    core.models[0] = saved;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_token_of_a_sign_and_a_word_has_no_head_to_keep() {
+    let mut bundle = Bundle::load(None);
+    let session = session(&mut bundle);
+    for token in ["+ghbdtn", "=ghbdtn", "_ghbdtn", "-ghbdtn"] {
+        let found: Strokes = token.chars().map(|character| {
+            let keyed = key(character);
+            Arc::new(KeyEvent { characters: if character.is_alphabetic() { keyed.characters.clone() } else { vec![character.to_string(), character.to_string()] }, ..(*keyed).clone() })
+        }).collect();
+        assert_eq!(session.core.joined_split(&found, 0), 0, "{token}");
+    }
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A word left as typed, in each state it can be asked in, beside a word that converts: at a boundary and at a pause.
+#[test]
+fn every_kept_word_is_asked_again_beside_a_converted_one() {
+    use ks_lang::short_words::SHORT_WORD_REASONS;
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let backend = session.backend.clone();
+    session.core.context_policy.reader = Some(Arc::new(ks_replay::harness::CaretReader { backend }));
+    let core = &mut session.core;
+    let next = plan("ghbdtn", "привет", Some(' '));
+    let score = core.models[0].score("lf");
+    for (word, reading) in [("z", "я"), ("d", "в"), ("r", "к"), ("f", "а"), ("b", "и"), ("c", "с"), ("lf", "да"), ("yt", "не"), ("gj", "по"), ("rfr", "как")] {
+        for convert in [false, true] {
+            for reason in ["test", SHORT_WORD_REASONS[0]] {
+                for segmentation_open in [false, true] {
+                    for before in ["", "начало ", "x ", "как дела "] {
+                        let baseline = DetectionDecision::new(convert, word, reading, 0, 1, 0.9, reason, score.clone(), score.clone());
+                        let kept = vec![Arc::new(KeptWord {
+                            plan: plan(word, reading, Some(' ')),
+                            baseline: Some(baseline),
+                            field: Some(field(before, "")),
+                            window: core.focus_or_zero(),
+                            deadline: f64::MAX,
+                            segmentation_open,
+                        })];
+                        let _ = core.take_along(&kept, &next, 6, "firefox", false);
+                        // The same at a pause.
+                        core.kept = kept;
+                        core.strokes = keys("ghbdtn");
+                        core.source_group = 0;
+                        let now = core.monotonic();
+                        core.last_word_input_at = Some(now - 5.0);
+                        core.pause_correction_pending = true;
+                        let _ = core.maybe_correct_after_pause(Some(now));
+                        core.pending = None;
+                        core.strokes.clear();
+                        core.kept.clear();
+                    }
+                }
+            }
+        }
+    }
+    // With no model to ask, the baseline answers.
+    let model = core.context_policy.model.take();
+    let baseline = DetectionDecision::new(true, "lf", "да", 0, 1, 0.9, SHORT_WORD_REASONS[0], score.clone(), score.clone());
+    let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("x ", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: true })];
+    let _ = core.take_along(&kept, &next, 6, "firefox", false);
+    core.context_policy.model = model;
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A waiting word of any kind, asked with its neighbour: the planned answer and the pair's answer may differ.
+#[test]
+fn a_waiting_word_and_its_neighbour_may_disagree() {
+    use ks_lang::short_words::SHORT_WORD_REASONS;
+    let mut bundle = Bundle::load(None);
+    let mut found = None;
+    for first in ["tot", "ещ", "yt", "lf", "да", "z", "я", "x", "ч", "gj", "по", "rfr", "как", "qr", "йк", "d", "в", "c", "с"] {
+        let mut session = bundle.session("firefox", 0, "начало ".chars().collect());
+        session.recovers = true;
+        let backend = session.backend.clone();
+        session.core.context_policy.reader = Some(Arc::new(ks_replay::harness::CaretReader { backend }));
+        for character in format!("{first} ").chars() {
+            let event = key(character);
+            session.select_layout(event.group);
+            session.tap((*event).clone());
+        }
+        if session.core.context_waiting.is_some() {
+            found = Some(session);
+            break;
+        }
+        bundle.give_back(session);
+    }
+    let mut session = found.expect("some word waits for its neighbour");
+    let core = &mut session.core;
+    let waiting = core.context_waiting.clone().expect("it waits");
+    let score = core.models[0].score("x");
+    let space = key(' ');
+    for (word, reading) in [("ghbdtn", "привет"), ("hello", "руддщ"), ("lf", "да"), ("z", "я"), ("d", "в"), ("x", "ч"), ("the", "еру"), ("git", "пше"), ("rfr", "как")] {
+        for (next, next_reading) in [("ghbdtn", "привет"), ("hello", "руддщ"), ("the", "еру"), ("git", "пше"), ("world", "цщкдв"), ("d", "в"), ("vbh", "мир")] {
+            for convert in [false, true] {
+                for reason in ["test", SHORT_WORD_REASONS[0]] {
+                    let decision = DetectionDecision::new(convert, word, reading, 0, 1, 0.9, reason, score.clone(), score.clone());
+                    let held = ks_engine::engine::WaitingContextWord { plan: plan(word, reading, Some(' ')), decision, baseline: None, window: core.focus_or_zero(), deadline: f64::MAX, ..waiting.clone() };
+                    let neighbour = DetectionDecision::new(false, next, next_reading, 0, 1, 0.9, "test", score.clone(), score.clone());
+                    let _ = core.resolve_context_wait(Some(&held), &keys(next), Some(&space), &neighbour, "firefox", &vec![(1, next_reading.to_owned())], false);
+                }
+            }
+        }
+    }
+    bundle.give_back(session);
+    bundle.clean();
+}

@@ -199,3 +199,21 @@ fn a_selection_is_changed_or_refused_with_its_reason() {
     bundle.give_back(session);
     bundle.clean();
 }
+
+#[test]
+fn an_engine_built_from_its_settings_takes_what_it_is_given() {
+    use ks_config::config::SettingsStore;
+    use ks_config::history::HistoryStore;
+    use ks_replay::harness::{Backend, UnreadField};
+    use std::path::PathBuf;
+    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
+    let resources = ks_lang::Resources::new(&root);
+    let settings = Arc::new(SettingsStore::new(None));
+    // A list of languages that is no list; a reader given, so none is opened.
+    settings.set("detection.language_models", json!(5), false).unwrap();
+    let history = Arc::new(HistoryStore::new(None, 10));
+    let learning = Some(Arc::new(LearningStore::new(None, None).unwrap()));
+    let clock = ks_replay::harness::FakeClock::new();
+    let engine = KeySwitchEngine::new(settings, history, Arc::new(Backend::new("app", 0, Vec::new())), learning, "test", Some(Arc::new(UnreadField)), None, &resources, clock.read());
+    assert!(engine.is_ok());
+}

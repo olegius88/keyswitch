@@ -66,7 +66,8 @@ fn label(text: &str) -> gtk::Label {
 }
 
 /// The monitor under a screen point, as `(x, y, width, height)`.
-fn monitor_at(display: &gdk::Display, x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
+#[must_use]
+pub fn monitor_at(display: &gdk::Display, x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
     let monitors = display.monitors();
     (0..monitors.n_items()).filter_map(|index| monitors.item(index)?.downcast::<gdk::Monitor>().ok()).map(|monitor| monitor.geometry()).find_map(|area| {
         let inside = area.x() <= x && x < area.x() + area.width() && area.y() <= y && y < area.y() + area.height();

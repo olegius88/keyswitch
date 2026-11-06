@@ -406,6 +406,17 @@ mod tests {
     }
 
     #[test]
+    fn fragments_are_packed_until_none_are_left_when_nobody_stops_it() {
+        let place = Place::new("packed");
+        let config = place.config();
+        place.write("first line\nsecond one\nthird one!\n");
+        let collector = Collector { store: &place.store, chunk_size: 11 };
+        assert!(collector.scan(&config).unwrap().0 > 1);
+        let mut worker = place.worker();
+        assert!(worker.turn(&config, "1:t", None, 0).is_ok());
+    }
+
+    #[test]
     fn a_stop_comes_between_two_packages() {
         let place = Place::new("stop");
         let config = place.config();

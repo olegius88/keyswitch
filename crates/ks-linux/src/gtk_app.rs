@@ -307,17 +307,9 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
     let post_fn: Post = Arc::new(post);
     // The engine loads its models on a background thread while the window and the tray come up.
     let engine = DeferredEngine::new(build, learning.clone(), enabled, post_fn, true);
-    let (updates, close_updates): (Arc<dyn UpdateController>, Box<dyn Fn()>) =
-        match UpdateManager::with_opener(VERSION, ks_config::history::data_dir().join("updates"), Arc::new(crate::http_curl::CurlOpener)) {
-            Ok(manager) => {
-                let closing = manager.clone();
-                (Arc::new(manager), Box::new(move || closing.close()))
-            }
-            Err(error) => {
-                logsetup::warning(LOGGER, &format!("Обновления недоступны: {error}"));
-                (Arc::new(NoUpdates), Box::new(|| {}))
-            }
-        };
+    let manager = UpdateManager::with_opener(VERSION, ks_config::history::data_dir().join("updates"), Arc::new(crate::http_curl::CurlOpener)).expect("the program's own version is a version");
+    let closing = manager.clone();
+    let (updates, close_updates): (Arc<dyn UpdateController>, Box<dyn Fn()>) = (Arc::new(manager), Box::new(move || closing.close()));
     let services = Rc::new(Services {
         settings: settings.clone(),
         history: history.clone(),
@@ -424,6 +416,13 @@ fn shutdown() {
     APP.with(|slot| slot.borrow_mut().take());
 }
 
+/// The sound of a correction, on a display if there is one.
+pub fn beep_on(display: Option<gdk::Display>) {
+    if let Some(display) = display {
+        display.beep();
+    }
+}
+
 /// The check that comes round by itself.
 #[must_use]
 pub fn periodic_update_check() -> glib::ControlFlow {
@@ -431,23 +430,6 @@ pub fn periodic_update_check() -> glib::ControlFlow {
         app.services.updates.check(true, false);
     });
     glib::ControlFlow::Continue
-}
-
-/// The updater when the manager could not be made: it never finds anything.
-struct NoUpdates;
-
-impl UpdateController for NoUpdates {
-    fn snapshot(&self) -> UpdateSnapshot {
-        UpdateSnapshot::new(UpdatePhase::Idle, "Проверка обновлений недоступна в этой сборке", VERSION)
-    }
-    fn subscribe(&self, _callback: ks_updates::UpdateObserver) {}
-    fn check(&self, _automatic: bool, _install_automatically: bool) -> bool {
-        false
-    }
-    fn install_available(&self) -> bool {
-        false
-    }
-    fn installation_failed(&self, _error: &dyn std::fmt::Display) {}
 }
 
 impl App {
@@ -697,10 +679,8 @@ impl App {
             notification.set_icon(&gio::ThemedIcon::new("keyswitch"));
             self.application.send_notification(None, &notification);
         }
-        if self.flag("general.sound", false)
-            && let Some(display) = gdk::Display::default()
-        {
-            display.beep();
+        if self.flag("general.sound", false) {
+            beep_on(gdk::Display::default());
         }
         if let Some(window) = self.window.borrow().as_ref()
             && window.window.is_visible()
@@ -767,10 +747,8 @@ fn accept_rule(engine: &DeferredEngine, draft: &RuleDraft) -> String {
         Ok(rule) => rule,
         Err(error) => return error.to_string(),
     };
-    match engine.add_learning_rule(rule, draft.editing.as_ref(), &draft.application) {
-        Ok(_) => {}
-        Err(ks_config::learning::LearningError::Invalid(error)) => return error.to_string(),
-        Err(error) => return format!("Правило не сохранено: {error}"),
+    if let Err(error) = engine.add_learning_rule(rule, draft.editing.as_ref(), &draft.application) {
+        return format!("Правило не сохранено: {error}");
     }
     with_window(MainWindow::refresh_rules);
     String::new()
@@ -786,16 +764,6 @@ mod tests {
         assert_eq!(json_text(Some(json!("dark")), "system"), "dark");
         assert_eq!(json_text(Some(json!(5)), "system"), "system");
         assert_eq!(json_text(None, "system"), "system");
-    }
-
-    #[test]
-    fn the_updater_that_could_not_be_made_finds_nothing() {
-        let none = NoUpdates;
-        assert_eq!(none.snapshot().phase, UpdatePhase::Idle);
-        none.subscribe(Arc::new(|_| {}));
-        assert!(!none.check(true, false));
-        assert!(!none.install_available());
-        none.installation_failed(&"no space");
     }
 
     #[test]

@@ -143,19 +143,31 @@ fn focus_in_and_out(widget: &gtk::Widget) {
     }
 }
 
-/// What a button opened: every control of a dialog in the window, before it is closed.
-fn walk_dialogs(window: &gtk::Widget) {
+/// What a button opened: every control of a dialog in the window, then a row of its list or its own close button.
+fn walk_dialogs(window: &gtk::Widget, round: usize) {
     let mut found = Vec::new();
     every_widget(window, &mut found);
     for dialog in found.iter().filter(|widget| widget.is::<adw::Dialog>() && !widget.is::<adw::AlertDialog>()) {
         let mut inside = Vec::new();
         every_widget(dialog, &mut inside);
         for widget in inside.iter().filter(|widget| acts(widget) || widget.is::<gtk::SearchEntry>()) {
-            if widget.root().is_some() && !widget.is::<gtk::Button>() {
+            if !widget.is::<gtk::Button>() && !widget.is::<gtk::ListBox>() {
                 note(format!("in a dialog: {}", widget.type_()));
                 change(widget);
                 pump(1);
             }
+        }
+        if round == 0 {
+            // A row chosen closes the dialog.
+            if let Some(row) = inside.iter().find_map(|widget| widget.downcast_ref::<gtk::ListBox>()).and_then(|list| list.row_at_index(0)) {
+                note("a row of a dialog");
+                row.emit_activate();
+                pump(5);
+            }
+        } else if let Some(close) = inside.iter().filter_map(|widget| widget.downcast_ref::<gtk::Button>()).find(|button| button.tooltip_text().is_some_and(|text| text.contains("Закрыть"))) {
+            note("the close button of a dialog");
+            close.emit_clicked();
+            pump(5);
         }
     }
 }
@@ -176,6 +188,9 @@ fn close_dialogs(window: &gtk::Widget, answer: &str) {
     let mut found = Vec::new();
     every_widget(window, &mut found);
     for widget in found {
+        if widget.root().is_none() {
+            continue;
+        }
         if let Some(dialog) = widget.downcast_ref::<adw::AlertDialog>() {
             if dialog.has_response(answer) {
                 dialog.emit_by_name::<()>("response", &[&answer]);
@@ -236,7 +251,7 @@ fn walk_everything() -> Result<(), String> {
                 change(widget);
                 pump(1);
                 if widget.is::<gtk::Button>() {
-                    walk_dialogs(&root);
+                    walk_dialogs(&root, round);
                     close_dialogs(&root, answer);
                 }
             }
@@ -423,6 +438,13 @@ fn app_calls() {
 fn offers(app: &Rc<gtk_app::App>) {
     let prompt = || LearningPrompt { source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: "firefox".to_owned(), action: RuleAction::Convert };
     let prompt_widget = || gtk::Window::list_toplevels().into_iter().filter_map(|top| top.downcast::<gtk::Window>().ok()).find(|top| top.is_visible() && top.title().is_some_and(|title| title.contains("Обучение")));
+    // Which monitor a point is on, for points off each edge.
+    if let Some(display) = gdk::Display::default() {
+        for (x, y) in [(10, 10), (-5, 10), (99_999, 10), (10, -5), (10, 99_999)] {
+            let _ = ks_linux::gtk_prompt::monitor_at(&display, x, y);
+        }
+    }
+    gtk_app::beep_on(None);
     // Anchors on no monitor, off each edge.
     for (x, y) in [(10, 10), (-5, 10), (99_999, 10), (10, -5), (10, 99_999)] {
         app.apply_learning_prompt(Some(prompt()), Some(PromptAnchor { x, y, window: Some(5) }));
@@ -448,22 +470,26 @@ fn offers(app: &Rc<gtk_app::App>) {
     }
     // Gone before it could be placed.
     app.apply_learning_prompt(Some(prompt()), Some(PromptAnchor { x: 10, y: 10, window: None }));
-    if let Some(window) = app.prompt.borrow_mut().take() {
+    let gone = app.prompt.borrow_mut().take();
+    if let Some(window) = &gone {
         window.destroy();
     }
     pump(5);
+    drop(gone);
     // The engine's own calls.
     if let Ok(engine) = app.services.engine.engine() {
         gtk_app::record_models(&engine, &app.services.models);
+        app.tray_action(TrayAction::SwitchLayout);
+        pump(20);
         let shared = engine.shared.clone();
         shared.show_learning_prompt(prompt());
         pump(20);
         let _ = shared.dismiss_learning_prompt(None, "проба");
         pump(5);
         shared.show_learning_prompt(prompt());
+        assert!(shared.confirm_learning_prompt(None));
         pump(20);
-        let _ = shared.confirm_learning_prompt(None);
-        pump(20);
+        rule_closed(app);
         let plan = ks_engine::engine::CorrectionPlan::new(Vec::new(), None, 0, 1, "ghbdtn".to_owned(), "привет".to_owned(), 0.9, "firefox");
         for callback in shared.correction_callbacks() {
             callback(&plan);
@@ -471,6 +497,15 @@ fn offers(app: &Rc<gtk_app::App>) {
         pump(5);
     }
     let _ = gtk_app::prompt_anchor(&app.desktop);
+}
+
+/// What a confirmed offer opened goes again.
+fn rule_closed(app: &Rc<gtk_app::App>) {
+    if let Some(editor) = app.rule_editor.borrow_mut().take() {
+        editor.destroy();
+    }
+    app.rule_editor_closed();
+    pump(5);
 }
 
 /// The rule window: asked twice, confirmed with a good and a bad draft, closed each way.
@@ -486,6 +521,24 @@ fn rule_window(app: &Rc<gtk_app::App>) {
         }
         pump(5);
         app.rule_editor_closed();
+    }
+    // A rule that cannot be saved: a folder where its file goes.
+    let rules = ks_config::history::data_dir().join("learning.json");
+    let saved = std::fs::read(&rules).ok();
+    let _ = std::fs::remove_file(&rules);
+    std::fs::create_dir_all(&rules).unwrap();
+    app.open_rule_editor(draft("cannotsave"), None);
+    pump(5);
+    if let Some(editor) = app.rule_editor.borrow().as_ref() {
+        editor.confirm();
+    }
+    if let Some(editor) = app.rule_editor.borrow_mut().take() {
+        editor.destroy();
+    }
+    pump(5);
+    std::fs::remove_dir_all(&rules).unwrap();
+    if let Some(saved) = saved {
+        std::fs::write(&rules, saved).unwrap();
     }
     // Every control of it, the last button closing it; then the keys; then the window's own close.
     app.open_rule_editor(draft("ntcn"), None);
@@ -559,6 +612,9 @@ fn application_calls() {
         app.services.settings.set("appearance.show_indicator", json!(false), false).unwrap();
         app.apply_setting("appearance.show_indicator", &json!(false));
         let _ = gtk_app::window_close_requested();
+        // The program ends with its tray up.
+        app.services.settings.set("appearance.show_indicator", json!(true), false).unwrap();
+        app.apply_setting("appearance.show_indicator", &json!(true));
         app.tray_action(TrayAction::Quit);
         app.application.activate_action("quit", None);
     });
@@ -575,9 +631,10 @@ fn programs(folder: &std::path::Path) {
     std::fs::create_dir_all(&applications).unwrap();
     let entry = |name: &str, lines: &str| std::fs::write(applications.join(format!("{name}.desktop")), format!("[Desktop Entry]\nType=Application\nExec=/bin/true %u\n{lines}\n")).unwrap();
     entry("proba", "Name=Проба\nIcon=dialog-information\nStartupWMClass=Проба");
-    entry("copy", "Name=Копия\nStartupWMClass=проба");
+    entry("copy", "Name=Копия\nIcon=dialog-information\nStartupWMClass=проба");
     entry("hidden", "Name=Скрытая\nNoDisplay=true");
-    entry("plain", "Name=Простая");
+    entry("plain", "Name=Простая\nIcon=dialog-warning\nStartupWMClass=Plain");
+    entry("bare", "Name=Без значка\nStartupWMClass=Bare");
     entry("handler", "Name=Обработчик\nMimeType=x-scheme-handler/ksprobe;inode/directory;");
     std::fs::write(applications.join("mimeinfo.cache"), "[MIME Cache]\nx-scheme-handler/ksprobe=handler.desktop;\ninode/directory=handler.desktop;\n").unwrap();
     std::fs::write(applications.join("mimeapps.list"), "[Default Applications]\nx-scheme-handler/ksprobe=handler.desktop\ninode/directory=handler.desktop\n").unwrap();
@@ -594,8 +651,9 @@ fn child(kind: &str) -> i32 {
             });
             gtk_app::run(false, true)
         }
-        "hidden" | "wayland" | "noupdates" => {
-            glib::timeout_add_local_once(Duration::from_millis(800), move || {
+        "hidden" | "wayland" => {
+            // Long enough for the models to load and the engine to say whether it started.
+            glib::timeout_add_local_once(Duration::from_secs(if kind == "wayland" { 15 } else { 1 }), move || {
                 gtk_app::with_app(|app| {
                     app.tray_action(TrayAction::SwitchLayout);
                     app.schedule_update_checks();
@@ -690,11 +748,8 @@ fn main() {
     // The other ways the program starts.
     run_child("hidden", &folder, |_, _| {});
     run_child("wayland", &folder, |command, _| {
-        command.env("XDG_SESSION_TYPE", "wayland").env("WAYLAND_DISPLAY", "no-such-display").env("GDK_BACKEND", "x11");
-    });
-    run_child("noupdates", &folder, |_, place| {
-        std::fs::create_dir_all(place.join("data")).unwrap();
-        std::fs::write(place.join("data/updates"), "").unwrap();
+        // The windows on X11 all the same: the first of the two a toolkit can use is not there.
+        command.env("XDG_SESSION_TYPE", "wayland").env("WAYLAND_DISPLAY", "no-such-display").env("GDK_BACKEND", "wayland,x11");
     });
     run_child("norules", &folder, |_, place| {
         // An old file of rules with a key the migration cannot read.

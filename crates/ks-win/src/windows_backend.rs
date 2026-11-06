@@ -1096,9 +1096,8 @@ impl Inner {
             self.api.translate_key(native.virtual_key, native.scan_code, state, english),
             self.api.translate_key(native.virtual_key, native.scan_code, state, russian),
         ];
-        let Ok(group) = self.current_group() else {
-            return false;
-        };
+        // The layouts were read just above and stay: an unknown layout is the group of none.
+        let group = self.current_group().unwrap_or(-1);
         let character = usize::try_from(group).ok().and_then(|index| characters.get(index)).cloned().unwrap_or_default();
         let mut event = KeyEvent {
             pressed: native.pressed,

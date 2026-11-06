@@ -1088,7 +1088,7 @@ pub fn unknown_shape(original: &str) -> bool {
         chars.next().filter(|_| chars.next().is_none())
     };
     !letters.is_empty()
-        && (letters.iter().all(|letter| "a" <= letter.as_str() && letter.as_str() <= "z")
+        && (letters.iter().all(|letter| letter.as_str() <= "z")
             || letters.iter().all(|letter| {
                 "а" <= letter.as_str() && letter.as_str() <= "я" && !single(letter).is_some_and(|c| UNKNOWN_HEAD_SIGN_KEY_LETTERS.contains(&c))
             }))
@@ -1162,7 +1162,7 @@ pub fn joined_question(original: &str) -> bool {
 /// tell the language: `ку` occurs in Russian prose and `re` nowhere in English (`Re-re!` is `Ку-ку!`), and `pre-order` is
 /// English by `order` though `pre` is no word of either prose. The shared features stay as the frozen model read them: fed
 /// these counts, its weights for single words turned `bye-bye` typed as meant into `ину-ину`.
-fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
+pub fn joined_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
     let (latin, cyrillic) = if item.source_group == 0 { (&item.original, &item.alternative) } else { (&item.alternative, &item.original) };
     let mut names: Vec<String> = Vec::new();
     for (reading, alphabet) in [(latin, "english"), (cyrillic, "russian")] {
@@ -1782,7 +1782,8 @@ pub fn alnum_question(original: &str, alternative: &str, before: &str, tables: &
 
 /// The runs of letters (`L`) and digits (`D`) of a token, each with its length up to `ALNUM_RUN_LENGTH_MAX`: `м67` is `L1D2`,
 /// `ц4и` `L1D1L1`, `100мс` `D3L2`; a token of more than `ALNUM_SHAPE_MAX_RUNS` runs is `many`.
-fn alnum_shape(token: &str) -> String {
+#[must_use]
+pub fn alnum_shape(token: &str) -> String {
     let mut runs: Vec<(char, usize)> = Vec::new();
     for c in token.chars() {
         let kind = if ucd::isdigit(c) { 'D' } else { 'L' };
@@ -1823,7 +1824,7 @@ fn longest_run(text: &str, wanted: fn(char) -> bool) -> Checked<&str> {
 /// orders are read with the rest. The shared features read every digit as one class: `1С` became `1C` in Russian prose and
 /// `2фа` `2af`, while `м67` for `v67` stayed a suggestion and `x64` typed in the Russian layout stayed `ч64` (the owner's
 /// typing, ru.stackoverflow messages of 2023).
-fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
+pub fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
     let tokens = tables.alnum().map_err(|_| FeatureError("invalid term frequency table"))?;
     let cyrillic = pystr::casefold(&item.original);
     let latin = pystr::casefold(&item.alternative);

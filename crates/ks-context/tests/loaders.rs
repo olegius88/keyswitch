@@ -347,3 +347,12 @@ fn keys_that_type_nothing_teach_the_templates_nothing() {
         templates.observe(&event);
     }
 }
+
+#[test]
+fn a_corrector_knows_the_keys_beside_each_key_of_its_languages() {
+    use ks_context::typo_correction::{TypoCorrector, TypoPolicy};
+    let resources = models().parent().expect("the resources").to_path_buf();
+    let lexicon = packaged_lexicon(&resources, "ru_RU").expect("the shipped list");
+    let corrector = TypoCorrector::new(vec![("ru_RU".to_owned(), lexicon)], TypoPolicy::default()).expect("a corrector");
+    assert!(!corrector.neighbours_of("ru_RU").is_empty());
+}

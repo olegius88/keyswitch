@@ -154,7 +154,14 @@ mod tests {
     #[test]
     fn levels_and_groups_beyond_a_key_follow_its_rules() {
         let mut map = map();
-        assert_eq!(map.keysym(11, 2, 1), 0, "only the first two groups answer for a level they lack");
+        // A one-level key of three groups: only the first two answer for a level they lack.
+        map.keys[1] = KeySyms { kt_index: [1, 1, 1, 0], group_info: 3, width: 1, syms: vec![0x20, 0x21, 0x22] };
+        assert_eq!(map.keysym(11, 1, 1), 0x21);
+        assert_eq!(map.keysym(11, 2, 1), 0);
+        // A key of a type the map does not have has no levels at all.
+        map.keys[1].kt_index = [9, 9, 9, 9];
+        assert_eq!(map.keysym(11, 0, 1), 0);
+        map.keys[1] = KeySyms { kt_index: [1, 0, 0, 0], group_info: 1, width: 1, syms: vec![0x20] };
         assert_eq!(map.keysym(11, 0, 3), 0);
         assert_eq!(map.keysym(10, 0, 2), 0, "a two-level key has no third level");
         // A group past the key's, redirected to a group the key does not have either.
