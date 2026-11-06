@@ -12,8 +12,8 @@
 //! * The engine's worker types corrections. It holds `inject_lock` across `SendInput` and across its waits for a layout,
 //!   and the hook never takes that lock. `hold` is taken by both, and never across `SendInput` or a wait.
 //!
-//! A panic on the hook's path takes the program down (a callback of the system cannot unwind, and the release profile
-//! aborts), so nothing on that path indexes or unwraps; what the Python's callback would have raised lets the key pass.
+//! A panic cannot unwind into the system's call of the hook, so `call_listener` stops one there and lets the key pass.
+//! Nothing on that path indexes or unwraps all the same: what the Python's callback would have raised lets the key pass.
 
 use ks_cast::To as _;
 use std::collections::{BTreeSet, VecDeque};

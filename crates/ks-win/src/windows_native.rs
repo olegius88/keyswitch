@@ -338,9 +338,14 @@ mod win32 {
         if listener.is_null() {
             return false;
         }
-        // SAFETY: set before the hooks are installed and freed only after they are removed, on this thread, which is the
-        // thread the system calls the hook procedures on (see HOOK_LISTENER).
-        unsafe { (*listener)(event) }
+        // A panic cannot unwind into the system's call of the hook: it would end the program. It ends here instead, and the
+        // key passes on to the window, as a key did when the Python's callback raised.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: set before the hooks are installed and freed only after they are removed, on this thread, which is
+            // the thread the system calls the hook procedures on (see HOOK_LISTENER).
+            unsafe { (*listener)(event) }
+        }))
+        .unwrap_or(false)
     }
 
     /// The low-level mouse hook: observe only, never suppress the user's pointer action.

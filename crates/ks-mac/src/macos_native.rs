@@ -301,17 +301,23 @@ impl NativeMacAPI {
 /// The listener of the running tap: the callback gets no closure, so it reads it here.
 static TAP_LISTENER: Mutex<Option<TapListener>> = Mutex::new(None);
 
+/// Hands an event to the listener. A panic cannot unwind into the system's call of the tap: it would end the program. It
+/// ends here instead, and the event goes on to the window.
+fn heard(listener: &TapListener, event: NativeKeyEvent) -> bool {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| listener(event))).unwrap_or(false)
+}
+
 extern "C" fn on_event(_proxy: CFRef, event_type: u32, event: *mut c_void, _info: *mut c_void) -> *mut c_void {
     let Some(listener) = locked(&TAP_LISTENER).clone() else { return event };
     if event_type == EVENT_TAP_DISABLED_BY_TIMEOUT || event_type == EVENT_TAP_DISABLED_BY_USER_INPUT {
-        listener(NativeKeyEvent { pressed: false, keycode: 0, timestamp: 0, injected: false, replayed: false, event_type, pointer: false });
+        heard(&listener, NativeKeyEvent { pressed: false, keycode: 0, timestamp: 0, injected: false, replayed: false, event_type, pointer: false });
         return event;
     }
     // SAFETY: the system hands a valid event for the time of this call.
     unsafe {
         let timestamp = CGEventGetTimestamp(event).bits::<i64>();
         if event_type == EVENT_LEFT_MOUSE_DOWN || event_type == EVENT_RIGHT_MOUSE_DOWN || event_type == EVENT_OTHER_MOUSE_DOWN {
-            listener(NativeKeyEvent { pressed: true, keycode: 0, timestamp, injected: false, replayed: false, event_type: 0, pointer: true });
+            heard(&listener, NativeKeyEvent { pressed: true, keycode: 0, timestamp, injected: false, replayed: false, event_type: 0, pointer: true });
             return event;
         }
         let mark = CGEventGetIntegerValueField(event, EVENT_SOURCE_USER_DATA_FIELD);
@@ -319,7 +325,7 @@ extern "C" fn on_event(_proxy: CFRef, event_type: u32, event: *mut c_void, _info
         // A modifier comes as a flags change, which says nothing about up or down by itself.
         let pressed = if event_type == EVENT_FLAGS_CHANGED { modifier_pressed(keycode, CGEventGetFlags(event)) } else { event_type == EVENT_KEY_DOWN };
         let native = NativeKeyEvent { pressed, keycode, timestamp, injected: mark == EVENT_MARK_INJECTED, replayed: mark == EVENT_MARK_REPLAYED, event_type, pointer: false };
-        if listener(native) { std::ptr::null_mut() } else { event }
+        if heard(&listener, native) { std::ptr::null_mut() } else { event }
     }
 }
 
