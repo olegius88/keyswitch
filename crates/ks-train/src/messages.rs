@@ -219,7 +219,7 @@ fn has_latin(text: &str) -> bool {
 }
 
 fn typeable_tokens(tokens: &[&str]) -> bool {
-    tokens.iter().all(|token| !token.is_empty() && token.chars().all(token_character) && !(has_cyrillic(token) && has_latin(token)))
+    tokens.iter().all(|token| token.chars().all(token_character) && !(has_cyrillic(token) && has_latin(token)))
 }
 
 /// `SENTENCE.split`: at the white space after a sentence's last sign.
@@ -228,9 +228,10 @@ fn sentences(text: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let (mut start, mut index) = (0, 0);
     while index < characters.len() {
-        if is_space(characters[index]) && index > 0 && matches!(characters[index - 1], '.' | '!' | '?') {
+        // The text is stripped: it opens and ends with no space.
+        if is_space(characters[index]) && matches!(characters[index - 1], '.' | '!' | '?') {
             parts.push(characters[start..index].iter().collect());
-            while index < characters.len() && is_space(characters[index]) {
+            while is_space(characters[index]) {
                 index += 1;
             }
             start = index;
@@ -410,7 +411,7 @@ pub fn build_tatoeba_bare(tatoeba: &Path, out: &Path) -> Result<BTreeMap<String,
         for (identifier, text) in tatoeba_rows(tatoeba, language)? {
             let lowered = without_bare_signs(&pystr::lower(&typeable(&text)));
             let tokens = pystr::split(&lowered);
-            let word = |token: &&str| !token.is_empty() && token.chars().all(|character| if cyrillic { is_cyrillic_letter(character) } else { character.is_ascii_alphabetic() });
+            let word = |token: &&str| token.chars().all(|character| if cyrillic { is_cyrillic_letter(character) } else { character.is_ascii_alphabetic() });
             if !(TATOEBA_MIN_TOKENS..=TATOEBA_MAX_TOKENS).contains(&tokens.len()) || !tokens.iter().all(word) {
                 continue;
             }
@@ -828,7 +829,7 @@ fn slippable(text: &str) -> bool {
 }
 
 fn reads_alike(token: &str) -> bool {
-    !token.is_empty() && token.chars().all(|character| pystr::isdigit(&text_of(character)) || LAYOUT_ALIKE_SIGNS.contains(character))
+    token.chars().all(|character| pystr::isdigit(&text_of(character)) || LAYOUT_ALIKE_SIGNS.contains(character))
 }
 
 fn formula(text: &str) -> bool {
@@ -952,9 +953,6 @@ fn code_like(token: &str) -> bool {
 fn lookalike(tokens: &[&str]) -> bool {
     for (index, token) in tokens.iter().enumerate() {
         let neighbours: Vec<&str> = [index.checked_sub(1).map(|at| tokens[at]), tokens.get(index + 1).copied()].into_iter().flatten().collect();
-        if neighbours.is_empty() {
-            continue;
-        }
         if matches!(*token, "c" | "C") && neighbours.iter().all(|word| has_cyrillic(word)) {
             return true;
         }

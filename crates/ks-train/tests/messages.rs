@@ -81,7 +81,7 @@ fn so_records() -> Vec<Value> {
         records.push(json!({
             "question_id": question,
             "title": format!("{post} заголовок"),
-            "text_markdown": format!("{post}\n\n```\nlet value = {index};\nx\n```\n\n    fn indented_{index}() -> i32 {{ 1 }}\n"),
+            "text_markdown": format!("{post}\n\n```\nlet value = {index};\nx\nlet shared = always_the_same();\nprint(\"кириллица в строке кода\");\n```\n\n    fn indented_{index}() -> i32 {{ 1 }}\n"),
             "comments": [{"text": format!("вопрос к {post}")}, {"text": post}],
             "answers": [{"text_markdown": format!("ответ на {post}\n\n```rust\nprintln!(\"{index}\");\n```"), "comments": [{"text": format!("ещё {post}")}]}],
         }));
@@ -105,7 +105,7 @@ static SOURCES: LazyLock<Sources> = LazyLock::new(|| {
     let taiga = folder.join("taiga");
     std::fs::create_dir_all(&taiga).expect("a folder");
     std::fs::write(taiga.join("notes.txt"), b"").expect("a file");
-    conllu(&taiga, "ru_taiga-ud-train-a", &["Мы пошли домой вечером.", "Он читает книгу", "Да!", "Hello world friends", "Это git в тексте!", "Проект большой идёт…"]);
+    conllu(&taiga, "ru_taiga-ud-train-a", &["Мы пошли домой вечером.", "Он читает книгу", "Да!", "Hello world friends", "Это git в тексте!", "Проект большой идёт…", "Вот ⊕ странный знак тут."]);
     conllu(&taiga, "ru_taiga-ud-dev", &["Кошка спит на диване.", "Я"]);
     conllu(&taiga, "ru_taiga-ud-test", &["Собака бежит по двору."]);
     let out = folder.join("out");
@@ -128,6 +128,7 @@ fn html_entities_read_as_html_reads_them() {
         ("&#xD800;", "\u{fffd}"),
         ("&#1114112;", "\u{fffd}"),
         ("&#99999999999999999999;", "\u{fffd}"),
+        ("&#4294967296;", "\u{fffd}"),
         ("&#x1;", ""),
         ("&#0;", "\u{fffd}"),
         ("&ampere", "&ere"),
@@ -152,6 +153,8 @@ fn a_post_is_cut_into_messages_a_person_could_type() {
     assert_eq!(joined("<b>жирный</b> текст &amp; ещё"), ["жирный текст & ещё"]);
     assert_eq!(joined("@user привет @ тебе как дела"), ["привет @ тебе как дела"]);
     assert_eq!(joined("@ привет тебе друг"), ["@ привет тебе друг"]);
+    assert_eq!(joined("@user_name.x-y как тут дела"), ["как тут дела"]);
+    assert_eq!(joined("как тут дела @user"), ["как тут дела"]);
     assert_eq!(joined("`код` и **жирный** и __тут__ всё"), ["код и жирный и тут всё"]);
     assert_eq!(joined("«кавычки» и ’апостроф‘ — тире… да\u{a0}нет"), ["\"кавычки\" и 'апостроф' - тире... да нет"]);
     assert_eq!(joined("# заголовок вот такой тут\n> цитата вот такая тут\n\n* пункт вот такой тут"), ["заголовок вот такой тут", "цитата вот такая тут", "пункт вот такой тут"]);
@@ -255,6 +258,23 @@ fn a_class_selects_its_messages() {
     assert!(!tool("select", &["--messages".as_ref(), messages.as_os_str(), "--development-share".as_ref(), "0.5".as_ref(), "--out".as_ref(), out.as_os_str()]).status.success());
     assert!(!tool("select", &["--messages".as_ref(), messages.as_os_str(), "--class".as_ref(), "dash".as_ref(), "--out".as_ref(), out.as_os_str()]).status.success());
     assert!(!tool("select", &["--messages".as_ref(), messages.as_os_str(), "--class".as_ref(), "dash".as_ref(), "--development-share".as_ref(), "many".as_ref(), "--out".as_ref(), out.as_os_str()]).status.success());
+    // Lines of a class that say what its neighbours do not.
+    let lines = [
+        "только два",
+        "слово é тут",
+        "слово ч тут",
+        "сайт ya.ru и нф.ру тут",
+        "формула x 5 тут",
+        "формула x = тут",
+        "модель x86 и ч86 тут",
+    ];
+    let own = sources.folder.join("own-classes.jsonl.gz");
+    let rows: Vec<String> = lines.iter().enumerate().map(|(index, text)| json!({"qid": index, "text": text}).to_string()).collect();
+    gz_write(&own, (rows.join("\n") + "\n").as_bytes());
+    for class in ["resume", "variable", "cyrletter-latin", "dotted-russian", "alnum-russian", "formula"] {
+        let output = tool("select", &["--messages".as_ref(), own.as_os_str(), "--class".as_ref(), class.as_ref(), "--development-share".as_ref(), "1.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "own".as_ref()]);
+        assert!(output.status.success(), "{class}: {}", String::from_utf8_lossy(&output.stderr));
+    }
     // With a list of the questions allowed, and with some of them left out.
     let list = sources.folder.join("allowed.txt.xz");
     let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 1);
@@ -297,6 +317,9 @@ fn whose_text_a_capture_holds_is_written_next_to_it() {
     assert!(run().status.success());
     assert!(!folder.join("taiga-sentences.txt").exists());
     // A sentence the detailed export does not hold.
+    let few = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tatoeba-few");
+    write(vec![json!({"recipe": common("tatoeba-train.jsonl.gz")})]);
+    assert!(String::from_utf8_lossy(&tool("sources", &["--manifest".as_ref(), manifest.as_os_str(), "--messages".as_ref(), sources.out.as_os_str(), "--tatoeba".as_ref(), few.as_os_str()]).stderr).contains("missing from the detailed export"));
     let wrong = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/tatoeba-bad");
     write(vec![json!({"recipe": common("tatoeba-train.jsonl.gz")})]);
     assert!(!tool("sources", &["--manifest".as_ref(), manifest.as_os_str(), "--messages".as_ref(), sources.out.as_os_str(), "--tatoeba".as_ref(), wrong.as_os_str()]).status.success());
@@ -320,6 +343,9 @@ fn the_chat_pools_are_made_from_fresh_comments() {
     std::fs::write(comments.join("notes.txt"), b"").expect("a file");
     let mut fresh: Vec<Value> = (0..40).map(|index| json!({"post_id": 1000 + index, "body": format!("свежий комментарий номер {index} тут")})).collect();
     for (post, body) in [
+        (json!(7), "abc c def xyz"),
+        (json!(7), "abc с дом тут"),
+        (json!(7), "abc с abcд тут"),
         (json!("1"), "комментарий строкой про проект"),
         (json!(1), "комментарий строкой про проект"),
         (json!(2), "код с \\ внутри тут"),
@@ -350,6 +376,8 @@ fn the_chat_pools_are_made_from_fresh_comments() {
         assert!(counts.get(reason).is_some(), "{reason}: {counts}");
     }
     assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(out.join("receipt.json")).expect("a receipt")).expect("json")["dump_sha256"], json!(ks_train::corpus::checksum(&dump).expect("a checksum")));
+    // Made again over what is there.
+    assert!(run(&dump).status.success());
     // Another dump, a post that is no post.
     assert!(!run(&sources.so).status.success());
     gz_write(&comments.join("comments-2.json.gz"), serde_json::to_vec(&json!([{"post_id": "no", "body": "текст"}])).expect("json").as_slice());
