@@ -119,5 +119,16 @@ mod tests {
         let probe = backend.probe();
         assert!(!probe.available && probe.error == "нет" && probe.current_group == -1);
         assert!(backend.start(Arc::new(|_| {})).is_err());
+        backend.set_key_filter(None);
+        backend.hold_input();
+        backend.stop();
+        backend.close();
+        for failure in [backend.release_input().err(), backend.complete_action(true).err(), backend.current_group().err(), backend.switch_group(0).err()] {
+            assert_eq!(failure.map(|error| error.to_string()).as_deref(), Some("нет"));
+        }
+        assert_eq!(backend.active_application(), "");
+        assert_eq!(backend.focused_window(), None);
+        let injection = Injection { strokes: &[], target_group: 0, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None };
+        assert!(backend.inject_correction(injection).is_err());
     }
 }

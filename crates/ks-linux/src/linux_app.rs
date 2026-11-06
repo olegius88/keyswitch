@@ -382,6 +382,17 @@ pub fn run_headless_with(wait_for_signal: &dyn Fn(Duration) -> bool, no_engine: 
 mod tests {
     use super::*;
 
+    /// `format(value, "g")` as Python printed each.
+    #[test]
+    fn floats_read_as_python_formats_them() {
+        for (value, text) in [
+            (1.0, "1"), (1.5, "1.5"), (1e22, "1e+22"), (1e-5, "1e-05"), (0.0001, "0.0001"), (123_456.0, "123456"), (1_234_567.0, "1.23457e+06"), (f64::NAN, "nan"), (f64::INFINITY, "inf"),
+            (f64::NEG_INFINITY, "-inf"), (0.0, "0"), (100.0, "100"), (0.5, "0.5"), (-1.5e-7, "-1.5e-07"), (2.5e10, "2.5e+10"),
+        ] {
+            assert_eq!(python_float(value), text);
+        }
+    }
+
     #[test]
     fn numbers_truth_and_settings_as_python_reads_them() {
         use serde_json::json;
