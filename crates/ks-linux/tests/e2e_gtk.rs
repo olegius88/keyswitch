@@ -153,10 +153,11 @@ fn walk_everything() -> Result<(), String> {
         gtk_app::refresh_current(page);
         pump(20);
     }
-    for answer in ["reset", "clear", "confirm", "ok", "cancel"] {
+    for (round, answer) in ["reset", "clear", "confirm", "ok", "cancel"].into_iter().enumerate() {
         let mut widgets = Vec::new();
         every_widget(&root, &mut widgets);
-        for widget in widgets.iter().filter(|widget| acts(widget)) {
+        // Every control once; after that only what opens a dialog, whose answer is what changes between the rounds.
+        for widget in widgets.iter().filter(|widget| acts(widget) && (round == 0 || widget.is::<gtk::Button>())) {
             if widget.root().is_some() {
                 note(format!("{answer} {} {}", widget.type_(), widget.downcast_ref::<gtk::Button>().and_then(gtk::Button::label).unwrap_or_default()));
                 change(widget);
@@ -301,7 +302,7 @@ fn main() {
     }
     seed();
     std::thread::spawn(|| {
-        std::thread::sleep(Duration::from_secs(300));
+        std::thread::sleep(Duration::from_secs(if cfg!(coverage) { 900 } else { 300 }));
         println!("E2E_FAILED: the walk did not end, last: {}", LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         std::process::exit(3);
     });

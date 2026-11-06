@@ -465,6 +465,15 @@ fn a_long_walk_stops_nowhere() {
         if dice.one_in(3) {
             let _ = session.core.settings.set("diagnostics.technical_logging", json!(true), false);
         }
+        // A model that did not load: the engine goes on with what it has.
+        if dice.one_in(8) {
+            session.core.boundary_model = None;
+        }
+        if dice.one_in(8) {
+            session.core.prefix_model = None;
+        }
+        let context_model = dice.one_in(8).then(|| session.core.context_policy.model.take());
+        let ortho = dice.one_in(8).then(|| session.core.context_policy.ortho.take());
         let mut window = 1;
         for _ in 0..STEPS {
             step(&mut session, &mut dice, &mut window);
@@ -486,6 +495,12 @@ fn a_long_walk_stops_nowhere() {
             assert!(text.len() < 20_000, "seed {seed}");
         }
         session.idle(2.0);
+        if let Some(model) = context_model {
+            session.core.context_policy.model = model;
+        }
+        if let Some(ortho) = ortho {
+            session.core.context_policy.ortho = ortho;
+        }
         bundle.give_back(session);
     }
     bundle.clean();
