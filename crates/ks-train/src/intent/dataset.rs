@@ -58,7 +58,7 @@ impl Split {
         }
     }
 
-    pub(crate) fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             Self::Train => 0,
             Self::Development => 1,
@@ -88,13 +88,7 @@ fn draw(digest: &[u8; 32]) -> u64 {
 pub fn stable_split(signature: &str) -> Split {
     let bucket = draw(&sha(&[SPLIT_NAMESPACE.as_bytes(), b"\0", signature.as_bytes()])) % SPLIT_BUCKET_COUNT;
     let mut cursor = 0;
-    for (name, width) in SPLIT_WIDTHS {
-        cursor += width;
-        if bucket < cursor {
-            return name;
-        }
-    }
-    unreachable!("the split table covers all buckets")
+    SPLIT_WIDTHS.into_iter().find_map(|(name, width)| { cursor += width; (bucket < cursor).then_some(name) }).expect("the split table covers all buckets")
 }
 
 fn training_trigger(signature: &str) -> CorrectionTrigger {
@@ -335,7 +329,7 @@ impl VariantQuarantine {
 }
 
 /// `variant_quarantine_fingerprint`: the hash of a canonical, order-independent form.
-fn quarantine_fingerprint(occurrences: &[QuarantinedOccurrence]) -> String {
+pub fn quarantine_fingerprint(occurrences: &[QuarantinedOccurrence]) -> String {
     let mut sorted: Vec<&QuarantinedOccurrence> = occurrences.iter().collect();
     sorted.sort();
     let mut hasher = Sha256::new();
@@ -991,4 +985,20 @@ pub fn read_frozen(root: &Path, spec: &Value) -> Result<Vec<u8>, String> {
         return Err(format!("{relative} differs from the frozen source"));
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_word_is_quarantined_for_where_it_stands_and_for_what_it_means() {
+        let (one, two): (BTreeSet<&'static str>, BTreeSet<&'static str>) = (["train"].into_iter().collect(), ["train", "test"].into_iter().collect());
+        let (single, both): (BTreeSet<i64>, BTreeSet<i64>) = ([0].into_iter().collect(), [0, 1].into_iter().collect());
+        assert_eq!(quarantine_reason(&two, &both), Some("cross_split+cross_language"));
+        assert_eq!(quarantine_reason(&two, &single), Some("cross_split"));
+        assert_eq!(quarantine_reason(&one, &both), Some("cross_language"));
+        assert_eq!(quarantine_reason(&one, &single), None);
+    }
 }

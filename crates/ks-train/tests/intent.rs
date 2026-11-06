@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::LazyLock;
-use support::{digest, recipe, scratch, small_tree, trainer};
+use support::{digest, recipe, scratch, small_tree, trainer, tree};
 
 struct Small {
     tree: PathBuf,
@@ -339,4 +339,321 @@ fn a_sealed_namespace_answers_one_candidate_once() {
     let file = std::fs::File::create(&huge).expect("a file");
     file.set_len(70 << 20).expect("a sparse file");
     assert!(publish_bundle(&[(first, b"9".to_vec()), (huge, b"10".to_vec())]).unwrap_err().contains("rollback limit"));
+}
+
+fn paths(value: &Value, here: &str, found: &mut Vec<String>) {
+    found.push(here.to_owned());
+    match value {
+        Value::Object(table) => {
+            for (name, item) in table {
+                paths(item, &format!("{here}/{name}"), found);
+            }
+        }
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                paths(item, &format!("{here}/{index}"), found);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+/// Every place of a value changed, one at a time.
+fn each_change(value: &Value, mut seen: impl FnMut(&Value)) {
+    let mut found = Vec::new();
+    paths(value, "", &mut found);
+    for path in found {
+        let original = value.pointer(&path).expect("a path").clone();
+        let changes = match &original {
+            Value::Bool(flag) => vec![json!(!flag)],
+            Value::Number(number) => vec![json!(number.as_f64().unwrap_or(0.0) + 1.0), json!(-1), json!("x")],
+            Value::String(text) if !text.is_empty() => vec![json!("x"), json!(""), json!(1), json!(format!("{text}x"))],
+            Value::String(_) | Value::Null | Value::Array(_) | Value::Object(_) => vec![json!(null), json!({"x": 1})],
+        };
+        for change in changes {
+            let mut copy = value.clone();
+            *copy.pointer_mut(&path).expect("a path") = change;
+            seen(&copy);
+        }
+    }
+}
+
+#[test]
+fn a_frozen_corpus_is_decoded_only_as_it_was_frozen() {
+    use ks_lang::detector::ProtectedTokens;
+    use ks_train::intent::{dataset, pipeline};
+    let small = prepared("intent-frozen", &|_| ());
+    let config = read(&config_of(&small));
+    let shape = pipeline::dataset_config(&config).expect("a dataset");
+    let protected = ProtectedTokens::load(&small.tree.join("resources"));
+    let raw = dataset::read_frozen(&small.tree, &config["hard_negative_development"]["source"]).expect("the corpus");
+    let good = dataset::decode_hard_negative_corpus(&raw, &config, &shape, &protected).expect("decoded");
+    assert!(good.provenance().is_object());
+    // Each thing the file says, changed.
+    let frozen: Value = serde_json::from_slice(&raw).expect("json");
+    let mut whole = frozen.clone();
+    let rows = whole["rows"].as_array_mut().expect("rows");
+    rows.truncate(3);
+    let row_count = frozen["rows"].as_array().expect("rows").len();
+    each_change(&whole, |changed| {
+        let mut copy = changed.clone();
+        if let Some(mine) = copy["rows"].as_array() {
+            let mut rows = mine.clone();
+            rows.extend(frozen["rows"].as_array().expect("rows")[3..row_count].iter().cloned());
+            copy["rows"] = json!(rows);
+        }
+        let bytes = serde_json::to_vec(&copy).expect("json");
+        assert!(dataset::decode_hard_negative_corpus(&bytes, &config, &shape, &protected).is_err());
+    });
+    assert!(dataset::decode_hard_negative_corpus(b"not json", &config, &shape, &protected).is_err());
+    // The same corpus against a config that expects something else of it.
+    let mut other = config.clone();
+    other["hard_negative_development"]["words_per_group"] = json!({"train": 1000, "development": 6, "calibration": 6, "threshold": 6});
+    assert!(dataset::decode_hard_negative_corpus(&raw, &other, &shape, &protected).is_err());
+    let mut tight = pipeline::dataset_config(&config).expect("a dataset");
+    tight.maximum_word_length = 2;
+    assert!(dataset::decode_hard_negative_corpus(&raw, &config, &tight, &protected).is_err());
+    // A row that is a protected token.
+    let mut token = frozen.clone();
+    let protected_word = "iphone";
+    let _ = protected_word;
+    token["rows"][0]["correct_typo"] = json!("github");
+    assert!(dataset::decode_hard_negative_corpus(&serde_json::to_vec(&token).expect("json"), &config, &shape, &protected).is_err());
+    let mut twice = frozen;
+    let first = twice["rows"][0].clone();
+    twice["rows"][1] = first;
+    assert!(dataset::decode_hard_negative_corpus(&serde_json::to_vec(&twice).expect("json"), &config, &shape, &protected).is_err());
+    // A frozen file that is not the one pinned.
+    let mut spec = config["hard_negative_development"]["source"].clone();
+    spec["bytes"] = json!(1);
+    assert!(dataset::read_frozen(&small.tree, &spec).is_err());
+    spec["sha256"] = json!("0");
+    assert!(dataset::read_frozen(&small.tree, &spec).is_err());
+    spec["path"] = json!("gone");
+    assert!(dataset::read_frozen(&small.tree, &spec).is_err());
+}
+
+#[test]
+fn a_dataset_that_leaks_across_its_splits_is_refused() {
+    use ks_train::intent::dataset::{self, Split, assert_no_split_leakage};
+    use ks_train::intent::pipeline;
+    let small = prepared("intent-leaks", &|_| ());
+    let presealed = pipeline::presealed_dataset(&small.tree).expect("a dataset");
+    let good = presealed.dataset.clone();
+    assert_no_split_leakage(&good, &Split::PRESEALED).expect("it holds");
+    let (train, development) = (Split::Train.index(), Split::Development.index());
+    let refuses = |edit: &dyn Fn(&mut dataset::DatasetBundle), words: &str| {
+        let mut changed = good.clone();
+        edit(&mut changed);
+        let said = assert_no_split_leakage(&changed, &Split::PRESEALED).expect_err(words);
+        assert!(said.contains(words), "{words}: {said}");
+    };
+    refuses(&|bundle| { let row = bundle.by_split[train][0].clone(); bundle.by_split[development].push(row); }, "leaked from");
+    refuses(&|bundle| { let mut row = bundle.by_split[train][0].clone(); row.base_signature = "another".to_owned(); bundle.by_split[development].push(row); }, "leaked between splits");
+    refuses(&|bundle| { let mut row = bundle.by_split[train][0].clone(); row.base_signature = "another".to_owned(); row.label = !row.label; bundle.by_split[train].push(row); }, "contradictory intended languages");
+    refuses(&|bundle| { bundle.by_split[train][0].original = "смесьmix".to_owned(); bundle.by_split[train][0].alternative = "other".to_owned(); }, "inconsistent physical signatures");
+    refuses(&|bundle| { bundle.safety[0].original = "смесьmix".to_owned(); bundle.safety[0].alternative = "other".to_owned(); }, "inconsistent physical signatures");
+    refuses(&|bundle| { let mut row = bundle.safety[0].clone(); row.safety = false; bundle.by_split[train].push(row); }, "safety corpus");
+    refuses(&|bundle| { let mut row = bundle.by_split[train][0].clone(); row.base_signature.clone_from(&bundle.safety[0].base_signature); bundle.by_split[train][0] = row; }, "safety corpus");
+    refuses(&|bundle| bundle.variant_quarantine.sha256 = "0".to_owned(), "does not match its records");
+    let with_occurrence = !good.variant_quarantine.occurrences.is_empty();
+    if with_occurrence {
+        refuses(&|bundle| { let first = bundle.variant_quarantine.occurrences[0].clone(); bundle.variant_quarantine.occurrences.push(first); bundle.variant_quarantine.sha256 = dataset::quarantine_fingerprint(&bundle.variant_quarantine.occurrences); }, "duplicate occurrence");
+        refuses(&|bundle| { bundle.variant_quarantine.occurrences[0].split = "test"; bundle.variant_quarantine.sha256 = dataset::quarantine_fingerprint(&bundle.variant_quarantine.occurrences); }, "outside its phase");
+        refuses(&|bundle| { bundle.variant_quarantine.occurrences[0].reason = "other"; bundle.variant_quarantine.sha256 = dataset::quarantine_fingerprint(&bundle.variant_quarantine.occurrences); }, "evidence is invalid");
+    }
+    // The test split in, with what was excluded from it.
+    let sealed = dataset::build_dataset(&presealed.prepared, &presealed.dataset_config, &[Split::Test]);
+    let whole = dataset::merge_sealed_test_dataset(good.clone(), sealed.clone()).expect("merged");
+    assert_no_split_leakage(&whole, &Split::PRESEALED).expect("it holds");
+    let mut emitted = whole.clone();
+    let row = &emitted.by_split[Split::Test.index()][0];
+    let signature = dataset::row_physical_signature(row).expect("a signature");
+    emitted.sealed_test_exclusion_signatures.push(signature);
+    assert!(assert_no_split_leakage(&emitted, &Split::PRESEALED).unwrap_err().contains("excluded sealed-test signature"));
+    // A sealed row that is in the candidate already goes; a quarantine record twice stops the merge.
+    let mut repeated = sealed.clone();
+    let row = good.by_split[train][0].clone();
+    repeated.by_split[Split::Test.index()].push(row);
+    let safety_row = good.safety[0].clone();
+    repeated.by_split[Split::Test.index()].push(safety_row);
+    let merged = dataset::merge_sealed_test_dataset(good.clone(), repeated).expect("merged");
+    assert!(merged.sealed_test_exclusion_signatures.len() >= whole.sealed_test_exclusion_signatures.len());
+    if with_occurrence {
+        let mut doubled = sealed;
+        doubled.variant_quarantine.occurrences = good.variant_quarantine.occurrences.clone();
+        doubled.sealed_variant_quarantine.occurrences = good.variant_quarantine.occurrences.clone();
+        assert!(dataset::merge_sealed_test_dataset(good, doubled).is_err());
+    }
+    // A word list, each line of its kinds, and the typos of a word.
+    let raw = "\\data\\\nngram 1=2\n\n\\1-grams:\n\n1 <s>\nnonumber\nmany слово\n5 hello\n7 HeLLo\n3 it's\n3 a\n\\2-grams:\n1 a b\n";
+    let words = dataset::load_onboard_unigrams(raw.as_bytes(), 0, 3, 16);
+    assert!(words.iter().any(|word| word.word == "hello" && word.frequency == 12), "{}", words.len());
+    assert_eq!(dataset::typo_variants("abcdefgh", 0).len(), 1);
+    assert_eq!(dataset::typo_variants("ab", 3).len(), 1);
+    assert_eq!(dataset::typo_variants("abcdefgh", 2).len(), 3);
+    assert_eq!(dataset::normalise_lexical_word("Ёж'ик", 1), "ёж'ик");
+    assert!(dataset::physical_signature("", 0).is_empty());
+    assert!(dataset::physical_signature("слово", 0).is_empty());
+    let prepared_words = dataset::prepare_lexicon(vec![], 5);
+    assert!(prepared_words.collisions.is_empty());
+}
+
+#[test]
+fn settings_of_a_fit_each_change_what_it_can_accept() {
+    use ks_train::intent::pipeline::fit_candidate;
+    let small = prepared("intent-settings", &|_| ());
+    let path = config_of(&small);
+    let good = read(&path);
+    let variants: [&dyn Fn(&mut Value); 20] = [
+        &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(0.0),
+        &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(0.001),
+        &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(60.0),
+        &|config| config["thresholds"]["selection_maximum_false_positives_per_trigger"] = json!(-1),
+        &|config| config["thresholds"]["selection_maximum_false_positives_per_trigger"] = json!(1),
+        &|config| config["thresholds"]["precision_floor"] = json!(1.0),
+        &|config| config["thresholds"]["maximum_false_positive_rate"] = json!(0.0),
+        &|config| config["quality_gates"]["selection_minimum_recall"] = json!(0.5),
+        &|config| config["quality_gates"]["selection_minimum_recall"] = json!(1.0),
+        &|config| config["quality_gates"]["selection_minimum_pause_recall"] = json!(1.0),
+        &|config| config["quality_gates"]["selection_minimum_typo_recall"] = json!(1.0),
+        &|config| config["quality_gates"]["selection_minimum_pause_typo_recall"] = json!(1.0),
+        &|config| config["quality_gates"]["minimum_specificity"] = json!(1.0),
+        &|config| config["thresholds"]["veto_positive_quantile"] = json!(0.5),
+        &|config| config["thresholds"]["veto_max_false_negative_rate"] = json!(0.0),
+        &|config| {
+            config["ftrl"]["maximum_epochs"] = json!(6);
+            config["ftrl"]["minimum_epochs"] = json!(1);
+            config["ftrl"]["patience"] = json!(1);
+            config["ftrl"]["alpha"] = json!(4.0);
+        },
+        &|config| {
+            config["ftrl"]["maximum_epochs"] = json!(3);
+            config["ftrl"]["l1"] = json!(100.0);
+        },
+        &|config| config["calibration"]["maximum_iterations"] = json!(1),
+        &|config| config["calibration"]["l2"] = json!(1_000_000.0),
+        &|config| config["seed"] = json!(u64::MAX),
+    ];
+    for variant in variants {
+        let mut changed = good.clone();
+        variant(&mut changed);
+        std::fs::write(&path, serde_json::to_vec(&changed).expect("json")).expect("a config");
+        let _ = fit_candidate(&small.tree, 2).map(|candidate| candidate.presealed_gate["passed"].clone());
+    }
+    std::fs::write(&path, serde_json::to_vec(&good).expect("json")).expect("a config");
+}
+
+#[test]
+fn the_audit_of_the_safety_rows_says_what_is_wrong_with_each() {
+    use ks_lang::detector::ProtectedTokens;
+    use ks_train::intent::pipeline::{self, SafetyAudit};
+    let small = &*PUBLISHED;
+    let presealed = pipeline::presealed_dataset(&small.tree).expect("a dataset");
+    let protected = ProtectedTokens::load(&small.tree.join("resources"));
+    let rows = &presealed.dataset.safety;
+    let audit = SafetyAudit::of(rows, &protected);
+    assert!(audit.passes(0));
+    assert!(!audit.passes(-1));
+    assert!(audit.payload().is_object());
+    assert!(!SafetyAudit::of(&[], &protected).passes(0));
+    let protected_row = rows.iter().find(|row| row.protected).expect("a protected row");
+    let collision = rows.iter().find(|row| row.variant_kind == "lexical_collision").expect("a collision");
+    let edits: [(&dyn Fn(&mut ks_train::intent::dataset::LexicalExample), bool); 9] = [
+        (&|row| row.label = true, true),
+        (&|row| row.safety = false, true),
+        (&|row| row.variant_kind = "other".to_owned(), true),
+        (&|row| row.source_known = true, true),
+        (&|row| row.target_known = true, true),
+        (&|row| row.original = "ordinary".to_owned(), true),
+        (&|row| row.source_known = false, false),
+        (&|row| row.target_known = false, false),
+        (&|row| row.variant_kind = "other".to_owned(), false),
+    ];
+    for (edit, of_protected) in edits {
+        let mut row = if of_protected { protected_row.clone() } else { collision.clone() };
+        edit(&mut row);
+        let audited = SafetyAudit::of(&[row], &protected);
+        assert!(!audited.failures.is_empty());
+        assert!(!audited.passes(0));
+    }
+    // Rows of one kind or of too few triggers do not make a whole audit.
+    let only_protected: Vec<_> = rows.iter().filter(|row| row.protected).cloned().collect();
+    assert!(!SafetyAudit::of(&only_protected, &protected).passes(0));
+    let only_collisions: Vec<_> = rows.iter().filter(|row| !row.protected).cloned().collect();
+    assert!(!SafetyAudit::of(&only_collisions, &protected).passes(0));
+    let fewer_collisions: Vec<_> = rows.iter().filter(|row| row.protected || row.trigger.as_str() == "space").cloned().collect();
+    assert!(!SafetyAudit::of(&fewer_collisions, &protected).passes(0));
+    let fewer_protected: Vec<_> = rows.iter().filter(|row| !row.protected || row.trigger.as_str() == "space").cloned().collect();
+    assert!(!SafetyAudit::of(&fewer_protected, &protected).passes(0));
+}
+
+#[test]
+fn the_receipt_of_a_seal_is_held_to_its_ledger() {
+    use ks_train::intent::seal::{claim_evaluation, receipt_is_valid, sha256_file, toolchain_snapshot, verify_toolchain};
+    let small = prepared("intent-receipt", &|_| ());
+    let config_path = config_of(&small);
+    let config = read(&config_path);
+    let registry = config["sealed_evaluation"]["registry_path"].as_str().expect("a registry").to_owned();
+    let namespace = config["sealed_evaluation"]["split_namespace"].as_str().expect("a namespace").to_owned();
+    let config_sha = sha256_file(&config_path).expect("a digest");
+    let receipt = claim_evaluation(&small.tree, &registry, &namespace, "candidate", &config_sha, "dataset").expect("a claim");
+    let evidence = receipt.payload();
+    assert!(receipt_is_valid(&small.tree, &evidence, &config, &config_sha, "dataset", "candidate"));
+    let check = |value: &Value| receipt_is_valid(&small.tree, value, &config, &config_sha, "dataset", "candidate");
+    assert!(!check(&json!(1)));
+    each_change(&evidence, |changed| assert!(!check(changed), "{changed}"));
+    let mut extra = evidence.clone();
+    extra["other"] = json!(1);
+    assert!(!check(&extra));
+    let mut less = evidence.clone();
+    less.as_object_mut().expect("a table").remove("registry_sha256");
+    assert!(!check(&less));
+    let mut other_name = evidence.clone();
+    let moved = other_name.as_object_mut().expect("a table").remove("registry_sha256").expect("a field");
+    other_name["other"] = moved;
+    assert!(!check(&other_name));
+    let mut no_section = config.clone();
+    no_section["sealed_evaluation"] = json!({});
+    assert!(!receipt_is_valid(&small.tree, &evidence, &no_section, &config_sha, "dataset", "candidate"));
+    assert!(!receipt_is_valid(&small.tree, &evidence, &config, "other", "dataset", "candidate"));
+    let registry_path = small.tree.join(&registry);
+    let bytes = std::fs::read(&registry_path).expect("the ledger");
+    std::fs::write(&registry_path, b"{}").expect("a file");
+    assert!(!check(&evidence));
+    std::fs::remove_file(&registry_path).expect("the file goes");
+    assert!(!check(&evidence));
+    std::fs::write(&registry_path, bytes).expect("a file");
+    // The toolchain, the same or moved.
+    let snapshot = toolchain_snapshot(&small.tree, &config_sha, &registry).expect("a snapshot");
+    verify_toolchain(&small.tree, &snapshot, &config_path, &registry).expect("the same");
+    let mut moved = snapshot;
+    moved["trainer_sha256"] = json!("0");
+    assert!(verify_toolchain(&small.tree, &moved, &config_path, &registry).unwrap_err().contains("trainer_sha256"));
+}
+
+#[test]
+fn the_frozen_dictionaries_and_the_samples_of_a_corpus() {
+    use ks_lang::LanguageModel;
+    use ks_train::intent::{external, frozen_dictionaries};
+    let root = tree();
+    let frozen = frozen_dictionaries(&root).expect("the dictionaries");
+    assert!(!external::discover_snapshot("en_US", &frozen).expect("a snapshot").words.is_empty());
+    assert!(external::discover_snapshot("en_US", Path::new("/nonexistent")).expect("a snapshot").words.is_empty());
+    // A dictionary in another encoding, one with no words, one half there.
+    let folder = scratch("intent-dictionaries");
+    std::fs::write(folder.join("en_US.aff"), "SET KOI8-R\n").expect("a file");
+    std::fs::write(folder.join("en_US.dic"), "1\nword\n").expect("a file");
+    assert!(external::discover_snapshot("en_US", &folder).map(|_| ()).unwrap_err().contains("KOI8-R"));
+    std::fs::write(folder.join("en_US.aff"), "SET UTF-8\n").expect("a file");
+    assert!(!external::discover_snapshot("en_US", &folder).expect("a snapshot").provenance.locale.is_empty());
+    let no_speller = LanguageModel::load("en_US", std::iter::empty::<&str>(), &[root.join("model/intent_v1/sources")], LanguageModel::disabled_speller());
+    assert!(external::snapshot_of_model(&no_speller, "en_US").expect("a snapshot").words.is_empty());
+    // A sample of a list.
+    let list = [1, 2, 3, 4, 5];
+    assert_eq!(external::deterministic_sample(&list, 10), list);
+    assert_eq!(external::deterministic_sample(&list, 5), list);
+    assert_eq!(external::deterministic_sample(&list, 1).len(), 1);
+    assert_eq!(external::deterministic_sample(&list, 2).len(), 2);
+    assert_eq!(external::deterministic_sample(&list, 0), list);
 }

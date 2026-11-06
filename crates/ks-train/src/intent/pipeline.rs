@@ -498,3 +498,44 @@ pub fn open_sealed_test(mut candidate: Candidate, root: &Path, workers: usize) -
     candidate.dataset = whole;
     Ok((candidate, gates_passed))
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn word(length: usize) -> LexicalExample {
+        LexicalExample {
+            original: "a".repeat(length),
+            alternative: "b".repeat(length),
+            source_group: 0,
+            target_group: 1,
+            trigger: CorrectionTrigger::Space,
+            label: true,
+            weight: 1.0,
+            base_signature: String::new(),
+            variant_kind: String::new(),
+            source_known: false,
+            target_known: false,
+            context_delta: 0.0,
+            context_group: None,
+            frequency: 0,
+            protected: false,
+            safety: false,
+        }
+    }
+
+    #[test]
+    fn a_word_falls_in_the_bucket_of_its_length_and_of_its_count() {
+        let names: Vec<String> = [1, 5, 7, 9, 11, 13, 16, 20, 40].iter().map(|length| diagnostic_length_bucket(&word(*length))).collect();
+        assert!(names.iter().collect::<BTreeSet<_>>().len() > 3, "{names:?}");
+        let counts: Vec<String> = [0, 1, 5, 20, 100, 1_000, 100_000, 100_000_000].iter().map(|count| diagnostic_frequency_bucket(*count)).collect();
+        assert!(counts.iter().collect::<BTreeSet<_>>().len() > 3, "{counts:?}");
+    }
+
+    #[test]
+    fn selection_diagnostics_need_examples() {
+        assert!(recall_target_threshold(&[], 0.5, false).is_err());
+        assert!(recall_target_threshold(&[], 0.5, true).is_err());
+    }
+}

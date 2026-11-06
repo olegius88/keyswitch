@@ -422,12 +422,10 @@ pub fn publish_bundle(outputs: &[(PathBuf, Vec<u8>)]) -> Result<(), String> {
                     None => std::fs::remove_file(target).map_err(|error| error.to_string()),
                     Some(old) => stage(target, old).and_then(|path| std::fs::rename(path, target).map_err(|error| error.to_string())),
                 };
-                if let Err(failure) = restored {
-                    failures.push(format!("{}: {failure}", target.display()));
-                }
+                failures.extend(restored.err().map(|failure| format!("; and {} was not put back: {failure}", target.display())));
             }
             clean(&staged);
-            return Err(if failures.is_empty() { format!("{}: {error}", destination.display()) } else { format!("bundle publication failed and rollback was incomplete: {}", failures.join("; ")) });
+            return Err(format!("{}: {error}{}", destination.display(), failures.concat()));
         }
     }
     Ok(())

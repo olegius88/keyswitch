@@ -1427,3 +1427,332 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
 
 /// `STRICT_GATE_NAMES`.
 pub const STRICT_GATES: [&str; 30] = ["provenance", "external_policy_schema", "external_minimum_corpus_policy", "external_trigger_expansion_policy", "external_hunspell_provenance", "hunspell_handle_snapshot_stability", "runtime_threshold_selection_evidence", "sealed_test", "sealed_test_context_stress", "safety", "typo_unknown_recall", "veto", "fallback_regression", "lexical_disjoint_size", "lexical_disjoint_corpus_provenance", "hunspell_hard_guard_regression", "lexical_disjoint_recall", "unknown_typo_development_provenance", "unknown_typo_disjoint_size", "unknown_typo_holdout_provenance", "unknown_typo_holdout_disjointness", "unknown_typo_model_evaluated", "unknown_typo_false_positives", "unknown_typo_recall", "unknown_typo_raw_model_integrity", "production_context_ensemble", "artifact_size", "load_latency", "inference_latency", "deterministic_inference"];
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("the repository")
+    }
+
+    fn manifest() -> Value {
+        crate::corpus::read_json(&root().join("model/intent_v1/manifest.json")).expect("the manifest")
+    }
+
+    fn config() -> FitConfig {
+        FitConfig::read(&crate::corpus::read_json(&root().join("model/intent_v1/config.json")).expect("the config")).expect("a config")
+    }
+
+    fn paths(value: &Value, here: &str, found: &mut Vec<String>) {
+        found.push(here.to_owned());
+        match value {
+            Value::Object(table) => {
+                for (name, item) in table {
+                    paths(item, &format!("{here}/{name}"), found);
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate() {
+                    paths(item, &format!("{here}/{index}"), found);
+                }
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+        }
+    }
+
+    /// Every place of a value changed, one at a time, each way a check could read it: a check of evidence stands or falls on each.
+    fn each_change(value: &Value, mut seen: impl FnMut(&Value)) {
+        let mut found = Vec::new();
+        paths(value, "", &mut found);
+        for path in found {
+            let original = value.pointer(&path).expect("a path").clone();
+            let changes = match &original {
+                Value::Bool(flag) => vec![json!(!flag), json!("x")],
+                Value::Number(number) => vec![json!(number.as_f64().unwrap_or(0.0) + 1.0), json!(-1), json!("x")],
+                Value::String(_) => vec![json!("x"), json!(1)],
+                Value::Null | Value::Array(_) | Value::Object(_) => vec![json!(null), json!({"x": 1})],
+            };
+            for change in changes {
+                let mut copy = value.clone();
+                *copy.pointer_mut(&path).expect("a path") = change;
+                seen(&copy);
+            }
+        }
+    }
+
+    #[test]
+    fn a_gate_of_the_kept_manifest_holds_and_no_change_of_it_goes_unnoticed_where_it_matters() {
+        let manifest = manifest();
+        let gates = &manifest["quality_gate_breakdown"];
+        let gate = &gates["sealed_test"]["per_trigger"]["space"];
+        assert_eq!(binary_evidence(Some(gate), false), Some(true));
+        each_change(gate, |changed| {
+            let _ = binary_evidence(Some(changed), false);
+        });
+        let context = &gates["sealed_test_context_stress"];
+        assert_eq!(context_evidence(Some(context), false), Some(true));
+        let profile = context["profiles"].as_object().expect("the profiles").keys().next().expect("a profile").clone();
+        for place in ["/passed", "/all_profiles_present", "/expected_profiles", &format!("/profiles/{profile}/passed"), &format!("/profiles/{profile}/all_triggers_present"), &format!("/profiles/{profile}/delta"), &format!("/profiles/{profile}/group_selector"), &format!("/profiles/{profile}/per_trigger/space/passed"), &format!("/profiles/{profile}/per_trigger/space/overall/passed"), &format!("/profiles/{profile}/per_trigger/space/typos/passed")] {
+            let mut changed = context.clone();
+            *changed.pointer_mut(place).expect(place) = json!("x");
+            assert_eq!(context_evidence(Some(&changed), false), Some(false), "{place}");
+        }
+        let mut other = context.clone();
+        other["profiles"].as_object_mut().expect("the profiles").remove(&profile);
+        assert!(context_evidence(Some(&other), false) != Some(true));
+        assert!(quality_evidence(Some(gates)));
+        let top: Vec<String> = {
+            let mut found = Vec::new();
+            for name in ["passed", "all_triggers_present", "safety", "veto"] {
+                paths(&gates[name], &format!("/{name}"), &mut found);
+            }
+            for name in ["sealed_test", "sealed_test_typos"] {
+                found.push(format!("/{name}/passed"));
+                found.push(format!("/{name}/per_trigger/space/passed"));
+            }
+            found.push("/sealed_test_context_stress/passed".to_owned());
+            found
+        };
+        for place in top {
+            let mut changed = gates.clone();
+            *changed.pointer_mut(&place).expect("a place") = json!("x");
+            assert!(!quality_evidence(Some(&changed)), "{place}");
+        }
+    }
+
+    #[test]
+    fn the_selection_of_thresholds_is_held_to_its_budget() {
+        let manifest = manifest();
+        let config = config();
+        let gate = &manifest["threshold_selection_gate_breakdown"];
+        let maximum = config.selection_max_false_positives;
+        assert!(threshold_evidence(Some(gate), maximum));
+        assert!(!threshold_evidence(None, maximum));
+        for place in ["/passed", "/all_triggers_present", "/neutral/passed", "/neutral/all_triggers_present", "/per_trigger/space/passed", "/neutral/per_trigger/space/passed", "/context_stress/passed"] {
+            let mut changed = gate.clone();
+            *changed.pointer_mut(place).expect(place) = json!(false);
+            assert!(!threshold_evidence(Some(&changed), maximum), "{place}");
+        }
+        let item = &gate["per_trigger"]["space"];
+        assert_eq!(selection_trigger_evidence(Some(item), maximum), Some(true));
+        each_change(item, |changed| {
+            let _ = selection_trigger_evidence(Some(changed), maximum);
+        });
+        assert_eq!(selection_trigger_evidence(Some(item), -1), Some(false));
+    }
+
+    #[test]
+    fn a_manifest_says_what_this_schema_says() {
+        let manifest = manifest();
+        validate_manifest(&manifest).expect("the kept manifest holds");
+        let table = manifest.as_object().expect("a table");
+        for (name, value) in table {
+            for change in [json!(1), json!(""), json!(null), json!("x"), json!([])] {
+                if &change == value {
+                    continue;
+                }
+                let mut copy = manifest.clone();
+                copy[name] = change;
+                let _ = validate_manifest(&copy);
+            }
+        }
+        let mut less = manifest.clone();
+        less.as_object_mut().expect("a table").remove("model_id");
+        assert!(validate_manifest(&less).is_err());
+    }
+
+    #[test]
+    fn the_numbers_of_a_model_are_those_its_manifest_gives() {
+        let manifest = manifest();
+        let config = config();
+        let model = LinearNgramModel::load(&root().join("resources/models/layout_intent_v1.ksm")).expect("the model");
+        assert!(runtime_parameters_match(&model, &manifest, &config));
+        let thresholds = &manifest["thresholds"];
+        each_change(thresholds, |changed| {
+            let mut copy = manifest.clone();
+            copy["thresholds"] = changed.clone();
+            let _ = runtime_parameters_match(&model, &copy, &config);
+        });
+        for section in ["threshold_selection_gate_breakdown", "veto", "quality_gate_breakdown", "calibration"] {
+            let mut copy = manifest.clone();
+            copy[section] = json!(null);
+            assert!(!runtime_parameters_match(&model, &copy, &config) || section == "calibration", "{section}");
+        }
+        let mut veto = manifest.clone();
+        veto["veto"]["selection"]["raw_logit"] = json!(1000.0);
+        assert!(!runtime_parameters_match(&model, &veto, &config));
+    }
+
+    #[test]
+    fn a_toolchain_of_the_other_trainer_is_taken_at_its_word_except_for_data() {
+        let root = root();
+        let manifest = manifest();
+        let registry = "model/intent_v1/seal-registry-v28.json";
+        let checks = toolchain_checks(&root, &manifest["toolchain"], registry).expect("checks");
+        assert!(!checks.is_empty());
+        let mut changed = manifest["toolchain"].clone();
+        changed["trainer_sha256"] = json!("not a digest");
+        assert!(toolchain_checks(&root, &changed, registry).is_err());
+        let mut rust = manifest["toolchain"].clone();
+        rust["implementation"] = json!(seal::IMPLEMENTATION);
+        assert!(toolchain_checks(&root, &rust, registry).expect("checks").iter().any(|check| !check.passed));
+    }
+
+    fn example(trigger: CorrectionTrigger, label: bool) -> LexicalExample {
+        LexicalExample {
+            original: "ghbdtn".to_owned(),
+            alternative: "привет".to_owned(),
+            source_group: 0,
+            target_group: 1,
+            trigger,
+            label,
+            weight: 1.0,
+            base_signature: "s".to_owned(),
+            variant_kind: "identity".to_owned(),
+            source_known: false,
+            target_known: true,
+            context_delta: 0.0,
+            context_group: None,
+            frequency: 1,
+            protected: false,
+            safety: false,
+        }
+    }
+
+    fn row<'a>(example: &'a LexicalExample, fallback: bool, ensemble: bool) -> PolicyRow<'a> {
+        PolicyRow { example, fallback, ensemble, model_evaluated: true, observed_delta: 0.0 }
+    }
+
+    #[test]
+    fn a_comparison_counts_what_each_policy_did() {
+        let (right, wrong) = (example(CorrectionTrigger::Space, true), example(CorrectionTrigger::Space, false));
+        let rows = [row(&right, true, true), row(&right, false, true), row(&right, true, false), row(&right, false, false), row(&wrong, true, true), row(&wrong, false, true), row(&wrong, true, false), row(&wrong, false, false)];
+        let compared = comparison_of(rows.iter());
+        assert_eq!((compared.rescued, compared.vetoed, compared.introduced, compared.prevented), (1, 1, 1, 1));
+        assert_eq!(compared.samples, 8);
+        assert!(compared.payload().is_object());
+    }
+
+    #[test]
+    fn the_shape_of_a_corpus_and_its_gate_read_each_count() {
+        let examples: Vec<LexicalExample> = TRIGGERS.iter().flat_map(|trigger| [example(*trigger, true), example(*trigger, false)]).collect();
+        let rows: Vec<PolicyRow<'_>> = examples.iter().map(|item| row(item, item.label, item.label)).collect();
+        let references: Vec<&PolicyRow<'_>> = rows.iter().collect();
+        let good = || corpus_evaluation(&references);
+        assert!(shape_is_valid(&good()));
+        let changes: [&dyn Fn(&mut CorpusEvaluation<'_>); 15] = [
+            &|corpus| corpus.overall.samples += 1,
+            &|corpus| corpus.overall.fallback.true_positive += 1,
+            &|corpus| corpus.overall.fallback.true_negative += 1,
+            &|corpus| corpus.overall.ensemble.true_positive += 1,
+            &|corpus| corpus.overall.ensemble.true_negative += 1,
+            &|corpus| corpus.overall.negative_model_evaluated = -1,
+            &|corpus| corpus.overall.negative_model_evaluated = corpus.overall.model_evaluated + 1,
+            &|corpus| corpus.negative_decisions.clear(),
+            &|corpus| corpus.per_trigger.get_mut("space").expect("a trigger").samples += 1,
+            &|corpus| corpus.per_trigger.get_mut("space").expect("a trigger").ensemble.true_positive += 1,
+            &|corpus| {
+                corpus.per_trigger.remove("space");
+            },
+            &|corpus| corpus.overall.ensemble.false_positive = 1,
+            &|corpus| corpus.overall.ensemble.true_negative = 0,
+            &|corpus| corpus.overall.ensemble.false_negative = 0,
+            &|corpus| corpus.examples.clear(),
+        ];
+        let config = config();
+        for (index, change) in changes.iter().enumerate() {
+            let mut corpus = good();
+            change(&mut corpus);
+            if index < 11 {
+                assert!(!shape_is_valid(&corpus), "{index}");
+            }
+            for profile in PROFILES.iter().take(4) {
+                for name in CORPORA {
+                    let gate = context_profile_corpus_gate(&config, profile, name, &corpus, &good());
+                    assert!(gate["passed"].is_boolean());
+                    let gate = context_profile_corpus_gate(&config, profile, name, &good(), &corpus);
+                    assert!(gate["passed"].is_boolean());
+                }
+            }
+        }
+        // A gate that holds, for a corpus of negatives only as for one of both labels.
+        for profile in PROFILES.iter().take(2) {
+            for name in CORPORA {
+                let _ = context_profile_corpus_gate(&config, profile, name, &good(), &good());
+            }
+        }
+        let negatives: Vec<PolicyRow<'_>> = examples.iter().filter(|item| !item.label).map(|item| row(item, false, false)).collect();
+        let references: Vec<&PolicyRow<'_>> = negatives.iter().collect();
+        let only = corpus_evaluation(&references);
+        for name in ["safety", "source_known"] {
+            let again = corpus_evaluation(&references);
+            assert!(context_profile_corpus_gate(&config, &PROFILES[0], name, &only, &again)["passed"].is_boolean());
+        }
+    }
+
+    #[test]
+    fn a_production_gate_needs_every_profile_every_corpus_and_the_extrema() {
+        let config = config();
+        let examples: Vec<LexicalExample> = TRIGGERS.iter().flat_map(|trigger| [example(*trigger, true), example(*trigger, false)]).collect();
+        let rows: Vec<PolicyRow<'_>> = examples.iter().map(|item| row(item, item.label, item.label)).collect();
+        let references: Vec<&PolicyRow<'_>> = rows.iter().collect();
+        let observed = |profile: &Profile| -> BTreeMap<String, Vec<f64>> { [("0_to_1".to_owned(), vec![profile.expected_delta(), profile.expected_delta()]), ("1_to_0".to_owned(), vec![profile.expected_delta(), profile.expected_delta()])].into_iter().collect() };
+        let corpora = || -> BTreeMap<&'static str, CorpusEvaluation<'_>> { CORPORA.iter().map(|name| (*name, corpus_evaluation(&references))).collect() };
+        let whole = ContextEvaluation { profiles: PROFILES.iter().map(|profile| ProfileEvaluation { profile: profile.clone(), observed: observed(profile), corpora: corpora() }).collect(), unique_predictions: 1, cache_hits: 1 };
+        assert!(production_context_gate(&config, &whole)["passed"].is_boolean());
+        assert!(production_context_payload(&whole, &json!({"passed": false})).is_object());
+        // One corpus short, an extremum off, a direction short, a profile short, no neutral at all.
+        let neutral = PROFILES.iter().find(|profile| profile.name == "neutral").expect("a neutral profile");
+        let other = PROFILES.iter().find(|profile| profile.name != "neutral").expect("another profile");
+        let mut few = corpora();
+        few.remove(CORPORA[0]);
+        let mut wrong = observed(other);
+        wrong.get_mut("0_to_1").expect("a direction")[0] = 99.0;
+        let mut short = observed(other);
+        short.remove("1_to_0");
+        let parts = ContextEvaluation {
+            profiles: vec![
+                ProfileEvaluation { profile: neutral.clone(), observed: observed(neutral), corpora: corpora() },
+                ProfileEvaluation { profile: other.clone(), observed: observed(other), corpora: few },
+                ProfileEvaluation { profile: other.clone(), observed: wrong, corpora: corpora() },
+                ProfileEvaluation { profile: other.clone(), observed: short, corpora: corpora() },
+            ],
+            unique_predictions: 1,
+            cache_hits: 1,
+        };
+        assert_eq!(production_context_gate(&config, &parts)["passed"], json!(false));
+        let none = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: other.clone(), observed: observed(other), corpora: corpora() }], unique_predictions: 0, cache_hits: 0 };
+        assert_eq!(production_context_gate(&config, &none)["passed"], json!(false));
+    }
+
+    #[test]
+    fn small_measures_refuse_what_they_cannot_measure() {
+        assert!(percentile(&[], 0.5).is_err());
+        assert!((median(&[1.0, 3.0]) - 2.0).abs() < f64::EPSILON);
+        assert!((median(&[1.0, 2.0, 3.0]) - 2.0).abs() < f64::EPSILON);
+        let item = example(CorrectionTrigger::Space, true);
+        for coverage in [f64::NAN, 2.0, -1.0] {
+            let row = PredictionRow { example: &item, should_switch: true, raw_logit: 0.0, coverage };
+            assert!(coverage_statistics(&[&row]).is_err());
+        }
+        let negative = example(CorrectionTrigger::Space, false);
+        assert!(veto_from(&[PredictionRow { example: &negative, should_switch: false, raw_logit: 0.0, coverage: 0.0 }], 0.0).is_err());
+        let config = config();
+        let quiet = Confusion::default();
+        assert!(!slice_passes(&config, &quiet, 0.0, 1.0));
+        let positive_only = Confusion { true_positive: 1, ..Confusion::default() };
+        assert!(!slice_passes(&config, &positive_only, 0.0, 1.0));
+        let imprecise = Confusion { true_positive: 1, false_positive: 100, true_negative: 1, ..Confusion::default() };
+        assert!(!slice_passes(&config, &imprecise, 0.0, 1.0));
+        let forgetful = Confusion { true_positive: 1, false_negative: 100, true_negative: 100, ..Confusion::default() };
+        assert!(!slice_passes(&config, &forgetful, 0.9, 1.0));
+        let good = Confusion { true_positive: 100, true_negative: 100, ..Confusion::default() };
+        assert!(slice_passes(&config, &good, 0.9, 1.0));
+        assert!(!slice_passes(&config, &good, 0.9, -1.0));
+        let scant = Confusion { true_positive: 100, true_negative: 100, false_positive: 1, ..Confusion::default() };
+        assert!(!slice_passes(&FitConfig { test_specificity: 1.0, ..config }, &scant, 0.9, 1.0));
+    }
+}
