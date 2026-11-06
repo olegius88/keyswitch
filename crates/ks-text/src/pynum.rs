@@ -12,6 +12,7 @@ use crate::ucd;
 /// `repr(x)` and `str(x)` of a float: the shortest text that parses back to `x`, in Python's layout
 /// (`1e+16`, `1.5e-07`, `0.0001`, `inf`, `nan`, `-0.0`).
 #[must_use]
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn float_repr(x: f64) -> String {
     if x.is_nan() {
         return "nan".to_string();
@@ -30,8 +31,7 @@ pub fn float_repr(x: f64) -> String {
     let mut text = format!("{:e}", x.abs());
     let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(char::is_ascii_digit).count();
     let exact = format!("{:.*e}", shortest_len - 1, x.abs());
-    // The correctly rounded value of that length is at least as close as the shortest form, so it reads back the same.
-    if exact != text {
+    if exact != text && exact.parse::<f64>().is_ok_and(|v| v == x.abs()) {
         text = exact;
     }
     let (mantissa, exponent) = text.split_once('e').expect("exponent form");
