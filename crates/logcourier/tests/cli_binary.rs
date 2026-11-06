@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
+#[cfg(unix)]
 const TOKEN: &str = "123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 struct Folder(PathBuf);

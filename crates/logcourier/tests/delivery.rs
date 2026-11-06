@@ -712,7 +712,6 @@ fn a_reset_leaves_the_group_alone_when_it_cannot_be_done_whole() {
     assert!(refusal_of_reset(&group, &store, &other, false).contains("другому боту"));
 
     let chat = json!({"type": "supergroup"});
-    let admin = json!({"status": "administrator", "can_pin_messages": true, "can_delete_messages": true});
     let answer = |answers: Vec<Value>| {
         group.answers.borrow_mut().clear();
         group.answers.borrow_mut().extend(answers);
