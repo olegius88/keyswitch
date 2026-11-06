@@ -42,12 +42,19 @@ fn resource_dir() -> Option<PathBuf> {
     }
 }
 
-fn rows(name: &str) -> Option<Vec<Value>> {
+/// The full answers where the private folder is there, else those on public words kept in the repository.
+fn golden_file(name: &str) -> Option<PathBuf> {
     let path = golden_root().join("context").join(name);
-    if !path.exists() {
+    let kept = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/context")).join(name);
+    let found = [&path, &kept].into_iter().find(|candidate| candidate.exists()).cloned();
+    if found.is_none() {
         eprintln!("SKIPPED: golden file {} is absent", path.display());
-        return None;
     }
+    found
+}
+
+fn rows(name: &str) -> Option<Vec<Value>> {
+    let path = golden_file(name)?;
     let reader = BufReader::new(GzDecoder::new(std::fs::File::open(path).expect("open")));
     Some(reader.lines().map(|line| serde_json::from_str(&line.expect("line")).expect("json")).collect())
 }
@@ -507,7 +514,7 @@ fn choice_json(choice: &TypoChoice) -> Value {
 #[test]
 fn typo_correction() {
     let Some((dir, models)) = paths() else { return };
-    let Some(meta_path) = Some(golden_root().join("context/typo_meta.json")).filter(|path| path.exists()) else {
+    let Some(meta_path) = golden_file("typo_meta.json") else {
         eprintln!("SKIPPED: typo_meta.json is absent");
         return;
     };
