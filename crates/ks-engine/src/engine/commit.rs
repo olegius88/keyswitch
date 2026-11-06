@@ -18,6 +18,11 @@ impl EngineCore {
         if self.strokes.is_empty() {
             return Ok(());
         }
+        // A word of a third layout: no language model can judge it, so it stays as typed.
+        if !self.in_models(self.source_group) {
+            self.clear_word(None, "layout_without_model");
+            return Ok(());
+        }
         if self.pending.as_ref().is_some_and(|pending| pending.mode != "early") {
             self.log_pending_dropped("next_word_committed");
             self.pending = None;

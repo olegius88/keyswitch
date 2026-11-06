@@ -152,3 +152,28 @@ fn no_sequence_of_keys_stops_the_engine() {
     }
     bundle.clean();
 }
+
+/// A third layout has no language model. Its words stay as typed, whatever follows them: at a boundary and at a pause.
+#[test]
+fn a_word_of_a_third_layout_stays_as_typed() {
+    let mut bundle = Bundle::load(None);
+    let mut session = bundle.session("firefox", 2, Vec::new());
+    for character in "ghbdtn".chars() {
+        let key = KEYS.iter().find(|key| key.characters[0] == character).expect("a key of the first layout");
+        session.tap(KeyEvent {
+            pressed: true,
+            keycode: key.keycode,
+            key_name: character.to_string(),
+            character: character.to_string(),
+            characters: key.strings(),
+            group: 2,
+            ..KeyEvent::default()
+        });
+    }
+    session.idle(2.0);
+    let space = KEYS.iter().find(|key| key.characters[0] == ' ').expect("the space bar");
+    session.tap(KeyEvent { pressed: true, keycode: space.keycode, key_name: " ".to_owned(), character: " ".to_owned(), characters: space.strings(), group: 2, ..KeyEvent::default() });
+    assert_eq!(session.backend.text().iter().collect::<String>(), "ghbdtn ");
+    bundle.give_back(session);
+    bundle.clean();
+}

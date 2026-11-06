@@ -205,7 +205,7 @@ fn type_character(session: &mut Session, dice: &mut Dice, character: char, state
     let Some((key, group)) = found else {
         return;
     };
-    if usize::try_from(session.backend.group()).ok() != Some(group) && !dice.one_in(50) {
+    if usize::try_from(session.backend.group()).ok() != Some(group) && session.backend.group() < 2 && !dice.one_in(50) {
         session.select_layout(i32::try_from(group).expect("two layouts"));
     }
     session.tap(KeyEvent {
@@ -270,8 +270,8 @@ fn age_what_is_held(session: &mut Session, dice: &mut Dice) {
         match kind {
             0 => "another program".clone_into(&mut plan.application),
             1 => plan.boundary = None,
-            2 => plan.source_group = 1 - plan.source_group,
-            _ => plan.target_group = plan.source_group,
+            // A plan always goes from one layout to the other: this is the other way round, never to itself.
+            _ => std::mem::swap(&mut plan.source_group, &mut plan.target_group),
         }
         Arc::new(plan)
     };
@@ -378,7 +378,8 @@ fn step(session: &mut Session, dice: &mut Dice, window: &mut i64) {
             session.backend.focus(*window, dice.of(APPLICATIONS));
         }
         86 => session.backend.focus(*window, dice.of(APPLICATIONS)),
-        87 => session.select_layout(i32::try_from(dice.below(2)).expect("small")),
+        // A third layout, which has no language model, is as real as the two.
+        87 => session.select_layout(i32::try_from(dice.below(3)).expect("small")),
         88 => change_reader(session, dice),
         89 => add_rule(session, dice),
         90 => {
@@ -425,6 +426,19 @@ fn a_long_walk_stops_nowhere() {
         let mut window = 1;
         for _ in 0..STEPS {
             step(&mut session, &mut dice, &mut window);
+            // A word held for later is where the guards are: age it often, and go on typing.
+            let holding = session.core.context_waiting.is_some() || session.core.provisional.is_some() || session.core.paused_conversion.is_some() || !session.core.kept.is_empty();
+            if holding && dice.one_in(3) {
+                age_what_is_held(&mut session, &mut dice);
+                let word = *dice.of(WORDS);
+                for character in word.chars() {
+                    type_character(&mut session, &mut dice, character, 0);
+                }
+                let boundary = *dice.of(&[" ", " ", " ", ",", ".", "'", "-"]);
+                for character in boundary.chars() {
+                    type_character(&mut session, &mut dice, character, 0);
+                }
+            }
             let (text, caret) = (session.backend.text(), session.backend.caret());
             assert!(caret <= text.len(), "seed {seed}");
             assert!(text.len() < 20_000, "seed {seed}");
@@ -435,5 +449,5 @@ fn a_long_walk_stops_nowhere() {
     bundle.clean();
 }
 
-const WALKS: u64 = 400;
+const WALKS: u64 = 1500;
 const STEPS: usize = 60;

@@ -133,7 +133,8 @@ impl EngineCore {
         if !self.pause_correction_pending {
             return Ok(());
         }
-        if !self.flag("detection.correct_on_pause", true) || !self.flag("enabled", true) {
+        // A word of a third layout has no language model to judge it, at a pause as at a boundary.
+        if !self.flag("detection.correct_on_pause", true) || !self.flag("enabled", true) || !self.in_models(self.source_group) {
             self.reset_pause_correction();
             return Ok(());
         }

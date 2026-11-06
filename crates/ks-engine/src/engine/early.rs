@@ -462,6 +462,10 @@ impl EngineCore {
         let Some(corrector) = corrector else {
             return Ok(None);
         };
+        // A third layout has no language model, so no word of it can be judged.
+        if !self.in_models(group) {
+            return Ok(None);
+        }
         if self.model(group).locale == TYPO_ENGLISH_LOCALE && !self.flag("detection.correct_typos_english", false) {
             // English slips are corrected only on request (constants.typo.TYPO_ENGLISH_LOCALE).
             return Ok(None);
