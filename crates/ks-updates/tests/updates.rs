@@ -326,7 +326,7 @@ fn a_download_removes_the_installers_of_earlier_updates() {
     }
     for name in kept {
         // On Windows the capital letters name the same file as the installer that goes.
-        assert!(directory.join(name).exists() || (cfg!(windows) && name.ends_with(".EXE")), "{name}");
+        assert!(directory.join(name).exists() || (cfg!(windows) && name == "KeySwitch-Setup-0.9.0-x64.EXE"), "{name}");
     }
     assert!(directory.join(&release.asset.name).exists());
     std::fs::remove_dir_all(directory).unwrap();
