@@ -807,3 +807,286 @@ fn the_event_flags_read_as_they_are_set() {
     let plain = HelperKey { seq: 1, pressed: true, keycode: 2, timestamp_ms: 3, flags: HELPER_KEY_NEEDS_VERDICT };
     assert!(!plain.forced() && plain.needs_verdict());
 }
+
+#[test]
+fn a_frame_in_pieces_waits_for_its_end() {
+    let frame = pack_frame(HELPER_MSG_READY, &[1, 2, 3]).unwrap();
+    let mut reader = FrameReader::new();
+    assert!(reader.feed(&frame[..frame.len() - 1]).unwrap().is_empty());
+    assert_eq!(reader.feed(&frame[frame.len() - 1..]).unwrap(), [(HELPER_MSG_READY, vec![1, 2, 3])]);
+}
+
+#[test]
+fn a_device_is_a_keyboard_or_a_pointer_only_by_all_it_can_do() {
+    let role = |info: &InputDeviceInfo| classify_input_device(info);
+    let mut gamepad = keyboard_info("/dev/input/event1");
+    gamepad.key_bits.insert(EVDEV_BTN_GAMEPAD);
+    assert_ne!(role(&gamepad), DeviceRole::Keyboard);
+    let mut no_y = pointer_info("/dev/input/event2");
+    no_y.rel_bits.remove(&EVDEV_REL_Y);
+    assert_eq!(role(&no_y), DeviceRole::Pointer, "a touchpad of buttons");
+    let mut no_x = pointer_info("/dev/input/event2");
+    no_x.rel_bits.remove(&EVDEV_REL_X);
+    assert_eq!(role(&no_x), DeviceRole::Pointer);
+    let mut few_keys = keyboard_info("/dev/input/event1");
+    few_keys.key_bits.remove(&EVDEV_KEY_A);
+    assert_ne!(role(&few_keys), DeviceRole::Keyboard);
+}
+
+#[test]
+fn an_action_settles_the_key_it_answers_and_the_next_one_goes_on() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    rig.os.press(keyboard, EVDEV_KEY_A, KEY_VALUE_PRESS);
+    rig.os.press(keyboard, EVDEV_KEY_A, KEY_VALUE_RELEASE);
+    helper.read_keyboard(keyboard).unwrap();
+    let frames = rig.channel.sent();
+    let sequence = key_frame(&frames, frames.len() - 1).0;
+    assert!(helper.handle_command(HELPER_CMD_EMIT_BATCH, &batch(1, HELPER_EMIT_ACTION, sequence, &[(true, EVDEV_KEY_Q), (false, EVDEV_KEY_Q)])).unwrap());
+    let frames = rig.channel.sent();
+    assert_eq!(ack_of(&frames), (1, 2));
+    assert!(frames.iter().any(|(kind, _)| *kind == HELPER_MSG_KEY), "the release waiting behind it");
+    let empty = batch(2, HELPER_EMIT_UNCHECKED, 0, &[]);
+    assert!(helper.handle_command(HELPER_CMD_EMIT_BATCH, &empty).unwrap());
+    assert_eq!(ack_of(&rig.channel.sent()), (2, 0));
+    helper.uinput_fd = None;
+    assert!(helper.handle_command(HELPER_CMD_EMIT_BATCH, &batch(3, HELPER_EMIT_UNCHECKED, 0, &[(true, EVDEV_KEY_Q)])).unwrap());
+    helper.emit_physical_key(true, EVDEV_KEY_Q).unwrap();
+}
+
+#[test]
+fn a_forced_key_refuses_injections_until_the_parent_knows_it() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    helper.forced_seq = Some(9);
+    assert!(helper.refuses(HELPER_EMIT_TEXT, 100));
+    assert!(helper.refuses(HELPER_EMIT_ACTION, 100));
+    assert!(!helper.refuses(HELPER_EMIT_UNCHECKED, 100));
+    assert!(helper.handle_command(HELPER_CMD_SEQ_ACK, &8_u32.to_be_bytes()).unwrap());
+    assert_eq!(helper.forced_seq, Some(9), "another key's answer");
+    assert!(helper.handle_command(HELPER_CMD_SEQ_ACK, &9_u32.to_be_bytes()).unwrap());
+    assert_eq!(helper.forced_seq, None);
+    helper.unverdicted_seq = 5;
+    assert!(helper.refuses(HELPER_EMIT_ACTION, 5));
+    assert!(!helper.refuses(HELPER_EMIT_ACTION, 6));
+    assert!(helper.refuses(HELPER_EMIT_TEXT, 4));
+    helper.unverdicted_seq = 0;
+    assert!(!helper.refuses(HELPER_EMIT_ACTION, 1));
+}
+
+#[test]
+fn keys_and_clicks_are_read_only_as_far_as_they_mean_something() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), pointer_info("/dev/input/event2")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    let pointer = rig.os.fd_of("/dev/input/event2");
+    rig.channel.sent();
+    helper.grabbed_fds.clear();
+    rig.os.press(keyboard, EVDEV_KEY_A, KEY_VALUE_PRESS);
+    helper.read_keyboard(keyboard).unwrap();
+    assert!(rig.channel.sent().is_empty(), "a keyboard not held by the helper");
+    helper.grabbed_fds.insert(keyboard);
+
+    helper.passed_keys.extend([EVDEV_KEY_CAPSLOCK, EVDEV_MODIFIER_KEYS[0]]);
+    rig.os.st().now += 10.0;
+    for code in [EVDEV_KEY_CAPSLOCK, EVDEV_MODIFIER_KEYS[0]] {
+        rig.os.press(keyboard, code, KEY_VALUE_REPEAT);
+    }
+    rig.os.press(keyboard, EVDEV_KEY_A, 9);
+    helper.read_keyboard(keyboard).unwrap();
+    assert!(rig.channel.sent().is_empty(), "modifiers do not repeat, nor do unknown values count");
+
+    let event = |ev_type: u32, code: u32, value: i32| RawInputEvent { sec: 5, usec: 0, ev_type, code, value };
+    rig.os.st().events.entry(pointer).or_default().extend([event(EV_REL, EVDEV_REL_X, 1), event(EV_KEY, EVDEV_KEY_A, KEY_VALUE_PRESS), event(EV_KEY, EVDEV_BTN_TASK + 1, KEY_VALUE_PRESS)]);
+    helper.read_pointer(pointer).unwrap();
+    assert!(rig.channel.sent().is_empty());
+}
+
+#[test]
+fn devices_that_fail_in_other_ways_are_passed_over() {
+    let mut info = keyboard_info("/dev/input/event1");
+    info.path = "/dev/input/event1".to_owned();
+    let rig = Rig::new(vec![info]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    helper.close_keyboard(keyboard).unwrap();
+    assert!(!rig.os.st().open.contains_key(&keyboard));
+
+    // Not held any more: no ungrab needed, and the keys it held are forgotten.
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    helper.grabbed_fds.clear();
+    helper.close_keyboard(keyboard).unwrap();
+
+    // A new device while the grab is off stays free.
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    helper.grab_enabled = false;
+    rig.os.st().devices.push(keyboard_info("/dev/input/event2"));
+    helper.rescan_devices(false).unwrap();
+    assert_eq!(rig.os.st().grabbed.len(), 1);
+    helper.set_grab_enabled(true).unwrap();
+    assert_eq!(rig.os.st().grabbed.len(), 2);
+    assert!(helper.set_grab_enabled(true).is_ok());
+    helper.set_grab_enabled(false).unwrap();
+    assert!(rig.os.st().grabbed.is_empty());
+    helper.set_grab_enabled(false).unwrap();
+}
+
+#[test]
+fn a_pointer_that_goes_away_is_closed_on_the_rescan() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), pointer_info("/dev/input/event2")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let pointer = rig.os.fd_of("/dev/input/event2");
+    rig.os.st().devices.retain(|device| device.path == "/dev/input/event1");
+    helper.rescan_devices(false).unwrap();
+    assert!(!rig.os.st().open.contains_key(&pointer));
+}
+
+#[test]
+fn a_grab_waits_for_keys_to_rise_and_a_failed_grab_closes_the_device() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let keyboard = rig.os.fd_of("/dev/input/event1");
+    helper.grabbed_fds.clear();
+    rig.os.st().failing_queries.insert(keyboard);
+    assert!(!helper.grab_keyboard_safely(keyboard), "a keyboard that does not answer");
+    rig.os.st().failing_queries.clear();
+    rig.os.st().keys_down.insert(keyboard, HashSet::new());
+    assert!(helper.grab_keyboard_safely(keyboard));
+    rig.os.st().devices.push(keyboard_info("/dev/input/event2"));
+    let already = rig.os.st().next_fd + 1;
+    rig.os.st().failing_queries.insert(already);
+    helper.rescan_devices(false).unwrap();
+    assert!(!rig.os.st().open.contains_key(&already), "a new keyboard that cannot be held is let go");
+}
+
+#[test]
+fn a_keyboard_denied_at_the_start_says_how_to_allow_it() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    rig.os.st().deny_all = true;
+    let mut helper = rig.helper();
+    assert_eq!(helper.start_up().unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+}
+
+fn callbacks_client() -> (HelperClient, UnixStream, Arc<Mutex<Vec<String>>>) {
+    let (parent, helper_side) = UnixStream::pair().unwrap();
+    let said: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let (key, pointer, repeat, caps, reset) = (said.clone(), said.clone(), said.clone(), said.clone(), said.clone());
+    let callbacks = HelperCallbacks {
+        on_key: Box::new(move |event| {
+            lock(&key).push(format!("key {}", event.seq));
+            event.seq % 2 == 0
+        }),
+        on_pointer: Box::new(move |time| lock(&pointer).push(format!("pointer {time}"))),
+        on_repeat_reset: Box::new(move |time| lock(&repeat).push(format!("repeat {time}"))),
+        on_caps_lock: Box::new(move |on| lock(&caps).push(format!("caps {on}"))),
+        on_input_reset: Box::new(move || lock(&reset).push("reset".to_owned())),
+    };
+    (HelperClient::new(Arc::new(parent), callbacks), helper_side, said)
+}
+
+fn key_message(seq: u32, flags: u32) -> Vec<u8> {
+    let mut body = seq.to_be_bytes().to_vec();
+    body.push(1);
+    body.extend(EVDEV_KEY_A.low::<u16>().to_be_bytes());
+    body.extend(1_u32.to_be_bytes());
+    body.push(flags.low::<u8>());
+    body
+}
+
+#[test]
+fn the_client_hands_each_message_to_its_place() {
+    let (client, mut helper_side, said) = callbacks_client();
+    let send = |side: &mut UnixStream, kind: u32, body: &[u8]| side.write_all(&pack_frame(kind, body).unwrap()).unwrap();
+    send(&mut helper_side, HELPER_MSG_READY, &[0]);
+    assert!(!client.start_default().unwrap(), "the lock light is off");
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(1, HELPER_KEY_NEEDS_VERDICT));
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(2, HELPER_KEY_NEEDS_VERDICT));
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(3, HELPER_KEY_FORCED));
+    send(&mut helper_side, HELPER_MSG_KEY, &key_message(4, 0));
+    send(&mut helper_side, HELPER_MSG_KEY, &[1]);
+    send(&mut helper_side, HELPER_MSG_POINTER, &7_u32.to_be_bytes());
+    send(&mut helper_side, HELPER_MSG_POINTER, &[1]);
+    send(&mut helper_side, HELPER_MSG_REPEAT_RESET, &8_u32.to_be_bytes());
+    send(&mut helper_side, HELPER_MSG_REPEAT_RESET, &[1]);
+    send(&mut helper_side, HELPER_MSG_CAPS_LOCK, &[1]);
+    send(&mut helper_side, HELPER_MSG_CAPS_LOCK, &[]);
+    send(&mut helper_side, HELPER_MSG_INPUT_RESET, &[]);
+    send(&mut helper_side, 999, &[]);
+    send(&mut helper_side, HELPER_MSG_EMIT_ACK, &[0; 8]);
+    send(&mut helper_side, HELPER_MSG_KEY_DOWN, &[0; 5]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock(&said).len() < 8 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(*lock(&said), ["key 1", "key 2", "key 3", "key 4", "pointer 7", "repeat 8", "caps true", "reset"]);
+    assert_eq!(read_frame(&mut helper_side), (HELPER_CMD_VERDICT, {
+        let mut body = 1_u32.to_be_bytes().to_vec();
+        body.push(HELPER_VERDICT_PASS.low::<u8>());
+        body
+    }));
+    assert_eq!(read_frame(&mut helper_side).0, HELPER_CMD_VERDICT);
+    assert_eq!(read_frame(&mut helper_side), (HELPER_CMD_SEQ_ACK, 3_u32.to_be_bytes().to_vec()));
+    assert!(client.caps_lock());
+    client.close();
+    client.close();
+}
+
+#[test]
+fn a_damaged_message_ends_the_reader_and_requests_fail_at_once() {
+    for damage in [pack_frame(HELPER_MSG_EMIT_ACK, &[1]).unwrap(), pack_frame(HELPER_MSG_KEY_DOWN, &[1]).unwrap(), pack_frame(HELPER_MSG_READY, &[]).unwrap(), vec![0xFF; 16]] {
+        let (client, mut helper_side, _said) = callbacks_client();
+        helper_side.write_all(&pack_frame(HELPER_MSG_READY, &[0]).unwrap()).unwrap();
+        assert!(client.start(2.0).is_ok());
+        helper_side.write_all(&damage).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !client.closed() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(client.query_key_down(EVDEV_KEY_A).is_err());
+        client.close();
+    }
+    let (client, mut helper_side, _said) = callbacks_client();
+    helper_side.write_all(&pack_frame(HELPER_MSG_READY, &[0]).unwrap()).unwrap();
+    assert!(client.start(2.0).is_ok());
+    let closer = {
+        let (mut side, client) = (helper_side, &client);
+        move || {
+            let _ = read_frame(&mut side);
+            client.close();
+        }
+    };
+    thread::scope(|scope| {
+        scope.spawn(closer);
+        assert!(client.query_key_down(EVDEV_KEY_A).is_err(), "the client closed while it waited");
+    });
+}
+
+#[test]
+fn the_flag_says_what_it_was_told() {
+    let flag = Flag::default();
+    assert!(!flag.is_set());
+    flag.set();
+    assert!(flag.is_set());
+    let (socket, _other) = UnixStream::pair().unwrap();
+    assert!(ByteChannel::fileno(&socket) > 0);
+}
+
+#[test]
+fn request_numbers_go_round_past_zero() {
+    let (client, _helper_side, _said) = callbacks_client();
+    *lock(&client.shared.next_req_id) = u32::MAX;
+    assert_eq!(client.shared.allocate_reply().0, 1);
+    client.close();
+}

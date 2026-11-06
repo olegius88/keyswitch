@@ -996,13 +996,13 @@ impl HelperClient {
         let reader = thread::Builder::new()
             .name("keyswitch-wayland-helper-read".to_owned())
             .spawn(move || reader_shared.read_loop())
-            .map_err(|error| error.to_string())?;
+            .expect("the system has room for a thread");
         let dispatch_shared = self.shared.clone();
         let receiver = lock(&self.receiver).take().ok_or_else(|| "The helper client was started already".to_owned())?;
         let dispatcher = thread::Builder::new()
             .name("keyswitch-wayland-helper-dispatch".to_owned())
             .spawn(move || dispatch_shared.dispatch_loop(&receiver))
-            .map_err(|error| error.to_string())?;
+            .expect("the system has room for a thread");
         lock(&self.threads).extend([reader, dispatcher]);
         if !self.shared.ready.wait(seconds(timeout)) {
             self.close();
