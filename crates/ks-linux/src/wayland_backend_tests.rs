@@ -853,6 +853,16 @@ fn a_listener_that_never_says_it_is_ready_stops_the_start() {
     assert!(!backend.running());
 }
 
+#[test]
+fn the_window_sees_a_wayland_backend_through_its_own_calls() {
+    let api = FakeApi::new();
+    let backend = Arc::new(WaylandBackend::new(api.clone(), None));
+    let desktop = crate::desktop_backend::desktop_of_wayland(backend);
+    assert!(desktop.wayland);
+    assert_eq!((desktop.process_for_window)(WINDOW), 4242);
+    assert_eq!((desktop.position_window)(WINDOW, 1, 2), api.position_window(WINDOW, 1, 2));
+}
+
 // ---------------------------------------------------------------- a long walk
 
 /// A small generator with a fixed start: the walk is the same on every run.

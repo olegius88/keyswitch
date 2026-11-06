@@ -152,6 +152,25 @@ mod tests {
     }
 
     #[test]
+    fn levels_and_groups_beyond_a_key_follow_its_rules() {
+        let mut map = map();
+        assert_eq!(map.keysym(11, 2, 1), 0, "only the first two groups answer for a level they lack");
+        assert_eq!(map.keysym(11, 0, 3), 0);
+        assert_eq!(map.keysym(10, 0, 2), 0, "a two-level key has no third level");
+        // A group past the key's, redirected to a group the key does not have either.
+        map.keys[0].group_info = 2 | OUT_OF_RANGE_REDIRECT | (3 << REDIRECT_GROUP_SHIFT);
+        assert_eq!(map.lookup_keysym(10, 2 << 13), Some(0x61));
+        map.keys[0].group_info = 2 | OUT_OF_RANGE_REDIRECT | (1 << REDIRECT_GROUP_SHIFT);
+        assert_eq!(map.lookup_keysym(10, 2 << 13), Some(0x6c6));
+        // A type the map does not have reads the first column; an entry switched off is passed over.
+        map.keys[1].kt_index = [9, 9, 9, 9];
+        assert_eq!(map.lookup_keysym(11, 0), Some(0x20));
+        map.keys[0].group_info = 2;
+        map.types[0].entries[0].active = false;
+        assert_eq!(map.lookup_keysym(10, 1), Some(0x61));
+    }
+
+    #[test]
     fn a_key_in_each_group_and_level() {
         let map = map();
         assert_eq!(map.keysym(10, 0, 0), 0x61);

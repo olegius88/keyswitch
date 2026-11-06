@@ -51,6 +51,11 @@ struct OsState {
     failing_reads: HashSet<i32>,
     failing_queries: HashSet<i32>,
     no_leds: bool,
+    /// A device that cannot be opened at all, or only read.
+    broken: HashSet<String>,
+    broken_read_only: HashSet<String>,
+    /// Keys that come up after so many looks.
+    keys_up_after: usize,
 }
 
 #[derive(Clone)]
@@ -102,6 +107,9 @@ impl HelperOs for FakeOs {
     }
     fn open_device(&mut self, path: &str, writable: bool) -> io::Result<i32> {
         let mut state = self.st();
+        if state.broken.contains(path) || (!writable && state.broken_read_only.contains(path)) {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
         if state.deny_all || (writable && state.deny_writable.contains(path)) {
             return Err(io::Error::from(io::ErrorKind::PermissionDenied));
         }
@@ -126,7 +134,14 @@ impl HelperOs for FakeOs {
         if self.st().failing_queries.contains(&fd) {
             return Err(io::Error::from(io::ErrorKind::NotFound));
         }
-        Ok(self.st().keys_down.get(&fd).cloned().unwrap_or_default())
+        let mut state = self.st();
+        if state.keys_up_after > 0 {
+            state.keys_up_after -= 1;
+            if state.keys_up_after == 0 {
+                state.keys_down.clear();
+            }
+        }
+        Ok(state.keys_down.get(&fd).cloned().unwrap_or_default())
     }
     fn query_caps_lock(&mut self, _fd: i32) -> bool {
         false
@@ -164,11 +179,12 @@ struct FakeChannel {
     inbound: Mutex<VecDeque<u8>>,
     outbound: Mutex<Vec<u8>>,
     fd: AtomicI32,
+    broken: AtomicBool,
 }
 
 impl FakeChannel {
     fn new() -> FakeChannel {
-        FakeChannel { inbound: Mutex::new(VecDeque::new()), outbound: Mutex::new(Vec::new()), fd: AtomicI32::new(2) }
+        FakeChannel { inbound: Mutex::new(VecDeque::new()), outbound: Mutex::new(Vec::new()), broken: AtomicBool::new(false), fd: AtomicI32::new(2) }
     }
     fn command(&self, msg_type: u32, payload: &[u8]) {
         lock(&self.inbound).extend(pack_frame(msg_type, payload).unwrap());
@@ -181,6 +197,9 @@ impl FakeChannel {
 
 impl ByteChannel for FakeChannel {
     fn recv(&self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.broken.load(Ordering::SeqCst) {
+            return Err(io::Error::from(io::ErrorKind::ConnectionReset));
+        }
         let mut inbound = lock(&self.inbound);
         let count = buffer.len().min(inbound.len());
         for slot in buffer.iter_mut().take(count) {
@@ -1088,5 +1107,130 @@ fn request_numbers_go_round_past_zero() {
     let (client, _helper_side, _said) = callbacks_client();
     *lock(&client.shared.next_req_id) = u32::MAX;
     assert_eq!(client.shared.allocate_reply().0, 1);
+    client.close();
+}
+
+#[test]
+fn a_socket_that_breaks_ends_the_service_quietly() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    rig.channel.broken.store(true, Ordering::SeqCst);
+    assert!(!helper.read_channel(libc::POLLIN).unwrap());
+}
+
+#[test]
+fn a_device_that_will_not_open_is_passed_over_unless_it_is_all_there_is() {
+    // Gone between the listing and the opening, for writing or for reading.
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), keyboard_info("/dev/input/event2"), keyboard_info("/dev/input/event3")]);
+    rig.os.st().broken.insert("/dev/input/event1".to_owned());
+    rig.os.st().deny_writable.insert("/dev/input/event2".to_owned());
+    rig.os.st().broken_read_only.insert("/dev/input/event2".to_owned());
+    let mut helper = rig.helper();
+    assert!(helper.start_up().is_ok());
+    assert_eq!(helper.keyboards.len(), 1);
+    // One keyboard denied and another open: no failure.
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1"), keyboard_info("/dev/input/event2")]);
+    rig.os.st().deny_writable.insert("/dev/input/event1".to_owned());
+    let mut helper = rig.helper();
+    let open = Rig::new(vec![keyboard_info("/dev/input/event2")]);
+    drop(open);
+    assert!(helper.start_up().is_ok());
+}
+
+#[test]
+fn a_grab_waits_for_the_keys_to_come_up_and_only_so_long() {
+    let rig = Rig::new(vec![keyboard_info("/dev/input/event1")]);
+    let mut helper = rig.helper();
+    helper.start_up().unwrap();
+    let fd = rig.os.fd_of("/dev/input/event1");
+    // Down, then up after a few looks: the keys are given a moment before the grab.
+    rig.os.st().keys_down.insert(fd, HashSet::from([EVDEV_KEY_A]));
+    rig.os.st().keys_up_after = 3;
+    assert!(helper.grab_keyboard_safely(fd));
+    assert!(!rig.os.st().sleeps.is_empty());
+    // Down for good: the wait ends at its deadline and the grab goes ahead.
+    rig.os.st().keys_down.insert(fd, HashSet::from([EVDEV_KEY_A]));
+    rig.os.st().keys_up_after = 0;
+    let _ = helper.grab_keyboard_safely(fd);
+    // A grab let go for a device the helper has no keys of.
+    helper.grabbed_fds.insert(999);
+    helper.set_grab_enabled(false).unwrap();
+    assert!(helper.grabbed_fds.is_empty());
+}
+
+#[test]
+fn a_client_asks_for_what_it_needs_and_stops_answering_once_its_socket_is_gone() {
+    // An action checked against its sequence is asked for in its own way.
+    let (client, mut helper_side, _) = peer_pair();
+    let answer = thread::spawn(move || {
+        let _ready = helper_side.write_all(&pack_frame(HELPER_MSG_READY, &[0]).unwrap());
+        let (_, body) = read_frame(&mut helper_side);
+        let request = body[..4].to_vec();
+        let mut reply = request;
+        reply.push(0);
+        let _ = helper_side.write_all(&pack_frame(HELPER_MSG_EMIT_ACK, &reply).unwrap());
+        helper_side
+    });
+    client.start(2.0).unwrap();
+    let _ = client.emit_batch(&[(true, EVDEV_KEY_A)], Some(5), true);
+    let helper_side = answer.join().unwrap();
+    // A message with nobody to take it, and a stop from the client's own thread.
+    drop(helper_side);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !client.closed() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    client.close();
+    client.close();
+}
+
+#[test]
+fn a_thread_that_will_not_end_is_left_behind() {
+    let (client, helper_side, _) = peer_pair();
+    // A thread of the client's that takes longer than a close waits.
+    lock(&client.threads).push(thread::spawn(|| thread::sleep(Duration::from_secs(3))));
+    let began = Instant::now();
+    client.close();
+    assert!(began.elapsed() < Duration::from_secs(3));
+    drop(helper_side);
+}
+
+#[test]
+fn a_close_from_a_thread_of_the_client_does_not_wait_for_itself() {
+    let (client, _helper_side, _) = peer_pair();
+    let client = Arc::new(client);
+    let go = Arc::new(Flag::default());
+    let (worker, signal) = (client.clone(), go.clone());
+    let handle = thread::spawn(move || {
+        assert!(signal.wait(Duration::from_secs(5)));
+        worker.close();
+    });
+    lock(&client.threads).push(handle);
+    go.set();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !lock(&client.threads).is_empty() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(lock(&client.threads).is_empty());
+}
+
+#[test]
+fn a_key_answered_after_the_socket_went_ends_the_loop_and_a_read_after_the_close_stops_it() {
+    let (client, mut helper_side, _) = peer_pair();
+    helper_side.write_all(&pack_frame(HELPER_MSG_READY, &[0]).unwrap()).unwrap();
+    client.start(2.0).unwrap();
+    // A key whose answer has nowhere to go.
+    let mut body = 1_u32.to_be_bytes().to_vec();
+    body.push(1);
+    body.extend(EVDEV_KEY_A.low::<u16>().to_be_bytes());
+    body.extend(1_u32.to_be_bytes());
+    body.push(0);
+    helper_side.write_all(&pack_frame(HELPER_MSG_KEY, &body).unwrap()).unwrap();
+    drop(helper_side);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !client.closed() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
     client.close();
 }

@@ -120,3 +120,30 @@ fn an_engine_that_cannot_start_ends_the_program() {
     let wayland = program(&folder, &["--headless"]).env("WAYLAND_DISPLAY", "wayland-nothing").env("XDG_SESSION_TYPE", "wayland").output().expect("it runs");
     assert_eq!(wayland.status.code(), Some(1), "{}", said(&wayland));
 }
+
+#[test]
+fn a_helper_on_a_socket_that_is_not_there_ends_at_once() {
+    let output = run("helper", &["--wayland-input-helper", "987654"]);
+    assert_ne!(output.status.code(), Some(0));
+}
+
+#[test]
+fn diagnostics_in_a_wayland_session_with_no_compositor_name_the_reason() {
+    let folder = Folder::new("wayland-probe");
+    let output = program(&folder, &["--diagnose"]).env("XDG_SESSION_TYPE", "wayland").env("WAYLAND_DISPLAY", "no-such-display").output().expect("it runs");
+    assert!(!String::from_utf8_lossy(&output.stdout).is_empty());
+}
+
+#[test]
+fn rules_that_cannot_be_opened_end_the_program_with_a_reason() {
+    let folder = Folder::new("rules");
+    // A file where the program keeps its rules' folder.
+    std::fs::write(folder.0.join("data"), "").expect("a file");
+    let mut child = program(&folder, &["--headless"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("it starts");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while child.try_wait().expect("it can be asked").is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = child.kill();
+    assert_ne!(child.wait().expect("it ended").code(), Some(0));
+}

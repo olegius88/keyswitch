@@ -625,6 +625,37 @@ mod tests {
     }
 
     #[test]
+    fn what_a_desktop_leaves_out_is_read_from_what_it_says_next() {
+        let flat = DesktopWindowInfo { width: 10, height: 0, ..info(42, "app", 4242) };
+        assert_eq!(flat.center(), None);
+        assert_eq!(kind(&[("XDG_CURRENT_DESKTOP", "ubuntu:GNOME")], false, false, ""), DesktopKind::Gnome);
+        assert_eq!(kind(&[("XDG_CURRENT_DESKTOP", "ubuntu")], false, false, ""), DesktopKind::Gnome);
+        assert_eq!(kind(&[("XDG_CURRENT_DESKTOP", "kde")], false, false, ""), DesktopKind::Kde);
+        assert_eq!(kind(&[("XDG_CURRENT_DESKTOP", "plasma")], false, false, ""), DesktopKind::Kde);
+        // An active layout past the list is the first one.
+        let past = json!([{"type": "keyboard", "xkb_layout_names": ["English (US)", "Russian"], "xkb_active_layout_index": 5}]);
+        assert_eq!(parse_sway_inputs(&past).1, 0);
+        // A focused container with no process is passed over; a class left empty gives way to the instance.
+        assert_eq!(parse_sway_focused_window(&json!({"id": 5, "pid": 0, "focused": true})), None);
+        let instance = json!({"id": 77, "pid": 5151, "focused": true, "window_properties": {"class": "", "instance": "xterm"}});
+        assert_eq!(parse_sway_focused_window(&instance), Some(info(77, "xterm", 5151)));
+        // GNOME: the class, the application, the instance, each in its turn; a pointer without both numbers is none.
+        let named = |window: Value| parse_gnome_state(&json!({"window": window}).to_string()).unwrap().window.map(|window| window.application);
+        assert_eq!(named(json!({"id": 1, "wm_class": "a"})).as_deref(), Some("a"));
+        assert_eq!(named(json!({"id": 1, "app_id": "b"})).as_deref(), Some("b"));
+        assert_eq!(named(json!({"id": 1, "wm_class_instance": "c"})).as_deref(), Some("c"));
+        assert_eq!(parse_gnome_state(&json!({"pointer": {"y": 1}}).to_string()).unwrap().pointer, None);
+        // KDE: the same three.
+        let mut map = KdeWindowIdMap::default();
+        let kde = |window: Value, map: &mut KdeWindowIdMap| parse_kwin_report(&json!({"window": window}).to_string(), map).unwrap().0.map(|window| window.application);
+        assert_eq!(kde(json!({"id": "u1", "resourceClass": "a"}), &mut map).as_deref(), Some("a"));
+        assert_eq!(kde(json!({"id": "u2", "desktopFileName": "b"}), &mut map).as_deref(), Some("b"));
+        assert_eq!(kde(json!({"id": "u3", "resourceName": "c"}), &mut map).as_deref(), Some("c"));
+        // A map that may hold nothing still answers.
+        assert!(KdeWindowIdMap::new(0).intern("u") > 0);
+    }
+
+    #[test]
     fn a_window_has_a_center_and_application_ids_are_cleaned() {
         assert_eq!(info(42, "app", 4242).center(), None);
         let sized = DesktopWindowInfo { x: 100, y: -20, width: 301, height: 200, ..info(42, "app", 4242) };

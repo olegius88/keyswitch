@@ -32,15 +32,20 @@ fn x11_backend() -> DesktopBackend {
 
 /// The Wayland backend; a session where it cannot be built gets the reason from `new_desktop_backend`.
 fn wayland_backend() -> Result<DesktopBackend, String> {
-    let backend = crate::wayland_native::new_wayland_backend(Some(crate::linux_app::selection_factory()))?;
+    crate::wayland_native::new_wayland_backend(Some(crate::linux_app::selection_factory())).map(desktop_of_wayland)
+}
+
+/// The window's view of a Wayland backend.
+#[must_use]
+pub fn desktop_of_wayland(backend: Arc<crate::wayland_backend::WaylandBackend>) -> DesktopBackend {
     let process_for_window = backend.process_for_window();
     let placer = backend.clone();
-    Ok(DesktopBackend {
+    DesktopBackend {
         input: backend,
         process_for_window,
         position_window: Arc::new(move |window, x, y| placer.position_window(window, i64::from(x), i64::from(y))),
         wayland: true,
-    })
+    }
 }
 
 /// The backend of this session. A Wayland session whose backend cannot be built gets one that reports why.

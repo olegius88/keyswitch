@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ks_backend::backend::{BackendProbe, InputBackend};
+use ks_backend::{ManagedFieldReader, ReaderFailure};
 use ks_config::config::SettingsStore;
 use ks_config::history::{HistoryStore, data_dir, history_limit};
 use ks_config::logsetup;
@@ -151,6 +152,12 @@ pub fn resource_dir_from(over: Option<PathBuf>, executable: Option<&Path>, is_di
     candidates.push(PathBuf::from("/usr/lib/keyswitch/resources"));
     candidates.push(PathBuf::from("/usr/lib/keyswitch/keyswitch/resources"));
     candidates.iter().find(|path| is_dir(path)).cloned().unwrap_or_else(|| PathBuf::from("/usr/lib/keyswitch/resources"))
+}
+
+/// The field reader over the accessibility bus, or why there is none.
+fn reader_over(api: Result<Box<dyn crate::atspi_context::AtspiApi>, crate::atspi_context::AtspiError>, process: &ProcessForWindow) -> Result<Box<dyn ManagedFieldReader>, ReaderFailure> {
+    let api = api.map_err(|error| error.failure())?;
+    Ok(Box::new(AtspiFieldReader::new(api, Some(process.clone()))))
 }
 
 /// The backend with the readers of this platform: the field reader is built by the engine on its worker, the selection
@@ -309,10 +316,7 @@ pub fn engine_builder(
     let resources = ks_lang::Resources::with_speller(resource_dir(), hunspell_speller(data_dir()));
     Box::new(move || {
         let process = process_for_window;
-        let factory: ReaderFactory = Arc::new(move || {
-            let api = atspi_bus::connect().map_err(|error| error.failure())?;
-            Ok(Box::new(AtspiFieldReader::new(api, Some(process.clone()))))
-        });
+        let factory: ReaderFactory = Arc::new(move || reader_over(atspi_bus::connect(), &process));
         KeySwitchEngine::new(
             settings,
             history,
@@ -383,6 +387,37 @@ mod tests {
     use super::*;
 
     /// `format(value, "g")` as Python printed each.
+    #[test]
+    fn a_reader_is_made_over_the_bus_or_says_why_not() {
+        let process: ProcessForWindow = Arc::new(|_| 0);
+        assert!(reader_over(Err(crate::atspi_context::AtspiError::Unavailable("no bus".to_owned())), &process).is_err());
+        struct Nothing;
+        impl crate::atspi_context::AtspiApi for Nothing {
+            fn child_count(&self, _: Option<&crate::atspi_context::NodeRef>) -> crate::atspi_context::AtspiResult<usize> { Ok(0) }
+            fn child_at(&self, _: Option<&crate::atspi_context::NodeRef>, _: usize) -> crate::atspi_context::AtspiResult<Option<crate::atspi_context::NodeRef>> { Ok(None) }
+            fn name(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<String> { Ok(String::new()) }
+            fn process_id(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<u32> { Ok(0) }
+            fn states(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<u64> { Ok(0) }
+            fn role(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<u32> { Ok(0) }
+            fn has_interface(&self, _: &crate::atspi_context::NodeRef, _: &str) -> crate::atspi_context::AtspiResult<bool> { Ok(false) }
+            fn n_selections(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<i32> { Ok(0) }
+            fn caret_offset(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<i32> { Ok(0) }
+            fn character_count(&self, _: &crate::atspi_context::NodeRef) -> crate::atspi_context::AtspiResult<i32> { Ok(0) }
+            fn get_text(&self, _: &crate::atspi_context::NodeRef, _: i32, _: i32) -> crate::atspi_context::AtspiResult<String> { Ok(String::new()) }
+            fn get_selection(&self, _: &crate::atspi_context::NodeRef, _: i32) -> crate::atspi_context::AtspiResult<(i32, i32)> { Ok((0, 0)) }
+            fn set_selection(&self, _: &crate::atspi_context::NodeRef, _: i32, _: i32, _: i32) -> crate::atspi_context::AtspiResult<bool> { Ok(false) }
+            fn delete_text(&self, _: &crate::atspi_context::NodeRef, _: i32, _: i32) -> crate::atspi_context::AtspiResult<bool> { Ok(false) }
+            fn insert_text(&self, _: &crate::atspi_context::NodeRef, _: i32, _: &str, _: i32) -> crate::atspi_context::AtspiResult<bool> { Ok(false) }
+            fn character_extents(&self, _: &crate::atspi_context::NodeRef, _: i32) -> crate::atspi_context::AtspiResult<(i32, i32, i32, i32)> { Ok((0, 0, 0, 0)) }
+        }
+        assert!(reader_over(Ok(Box::new(Nothing)), &process).is_ok());
+    }
+
+    #[test]
+    fn help_takes_a_value_it_does_not_read() {
+        assert!(matches!(parse(&["--help=x"]), Parsed::Exit { code: 0, .. }));
+    }
+
     #[test]
     fn floats_read_as_python_formats_them() {
         for (value, text) in [
