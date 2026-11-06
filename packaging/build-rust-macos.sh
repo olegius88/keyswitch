@@ -36,6 +36,8 @@ rm -rf "$native_output"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources/resources"
 cp "$project_dir/target/release/$app_name" "$bundle/Contents/MacOS/$app_name"
 strip -x "$bundle/Contents/MacOS/$app_name"
+# The login item an earlier version wrote names this file: replacing the app must not end the start at login.
+ln -s "$app_name" "$bundle/Contents/MacOS/keyswitch-bin"
 # The helper of Wayland and the stylesheet of GTK are Linux only.
 (cd "$project_dir/resources" && find . -type f ! -path './wayland-input/*' ! -name style.css -print0 \
     | xargs -0 tar -cf - ) | tar -xf - -C "$bundle/Contents/Resources/resources"
