@@ -2,6 +2,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg_attr(coverage_nightly, coverage(off))] // One call: the window opens only on a desktop.
 fn main() {
     logcourier::cli::entry();
 }

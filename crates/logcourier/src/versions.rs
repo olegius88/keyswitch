@@ -207,6 +207,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_record_of_another_program_ends_the_version_and_a_tail_with_no_line_has_none() {
+        let (length, version) = take_fragment(b"2026-11-04 12:00:00,123 other record\n", Some("0.66.1".to_owned()), true, b"");
+        assert_eq!((length, version), (37, None));
+        let long = vec![b'x'; usize::try_from(PROBE_BYTES).unwrap() + 1];
+        let mut stream = std::io::Cursor::new(long);
+        assert_eq!(latest_version(&mut stream).unwrap(), None);
+    }
+
+    #[test]
     fn a_version_has_only_the_tail_it_may_have() {
         for (text, good) in [("0.66.1", true), ("0.66.1-rc1", true), ("0.66.1+build", true), ("0.66.1x", false), ("0.66", false), ("0.66.1-", false), ("0.66.1-!", false), ("", false)] {
             assert_eq!(is_version(text), good, "{text:?}");

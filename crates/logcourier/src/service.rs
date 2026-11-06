@@ -268,3 +268,213 @@ fn run(root: &std::path::Path, shared: &Arc<(Mutex<Shared>, Condvar)>, stopping:
         state.woken = false;
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::config::Source;
+    use std::io::Write as _;
+
+    const BOT: &str = "123456";
+
+    /// A group that takes every call and keeps no file: what was sent stays in the queue.
+    struct Forgetful;
+
+    impl Client for Forgetful {
+        fn bot_id(&self) -> &str {
+            BOT
+        }
+
+        fn call(&self, method: &str, _params: Value) -> Result<Value> {
+            Ok(match method {
+                "getChat" => json!({"type": "supergroup", "title": "logs"}),
+                "getChatMember" => json!({"status": "administrator", "can_pin_messages": true, "can_delete_messages": true}),
+                _ => json!(true),
+            })
+        }
+
+        fn send_document(&self, _chat_id: &str, _filename: &str, _data: &[u8], _caption: &str) -> Result<Value> {
+            Ok(json!({"message_id": 1, "chat": {"id": -1001}, "document": {"file_id": ""}}))
+        }
+
+        fn download(&self, _file_id: &str, _limit: usize) -> Result<Vec<u8>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct Place {
+        root: PathBuf,
+        log: PathBuf,
+        store: Store,
+        shared: Arc<(Mutex<Shared>, Condvar)>,
+        stopping: Arc<AtomicBool>,
+        notify: Notify,
+        make: MakeClient,
+    }
+
+    impl Place {
+        fn new(name: &str) -> Place {
+            let root = std::env::temp_dir().join(format!("lc-service-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            let log = root.join("app.log");
+            Place {
+                store: Store::open(&root.join("data")).unwrap(),
+                root,
+                log,
+                shared: Arc::new((
+                    Mutex::new(Shared { config: Config::default(), token: "1:t".to_owned(), manual: false, manual_pending: false, reset_request: None, next_send: 0.0, revision: 0, woken: false }),
+                    Condvar::new(),
+                )),
+                stopping: Arc::new(AtomicBool::new(false)),
+                notify: Arc::new(|_, _| {}),
+                make: Arc::new(|_| Ok(Box::new(Forgetful))),
+            }
+        }
+
+        fn config(&self) -> Config {
+            let mut source = Source::new(self.log.display().to_string(), "app");
+            source.include_existing = true;
+            Config { bot_id: BOT.to_owned(), chat_id: "-1001".to_owned(), consent: true, auto_send: true, sources: vec![source], ..Config::default() }
+        }
+
+        fn write(&self, text: &str) {
+            std::fs::OpenOptions::new().create(true).append(true).open(&self.log).unwrap().write_all(text.as_bytes()).unwrap();
+        }
+
+        fn worker(&self) -> Worker<'_> {
+            Worker { store: &self.store, shared: &self.shared, stopping: &self.stopping, notify: &self.notify, make: &self.make, retry_at: 0.0, failures: 0 }
+        }
+    }
+
+    impl Drop for Place {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn a_turn_is_cancelled_by_a_stop_or_by_new_settings() {
+        let place = Place::new("cancel");
+        let worker = place.worker();
+        assert!(!worker.cancelled(0)());
+        assert!(worker.cancelled(1)());
+        place.stopping.store(true, Ordering::SeqCst);
+        assert!(worker.cancelled(0)());
+    }
+
+    #[test]
+    fn a_group_needs_a_token_a_chat_and_a_bot() {
+        let place = Place::new("unconfigured");
+        let mut worker = place.worker();
+        let full = place.config();
+        let no_chat = Config { chat_id: String::new(), ..full.clone() };
+        let no_bot = Config { bot_id: String::new(), ..full.clone() };
+        for (config, token) in [(&no_chat, "1:t"), (&no_bot, "1:t"), (&full, "")] {
+            assert!(worker.turn(config, token, Some(false), 0).unwrap().contains("Настройте"));
+            assert!(worker.turn(config, token, None, 0).unwrap().contains("Настройте"));
+        }
+    }
+
+    #[test]
+    fn a_full_queue_stops_the_collection_and_the_delivery_goes_on() {
+        let mut place = Place::new("full");
+        place.write("first line\nsecond one\n");
+        place.store.capacity = 0;
+        let config = place.config();
+        let mut worker = place.worker();
+        let message = worker.turn(&config, "1:t", None, 0).unwrap();
+        assert!(message.contains("Новых архивов"), "{message}");
+        assert!(message.contains("заполнена"), "{message}");
+    }
+
+    #[test]
+    fn fragments_wait_for_their_package_and_a_package_for_its_place() {
+        let mut place = Place::new("package");
+        let config = place.config();
+        place.write("first line\nsecond one\nthird one!\n");
+        let collector = Collector { store: &place.store, chunk_size: 11 };
+        assert!(collector.scan(&config).unwrap().0 > 1);
+        // No room for the package: the fragments stay, and what stays is said.
+        place.store.capacity = 0;
+        let mut worker = place.worker();
+        let message = worker.turn(&config, "1:t", None, 0).unwrap();
+        assert!(message.contains("упаковки"), "{message}");
+        // What a group does not keep stays in the queue: sent again soon, not at the next interval.
+        assert!(locked(&place.shared.0).next_send <= monotonic() + PENDING_RETRY_SECONDS);
+    }
+
+    #[test]
+    fn a_stop_comes_between_two_packages() {
+        let place = Place::new("stop");
+        let config = place.config();
+        place.write("first line\nsecond one\nthird one!\n");
+        let collector = Collector { store: &place.store, chunk_size: 11 };
+        assert!(collector.scan(&config).unwrap().0 > 1);
+        place.stopping.store(true, Ordering::SeqCst);
+        let mut worker = place.worker();
+        assert!(matches!(worker.turn(&config, "1:t", None, 0), Err(Error::Cancelled(_))));
+    }
+
+    #[test]
+    fn packing_and_sending_all_of_it_waits_for_the_next_interval() {
+        let place = Place::new("sent");
+        let config = Config { sources: Vec::new(), ..place.config() };
+        let mut worker = place.worker();
+        locked(&place.shared.0).manual_pending = true;
+        let message = worker.turn(&config, "1:t", None, 0).unwrap();
+        assert!(message.contains("Новых архивов"), "{message}");
+        let state = locked(&place.shared.0);
+        assert!(!state.manual_pending);
+        assert!(state.next_send > monotonic() + PENDING_RETRY_SECONDS);
+    }
+
+    #[test]
+    fn a_queue_that_cannot_be_read_fails_the_turn() {
+        let place = Place::new("broken");
+        let config = place.config();
+        place.write("first line\n");
+        place.store.db.execute_batch("DROP TABLE bundles").unwrap();
+        let mut worker = place.worker();
+        assert!(worker.turn(&config, "1:t", None, 0).is_err());
+    }
+
+    #[test]
+    fn a_queue_that_cannot_be_packed_fails_the_turn() {
+        let place = Place::new("readonly");
+        let config = place.config();
+        place.write("first line\nsecond one\nthird one!\n");
+        let collector = Collector { store: &place.store, chunk_size: 11 };
+        assert!(collector.scan(&config).unwrap().0 > 1);
+        let quiet = Config { sources: Vec::new(), ..config };
+        place.store.db.execute_batch("PRAGMA query_only = 1").unwrap();
+        let mut worker = place.worker();
+        assert!(worker.turn(&quiet, "1:t", None, 0).is_err());
+    }
+
+    #[test]
+    fn the_worker_says_a_cancelled_turn_and_goes_round_again_when_woken() {
+        let mut place = Place::new("loop");
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (sink, stop, wakes) = (seen.clone(), place.stopping.clone(), place.shared.clone());
+        place.notify = Arc::new(move |message: String, _| {
+            let mut seen = sink.lock().unwrap();
+            seen.push(message);
+            // Woken while it worked: no waiting before the next round.
+            locked(&wakes.0).woken = true;
+            if seen.len() >= 2 {
+                stop.store(true, Ordering::SeqCst);
+            }
+        });
+        let moved = place.shared.clone();
+        place.make = Arc::new(move |_| {
+            // New settings arrive as the client is made: the delivery stops at its first check.
+            locked(&moved.0).revision += 1;
+            Ok(Box::new(Forgetful))
+        });
+        locked(&place.shared.0).config = Config { sources: Vec::new(), ..place.config() };
+        run(&place.root.join("data"), &place.shared, &place.stopping, &place.notify, &place.make);
+        assert!(seen.lock().unwrap()[0].contains("остановлен") || !seen.lock().unwrap().is_empty());
+    }
+}

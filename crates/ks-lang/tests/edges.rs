@@ -9,7 +9,7 @@ use ks_lang::detector::{DecideOptions, LanguageDetector, LanguageScorer, Protect
 use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, early_switch_decision};
 use ks_lang::language_model::WordScore;
 use ks_lang::lexicon_supplement::supplement_words;
-use ks_lang::ortho_model::OrthoModel;
+use ks_lang::ortho_model::{FEATURES, OrthoEvidence, OrthoModel};
 use ks_lang::short_words::trusted_short_word_decision;
 use ks_lang::tables::WordTable;
 use ks_lang::word_decision::opening_letter_decision;
@@ -129,4 +129,71 @@ fn an_early_switch_refuses_what_looks_like_an_abbreviation_or_a_word_of_the_sour
     };
     assert!(decide(&unknown, "ghbd", "ПрИв").reason.contains("сокращение"));
     assert!(decide(&known, "ghbd", "прив").reason.contains("словом исходного"));
+}
+
+#[test]
+fn a_dictionary_with_no_words_adds_none_to_the_index() {
+    let root = folder("empty-dictionary");
+    let empty = root.join("empty.dic");
+    std::fs::write(&empty, "0\n").unwrap();
+    let index = PrefixIndex::from_lexicon(Arc::new(WordTable::default()), &format!("Hunspell: {}", empty.display()));
+    assert_eq!(index.completions("a").completions, 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// The shipped artifact with one thing changed, as a file.
+fn ortho_with(root: &Path, change: impl FnOnce(&mut serde_json::Value)) -> (Option<OrthoModel>, String) {
+    let mut artifact: serde_json::Value = serde_json::from_slice(&std::fs::read(resources().join("models/ortho_v1.json")).unwrap()).unwrap();
+    change(&mut artifact);
+    let path = root.join("ortho.json");
+    std::fs::write(&path, serde_json::to_vec(&artifact).unwrap()).unwrap();
+    OrthoModel::try_load(&path, None)
+}
+
+#[test]
+fn an_orthotactic_artifact_carries_both_scripts_and_only_those() {
+    let root = folder("ortho-scripts");
+    let refused = |change: fn(&mut serde_json::Value)| ortho_with(&root, change).0.is_none();
+    assert!(refused(|artifact| {
+        artifact["models"].as_object_mut().unwrap().remove("en");
+    }));
+    assert!(refused(|artifact| {
+        let en = artifact["models"]["en"].clone();
+        artifact["models"]["de"] = en;
+    }));
+    assert!(refused(|artifact| {
+        let en = artifact["models"]["en"].clone();
+        artifact["source_models"] = serde_json::json!({"de": en});
+    }));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_gated_feature_counts_only_for_a_reading_that_is_noise() {
+    let root = folder("ortho-gated");
+    let (model, status) = ortho_with(&root, |artifact| {
+        artifact["schema_version"] = serde_json::json!(ks_lang::constants::ORTHO_PLAUSIBILITY_ARTIFACT_SCHEMA_VERSION);
+        artifact["gated_features"] = serde_json::json!(["ident"]);
+        artifact["target_centres"] = artifact["feature_centres"].clone();
+        for script in ["en", "ru"] {
+            for name in FEATURES {
+                if artifact["features"][script].get(name).is_none() {
+                    artifact["features"][script][name] = serde_json::json!(0);
+                }
+            }
+        }
+    });
+    let model = model.unwrap_or_else(|| panic!("{status}"));
+    let known = |_: &str, _: &str| false;
+    for keys in ["ghbdtn", "hello", "the", "qqqqq", "zxcvb", "world", "привет"] {
+        for source_script in ["en", "ru"] {
+            let score = model.score(&OrthoEvidence { keys, shape: "lower", source_script }, Some(&known));
+            assert!(score.total.is_finite());
+        }
+    }
+    // A shape nobody knows reads as lower case.
+    let plain = model.score(&OrthoEvidence { keys: "ghbdtn", shape: "lower", source_script: "en" }, Some(&known));
+    let strange = model.score(&OrthoEvidence { keys: "ghbdtn", shape: "strange", source_script: "en" }, Some(&known));
+    assert_eq!(plain, strange);
+    std::fs::remove_dir_all(root).unwrap();
 }

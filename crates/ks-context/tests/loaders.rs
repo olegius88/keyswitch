@@ -290,3 +290,60 @@ fn a_table_of_weights_reads_any_value() {
     assert!(load_artifact(&written(b"{"), 10_000, "too large", &spec).is_err());
     assert!(load_artifact(&written(b"{\"weights\": 1e999}"), 10_000, "too large", &spec).is_err());
 }
+
+#[test]
+fn a_prefix_model_says_which_features_it_reads() {
+    use ks_context::prefix_model::{PrefixInput, PrefixSide};
+    use ks_context::prefix_schema::features_for_version;
+    use ks_lang::Resources;
+    let resources = Resources::new(models().parent().expect("the resources"));
+    let (ru, en) = (resources.engine_language_model("ru_RU").expect("ru"), resources.engine_language_model("en_US").expect("en"));
+    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
+    let mut field = ks_backend::FieldContext::new("firefox", "1");
+    "/* a comment ".clone_into(&mut field.before);
+    let item = PrefixInput { original: "ghbd".to_owned(), alternative: "прив".to_owned(), source_group: 0, field };
+    assert!(features_for_version(&item, sides, 99).is_err());
+    assert!(features_for_version(&item, sides, 1).expect("the first schema").len() > 1);
+}
+
+#[test]
+fn a_prefix_artifact_of_the_first_schema_need_not_say_so() {
+    let mut artifact = prefix_artifact();
+    artifact["feature_version"] = json!(1);
+    artifact.as_object_mut().expect("an object").remove("prefix_feature_version");
+    let _ = VersionedPrefixModel::load(&written(artifact.to_string().as_bytes()));
+}
+
+#[test]
+fn a_list_of_word_counts_is_refused_past_its_size_and_for_a_language_it_has_no_letters_of() {
+    use ks_context::constants::TYPO_FREQUENCY_MAX_BYTES;
+    let path = written(b"");
+    std::fs::File::options().write(true).open(&path).expect("the file").set_len(u64::try_from(TYPO_FREQUENCY_MAX_BYTES).expect("small") + 1).expect("sparse");
+    assert!(TypoLexicon::load(&path, "ru_RU").is_err());
+    std::fs::remove_file(&path).expect("removed");
+    let header = json!({"schema_version": 1, "locale": "de_DE", "alphabet": "abc"});
+    let path = written(format!("{header}\n").as_bytes());
+    assert!(TypoLexicon::load(&path, "de_DE").is_err());
+    assert!(ks_context::typo_correction::locale_keys("de_DE").is_none());
+    assert!(ks_context::typo_correction::locale_keys("en_US").is_some());
+}
+
+#[test]
+fn keys_that_type_nothing_teach_the_templates_nothing() {
+    use ks_backend::KeyEvent;
+    use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SUPER_MASK};
+    use ks_context::typo_correction::KeyTemplates;
+    let mut templates = KeyTemplates::default();
+    let key = KeyEvent { pressed: true, keycode: 38, key_name: "a".to_owned(), character: "a".to_owned(), characters: vec!["a".to_owned(), "ф".to_owned()], ..KeyEvent::default() };
+    for event in [
+        KeyEvent { pressed: false, ..key.clone() },
+        KeyEvent { synthetic: true, ..key.clone() },
+        KeyEvent { state: CONTROL_MASK, ..key.clone() },
+        KeyEvent { state: ALT_MASK, ..key.clone() },
+        KeyEvent { state: SUPER_MASK, ..key.clone() },
+        key,
+    ] {
+        templates.observe(&event);
+    }
+}

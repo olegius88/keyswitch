@@ -91,6 +91,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_name_beyond_ascii_says_it_is_utf8() {
+        let mut zip = ZipWriter::new();
+        zip.write("логи.txt", b"x", false);
+        let bytes = zip.finish();
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]) & 0x800, 0x800);
+    }
+
+    #[test]
     fn the_checksum_is_the_standard_one() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
     }

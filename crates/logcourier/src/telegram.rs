@@ -314,6 +314,17 @@ mod tests {
     }
 
     #[test]
+    fn a_value_for_curl_keeps_every_control_character_quoted() {
+        assert_eq!(quoted("a\\b\"c\nd\re\tf"), "\"a\\\\b\\\"c\\nd\\re\\tf\"");
+    }
+
+    #[test]
+    fn a_client_names_the_bot_of_its_token() {
+        let client = Telegram::new(TOKEN).unwrap();
+        assert_eq!(Client::bot_id(&client), TOKEN.split(':').next().unwrap());
+    }
+
+    #[test]
     fn an_error_carries_its_pause_and_never_the_token() {
         let body = format!("{{\"description\":\"bad {TOKEN}\",\"parameters\":{{\"retry_after\":37}}}}");
         let (client, _) = client(vec![(429, body.into_bytes())]);

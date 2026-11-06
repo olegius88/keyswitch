@@ -1049,6 +1049,15 @@ mod tests {
     }
 
     #[test]
+    fn a_channel_past_its_limit_is_refused() {
+        let count = ORTHO_CHANNEL_MAX_GRAMS + 1;
+        let grams = vec!["a"; count].join("\\n");
+        let numbers = vec!["0"; count].join(",");
+        let text = format!(r#"{{"grams": "{grams}", "logprob": [{numbers}], "backoff": [], "uniform": -1}}"#);
+        assert!(serde_json::from_str::<RawChannel>(&text).is_err());
+    }
+
+    #[test]
     fn channels_read_as_they_are_written_and_nothing_else() {
         let read = |text: &str| serde_json::from_str::<RawChannel>(text).map(|_| ());
         assert!(read(r#"{"grams": "", "logprob": [], "backoff": [], "uniform": -1, "other": 7}"#).is_ok());

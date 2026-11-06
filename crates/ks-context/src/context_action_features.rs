@@ -1880,8 +1880,7 @@ pub fn brief_question(original: &str, before: &str, after: &str) -> bool {
     if !(BRIEF_HEAD_LETTERS.contains(&count(original)) && original.is_ascii() && pystr::isalpha(original)) {
         return false;
     }
-    let cyrillic = translate(original, "us", "ru");
-    pystr::isalpha(&cyrillic) && !cyrillic.chars().any(|c| c.is_ascii()) && !has_alpha(before) && !has_alpha(after)
+    !has_alpha(before) && !has_alpha(after)
 }
 
 /// The larger of two counts of the Russian reading and of the Latin one, as the brief heads read them.
@@ -2162,7 +2161,7 @@ pub fn slip_question(original: &str, before: &str, tables: &TermTables) -> bool 
     }
     let cyrillic = pystr::casefold(&translate(original, "us", "ru"));
     let small = |alphabet: &str| term_bucket(original, alphabet, tables).parse::<usize>().is_ok_and(|bucket| bucket <= SLIP_HEAD_MAX_LATIN_BUCKET);
-    all_cyrillic(&cyrillic) && tables.term("russian").count(&cyrillic) > 0 && small("latin") && small("english")
+    tables.term("russian").count(&cyrillic) > 0 && small("latin") && small("english")
 }
 
 /// The slip head's evidence, all it reads (no copy of the shared features, which hold the frozen model's keep weights for

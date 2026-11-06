@@ -142,6 +142,13 @@ mod tests {
 
     /// What `datetime.fromisoformat` accepts and refuses, as the Python answered.
     #[test]
+    fn digits_are_all_digits_and_at_least_one() {
+        assert!(digits(b"12"));
+        assert!(!digits(b""));
+        assert!(!digits(b"1a"));
+    }
+
+    #[test]
     fn dates_are_read_only_when_they_are_dates() {
         for (text, date) in [
             ("2026-11-04", Some("2026-11-04")),

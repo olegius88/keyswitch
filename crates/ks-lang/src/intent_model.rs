@@ -246,7 +246,7 @@ pub fn extract_features(
     let alternative = normalize_token(evidence.alternative);
     let (original_length, alternative_length) = (pystr::len(&original), pystr::len(&alternative));
     let active_orders = orders.iter().filter(|&&order| (original_length + 2).to::<i64>() >= order || (alternative_length + 2).to::<i64>() >= order).count();
-    let order_scale = if active_orders > 0 { 1.0 / active_orders.to::<f64>().sqrt() } else { 1.0 };
+    let order_scale = 1.0 / active_orders.to::<f64>().sqrt();
     add_character_features(&original, evidence.source_group, -order_scale, &orders, &mut add);
     add_character_features(&alternative, evidence.target_group, order_scale, &orders, &mut add);
 
@@ -425,11 +425,9 @@ impl LinearNgramModel {
         let trigger = evidence.trigger.index();
         let threshold_logit = self.threshold_logits[trigger][direction.index()];
         let threshold = self.thresholds[trigger][direction.index()];
-        let coverage = if features.character_fingerprints.is_empty() {
-            0.0
-        } else {
+        let coverage = {
             let supported = features.character_fingerprints.iter().filter(|&&fingerprint| self.is_supported(fingerprint)).count();
-            supported.to::<f64>() / features.character_fingerprints.len().to::<f64>()
+            share_of(supported, features.character_fingerprints.len())
         };
         Ok(LinearPrediction { logit, probability, threshold, coverage, should_switch: calibrated >= threshold_logit, model_version: self.model_version.clone() })
     }
@@ -468,9 +466,18 @@ impl LinearNgramModel {
 }
 
 /// `Path.expanduser()` for `~` and `~/...`.
+/// `part / whole`, none of nothing.
+fn share_of(part: usize, whole: usize) -> f64 {
+    if whole == 0 { 0.0 } else { part.to::<f64>() / whole.to::<f64>() }
+}
+
 fn expanduser(text: &str) -> PathBuf {
+    expanduser_in(text, std::env::var_os("HOME"))
+}
+
+fn expanduser_in(text: &str, home: Option<std::ffi::OsString>) -> PathBuf {
     if (text == "~" || text.starts_with("~/"))
-        && let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty())
+        && let Some(home) = home.filter(|home| !home.is_empty())
     {
         return PathBuf::from(home).join(text.get(1..).unwrap_or_default().trim_start_matches('/'));
     }
@@ -1163,6 +1170,16 @@ fn validated_json_value(value: &Value, field: &str, depth: usize) -> Result<(), 
 mod tests {
     use crate::constants::FNV1A64_OFFSET_BASIS;
     use super::*;
+
+    #[test]
+    fn a_share_of_nothing_is_none_and_no_home_leaves_the_path_as_it_is() {
+        assert!(share_of(0, 0).abs() < f64::EPSILON);
+        assert!((share_of(1, 2) - 0.5).abs() < f64::EPSILON);
+        assert_eq!(expanduser_in("~/x", None), PathBuf::from("~/x"));
+        assert_eq!(expanduser_in("~/x", Some("".into())), PathBuf::from("~/x"));
+        assert_eq!(expanduser_in("~", Some("/home/a".into())), PathBuf::from("/home/a/"));
+        assert_eq!(expanduser_in("~/x", Some("/home/a".into())), PathBuf::from("/home/a/x"));
+    }
 
     #[test]
     fn orders_of_any_number_are_checked_and_a_home_folder_is_expanded() {

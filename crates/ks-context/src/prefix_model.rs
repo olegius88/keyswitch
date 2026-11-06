@@ -32,7 +32,7 @@ pub struct PrefixInput {
 
 /// `max(-bound, min(bound, value))`.
 fn clamp(value: f64, bound: f64) -> f64 {
-    let capped = if value < bound { value } else { bound };
+    let capped = value.min(bound);
     if capped > -bound { capped } else { -bound }
 }
 

@@ -188,15 +188,10 @@ impl LanguageScorer for LanguageModel {
 
 /// Minimal inference contract used by the policy layer.
 pub trait IntentClassifier: Send + Sync {
-    fn veto_threshold(&self) -> f64;
     fn predict(&self, item: &IntentModelInput<'_>) -> Result<LinearPrediction, LoadError>;
 }
 
 impl IntentClassifier for LinearNgramModel {
-    fn veto_threshold(&self) -> f64 {
-        self.veto_threshold
-    }
-
     fn predict(&self, item: &IntentModelInput<'_>) -> Result<LinearPrediction, LoadError> {
         LinearNgramModel::predict(self, item)
     }

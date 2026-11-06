@@ -6,7 +6,9 @@ use ks_context::context_action_features::{
     resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
     variable_question, words_of,
 };
-use ks_context::context_model::{AfterOrigin, TermTables};
+use ks_backend::{FieldContext, FieldRole};
+use ks_context::context_action_features::{FeatureMap, extract_action_features};
+use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextAction, ContextEvidence, ContextModel, TermTables};
 use std::path::PathBuf;
 
 const TOKENS: &[(&str, &str)] = &[
@@ -92,4 +94,95 @@ fn every_question_answers_for_every_token_in_every_place() {
         }
     }
     assert!(asked > 100_000 && yes > 0 && yes < asked, "{yes} of {asked}");
+}
+
+fn evidence(original: &str, alternative: &str, before: &str, after: &str, trigger: &str, origin: AfterOrigin, known: bool) -> ContextEvidence {
+    let mut field = FieldContext::new("firefox", "1");
+    before.clone_into(&mut field.before);
+    after.clone_into(&mut field.after);
+    field.role = FieldRole::Text;
+    ContextEvidence {
+        original: original.to_owned(),
+        alternative: alternative.to_owned(),
+        source_group: i64::from(!original.is_ascii()),
+        field,
+        trigger: trigger.to_owned(),
+        baseline_convert: known,
+        source_known: known,
+        target_known: !known,
+        score_delta: 0.5,
+        source_score: None,
+        target_score: None,
+        model_probability: None,
+        model_threshold: None,
+        literal_tail: String::new(),
+        ortho_score: Some(1.0),
+        ortho_threshold: Some(1.0),
+        boundary_text: " ".to_owned(),
+        after_origin: origin,
+        before_origin: BeforeOrigin::Field,
+        source_identifier: false,
+        target_identifier: false,
+        source_typo: false,
+        target_typo: false,
+        source_opening: false,
+        target_opening: false,
+        inside: false,
+        term_counts_dropped: false,
+    }
+}
+
+#[test]
+fn every_token_in_every_place_has_its_features() {
+    let tables = tables();
+    let mut failed = 0;
+    let mut built = 0;
+    let mut turn = 0_usize;
+    for (original, alternative) in TOKENS {
+        for before in PLACES {
+            for after in AFTER {
+                for origin in ORIGINS {
+                    turn += 1;
+                    let known = turn.is_multiple_of(2);
+                    let trigger = TRIGGERS[turn % TRIGGERS.len()];
+                    match extract_action_features(&evidence(original, alternative, before, after, trigger, *origin, known), &tables) {
+                        Ok(features) => {
+                            built += 1;
+                            assert!(!features.is_empty());
+                        }
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
+        }
+    }
+    assert!(built > 1000 && failed < built, "{built} built, {failed} failed");
+}
+
+#[test]
+fn questions_about_a_sign_in_a_number_read_every_character() {
+    assert!(digit_dot_question("1ю", "1.", "space"));
+    assert!(!digit_dot_question("1ю", "1x", "space"));
+    assert!(!digit_dot_question("1ю", "2.", "space"));
+    assert!(!digit_dot_question("1ю2", "1.3", "space"));
+    // A word of many runs of letters and digits, of letters of any case.
+    let tables = tables();
+    for token in ["a1b2c3d4e5f6g7h8i9j0", "A1B2", "a1b2", "A1b2", "ф1и2", "Ф1И2", "Ф1и2"] {
+        for origin in ORIGINS {
+            let _ = extract_action_features(&evidence(token, token, "x = ", "как", "space", *origin, false), &tables);
+        }
+    }
+    // A quoted word in capitals, and a capital alone.
+    for word in ["\"ПРИВЕТ", "\"Я", "\"Привет", "\"привет"] {
+        let _ = extract_action_features(&evidence(word, "@GHBDTN", "x ", "", "space", AfterOrigin::None, false), &tables);
+    }
+}
+
+#[test]
+fn a_model_answers_no_scores_that_are_no_numbers() {
+    let model = ContextModel::load(&PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/models"))).expect("the shipped model");
+    let features = FeatureMap::default();
+    let answer = model.prediction_of(&[f64::NAN, 0.0, 0.0, 0.0], &features);
+    assert_eq!(answer.action, ContextAction::Suggest);
+    assert!(answer.probability.abs() < f64::EPSILON);
 }

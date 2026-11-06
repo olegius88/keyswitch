@@ -269,7 +269,7 @@ pub fn early_switch_decision(
     if source_evidence.completions > 0 {
         return with_reason(&rejected, "префикс продолжается в исходном языке");
     }
-    if source_evidence.known || source_scorer.score(original).known {
+    if source_scorer.score(original).known {
         return with_reason(&rejected, "префикс сам является словом исходного языка");
     }
     let target_evidence = target_index.completions(replacement);

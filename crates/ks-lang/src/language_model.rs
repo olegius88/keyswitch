@@ -381,10 +381,7 @@ impl LanguageModel {
         // The Python normalises the extra words once more here; casefolding twice is not always the same as once.
         let mut additions = WordList::with_capacity(normalized_extra.len(), normalized_extra.arena_bytes());
         for word in locale_fallbacks(locale).iter().copied().chain(normalized_extra.iter()) {
-            let normalized = Self::normalize(word);
-            if !normalized.is_empty() {
-                additions.push(&normalized);
-            }
+            additions.push(&Self::normalize(word));
         }
         drop(normalized_extra);
         let additions = additions.sorted_unique();
@@ -568,7 +565,7 @@ impl LanguageModel {
         let ratio = hits.to::<f64>() / count.to::<f64>();
         let invalid_ratio = 1.0 - ratio;
         let score = self.ngram_score(&normalized);
-        let limited = if score < LANGUAGE_MODEL_NATURALNESS_MAX { score } else { LANGUAGE_MODEL_NATURALNESS_MAX };
+        let limited = score.min(LANGUAGE_MODEL_NATURALNESS_MAX);
         let raw_naturalness = if limited > LANGUAGE_MODEL_NATURALNESS_MIN { limited } else { LANGUAGE_MODEL_NATURALNESS_MIN };
         let mut naturalness = raw_naturalness;
         let mut lexical = 0.0;

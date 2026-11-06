@@ -544,24 +544,6 @@ impl ContextModel {
         })
     }
 
-    /// The model's verdict stands; this is where an explicit exception would refuse it.
-    ///
-    /// `KeySwitch` exists because rule-based switching hit a wall: the rules multiplied until they argued with each other
-    /// over the nuances of two languages. So when the model says convert, the product converts. What may still refuse a
-    /// conversion is an exception the user can see and name - an excluded word or application, their own switching
-    /// settings, a rule they taught the engine, or a case analysed one by one - and those live in the engine and the
-    /// settings, not here.
-    ///
-    /// Until 17.09.2026 this method carried two class-wide vetoes instead: an isolated token needed a licence from a
-    /// frozen verdict, and a token of at most three letters with an unknown own reading could only be suggested when it
-    /// stood alone or was uppercase. They overruled the model on whole classes of input - exactly the input the model was
-    /// trained to tell apart - and cost 14 of 300 restorations on chat-like first words while preventing no corruption at
-    /// all. A weak class is a training problem; it is answered with the corpus, the labels and the features, and proved
-    /// by measurement.
-    #[must_use]
-    pub fn allows_automatic_conversion(&self, _features: &FeatureMap) -> bool {
-        true
-    }
 
     fn unsupported(&self) -> ContextPrediction {
         ContextPrediction { action: ContextAction::Suggest, probability: 0.0, probabilities: [0.0, 0.0, 0.0, 1.0], model_version: self.version.clone(), supported: false }
@@ -606,10 +588,16 @@ impl ContextModel {
                 }
             }
         }
+        self.prediction_of(&scores, &features)
+    }
+
+    /// The answer of the scores; scores that are no numbers are no answer.
+    #[must_use]
+    pub fn prediction_of(&self, scores: &[f64; ACTION_COUNT], features: &FeatureMap) -> ContextPrediction {
         if !scores.iter().all(|score| score.is_finite()) {
             return self.unsupported();
         }
-        let probabilities = softmax(&scores);
+        let probabilities = softmax(scores);
         let selected = first_greatest(&probabilities);
         let mut action = ACTIONS[selected];
         if action == ContextAction::Convert && probabilities[selected] < self.conversion_threshold {
@@ -622,10 +610,7 @@ impl ContextModel {
             // for `pr` and stayed; asked beside `и` the same model converts it at p=1.00.
             action = ContextAction::Suggest;
         }
-        if action == ContextAction::Convert && !self.allows_automatic_conversion(&features) {
-            action = ContextAction::Suggest;
-        }
-        let supported = self.supports_features(&features);
+        let supported = self.supports_features(features);
         if !supported && matches!(action, ContextAction::Keep | ContextAction::Convert) {
             action = ContextAction::Suggest;
         }

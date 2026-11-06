@@ -203,8 +203,7 @@ pub fn ends_with_typed(text: &str, typed: &str) -> bool {
     }
     let (text_length, typed_length) = (pystr::len(text), pystr::len(typed));
     let tail = if typed_length <= text_length { pystr::slice(text, Some((text_length - typed_length).to::<i64>()), None) } else { "" };
-    !typed.is_empty()
-        && pystr::len(tail) == typed_length
+    pystr::len(tail) == typed_length
         && pystr::slice(tail, Some(1), None) == pystr::slice(typed, Some(1), None)
         && pystr::casefold(pystr::slice(tail, None, Some(1))) == pystr::casefold(pystr::slice(typed, None, Some(1)))
 }

@@ -183,6 +183,7 @@ pub fn fetch_or_list_with(client: &dyn Client, command: &str, chat_id: &str, opt
 }
 
 #[cfg(windows)]
+#[cfg_attr(coverage_nightly, coverage(off))] // Opens the window: checked on the packaged program by the CI's self-test.
 fn gui(arguments: &[String]) -> Result<i32> {
     if arguments.first().map(String::as_str) == Some("self-test") {
         let output = parse_output(&arguments[1..]);
