@@ -950,7 +950,7 @@ fn a_release_lets_only_the_key_ups_before_the_waiting_enter_through() {
         hold.held.push_back(native(false, KEY_Z));
     }
     assert!(backend.release_input().is_ok());
-    assert_eq!(api.posted().len(), 1);
+    assert_eq!(lock(&backend.inner.hold).held.len(), 1);
     assert_eq!(backend.release_input(), Ok(0));
     assert!(lock(&backend.inner.hold).holding);
     let _ = backend.complete_action(false);
