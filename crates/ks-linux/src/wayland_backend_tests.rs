@@ -17,6 +17,8 @@ const RU: i64 = 1;
 /// (plain, shifted) in English and Russian, and the keysym name.
 type Spec = ((&'static str, &'static str), (&'static str, &'static str), &'static str);
 
+const KEY_EMOJI: u32 = 200;
+
 fn qwerty(keycode: u32) -> Option<Spec> {
     Some(match keycode {
         EVDEV_KEY_Q => (("q", "Q"), ("й", "Й"), "q"),
@@ -28,6 +30,8 @@ fn qwerty(keycode: u32) -> Option<Spec> {
         // The Russian layout has `,` on Shift with the slash key: a comma after a word is typed there.
         EVDEV_KEY_SLASH => (("/", "?"), (".", ","), "slash"),
         EVDEV_KEY_SPACE => ((" ", " "), (" ", " "), "space"),
+        // A key of a layout a person made, for a character beyond the first plane.
+        KEY_EMOJI => (("😀", "😀"), ("😀", "😀"), "emoji"),
         _ => return None,
     })
 }
@@ -38,6 +42,7 @@ struct FakeState {
     names: Vec<String>,
     current_index: i64,
     accept_switch: bool,
+    ignores_switch: bool,
     switch_requests: Vec<i64>,
     fail_switch_from: Option<usize>,
     posted: Vec<Vec<(bool, u32)>>,
@@ -99,6 +104,9 @@ impl WaylandApi for FakeApi {
         self.st().current_index
     }
     fn select_layout_index(&self, index: i64) -> bool {
+        if self.st().ignores_switch {
+            return true;
+        }
         let call = self.switch_calls.fetch_add(1, Ordering::SeqCst) + 1;
         let mut state = self.st();
         state.switch_requests.push(index);
@@ -686,6 +694,163 @@ fn a_selection_is_typed_run_by_run_in_the_layouts_that_have_its_characters() {
     let refused = backend.replace_selection(&selected, "q€", None);
     assert!(matches!(refused, Err(SelectionError::Refused(reason)) if reason == SelectionRefused::new(RefusalReason::Untypeable)));
     assert!(api.st().posted.is_empty());
+}
+
+#[test]
+fn what_the_compositor_knows_is_asked_through() {
+    let (api, backend, _events) = make();
+    assert_eq!(backend.layouts(), Ok((EN, RU)));
+    assert_eq!(backend.window_process_id(WINDOW), 4242);
+    assert_eq!(backend.window_origin(WINDOW), api.window_origin(WINDOW));
+    assert_eq!(backend.position_window(WINDOW, 1, 2), api.position_window(WINDOW, 1, 2));
+    assert_eq!(backend.input_anchor(), api.input_anchor());
+    assert!(spawn_failed(std::io::Error::other("no threads")).to_string().contains("no threads"));
+}
+
+#[test]
+fn layouts_of_other_alphabets_are_passed_over() {
+    let found = select_layout_indices(5, &|_, _, index| ["1", "\u{3b1}", "q", "w", "й"][usize::try_from(index).unwrap()].to_owned());
+    assert_eq!(found.unwrap(), (2, 4));
+    let russian_first = select_layout_indices(3, &|_, _, index| ["й", "ц", "q"][usize::try_from(index).unwrap()].to_owned());
+    assert_eq!(russian_first.unwrap(), (2, 0));
+    assert_eq!(key_name(99999, "я", ""), "я");
+    assert_eq!(key_name(99999, "", "я"), "KEY_99999");
+}
+
+#[test]
+fn a_thread_is_waited_for_only_so_long_and_never_by_itself() {
+    let slow = thread::spawn(|| thread::sleep(Duration::from_millis(300)));
+    let began = Instant::now();
+    join_within(slow, 0.01);
+    assert!(began.elapsed() < Duration::from_millis(300));
+    join_within(thread::spawn(|| {}), 5.0);
+    // A stop from the listener's own thread.
+    let (_api, backend, _events) = make();
+    let backend = Arc::new(backend);
+    let go = Arc::new(Flag::default());
+    let (worker, signal) = (backend.clone(), go.clone());
+    let handle = thread::spawn(move || {
+        assert!(signal.wait(Duration::from_secs(5)));
+        worker.stop();
+    });
+    let id = handle.thread().id();
+    assert_ne!(id, thread::current().id());
+    *lock(&backend.inner.thread) = Some(handle);
+    go.set();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock(&backend.inner.thread).is_some() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(lock(&backend.inner.thread).is_none());
+}
+
+#[test]
+fn a_pointer_with_nobody_listening_and_a_key_with_no_layouts_pass() {
+    let (api, backend, _events) = make();
+    *lock(&backend.inner.listener) = None;
+    let pointer = NativeKeyEvent { pointer: true, ..key(0, 1, true) };
+    assert!(!backend.inner.handle_native(pointer));
+    api.st().names.clear();
+    assert!(!backend.inner.handle_native(key(EVDEV_KEY_A, 2, true)));
+}
+
+#[test]
+fn a_layout_the_compositor_never_confirms_is_said_to_be_unconfirmed() {
+    let (api, backend, _events) = make();
+    api.st().ignores_switch = true;
+    assert!(matches!(backend.switch_group(1), Err(BackendError::LayoutSwitchUnconfirmed { .. })));
+}
+
+#[test]
+fn keys_posted_again_go_apart_from_the_keys_typed() {
+    let (api, backend, _events) = make();
+    let again = NativeInput { replayed: true, ..NativeInput::synthetic(true, EVDEV_KEY_A) };
+    let own = NativeInput { pressed: true, keycode: EVDEV_KEY_A, synthetic: false, replayed: false };
+    for inputs in [
+        vec![again, NativeInput::synthetic(true, EVDEV_KEY_A)],
+        vec![NativeInput::synthetic(true, EVDEV_KEY_A), again],
+        vec![NativeInput::synthetic(true, EVDEV_KEY_A), own],
+        vec![own, NativeInput::synthetic(false, EVDEV_KEY_A), NativeInput::synthetic(true, EVDEV_KEY_A)],
+    ] {
+        api.st().posted.clear();
+        assert!(backend.inner.deliver_inputs(&inputs, None, false).is_ok());
+    }
+}
+
+#[test]
+fn a_held_place_that_moved_stops_the_selection() {
+    let (api, backend, _events) = make();
+    let selected = SelectedText { text: "q".to_owned(), source: "atspi".to_owned() };
+    backend.hold_input();
+    // The hold is good: the selection is typed against the sequence it began at.
+    assert!(backend.replace_selection(&selected, "a", None).is_ok());
+    backend.hold_input();
+    api.st().window = WINDOW + 1;
+    assert!(matches!(backend.replace_selection(&selected, "a", None), Err(SelectionError::Refused(_))));
+    api.st().window = WINDOW;
+    let _ = backend.release_input();
+    backend.hold_input();
+    backend.inner.state().pointer_epoch += 1;
+    assert!(matches!(backend.replace_selection(&selected, "a", None), Err(SelectionError::Refused(_))));
+    let _ = backend.release_input();
+    backend.inner.state().hold_broken = true;
+    assert!(matches!(backend.replace_selection(&selected, "a", None), Err(SelectionError::Failed(_))));
+}
+
+#[test]
+fn a_selection_is_typed_with_shift_and_caps_lock_as_they_are() {
+    let (api, backend, _events) = make();
+    let selected = SelectedText { text: "q".to_owned(), source: "atspi".to_owned() };
+    assert!(backend.replace_selection(&selected, "A", None).unwrap());
+    assert!(api.st().posted[0].contains(&(true, EVDEV_KEY_LEFTSHIFT)));
+    api.st().posted.clear();
+    api.st().caps_lock = true;
+    assert!(backend.replace_selection(&selected, "A", None).unwrap());
+    assert!(!api.st().posted[0].contains(&(true, EVDEV_KEY_LEFTSHIFT)));
+    api.st().caps_lock = false;
+    // Beyond the first plane the caret cannot be counted back: the text is typed and left unselected.
+    assert!(!backend.replace_selection(&selected, "😀", None).unwrap());
+    // A final layout that is no layout stays where it was.
+    assert!(backend.replace_selection(&selected, "a", Some(-1)).unwrap());
+    assert!(backend.replace_selection(&selected, "a", Some(9)).unwrap());
+}
+
+struct Field {
+    answers: Vec<Option<bool>>,
+}
+
+impl crate::x11_backend::SelectionSource for Field {
+    fn read_selection(&mut self, _application: &str, _window: i64) -> Result<SelectedText, SelectionError> {
+        Ok(SelectedText { text: "q".to_owned(), source: "atspi".to_owned() })
+    }
+    fn write_selection(&mut self, _selected: &SelectedText, _replacement: &str) -> Result<Option<bool>, SelectionError> {
+        Ok(self.answers.remove(0))
+    }
+}
+
+#[test]
+fn a_field_that_takes_text_itself_needs_no_keys() {
+    let api = FakeApi::new();
+    let factory: crate::x11_backend::SelectionFactory = Box::new(|_| Box::new(Field { answers: vec![Some(true), Some(false), None] }));
+    let backend = WaylandBackend::new(api.clone(), Some(factory));
+    // Asked on no window: no password to check for. Asked twice: one source.
+    let selected = backend.read_selection("app", 0).unwrap();
+    assert_eq!(backend.read_selection("app", WINDOW).unwrap(), selected);
+    assert!(backend.replace_selection(&selected, "привет", Some(1)).unwrap());
+    assert_eq!(api.st().switch_requests, vec![RU]);
+    assert!(api.st().posted.is_empty());
+    assert!(!backend.replace_selection(&selected, "привет", None).unwrap());
+    // A field that cannot take it: the keys type it after all.
+    assert!(backend.replace_selection(&selected, "a", None).unwrap());
+    assert!(!api.st().posted.is_empty());
+}
+
+#[test]
+fn a_listener_that_never_says_it_is_ready_stops_the_start() {
+    let (api, backend, _events) = make();
+    api.st().signal_ready = false;
+    assert!(error_text(backend.start(Arc::new(|_| {}))).contains("не подтвердил"));
+    assert!(!backend.running());
 }
 
 // ---------------------------------------------------------------- a long walk

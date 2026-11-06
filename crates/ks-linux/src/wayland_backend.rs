@@ -348,6 +348,11 @@ impl WaylandBackend {
     }
 }
 
+/// A thread the system refused.
+fn spawn_failed(error: std::io::Error) -> BackendError {
+    failed(error.to_string())
+}
+
 /// Waits for a thread to end, up to `timeout` seconds; a thread still running is left behind.
 pub fn join_within(handle: JoinHandle<()>, timeout: f64) {
     let deadline = Instant::now() + seconds(timeout);
@@ -1171,7 +1176,7 @@ impl InputBackend for WaylandBackend {
                 }
                 worker.running.store(false, Ordering::SeqCst);
             })
-            .map_err(|error| failed(error.to_string()))?;
+            .map_err(spawn_failed)?;
         *lock(&inner.thread) = Some(handle);
         if !inner.ready.wait(seconds(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS)) {
             self.stop_inner();
