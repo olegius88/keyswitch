@@ -687,3 +687,153 @@ fn a_selection_is_typed_run_by_run_in_the_layouts_that_have_its_characters() {
     assert!(matches!(refused, Err(SelectionError::Refused(reason)) if reason == SelectionRefused::new(RefusalReason::Untypeable)));
     assert!(api.st().posted.is_empty());
 }
+
+// ---------------------------------------------------------------- a long walk
+
+/// A small generator with a fixed start: the walk is the same on every run.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, limit: usize) -> usize {
+        (self.next() % limit.to::<u64>()).to::<usize>()
+    }
+    fn of<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[self.below(items.len())]
+    }
+    fn one_in(&mut self, odds: usize) -> bool {
+        self.below(odds) == 0
+    }
+}
+
+const WALK_KEYS: [u32; 43] = [
+    EVDEV_KEY_A, EVDEV_KEY_Q, EVDEV_KEY_Z, KEY_G, EVDEV_KEY_SEMICOLON, EVDEV_KEY_COMMA, EVDEV_KEY_SLASH, EVDEV_KEY_SPACE, EVDEV_KEY_ENTER, EVDEV_KEY_KPENTER, EVDEV_KEY_TAB, EVDEV_KEY_ESC,
+    EVDEV_KEY_BACKSPACE, EVDEV_KEY_CAPSLOCK, EVDEV_KEY_LEFTSHIFT, EVDEV_KEY_RIGHTSHIFT, EVDEV_KEY_LEFTCTRL, EVDEV_KEY_RIGHTCTRL, EVDEV_KEY_LEFTALT, EVDEV_KEY_RIGHTALT, EVDEV_KEY_LEFTMETA,
+    EVDEV_KEY_RIGHTMETA, EVDEV_KEY_HOME, EVDEV_KEY_END, EVDEV_KEY_PAGEUP, EVDEV_KEY_PAGEDOWN, EVDEV_KEY_LEFT, EVDEV_KEY_RIGHT, EVDEV_KEY_UP, EVDEV_KEY_DOWN, EVDEV_KEY_INSERT, EVDEV_KEY_DELETE,
+    EVDEV_KEY_EQUAL, EVDEV_KEY_MINUS, EVDEV_KEY_DOT, EVDEV_KEY_GRAVE, EVDEV_KEY_LEFTBRACE, EVDEV_KEY_BACKSLASH, EVDEV_KEY_RIGHTBRACE, EVDEV_KEY_APOSTROPHE, EVDEV_KEY_PAUSE, 2, 999,
+];
+
+fn walk_stroke(dice: &mut Dice) -> KeyEvent {
+    let code = *dice.of(&WALK_KEYS[..WALK_KEYS.len() - 1]);
+    let (plain, shifted) = qwerty(code).map_or(("x", "X"), |spec| (spec.0.0, spec.1.0));
+    let group = *dice.of(&[0, 0, 0, 1, 1, 1, -1, 5]);
+    let state = *dice.of(&[0, 0, 0, SHIFT_MASK, LOCK_MASK, CONTROL_MASK]);
+    stroke(code, plain, &[plain, shifted], group, state)
+}
+
+fn walk_injection(backend: &WaylandBackend, dice: &mut Dice) {
+    let strokes: Vec<KeyEvent> = (0..dice.below(5)).map(|_| walk_stroke(dice)).collect();
+    let trailing: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(dice)).collect();
+    let late: Vec<KeyEvent> = (0..dice.below(2)).map(|_| walk_stroke(dice)).collect();
+    let boundary = dice.one_in(2).then(|| walk_stroke(dice));
+    let source_group = *dice.of(&[None, None, Some(0), Some(1), Some(-1), Some(9)]);
+    let erased = *dice.of(&[None, None, Some(1), Some(2)]);
+    let _ = backend.inject_correction(Injection {
+        strokes: &strokes,
+        target_group: *dice.of(&[0, 1, 1, 0, -1, 7]),
+        boundary: boundary.as_ref(),
+        source_group,
+        late: &late,
+        trailing: &trailing,
+        kept_tail: *dice.of(&[0, 0, 0, 1, 9]),
+        erased,
+    });
+}
+
+#[test]
+fn a_long_walk_through_the_backend_stops_nowhere() {
+    for seed in 1..=WALKS {
+        let mut dice = Dice(0x9e37_79b9_7f4a_7c15 ^ seed.wrapping_mul(0xbf58_476d_1ce4_e5b9));
+        let (api, backend, _events) = make();
+        let mut sequence = 1;
+        for _ in 0..STEPS {
+            sequence += 1;
+            let code = *dice.of(&WALK_KEYS);
+            match dice.below(36) {
+                0..=13 => {
+                    let _ = backend.handle_native(key(code, sequence, true));
+                    let _ = backend.handle_native(key(code, sequence + 1, false));
+                    sequence += 1;
+                }
+                14..=16 => {
+                    let _ = backend.handle_native(key(code, sequence, true));
+                }
+                17 => {
+                    let _ = backend.handle_native(NativeKeyEvent { input_reset: true, ..key(code, sequence, true) });
+                }
+                18 => {
+                    let _ = backend.handle_native(forced(code, sequence));
+                }
+                19 => {
+                    let _ = backend.handle_native(NativeKeyEvent { pointer: true, ..key(0, sequence, true) });
+                }
+                20 => {
+                    let _ = backend.handle_native(NativeKeyEvent { repeat_reset: true, ..key(0, sequence, true) });
+                }
+                21 => {
+                    let _ = backend.handle_native(NativeKeyEvent { injected: true, ..key(code, sequence, dice.one_in(2)) });
+                }
+                22 => {
+                    let _ = backend.handle_native(NativeKeyEvent { replayed: true, ..key(code, sequence, dice.one_in(2)) });
+                }
+                23..=25 => backend.hold_input(),
+                26 => {
+                    let _ = backend.release_input();
+                }
+                27 => {
+                    let _ = backend.complete_action(dice.one_in(2));
+                }
+                28 => walk_injection(&backend, &mut dice),
+                29 => match dice.below(4) {
+                    0 => backend.set_key_filter(defer_enter()),
+                    1 => backend.set_key_filter(filter(|event| if event.key_name == "Pause" { KeyDisposition::Consume } else { KeyDisposition::Pass })),
+                    2 => backend.set_key_filter(filter(|_| KeyDisposition::Defer)),
+                    _ => backend.set_key_filter(None),
+                },
+                30 => api.st().window = *dice.of(&[WINDOW, SECOND_WINDOW]),
+                31 => api.st().caps_lock = dice.one_in(2),
+                32 => {
+                    let mut state = api.st();
+                    state.refuse_checked = dice.one_in(4);
+                    state.post_result = *dice.of(&[None, None, None, Some(0), Some(1)]);
+                    state.fail_switch_from = None;
+                }
+                33 => {
+                    api.st().released_keys.insert(code);
+                    let _ = backend.handle_native(key(EVDEV_KEY_A, sequence, true));
+                    api.st().now_ms += 100_000;
+                }
+                34 => {
+                    let _ = backend.switch_group(*dice.of(&[0, 1, -1, 9]));
+                }
+                _ => {
+                    let _ = (backend.current_group(), backend.active_application(), backend.focused_window(), backend.probe());
+                }
+            }
+        }
+        let _ = backend.complete_action(false);
+        let _ = backend.release_input();
+    }
+}
+
+const WALKS: u64 = 300;
+const STEPS: usize = 60;
+
+#[test]
+fn every_key_of_the_table_has_its_name() {
+    for code in WALK_KEYS {
+        let _ = key_name(code, "", "");
+    }
+    assert_eq!(key_name(EVDEV_KEY_TAB, "", ""), "Tab");
+    assert_eq!(key_name(EVDEV_KEY_Q, "q", "q"), "q");
+    assert_eq!(key_name(EVDEV_KEY_Q, "Cyrillic_shorti", "й"), "Cyrillic_shorti");
+    assert_eq!(key_name(999, "", "z"), "z");
+    assert_eq!(key_name(999, "", ""), "KEY_999");
+    assert!(select_layout_indices(1, &|_, _, _| "й".to_owned()).is_err());
+    assert_eq!(select_layout_indices(3, &|_, _, index| ["é", "q", "й"][index.to::<usize>()].to_owned()).ok(), Some((1, 2)));
+}
