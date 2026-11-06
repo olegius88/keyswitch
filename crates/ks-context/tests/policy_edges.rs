@@ -10,7 +10,7 @@ use ks_lang::Resources;
 use ks_lang::detector::{DetectionDecision, LanguageDetector, LanguageScorer, ProtectedTokens};
 
 fn resources() -> Arc<Resources> {
-    Resources::new(&PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources")))
+    Resources::new(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources")))
 }
 
 struct Shows(FieldContext);

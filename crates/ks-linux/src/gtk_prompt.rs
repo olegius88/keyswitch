@@ -14,7 +14,7 @@ use ks_engine::rule_editor::{
     layout_hint, match_label, prompt_word_line,
 };
 
-use crate::gtk_model::{
+use crate::gtk_model::{with_shared, 
     LEARNING_PROMPT_GTK_MARGIN_X_PIXELS, LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS, LEARNING_PROMPT_GTK_SPACING_PIXELS, LEARNING_PROMPT_GTK_WIDTH_PIXELS,
     LEARNING_PROMPT_WINDOW_TITLE, prompt_position,
 };
@@ -132,11 +132,11 @@ impl LearningPromptWindow {
         inner.window.add_controller(controller);
         let weak = Rc::downgrade(&inner);
         inner.window.connect_close_request(move |_| {
-            if let Some(inner) = weak.upgrade()
-                && let Some(prompt) = inner.prompt.borrow().clone()
-            {
-                (inner.callbacks.dismiss)(&prompt);
-            }
+            with_shared(&weak, |inner| {
+                if let Some(prompt) = inner.prompt.borrow().clone() {
+                    (inner.callbacks.dismiss)(&prompt);
+                }
+            });
             glib::Propagation::Stop
         });
         LearningPromptWindow { inner }
@@ -156,11 +156,7 @@ impl LearningPromptWindow {
         inner.window.present();
         inner.window.grab_focus();
         let weak = Rc::downgrade(inner);
-        glib::idle_add_local_once(move || {
-            if let Some(inner) = weak.upgrade() {
-                inner.position_above_anchor();
-            }
-        });
+        glib::idle_add_local_once(move || with_shared(&weak, PromptInner::position_above_anchor));
     }
 
     pub fn hide_prompt(&self) {
@@ -223,8 +219,10 @@ fn radio_group<T: Copy + PartialEq>(
         into.append(&button);
         buttons.push((*value, button));
     }
-    if let Some((_, button)) = buttons.iter().find(|(value, _)| *value == selected) {
-        button.set_active(true);
+    for (value, button) in &buttons {
+        if *value == selected {
+            button.set_active(true);
+        }
     }
     buttons
 }
@@ -303,11 +301,7 @@ impl RuleEditorWindow {
         let weak = Rc::downgrade(&form);
         let with_form = move |action: fn(&RuleForm)| {
             let weak = weak.clone();
-            move || {
-                if let Some(form) = weak.upgrade() {
-                    action(&form);
-                }
-            }
+            move || with_shared(&weak, action)
         };
         let changed = with_form(RuleForm::pattern_changed);
         form.entry.connect_changed(move |_| changed());
@@ -345,11 +339,7 @@ impl RuleEditorWindow {
             }
         });
         let weak = Rc::downgrade(&form);
-        form.window.connect_is_active_notify(move |window| {
-            if let Some(form) = weak.upgrade() {
-                (form.callbacks.focused)(window.is_active());
-            }
-        });
+        form.window.connect_is_active_notify(move |window| with_shared(&weak, |form| (form.callbacks.focused)(window.is_active())));
         form.pattern_changed();
         RuleEditorWindow { form }
     }

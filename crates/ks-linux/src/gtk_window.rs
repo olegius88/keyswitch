@@ -38,7 +38,7 @@ use ks_updates::{UpdateController, UpdatePhase, UpdateSnapshot};
 use serde_json::{Value, json};
 
 use crate::gtk_app;
-use crate::gtk_model::{GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
+use crate::gtk_model::{with_live, GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
 use crate::system::AutostartManager;
 
 const CONFIDENCE_SETTING_STEP: f64 = 0.1;
@@ -90,26 +90,40 @@ impl ApplicationChoice {
 /// `installed_application_choices`: visible desktop applications with the best `WM_CLASS` candidate.
 #[must_use]
 pub fn installed_application_choices() -> Vec<ApplicationChoice> {
-    let mut choices: Vec<ApplicationChoice> = Vec::new();
-    for application in gio::AppInfo::all() {
-        if !application.should_show() {
-            continue;
-        }
+    let shown = gio::AppInfo::all().into_iter().filter(AppInfoExt::should_show).map(|application| {
         let desktop_id = application.id().map(|id| id.to_string()).unwrap_or_default();
-        let desktop_id = desktop_id.strip_suffix(".desktop").unwrap_or(&desktop_id).to_owned();
-        let startup_class =
-            application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map(|class| class.to_string()).unwrap_or_default();
-        let executable = application.executable().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-        let identifier = [startup_class, executable, desktop_id.clone()].into_iter().find(|text| !text.is_empty()).unwrap_or_default().trim().to_owned();
-        let name = application.display_name().to_string().trim().to_owned();
-        let name = if name.is_empty() { application.name().to_string().trim().to_owned() } else { name };
-        let name = if name.is_empty() { identifier.clone() } else { name };
-        if identifier.is_empty() || name.is_empty() {
-            continue;
+        RawChoice {
+            desktop_id: desktop_id.strip_suffix(".desktop").unwrap_or(&desktop_id).to_owned(),
+            startup_class: application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map(|class| class.to_string()).unwrap_or_default(),
+            executable: application.executable().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
+            display_name: application.display_name().to_string(),
+            name: application.name().to_string(),
+            icon: application.icon(),
         }
+    });
+    choices_of(shown)
+}
+
+/// What a desktop entry says of a program.
+struct RawChoice {
+    desktop_id: String,
+    startup_class: String,
+    executable: String,
+    display_name: String,
+    name: String,
+    icon: Option<gio::Icon>,
+}
+
+/// The programs a person can choose from, by name, each once. A program with nothing to identify it is left out.
+fn choices_of(items: impl Iterator<Item = RawChoice>) -> Vec<ApplicationChoice> {
+    let mut choices: Vec<ApplicationChoice> = Vec::new();
+    for item in items {
+        let first_text = |texts: [&str; 3]| texts.into_iter().map(str::trim).find(|text| !text.is_empty()).unwrap_or_default().to_owned();
+        let identifier = first_text([&item.startup_class, &item.executable, &item.desktop_id]);
+        let name = first_text([&item.display_name, &item.name, &identifier]);
         let key = identifier.to_lowercase();
-        if choices.iter().all(|choice| choice.identifier.to_lowercase() != key) {
-            choices.push(ApplicationChoice { name, identifier, desktop_id, icon: application.icon() });
+        if !identifier.is_empty() && choices.iter().all(|choice| choice.identifier.to_lowercase() != key) {
+            choices.push(ApplicationChoice { name, identifier, desktop_id: item.desktop_id, icon: item.icon });
         }
     }
     choices.sort_by_key(|choice| (choice.name.to_lowercase(), choice.identifier.to_lowercase()));
@@ -250,8 +264,13 @@ fn install_css(resource_dir: &std::path::Path) {
     }
     let provider = gtk::CssProvider::new();
     provider.load_from_path(resource_dir.join("style.css"));
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    add_provider_to(gdk::Display::default(), &provider);
+}
+
+/// The style for a display, if there is one.
+pub fn add_provider_to(display: Option<gdk::Display>, provider: &gtk::CssProvider) {
+    if let Some(display) = display {
+        gtk::style_context_add_provider_for_display(&display, provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
 }
 
@@ -284,7 +303,7 @@ struct Live {
 
 pub struct MainWindow {
     pub window: adw::ApplicationWindow,
-    services: Rc<Services>,
+    pub services: Rc<Services>,
     toast_overlay: adw::ToastOverlay,
     stack: gtk::Stack,
     nav_list: gtk::ListBox,
@@ -425,9 +444,7 @@ impl MainWindow {
         this.refresh_models();
         this.apply_engine_snapshot(&this.services.engine.snapshot());
         this.apply_update_snapshot(&this.services.updates.snapshot());
-        if let Some(row) = this.nav_list.row_at_index(0) {
-            this.nav_list.select_row(Some(&row));
-        }
+        this.nav_list.select_row(this.nav_list.row_at_index(0).as_ref());
         this
     }
 
@@ -500,9 +517,9 @@ impl MainWindow {
         let stack = self.stack.clone();
         self.nav_list.connect_row_selected(move |_, row| {
             let Some(row) = row else { return };
-            let Some((name, _, _)) = NAVIGATION.get(row.index().to::<usize>()) else { return };
+            let (name, _, _) = NAVIGATION[row.index().to::<usize>()];
             stack.set_visible_child_name(name);
-            if *name == "history" || *name == "automation" {
+            if name == "history" || name == "automation" {
                 gtk_app::refresh_current(name);
             }
         });
@@ -510,6 +527,12 @@ impl MainWindow {
     }
 
     // ------------------------------------------------------------------------------------------------- shared helpers
+
+    /// The settings this window shows a control of.
+    #[must_use]
+    pub fn control_paths(&self) -> Vec<String> {
+        self.controls.borrow().keys().cloned().collect()
+    }
 
     pub fn toast(&self, message: &str) {
         self.toast_overlay.add_toast(adw::Toast::new(message));
@@ -773,7 +796,11 @@ impl MainWindow {
     }
 
     pub fn finish_active_application_capture(&self) {
-        let application = self.services.backend.active_application().trim().to_owned();
+        self.capture_application(self.services.backend.active_application().trim());
+    }
+
+    /// The program in front has been chosen: it goes on the list, unless it is none or this one.
+    pub fn capture_application(&self, application: &str) {
         self.window.present();
         if application.is_empty() || application.to_lowercase() == "keyswitch" {
             self.live.active_app_row.set_subtitle("Окно не выбрано. Повторите и переключитесь в другое приложение.");
@@ -781,7 +808,7 @@ impl MainWindow {
             return;
         }
         self.live.active_app_row.set_subtitle(&format!("Выбрано окно: {application}"));
-        self.add_application_exclusion(&application, "");
+        self.add_application_exclusion(application, "");
     }
 
     fn show_application_picker(&self) {
@@ -796,11 +823,9 @@ impl MainWindow {
         header.set_title_widget(Some(&title));
         let close = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Закрыть").build();
         let weak = dialog.downgrade();
-        close.connect_clicked(move |_| {
-            if let Some(dialog) = weak.upgrade() {
-                dialog.close();
-            }
-        });
+        close.connect_clicked(move |_| with_live(&weak, |dialog| {
+            dialog.close();
+        }));
         header.pack_start(&close);
         toolbar.add_top_bar(&header);
 
@@ -828,22 +853,17 @@ impl MainWindow {
         let weak_search = search.downgrade();
         applications.set_filter_func(move |row| {
             let wanted = weak_search.upgrade().map(|search| search.text().trim().to_lowercase()).unwrap_or_default();
-            searched.get(row.index().to::<usize>()).is_some_and(|choice| choice.search_text().contains(&wanted))
+            searched[row.index().to::<usize>()].search_text().contains(&wanted)
         });
         let weak_list = applications.downgrade();
-        search.connect_search_changed(move |_| {
-            if let Some(list) = weak_list.upgrade() {
-                list.invalidate_filter();
-            }
-        });
+        search.connect_search_changed(move |_| with_live(&weak_list, |list| list.invalidate_filter()));
         let weak = dialog.downgrade();
         applications.connect_row_activated(move |_, row| {
-            if let Some(choice) = catalog.get(row.index().to::<usize>()) {
-                gtk_app::add_application_exclusion(&choice.identifier, &choice.name);
-            }
-            if let Some(dialog) = weak.upgrade() {
+            let choice = &catalog[row.index().to::<usize>()];
+            gtk_app::add_application_exclusion(&choice.identifier, &choice.name);
+            with_live(&weak, |dialog| {
                 dialog.close();
-            }
+            });
         });
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&applications).build();
         content.append(&scroll);
@@ -904,7 +924,7 @@ impl MainWindow {
         );
     }
 
-    fn copy_diagnostics(&self) {
+    pub fn copy_diagnostics(&self) {
         let settings = &self.services.settings;
         let info = self.services.models.lock().unwrap_or_else(PoisonError::into_inner).clone();
         let loading = || self.services.engine.snapshot().last_action;
@@ -920,35 +940,37 @@ impl MainWindow {
             log_state: status_repr(&log_status()),
         };
         let text = diagnostics_report(&self.probe, &context);
-        match gdk::Display::default() {
-            Some(display) => {
-                display.clipboard().set_text(&text);
-                self.toast("Диагностика скопирована");
-            }
-            None => self.toast("Буфер обмена недоступен"),
-        }
+        WidgetExt::display(&self.window).clipboard().set_text(&text);
+        self.toast("Диагностика скопирована");
     }
 
     fn open_update_release(&self) {
-        let url = self.services.updates.snapshot().release_url;
+        self.open_release(&self.services.updates.snapshot().release_url);
+    }
+
+    /// The page of the release, with what the system's browser answers.
+    pub fn open_release(&self, url: &str) {
         if url.is_empty() {
             self.toast("Сначала проверьте наличие новой версии");
             return;
         }
-        match open_uri(&url) {
-            Ok(_) => {}
-            Err(message) => self.toast(&format!("Не удалось открыть выпуск: {message}")),
+        if let Err(message) = open_uri(url) {
+            self.toast(&format!("Не удалось открыть выпуск: {message}"));
         }
     }
 
-    fn open_log_directory(&self) {
-        let uri = gio::File::for_path(log_directory()).uri();
-        if let Err(message) = open_uri(&uri) {
+    pub fn open_log_directory(&self) {
+        self.open_folder(&gio::File::for_path(log_directory()).uri());
+    }
+
+    /// A folder in the system's file manager, with what that answers.
+    pub fn open_folder(&self, uri: &str) {
+        if let Err(message) = open_uri(uri) {
             self.toast(&format!("Не удалось открыть папку журнала: {message}"));
         }
     }
 
-    fn check_updates(&self) {
+    pub fn check_updates(&self) {
         if !self.services.updates.check(false, false) {
             self.toast("Проверка обновлений уже выполняется");
         }
@@ -959,6 +981,29 @@ impl MainWindow {
         for (_, source) in self.save_sources.borrow_mut().drain() {
             source.remove();
         }
+    }
+}
+
+/// What the diagnostics page says of the backend, in the words of its session.
+fn backend_rows(probe: &BackendProbe, group: &str) -> [(&'static str, String); 5] {
+    let display = if probe.display.is_empty() { "—" } else { probe.display.as_str() };
+    let capture = if probe.available { &probe.record_version } else { &probe.error }.clone();
+    if probe.session_type == "wayland" {
+        [
+            ("Сеанс", format!("{} · {display}", probe.session_type)),
+            ("Перехват ввода", capture),
+            ("Синтез ввода", probe.xtest_version.clone()),
+            ("Раскладки", probe.xkb_version.clone()),
+            ("Активная группа", group.to_owned()),
+        ]
+    } else {
+        [
+            ("Сеанс", format!("{} · DISPLAY {display}", probe.session_type)),
+            ("XRecord", capture),
+            ("XTEST", probe.xtest_version.clone()),
+            ("XKB", probe.xkb_version.clone()),
+            ("XKB-группа", group.to_owned()),
+        ]
     }
 }
 
@@ -1116,10 +1161,11 @@ impl Builder<'_> {
             let (settings, sources_again, key_again) = (settings.clone(), sources.clone(), key.clone());
             let source = glib::timeout_add_local_once(std::time::Duration::from_millis(u64::from(TEXT_SAVE_DEBOUNCE_MS)), move || {
                 sources_again.borrow_mut().remove(&key_again);
-                let Some(buffer) = weak.upgrade() else { return };
-                let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true);
-                let values: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
-                store(&settings, &key_again, json!(values));
+                with_live(&weak, |buffer| {
+                    let text = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true);
+                    let values: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+                    store(&settings, &key_again, json!(values));
+                });
             });
             sources.borrow_mut().insert(key.clone(), source);
         });
@@ -1136,11 +1182,7 @@ impl Builder<'_> {
         });
         let focus = gtk::EventControllerFocus::new();
         let weak = entry.downgrade();
-        focus.connect_leave(move |_| {
-            if let Some(entry) = weak.upgrade() {
-                save_hotkey(&settings, &key, &entry);
-            }
-        });
+        focus.connect_leave(move |_| with_live(&weak, |entry| save_hotkey(&settings, &key, &entry)));
         entry.add_controller(focus);
         row.add_suffix(&entry);
         row
@@ -1609,18 +1651,8 @@ impl Builder<'_> {
         let probe = self.probe;
         let diagnostics = group("Диагностика backend");
         let group_text = group_text(probe.current_group);
-        if probe.session_type == "wayland" {
-            diagnostics.add(&action_row("Сеанс", &format!("{} · {}", probe.session_type, if probe.display.is_empty() { "—" } else { probe.display.as_str() })));
-            diagnostics.add(&action_row("Перехват ввода", if probe.available { &probe.record_version } else { &probe.error }));
-            diagnostics.add(&action_row("Синтез ввода", &probe.xtest_version));
-            diagnostics.add(&action_row("Раскладки", &probe.xkb_version));
-            diagnostics.add(&action_row("Активная группа", &group_text));
-        } else {
-            diagnostics.add(&action_row("Сеанс", &format!("{} · DISPLAY {}", probe.session_type, if probe.display.is_empty() { "—" } else { probe.display.as_str() })));
-            diagnostics.add(&action_row("XRecord", if probe.available { &probe.record_version } else { &probe.error }));
-            diagnostics.add(&action_row("XTEST", &probe.xtest_version));
-            diagnostics.add(&action_row("XKB", &probe.xkb_version));
-            diagnostics.add(&action_row("XKB-группа", &group_text));
+        for (title, value) in backend_rows(probe, &group_text) {
+            diagnostics.add(&action_row(title, &value));
         }
         diagnostics.add(&action_row("Операционная система", &os_description()));
         page.append(&diagnostics);
@@ -1678,6 +1710,64 @@ pub type Rule = LearnedRule;
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn programs_are_named_and_listed_once() {
+        let raw = |class: &str, executable: &str, id: &str, display: &str, name: &str| RawChoice {
+            startup_class: class.to_owned(),
+            executable: executable.to_owned(),
+            desktop_id: id.to_owned(),
+            display_name: display.to_owned(),
+            name: name.to_owned(),
+            icon: None,
+        };
+        let choices = choices_of(
+            [
+                raw("Class", "exe", "id", "Показ", "имя"),
+                raw("class", "other", "id2", "Копия", "копия"),
+                raw("", "exe2", "id3", "  ", "Имя"),
+                raw("", "", "id4", "", ""),
+                raw("  ", "", "", "Никто", "Никто"),
+            ]
+            .into_iter(),
+        );
+        let found: Vec<(&str, &str)> = choices.iter().map(|choice| (choice.name.as_str(), choice.identifier.as_str())).collect();
+        assert_eq!(found, [("id4", "id4"), ("Имя", "exe2"), ("Показ", "Class")]);
+        assert!(choices[2].search_text().contains("class"));
+    }
+
+    #[test]
+    fn settings_edited_by_hand_read_as_they_can() {
+        let settings = SettingsStore::new(None);
+        assert_eq!(setting_text(&settings, "no.such.text", "x"), "x");
+        settings.set("a.number", json!(5), false).unwrap();
+        settings.set("a.null", json!(null), false).unwrap();
+        settings.set("a.list", json!(["b", 5]), false).unwrap();
+        assert_eq!(setting_text(&settings, "a.number", "x"), "5");
+        assert_eq!(setting_text(&settings, "a.null", "x"), "x");
+        assert_eq!(setting_strings(&settings, "a.list"), ["b", "5"]);
+        assert!(setting_strings(&settings, "a.number").is_empty());
+        assert_eq!(python_bool(false), "False");
+        assert_eq!(python_bool(true), "True");
+    }
+
+    #[test]
+    fn the_diagnostics_speak_the_words_of_the_session() {
+        let probe = |session: &str, available: bool, display: &str| BackendProbe {
+            session_type: session.to_owned(),
+            available,
+            display: display.to_owned(),
+            record_version: "1.13".to_owned(),
+            error: "why not".to_owned(),
+            ..BackendProbe::default()
+        };
+        assert_eq!(backend_rows(&probe("wayland", true, "wayland-0"), "0")[0].1, "wayland · wayland-0");
+        assert_eq!(backend_rows(&probe("wayland", false, ""), "0")[0].1, "wayland · —");
+        assert_eq!(backend_rows(&probe("wayland", false, ""), "0")[1].1, "why not");
+        assert_eq!(backend_rows(&probe("x11", true, ":0"), "0")[1], ("XRecord", "1.13".to_owned()));
+        assert_eq!(backend_rows(&probe("x11", false, ""), "0")[0].1, "x11 · DISPLAY —");
+        assert_eq!(backend_rows(&probe("x11", false, ""), "0")[1].1, "why not");
+    }
 
     #[test]
     fn counts_are_grouped_like_python() {

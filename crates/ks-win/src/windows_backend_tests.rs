@@ -659,7 +659,7 @@ fn modifiers_lost_on_the_way_are_named_together() {
         state.released_keys.insert(first);
         state.released_keys.insert(second);
     }
-    let _ = subject.handle_native(native(true, VK_A, VK_A, false, 21 + i64::from(MODIFIER_RECHECK_GAP_MS) + 1));
+    let _ = subject.handle_native(native(true, VK_A, VK_A, false, 21 + MODIFIER_RECHECK_GAP_MS + 1));
     let hook = lock(&subject.inner.hook);
     assert!(!hook.pressed.contains(first) && !hook.pressed.contains(second));
 }

@@ -269,10 +269,42 @@ pub fn prompt_position(anchor: (i32, i32), size: (i32, i32), monitor: Option<(i3
     (x, y)
 }
 
+/// Runs `action` on what a handler's weak reference still points to; a widget already gone asks nothing.
+pub fn with_live<T: gtk::glib::object::ObjectType>(weak: &gtk::glib::WeakRef<T>, action: impl FnOnce(T)) {
+    if let Some(alive) = weak.upgrade() {
+        action(alive);
+    }
+}
+
+/// The same for a shared value of the window's own.
+pub fn with_shared<T>(weak: &std::rc::Weak<T>, action: impl FnOnce(&T)) {
+    if let Some(alive) = weak.upgrade() {
+        action(&alive);
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_handler_finds_its_widget_or_does_nothing() {
+        use gtk::prelude::*;
+        let object = gtk::gio::SimpleAction::new("x", None);
+        let weak = object.downgrade();
+        let mut seen = 0;
+        with_live(&weak, |_| seen += 1);
+        drop(object);
+        with_live(&weak, |_| seen += 1);
+        assert_eq!(seen, 1);
+        let shared = std::rc::Rc::new(5);
+        let weak = std::rc::Rc::downgrade(&shared);
+        with_shared(&weak, |value| seen += *value);
+        drop(shared);
+        with_shared(&weak, |value| seen += *value);
+        assert_eq!(seen, 6);
+    }
 
     #[test]
     fn the_small_texts_of_the_window() {

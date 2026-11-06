@@ -137,13 +137,15 @@ fn diagnostics_in_a_wayland_session_with_no_compositor_name_the_reason() {
 #[test]
 fn rules_that_cannot_be_opened_end_the_program_with_a_reason() {
     let folder = Folder::new("rules");
-    // A file where the program keeps its rules' folder.
-    std::fs::write(folder.0.join("data"), "").expect("a file");
+    // An old file of rules with a key the migration cannot read.
+    std::fs::create_dir_all(folder.0.join("data")).expect("a folder");
+    std::fs::write(folder.0.join("data/learning.json"), r#"{"schema_version": 2, "rules": {"²:слово": {"target_group": 1, "confirmations": 9}}}"#).expect("a file");
     let mut child = program(&folder, &["--headless"]).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("it starts");
     let deadline = Instant::now() + Duration::from_secs(30);
     while child.try_wait().expect("it can be asked").is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
     let _ = child.kill();
-    assert_ne!(child.wait().expect("it ended").code(), Some(0));
+    let code = child.wait().expect("it ended").code();
+    assert_eq!(code, Some(1));
 }

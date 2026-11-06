@@ -42,9 +42,9 @@ thread_local! {
 
 /// The application and what it keeps; it lives on the main thread.
 pub struct App {
-    application: adw::Application,
-    services: Rc<Services>,
-    desktop: DesktopBackend,
+    pub application: adw::Application,
+    pub services: Rc<Services>,
+    pub desktop: DesktopBackend,
     learning: Arc<LearningStore>,
     autostart: AutostartManager,
     close_updates: Box<dyn Fn()>,
@@ -52,8 +52,8 @@ pub struct App {
     no_engine: bool,
     window: RefCell<Option<Rc<MainWindow>>>,
     tray: RefCell<Option<StatusNotifierItem>>,
-    prompt: RefCell<Option<LearningPromptWindow>>,
-    rule_editor: RefCell<Option<RuleEditorWindow>>,
+    pub prompt: RefCell<Option<LearningPromptWindow>>,
+    pub rule_editor: RefCell<Option<RuleEditorWindow>>,
     /// The window the user typed in when the last rule offer closed, and the one the open rule window gives the keyboard
     /// back to.
     offer_window: Cell<Option<i64>>,
@@ -64,7 +64,7 @@ pub struct App {
     update_periodic: RefCell<Option<glib::SourceId>>,
     last_update_notification: RefCell<String>,
     /// The switch of the autostart row being put back after a failed change.
-    reverting_autostart: Cell<bool>,
+    pub reverting_autostart: Cell<bool>,
 }
 
 fn app() -> Option<Rc<App>> {
@@ -220,7 +220,7 @@ fn json_text(value: Option<Value>, default: &str) -> String {
 }
 
 /// What the engine reports of its models, kept for the languages page and the copied report.
-fn record_models(engine: &KeySwitchEngine, info: &SharedModelInfo) {
+pub fn record_models(engine: &KeySwitchEngine, info: &SharedModelInfo) {
     let guard = engine.core();
     let Some(core) = guard.as_ref() else { return };
     let status = &core.intent_model_status;
@@ -239,15 +239,25 @@ fn record_models(engine: &KeySwitchEngine, info: &SharedModelInfo) {
 
 /// The caret the offer goes above, searched on the engine's thread while the window the user typed in is still the active
 /// one; the pointer is the fallback.
-fn prompt_anchor(desktop: &DesktopBackend) -> Option<PromptAnchor> {
+#[must_use]
+pub fn prompt_anchor(desktop: &DesktopBackend) -> Option<PromptAnchor> {
     let fallback: Option<ScreenAnchor> = desktop.input.input_anchor();
-    let window = fallback.and_then(|anchor| anchor.window);
-    // A backend that knows where windows are searches the application of the window the user typed in.
-    let process = match window {
-        Some(window) if desktop.wayland => (desktop.process_for_window)(window),
-        _ => 0,
-    };
+    let process = anchor_process(fallback.and_then(|anchor| anchor.window), desktop.wayland, &*desktop.process_for_window);
     let caret = atspi_bus::connect().ok().and_then(|api| focused_caret_anchor(&*api, process));
+    anchor_of(caret, fallback)
+}
+
+/// Whose fields to search: a backend that knows where windows are searches the application of the window the user typed in.
+fn anchor_process(window: Option<i64>, wayland: bool, process_of: &dyn Fn(i64) -> u32) -> u32 {
+    match window {
+        Some(window) if wayland => process_of(window),
+        _ => 0,
+    }
+}
+
+/// The caret if it was found, else the pointer.
+fn anchor_of(caret: Option<(i32, i32)>, fallback: Option<ScreenAnchor>) -> Option<PromptAnchor> {
+    let window = fallback.and_then(|anchor| anchor.window);
     match (caret, fallback) {
         (Some((x, y)), _) => Some(PromptAnchor { x, y, window }),
         (None, Some(anchor)) => Some(PromptAnchor { x: anchor.x, y: anchor.y, window: anchor.window }),
@@ -412,6 +422,15 @@ fn shutdown() {
         app.hold.borrow_mut().take();
     });
     APP.with(|slot| slot.borrow_mut().take());
+}
+
+/// The check that comes round by itself.
+#[must_use]
+pub fn periodic_update_check() -> glib::ControlFlow {
+    with_app(|app| {
+        app.services.updates.check(true, false);
+    });
+    glib::ControlFlow::Continue
 }
 
 /// The updater when the manager could not be made: it never finds anything.
@@ -608,7 +627,7 @@ impl App {
         }
     }
 
-    fn sync_autostart(&self) {
+    pub fn sync_autostart(&self) {
         let (enabled, hidden) = (self.flag("general.autostart", true), self.flag("general.start_hidden", true));
         if let Err(error) = self.autostart.set_enabled(enabled, hidden) {
             logsetup::warning(LOGGER, &format!("Не удалось синхронизировать XDG Autostart: {error}"));
@@ -625,22 +644,18 @@ impl App {
         {
             return;
         }
-        let source = glib::timeout_add_seconds_local_once(UPDATE_CHECK_INITIAL_DELAY_SECONDS.low::<u32>(), || {
-            with_app(|app| {
-                app.update_initial.borrow_mut().take();
-                app.services.updates.check(true, false);
-                if app.flag("updates.check_automatically", true) {
-                    let periodic = glib::timeout_add_seconds_local(UPDATE_CHECK_INTERVAL_SECONDS.low::<u32>(), || {
-                        with_app(|app| {
-                            app.services.updates.check(true, false);
-                        });
-                        glib::ControlFlow::Continue
-                    });
-                    *app.update_periodic.borrow_mut() = Some(periodic);
-                }
-            });
-        });
+        let source = glib::timeout_add_seconds_local_once(UPDATE_CHECK_INITIAL_DELAY_SECONDS.low::<u32>(), || with_app(|app| app.first_update_check()));
         *self.update_initial.borrow_mut() = Some(source);
+    }
+
+    /// The check a while after the start; from then on it comes round by itself, if it should.
+    pub fn first_update_check(&self) {
+        self.update_initial.borrow_mut().take();
+        self.services.updates.check(true, false);
+        if self.flag("updates.check_automatically", true) {
+            let periodic = glib::timeout_add_seconds_local(UPDATE_CHECK_INTERVAL_SECONDS.low::<u32>(), periodic_update_check);
+            *self.update_periodic.borrow_mut() = Some(periodic);
+        }
     }
 
     pub fn cancel_update_checks(&self) {
@@ -716,9 +731,7 @@ impl App {
             };
             *self.prompt.borrow_mut() = Some(LearningPromptWindow::new(self.application.upcast_ref(), callbacks));
         }
-        if let Some(window) = self.prompt.borrow().as_ref() {
-            window.show_prompt(prompt, anchor);
-        }
+        self.prompt.borrow().iter().for_each(|window| window.show_prompt(prompt.clone(), anchor));
     }
 
     /// Shows the rule window filled in with `draft`; one at a time. `return_window` gets the keyboard back when it closes.
@@ -761,4 +774,41 @@ fn accept_rule(engine: &DeferredEngine, draft: &RuleDraft) -> String {
     }
     with_window(MainWindow::refresh_rules);
     String::new()
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_setting_that_is_no_text_reads_as_the_default() {
+        assert_eq!(json_text(Some(json!("dark")), "system"), "dark");
+        assert_eq!(json_text(Some(json!(5)), "system"), "system");
+        assert_eq!(json_text(None, "system"), "system");
+    }
+
+    #[test]
+    fn the_updater_that_could_not_be_made_finds_nothing() {
+        let none = NoUpdates;
+        assert_eq!(none.snapshot().phase, UpdatePhase::Idle);
+        none.subscribe(Arc::new(|_| {}));
+        assert!(!none.check(true, false));
+        assert!(!none.install_available());
+        none.installation_failed(&"no space");
+    }
+
+    #[test]
+    fn the_offer_goes_above_the_caret_or_else_the_pointer() {
+        let at = |window| ScreenAnchor { x: 1, y: 2, window };
+        assert_eq!(anchor_process(Some(7), true, &|window| u32::try_from(window).unwrap() + 1), 8);
+        assert_eq!(anchor_process(Some(7), false, &|_| 9), 0);
+        assert_eq!(anchor_process(None, true, &|_| 9), 0);
+        let caret = anchor_of(Some((5, 6)), Some(at(Some(3)))).unwrap();
+        assert_eq!((caret.x, caret.y, caret.window), (5, 6, Some(3)));
+        let pointer = anchor_of(None, Some(at(None))).unwrap();
+        assert_eq!((pointer.x, pointer.y, pointer.window), (1, 2, None));
+        assert!(anchor_of(None, None).is_none());
+        assert!(anchor_of(Some((5, 6)), None).is_some());
+    }
 }

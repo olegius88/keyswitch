@@ -737,9 +737,6 @@ struct InvariantModel {
 }
 
 impl IntentClassifier for InvariantModel {
-    fn veto_threshold(&self) -> f64 {
-        self.delegate.veto_threshold
-    }
 
     fn predict(&self, item: &IntentModelInput<'_>) -> Result<LinearPrediction, LoadError> {
         let key = (item.original.to_owned(), item.alternative.to_owned(), item.source_group * 2 + item.target_group, item.trigger);
