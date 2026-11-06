@@ -680,11 +680,8 @@ impl LanguageScorer for FixedContext {
     }
 
     fn context_score(&self, previous: &str, _word: &str) -> f64 {
-        match previous {
-            SOURCE_SENTINEL => self.profile.source_context,
-            TARGET_SENTINEL => self.profile.target_context,
-            _ => panic!("production context scorer received an unknown sentinel"),
-        }
+        assert!(previous == SOURCE_SENTINEL || previous == TARGET_SENTINEL, "production context scorer received an unknown sentinel");
+        if previous == SOURCE_SENTINEL { self.profile.source_context } else { self.profile.target_context }
     }
 
     fn best_single_deletion(&self, word: &str) -> WordScore {
@@ -746,14 +743,8 @@ impl IntentClassifier for InvariantModel {
         }
         let neutral = IntentModelInput { context_delta: 0.0, context_group: None, ..*item };
         let prediction = self.delegate.predict(&neutral)?;
-        match self.cache.lock().expect("a prediction cache").entry(key) {
-            std::collections::hash_map::Entry::Occupied(_) => {
-                self.hits.fetch_add(1, Ordering::Relaxed);
-            }
-            std::collections::hash_map::Entry::Vacant(place) => {
-                place.insert(prediction.clone());
-            }
-        }
+        let earlier = self.cache.lock().expect("a prediction cache").insert(key, prediction.clone());
+        self.hits.fetch_add(u64::from(earlier.is_some()), Ordering::Relaxed);
         Ok(prediction)
     }
 }
@@ -1224,6 +1215,37 @@ fn sources_of(corpus: &ExternalCorpus) -> Value {
 
 /// `main` of the evaluator: the report on standard output (or returned), the exit status as a number.
 pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
+    match stages(options) {
+        Ok(result) => Ok(result),
+        Err(Stop::Report(report)) => Ok((report, 1)),
+        Err(Stop::Failed(error)) => Err(error),
+    }
+}
+
+/// Why the stages end early: a report of the phase that did not hold, or a failure.
+enum Stop {
+    Report(String),
+    Failed(String),
+}
+
+impl From<String> for Stop {
+    fn from(error: String) -> Stop {
+        Stop::Failed(error)
+    }
+}
+
+impl From<&str> for Stop {
+    fn from(error: &str) -> Stop {
+        Stop::Failed(error.to_owned())
+    }
+}
+
+/// The report of a phase ends the evaluation unless its checks held.
+fn stop_unless(held: bool, report: impl FnOnce() -> Value) -> Result<(), Stop> {
+    if held { Ok(()) } else { Err(Stop::Report(pretty(&report()))) }
+}
+
+fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
     let root = options.root;
     let workers = options.workers.max(1);
     let config_path = root.join("model/intent_v1/config.json");
@@ -1239,9 +1261,7 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let presealed_inputs = ProvenanceInputs { root, artifact: options.artifact, config_path: &config_path, raw_config: &raw_config, config: &config, candidate: &candidate, dataset: None, scorer: &scorer, hard_negative: &hard_provenance, protected: &protected_list };
     let presealed_checks = verify_provenance(&model, &manifest, &presealed_inputs)?;
     let provenance_count = presealed_checks.len();
-    if !checks_pass(&presealed_checks, provenance_count) {
-        return Ok((pretty(&json!({"schema_version": 1, "phase": "presealed_provenance", "sealed_test_evaluated": false, "provenance": checks_payload(&presealed_checks)})), 1));
-    }
+    stop_unless(checks_pass(&presealed_checks, provenance_count), || json!({"schema_version": 1, "phase": "presealed_provenance", "sealed_test_evaluated": false, "provenance": checks_payload(&presealed_checks)}))?;
     let sealed = dataset::build_dataset(&prepared, &dataset_config, &[Split::Test]);
     dataset::assert_no_split_leakage(&sealed, &[Split::Test])?;
     let whole = dataset::merge_sealed_test_dataset(candidate.clone(), sealed.clone())?;
@@ -1250,13 +1270,9 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     dataset::assert_no_split_leakage(&base_sealed, &Split::PRESEALED)?;
     let full_inputs = ProvenanceInputs { dataset: Some(&whole), ..presealed_inputs };
     let provenance = verify_provenance(&model, &manifest, &full_inputs)?;
-    if !checks_pass(&provenance, provenance_count + 1) {
-        return Ok((pretty(&json!({"schema_version": 1, "phase": "full_provenance", "sealed_test_evaluated": false, "provenance": checks_payload(&provenance)})), 1));
-    }
+    stop_unless(checks_pass(&provenance, provenance_count + 1), || json!({"schema_version": 1, "phase": "full_provenance", "sealed_test_evaluated": false, "provenance": checks_payload(&provenance)}))?;
     let evidence = internal_evidence(&model, &manifest, &config, &prepared, &whole, &protected_list, workers)?;
-    if !checks_pass(&evidence.checks, 10) {
-        return Ok((pretty(&json!({"schema_version": 1, "phase": "internal_sealed_evidence", "sealed_test_evaluated": true, "provenance": checks_payload(&provenance), "internal_sealed_evidence": checks_payload(&evidence.checks)})), 1));
-    }
+    stop_unless(checks_pass(&evidence.checks, 10), || json!({"schema_version": 1, "phase": "internal_sealed_evidence", "sealed_test_evaluated": true, "provenance": checks_payload(&provenance), "internal_sealed_evidence": checks_payload(&evidence.checks)}))?;
     if options.provenance_only {
         return Ok((pretty(&json!({"schema_version": 1, "phase": "internal_sealed_evidence", "provenance_passed": true, "internal_sealed_evidence_passed": true, "sealed_test_evaluated": true, "provenance": checks_payload(&provenance), "internal_sealed_evidence": checks_payload(&evidence.checks)})), 0));
     }
@@ -1294,17 +1310,13 @@ pub fn evaluate(options: &Options<'_>) -> Result<(String, i32), String> {
     let combined: BTreeSet<String> = index.signatures.union(&development_signatures).cloned().collect();
     let holdout = external::build_unknown_typo_disjoint_corpus(&onboard, &combined, minimum, &snapshots, &references, &protected, external::HOLDOUT_RANK_NAMESPACE, external::HOLDOUT_CHOICE_NAMESPACE)?;
     let provenance_gates = external_provenance_gates(&policy, stable, &lexical, &index, &development, &holdout);
-    if !all_true(&provenance_gates) {
-        return Ok((pretty(&json!({"schema_version": 1, "phase": "external_corpus_provenance", "external_model_metrics_evaluated": false, "external_provenance_gates": provenance_gates})), 1));
-    }
+    stop_unless(all_true(&provenance_gates), || json!({"schema_version": 1, "phase": "external_corpus_provenance", "external_model_metrics_evaluated": false, "external_provenance_gates": provenance_gates}))?;
     let lexical_comparison = compare_with_fallback(&detector, &lexical.examples, 0, workers)?;
     let unknown_comparison = compare_with_fallback(&detector, &holdout.examples, 0, workers)?;
     let unknown_rows = predict_rows(&model, &holdout.examples, workers)?;
     let unknown_metrics = prediction_metrics(unknown_rows.iter());
     let source_known: Vec<LexicalExample> = lexical.examples.iter().filter(|example| !example.label && models[example.source_group.to::<usize>()].score(&example.original).known).map(|example| LexicalExample { source_known: true, ..example.clone() }).collect();
-    if !(0..2).all(|group| source_known.iter().any(|example| example.source_group == group)) {
-        return Err("source-known runtime subset must cover groups 0 and 1".to_owned());
-    }
+    assert!((0..2).all(|group| source_known.iter().any(|example| example.source_group == group)), "source-known runtime subset must cover groups 0 and 1");
     let source_known_comparison = compare_with_fallback(&detector, &source_known, 0, workers)?;
     let context = production_context(&model, whole.split(Split::Test), &holdout.examples, &whole.safety, &source_known, &models, &protected, &config, workers)?;
     let context_gate = production_context_gate(&config, &context);
@@ -1726,6 +1738,121 @@ mod tests {
         assert_eq!(production_context_gate(&config, &parts)["passed"], json!(false));
         let none = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: other.clone(), observed: observed(other), corpora: corpora() }], unique_predictions: 0, cache_hits: 0 };
         assert_eq!(production_context_gate(&config, &none)["passed"], json!(false));
+    }
+
+    fn snapshots() -> ([Arc<LanguageModel>; 2], [Snapshot; 2]) {
+        let (_, models) = crate::intent::runtime_models(&root()).expect("the models");
+        let snapshots = [external::snapshot_of_model(&models[0], LOCALES[0]).expect("a snapshot"), external::snapshot_of_model(&models[1], LOCALES[1]).expect("a snapshot")];
+        (models, snapshots)
+    }
+
+    #[test]
+    fn external_corpora_are_held_to_the_policy_of_the_config() {
+        let (models, snapshots) = snapshots();
+        let references = [&*models[0], &*models[1]];
+        let protected = ks_lang::Resources::new(root().join("resources")).protected_tokens();
+        let onboard: [std::collections::HashSet<String>; 2] = [std::collections::HashSet::new(), std::collections::HashSet::new()];
+        let minimum = 4;
+        let lexical = external::build_lexical_disjoint_corpus(&onboard, minimum, &snapshots).expect("a corpus");
+        let excluded = BTreeSet::new();
+        let development = external::build_unknown_typo_disjoint_corpus(&onboard, &excluded, minimum, &snapshots, &references, &protected, external::DEVELOPMENT_RANK_NAMESPACE, external::DEVELOPMENT_CHOICE_NAMESPACE).expect("a corpus");
+        let development_signatures = external::unknown_typo_physical_signatures(&development).expect("signatures");
+        let holdout = external::build_unknown_typo_disjoint_corpus(&onboard, &development_signatures, minimum, &snapshots, &references, &protected, external::HOLDOUT_RANK_NAMESPACE, external::HOLDOUT_CHOICE_NAMESPACE).expect("a corpus");
+        let index = SealedSignatureIndex { signatures: BTreeSet::new(), sha256: development.exclusion_signature_sha256.clone(), split_lexical_signature_count: 0, safety_lexical_signature_count: 0, protected_exact_signature_count: 0 };
+        let mut policy = crate::corpus::read_json(&root().join("model/intent_v1/config.json")).expect("the config")["external_evaluation"].clone();
+        policy["minimum_words_per_group"] = json!(minimum);
+        policy["lexical_disjoint_corpus_sha256"] = json!(lexical.corpus_sha256);
+        policy["unknown_typo_development_corpus_sha256"] = json!(development.corpus_sha256);
+        policy["unknown_typo_holdout_corpus_sha256"] = json!(holdout.corpus_sha256);
+        let gates = external_provenance_gates(&policy, true, &lexical, &index, &development, &holdout);
+        assert!(gates.as_object().expect("the gates").len() > 5);
+        // Each thing a corpus says, one at a time.
+        let edits: [&dyn Fn(&mut ExternalCorpus); 10] = [
+            &|corpus| corpus.minimum_words_per_group = 1,
+            &|corpus| corpus.corpus_sha256 = "0".to_owned(),
+            &|corpus| corpus.rank_namespace = "x".to_owned(),
+            &|corpus| corpus.choice_namespace = "x".to_owned(),
+            &|corpus| corpus.exclusion_signature_count = 99,
+            &|corpus| corpus.exclusion_signature_sha256 = "0".to_owned(),
+            &|corpus| corpus.selected_sealed_overlap_count = 1,
+            &|corpus| corpus.dictionary_sources[0] = "x".to_owned(),
+            &|corpus| corpus.dictionary_provenance[0].locale = "x".to_owned(),
+            &|corpus| corpus.examples.clear(),
+        ];
+        for edit in edits {
+            for which in 0..3 {
+                let (mut one, mut two, mut three) = (lexical.clone(), development.clone(), holdout.clone());
+                edit(match which { 0 => &mut one, 1 => &mut two, _ => &mut three });
+                let gates = external_provenance_gates(&policy, true, &one, &index, &two, &three);
+                assert!(gates.is_object());
+            }
+        }
+        assert!(external_provenance_gates(&policy, false, &lexical, &index, &development, &holdout).is_object());
+        let mut other = policy.clone();
+        other["trigger_expansion"] = json!(["space"]);
+        assert!(!trigger_expansion_matches(&development, &other["trigger_expansion"]));
+        assert!(external_provenance_gates(&other, true, &lexical, &index, &development, &holdout).is_object());
+        let mut wrong = development.clone();
+        wrong.examples.pop();
+        assert!(!trigger_expansion_matches(&wrong, &policy["trigger_expansion"]));
+        wrong.examples.clear();
+        assert!(!trigger_expansion_matches(&wrong, &policy["trigger_expansion"]));
+        for field in ["dictionary_sha256", "dictionary_bytes", "affix_sha256"] {
+            let mut pinned = policy["hunspell"].clone();
+            pinned["en_US"][field] = json!("0");
+            assert!(!dictionaries_match_policy(&development.dictionary_provenance, &pinned));
+        }
+        let mut provenance = development.dictionary_provenance.clone();
+        provenance[0].locale = "x".to_owned();
+        assert!(!dictionaries_match_policy(&provenance, &policy["hunspell"]));
+        // What the builders and the checks refuse.
+        assert!(external::build_lexical_disjoint_corpus(&onboard, 0, &snapshots).is_err());
+        let swapped = [snapshots[1].clone(), snapshots[0].clone()];
+        assert!(external::build_lexical_disjoint_corpus(&onboard, 1, &swapped).is_err());
+        let build = |minimum: usize, snapshots: &[Snapshot; 2], rank: &str, choice: &str| external::build_unknown_typo_disjoint_corpus(&onboard, &excluded, minimum, snapshots, &references, &protected, rank, choice).map(|_| ());
+        assert!(build(0, &snapshots, "a", "b").is_err());
+        assert!(build(1, &swapped, "a", "b").is_err());
+        for (rank, choice) in [("", "b"), ("a", ""), ("a\0", "b"), ("а", "b"), (&"x".repeat(1000), "b"), ("a", "a")] {
+            assert!(build(1, &snapshots, rank, choice).is_err(), "{rank}");
+        }
+        let mut foreign = development.clone();
+        foreign.examples[0].base_signature = "other:x".to_owned();
+        assert!(external::unknown_typo_physical_signatures(&foreign).is_err());
+        let mut empty_signature = development.clone();
+        empty_signature.examples[0].base_signature = "hunspell-unknown-typo:".to_owned();
+        let _ = external::unknown_typo_physical_signatures(&empty_signature);
+        let mut uneven = development.clone();
+        uneven.examples.pop();
+        assert!(external::unknown_typo_physical_signatures(&uneven).is_err());
+        uneven.examples.clear();
+        assert!(external::unknown_typo_physical_signatures(&uneven).is_err());
+    }
+
+    #[test]
+    fn safety_rows_go_through_the_guards_of_the_program() {
+        let (models, _) = snapshots();
+        let protected = ks_lang::Resources::new(root().join("resources")).protected_tokens();
+        let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = vec![(0, models[0].clone()), (1, models[1].clone())];
+        let classifier = Arc::new(LinearNgramModel::load(&root().join("resources/models/layout_intent_v1.ksm")).expect("the model"));
+        let detector = LanguageDetector::new(scorers, Some(classifier), protected.clone()).expect("a detector");
+        let safe = |kind: &str, is_protected: bool, original: &str, alternative: &str| LexicalExample { label: false, safety: true, variant_kind: kind.to_owned(), protected: is_protected, original: original.to_owned(), alternative: alternative.to_owned(), ..example(CorrectionTrigger::Space, false) };
+        let rows = [safe("protected", true, "git", "пше"), safe("lexical_collision", false, "here", "руку"), safe("lexical_collision", false, "ghbdtn", "привет"), safe("protected", true, "ghbdtn", "привет")];
+        let policy = safety_policy(&detector, &rows, &protected).expect("a policy");
+        assert_eq!(policy.samples, 4);
+        for row in [safe("protected", false, "git", "пше"), safe("lexical_collision", true, "here", "руку"), safe("other", false, "git", "пше"), LexicalExample { label: true, ..safe("protected", true, "git", "пше") }, LexicalExample { safety: false, ..safe("protected", true, "git", "пше") }] {
+            assert!(safety_policy(&detector, &[row], &protected).is_err());
+        }
+    }
+
+    #[test]
+    fn scorers_of_the_evaluation_answer_as_the_program_does() {
+        let (models, _) = snapshots();
+        assert_eq!(detector_error(ks_lang::detector::DetectorError { name: "n", message: "m".to_owned() }).is_empty(), false);
+        assert_eq!(load_error(LoadError { name: "n", message: "m".to_owned() }), "n");
+        let cache = CorpusCache::new(models[0].clone());
+        assert!(cache.context_score("the", "word").is_finite());
+        assert!(cache.score("word").known == cache.score("word").known);
+        let _ = cache.best_single_deletion("wordd");
     }
 
     #[test]

@@ -505,7 +505,7 @@ fn settings_of_a_fit_each_change_what_it_can_accept() {
     let small = prepared("intent-settings", &|_| ());
     let path = config_of(&small);
     let good = read(&path);
-    let variants: [&dyn Fn(&mut Value); 20] = [
+    let variants: [&dyn Fn(&mut Value); 21] = [
         &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(0.0),
         &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(0.001),
         &|config| config["thresholds"]["threshold_logit_margin_cap"] = json!(60.0),
@@ -531,9 +531,14 @@ fn settings_of_a_fit_each_change_what_it_can_accept() {
             config["ftrl"]["maximum_epochs"] = json!(3);
             config["ftrl"]["l1"] = json!(100.0);
         },
+        &|config| {
+            config["ftrl"]["maximum_epochs"] = json!(4);
+            config["ftrl"]["minimum_epochs"] = json!(4);
+            config["ftrl"]["patience"] = json!(1);
+        },
         &|config| config["calibration"]["maximum_iterations"] = json!(1),
         &|config| config["calibration"]["l2"] = json!(1_000_000.0),
-        &|config| config["seed"] = json!(u64::MAX),
+        &|config| config["seed"] = json!(1_u64 << 33),
     ];
     for variant in variants {
         let mut changed = good.clone();
@@ -656,4 +661,59 @@ fn the_frozen_dictionaries_and_the_samples_of_a_corpus() {
     assert_eq!(external::deterministic_sample(&list, 1).len(), 1);
     assert_eq!(external::deterministic_sample(&list, 2).len(), 2);
     assert_eq!(external::deterministic_sample(&list, 0), list);
+}
+
+#[test]
+fn a_manifest_that_does_not_fit_stops_the_strict_evaluation_where_it_differs() {
+    use ks_train::intent::evaluate::{Options, evaluate};
+    let small = &*PUBLISHED;
+    let manifest_path = small.tree.join("model/intent_v1/manifest.json");
+    let artifact = small.tree.join("resources/models/layout_intent_v1.ksm");
+    let good = read(&manifest_path);
+    let folder = scratch("intent-phases");
+    let with = |edit: &dyn Fn(&mut Value)| -> (String, i32) {
+        let mut changed = good.clone();
+        edit(&mut changed);
+        let path = folder.join("manifest.json");
+        write_json(&path, &changed);
+        evaluate(&Options { root: &small.tree, artifact: &artifact, manifest: &path, comparison_sample: 20, latency_sample: 5, strict: true, provenance_only: true, workers: 2 }).expect("a report")
+    };
+    let phase = |edit: &dyn Fn(&mut Value)| {
+        let (report, status) = with(edit);
+        assert_eq!(status, 1);
+        let value: Value = serde_json::from_str(&report).expect("json");
+        assert!(value["phase"].is_string(), "{report}");
+    };
+    let edits: [&dyn Fn(&mut Value); 12] = [
+        &|value| value["artifact_sha256"] = json!("0".repeat(64)),
+        &|value| value["artifact_model_version"] = json!("other"),
+        &|value| value["quality_gate_breakdown"]["passed"] = json!(false),
+        &|value| value["dataset_sha256"] = json!("0".repeat(64)),
+        &|value| value["counts"] = json!({}),
+        &|value| value["variant_quarantine_sha256"] = json!("0".repeat(64)),
+        &|value| value["sealed_variant_quarantine_sha256"] = json!("0".repeat(64)),
+        &|value| value["veto"] = json!({"selection": {}}),
+        &|value| value["veto"]["extra"] = json!(1),
+        &|value| value["safety"] = json!({"guard_audit": {}}),
+        &|value| value["safety"]["extra"] = json!(1),
+        &|value| value["config_sha256"] = json!("0".repeat(64)),
+    ];
+    for edit in edits {
+        phase(edit);
+    }
+    // A model that cannot be read, a manifest that is not there.
+    let missing = Path::new("/nonexistent");
+    assert!(evaluate(&Options { root: &small.tree, artifact: missing, manifest: &manifest_path, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
+    assert!(evaluate(&Options { root: &small.tree, artifact: &artifact, manifest: missing, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
+    let answer = run(intent(&small.tree).arg("--evaluate").arg("--artifact").arg(missing));
+    assert!(!answer.status.success());
+    // Against the tree a config differs from.
+    let other = prepared("intent-other-config", &|config| config["ftrl"]["maximum_epochs"] = json!(1));
+    std::fs::copy(&artifact, other.tree.join("resources/models/layout_intent_v1.ksm")).expect("a copy");
+    std::fs::copy(&manifest_path, other.tree.join("model/intent_v1/manifest.json")).expect("a copy");
+    let answer = run(intent(&other.tree).arg("--evaluate").args(["--comparison-sample", "5", "--latency-sample", "2"]));
+    assert!(said(&answer).contains("presealed_provenance"), "{}", said(&answer));
+    // The replay of a tree whose recorded model is another one.
+    let replay = run(intent(&other.tree).arg("--verify").args(["--jobs", "1"]));
+    assert!(!replay.status.success(), "{}", said(&replay));
 }

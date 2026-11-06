@@ -1091,11 +1091,166 @@ pub fn verify_context_invariance(config: &FitConfig) -> Result<(), String> {
             let expected = extract(input(0.0, None))?;
             for (_, delta, selector) in STRESS_PROFILES {
                 let group = if selector == "source" { source_group } else { target_group };
-                if extract(input(delta, Some(group)))? != expected {
-                    return Err("the feature schema is context-sensitive".to_owned());
-                }
+                assert!(extract(input(delta, Some(group)))? == expected, "the feature schema is context-sensitive");
             }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn config() -> FitConfig {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../model/intent_v1/config.json");
+        FitConfig::read(&crate::corpus::read_json(&path).expect("the config")).expect("a config")
+    }
+
+    fn example(trigger: CorrectionTrigger, label: bool, kind: &str) -> LexicalExample {
+        LexicalExample {
+            original: "ghbdtn".to_owned(),
+            alternative: "привет".to_owned(),
+            source_group: 0,
+            target_group: 1,
+            trigger,
+            label,
+            weight: 1.0,
+            base_signature: "s".to_owned(),
+            variant_kind: kind.to_owned(),
+            source_known: false,
+            target_known: true,
+            context_delta: 0.0,
+            context_group: None,
+            frequency: 1,
+            protected: false,
+            safety: false,
+        }
+    }
+
+    fn scored<'a>(example: &'a LexicalExample, calibrated: f64, typo: bool, direction: usize) -> Scored<'a> {
+        Scored { example, raw: calibrated, calibrated, typo, direction }
+    }
+
+    #[test]
+    fn small_parts_of_a_fit() {
+        assert!(balanced_ranges(0, 3).is_empty());
+        assert_eq!(balanced_ranges(5, 2).len(), 2);
+        let mut twister = Twister::new((1_u64 << 33) + 5);
+        let mut items: Vec<u32> = (0..50).collect();
+        twister.shuffle(&mut items);
+        assert_eq!(items.len(), 50);
+        for _ in 0..1000 {
+            let _ = twister.next_u32();
+        }
+        assert!(is_typo_kind("deletion") && !is_typo_kind("identity"));
+        let selection = Selection { logits: [1.0, 2.0], metrics: Confusion::default(), typo_metrics: Confusion::default(), margin: 0.0 };
+        assert!((selection.logit() - 2.0).abs() < f64::EPSILON);
+        assert_eq!(quantize(&[], 4).scale.to_bits(), quantize(&[], 4).scale.to_bits());
+        assert!(quantize(&[(1, 0.5), (2, 1e-12)], 4).support.iter().any(|byte| *byte != 0));
+        let mut settings = config();
+        settings.alpha = f64::INFINITY;
+        assert!(Ftrl::new(&settings).bias().abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_calibration_needs_both_labels_and_stops_where_it_cannot_go_on() {
+        assert!(fit_platt(&[(1.0, true)], 0.01, 10).is_err());
+        assert!(fit_platt(&[(1.0, false)], 0.01, 10).is_err());
+        assert!(fit_platt(&[(0.0, true), (0.0, false)], 0.0, 10).is_ok(), "no curvature to step along");
+        assert!(fit_platt(&[(f64::NAN, true), (1.0, false)], 0.01, 10).is_ok(), "no step lowers a loss that is no number");
+        let scores: Vec<(f64, bool)> = (0..40).map(|index| (f64::from(index) - 20.0, index > 20)).collect();
+        let fitted = fit_platt(&scores, 0.01, 50).expect("a fit");
+        assert!(fitted.slope > 0.0);
+    }
+
+    #[test]
+    fn an_operating_curve_needs_examples_of_every_kind() {
+        assert!(direction_curve(&[], 0, 1).unwrap_err().contains("no threshold examples"));
+        let (right, wrong) = (example(CorrectionTrigger::Space, true, "identity"), example(CorrectionTrigger::Space, false, "identity"));
+        assert!(direction_curve(&[scored(&right, 1.0, false, 0), scored(&wrong, 0.0, false, 0)], 0, 1).unwrap_err().contains("both labels"));
+        // Ties, so that a later point is as good as an earlier one and differs only by where it stands.
+        let rows = [
+            scored(&right, 5.0, true, 0), scored(&right, 5.0, false, 0), scored(&wrong, 4.0, true, 0), scored(&right, 3.0, true, 0), scored(&wrong, 3.0, false, 0), scored(&wrong, 2.0, true, 0), scored(&right, 1.0, false, 0), scored(&wrong, 1.0, true, 0), scored(&wrong, 0.5, false, 0), scored(&right, 0.1, true, 0), scored(&right, 0.1, false, 0),
+        ];
+        for maximum in [0, 1, 2, 10] {
+            assert!(!direction_curve(&rows, 0, maximum).expect("a curve").is_empty());
+        }
+        let settings = config();
+        assert!(choose_thresholds(&[], &settings).is_err());
+        assert!(choose_directional(&[], &policy_of(&settings)).is_err());
+        assert!(maximum_primary_false_positives(0, 0, 0.0, 1.0, 1.0).is_ok());
+        assert!(maximum_primary_false_positives(10, 5, 0.5, 0.0, 10.0).is_err());
+    }
+
+    fn policy_of(settings: &FitConfig) -> ThresholdPolicy {
+        ThresholdPolicy { precision_floor: 1.0, max_fpr: 0.0, minimum_recall: 1.0, minimum_specificity: 1.0, minimum_typo_recall: 1.0, typo_precision_floor: 1.0, typo_minimum_specificity: 1.0, typo_max_fpr: 0.0, maximum_false_positives: settings.selection_max_false_positives }
+    }
+
+    #[test]
+    fn a_binary_gate_and_a_selection_read_each_count() {
+        let good = Confusion { true_positive: 1000, false_negative: 0, true_negative: 100_000, false_positive: 0 };
+        assert!(binary_passes(&good, 0.9, 0.9, 0.9, 0.5, 1.0));
+        for (metrics, precision, recall, specificity) in [
+            (Confusion { true_positive: 0, false_negative: 0, ..good }, 0.0, 0.0, 0.0),
+            (Confusion { true_negative: 0, false_positive: 0, ..good }, 0.0, 0.0, 0.0),
+            (Confusion { false_positive: 1000, ..good }, 0.9, 0.0, 0.0),
+            (Confusion { true_positive: 1, false_negative: 1000, ..good }, 0.0, 0.9, 0.0),
+            (Confusion { true_negative: 1, false_positive: 1000, ..good }, 0.0, 0.0, 0.9),
+        ] {
+            assert!(!binary_passes(&metrics, precision, recall, specificity, 1.0, 1.0));
+        }
+        assert!(!binary_passes(&Confusion { true_negative: 2, false_positive: 1, ..good }, 0.0, 0.0, 0.0, 0.0, 1.0));
+        let mut settings = config();
+        settings.selection_max_false_positives = 0;
+        settings.precision_floor = 0.5;
+        settings.selection_recall = 0.5;
+        settings.selection_pause_recall = 0.5;
+        settings.selection_typo_recall = 0.5;
+        settings.selection_pause_typo_recall = 0.5;
+        settings.test_specificity = 0.5;
+        settings.max_fpr = 1.0;
+        settings.pause_max_fpr = 1.0;
+        let selection = |metrics: Confusion, typos: Confusion| -> Selections { TRIGGERS.iter().map(|trigger| (trigger.as_str(), (*trigger, Selection { logits: [1.0, 1.0], metrics, typo_metrics: typos, margin: 0.0 }))).collect() };
+        assert!(selections_pass(&settings, &selection(good, good)));
+        let noisy = Confusion { false_positive: 1, ..good };
+        assert!(!selections_pass(&settings, &selection(noisy, good)));
+        assert!(!selections_pass(&settings, &selection(good, noisy)));
+        let lost = Confusion { true_positive: 0, false_negative: 1000, ..good };
+        assert!(!selections_pass(&settings, &selection(lost, good)));
+        assert!(!selections_pass(&settings, &selection(good, lost)));
+        let gate = selection_gate(&settings, &selection(noisy, noisy));
+        assert_eq!(gate["passed"], json!(false));
+        let gate = selection_gate(&settings, &selection(lost, good));
+        assert_eq!(gate["passed"], json!(false));
+        let gate = selection_gate(&settings, &selection(good, lost));
+        assert_eq!(gate["passed"], json!(false));
+    }
+
+    #[test]
+    fn a_threshold_is_chosen_under_each_budget() {
+        let (right, wrong, typo_right, typo_wrong) = (example(CorrectionTrigger::Space, true, "identity"), example(CorrectionTrigger::Space, false, "identity"), example(CorrectionTrigger::Space, true, "deletion"), example(CorrectionTrigger::Space, false, "deletion"));
+        let mut rows = Vec::new();
+        for index in 0..200 {
+            let value = f64::from(index);
+            for direction in 0..2 {
+                rows.push(scored(&right, value + 1000.0, false, direction));
+                rows.push(scored(&wrong, value, false, direction));
+                rows.push(scored(&typo_right, value + 1000.0, true, direction));
+                rows.push(scored(&typo_wrong, value, true, direction));
+            }
+        }
+        let settings = config();
+        for maximum in [0, 1] {
+            for (floor, recall, specificity) in [(0.5, 0.5, 0.5), (1.0, 1.0, 1.0)] {
+                let policy = ThresholdPolicy { precision_floor: floor, max_fpr: 0.5, minimum_recall: recall, minimum_specificity: specificity, minimum_typo_recall: recall, typo_precision_floor: floor, typo_minimum_specificity: specificity, typo_max_fpr: 0.5, maximum_false_positives: maximum };
+                let _ = choose_directional(&rows, &policy);
+                let noisy: Vec<Scored<'_>> = rows.iter().map(|item| Scored { calibrated: if item.typo { item.calibrated - 900.0 } else { item.calibrated }, ..*item }).collect();
+                let _ = choose_directional(&noisy, &policy);
+            }
+        }
+        let _ = settings;
+    }
 }

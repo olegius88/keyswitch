@@ -185,6 +185,7 @@ pub fn build_sealed_signature_index(dataset: &DatasetBundle) -> Result<SealedSig
 }
 
 /// `LexicalDisjointCorpus`.
+#[derive(Clone)]
 pub struct ExternalCorpus {
     pub examples: Vec<LexicalExample>,
     pub words_by_group: [usize; 2],

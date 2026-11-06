@@ -190,11 +190,16 @@ pub(crate) fn write_split(directory: &Path, split: &str, rows: &[Value], manifes
 
 /// A corpus of the four splits.
 pub(crate) fn corpus(directory: &Path) {
+    corpus_of(directory, 1);
+}
+
+/// The same, each split so many times as large.
+pub(crate) fn corpus_of(directory: &Path, scale: usize) {
     std::fs::create_dir_all(directory).expect("a folder");
     let mut dice = Dice(0x9e37_79b9_7f4a_7c15);
     let mut manifest = json!({"splits": {}});
     let mut members: [Vec<String>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-    for (split, size) in [("train", 400), ("development", 150), ("calibration", 150), ("test", 200)] {
+    for (split, size) in [("train", 400 * scale), ("development", 150 * scale), ("calibration", 150 * scale), ("test", 200 * scale)] {
         let mut rows = Vec::new();
         for index in 0..size {
             let group = i64::try_from(index % 2).expect("small");
