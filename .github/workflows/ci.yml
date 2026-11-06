@@ -227,8 +227,9 @@ jobs:
           if ((Get-Content $said -Raw) -notmatch [regex]::Escape($version)) { throw "the updated program says $(Get-Content $said -Raw), not $version" }
           $left = Get-ChildItem -LiteralPath $root -Name
           "after the update: $($left -join ', ')"
-          $python_files = $left | Where-Object { $_ -match '\.(pyd|zip)$' -or $_ -match '^(python3.*|vcruntime140.*|libcrypto-3|libffi-8|libssl-3|libtommath|tcl90|tcl9tk90|zlib1)\.dll$' -or $_ -in @("keyswitch", "PIL", "README.md", "README.en.md") }
-          if ($python_files) { throw "the update left files of 0.66.2: $($python_files -join ', ')" }
+          # What this version installs and nothing else: every other file came from 0.66.2.
+          $foreign = $left | Where-Object { $_ -notin @("KeySwitch.exe", "resources") -and $_ -notmatch '^unins\d+\.(exe|dat)$' }
+          if ($foreign) { throw "the update left files of 0.66.2: $($foreign -join ', ')" }
           # Installed by hand over the running program, as a user downloading the next release does.
           Run-Bounded $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 120000
           if (-not $relaunched.HasExited) { throw "the installer over the running KeySwitch left it running" }

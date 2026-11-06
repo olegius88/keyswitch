@@ -64,28 +64,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Создать ярлык на рабочем столе"; GroupDescription: "Дополнительные ярлыки:"; Flags: unchecked
 
-; The Rust program is one executable and its resources folder. What the Python releases (up to 0.66.1) left in the install
-; folder is removed on an update over them; the settings and data live in %APPDATA% and are not touched.
+; The Rust program is one executable and its resources folder, and it carries no library of its own. What a Python release
+; (up to 0.66.2) left in the install folder is removed on an update over it, whichever release that was: its runtime and
+; libraries by their kind, its own folders by name. The settings and data live in %APPDATA% and are not touched.
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\keyswitch"
 Type: filesandordirs; Name: "{app}\PIL"
 Type: filesandordirs; Name: "{app}\licenses"
+Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\*.pyd"
-Type: files; Name: "{app}\python3*.dll"
-Type: files; Name: "{app}\libcrypto-3.dll"
-Type: files; Name: "{app}\libffi-8.dll"
-Type: files; Name: "{app}\libssl-3.dll"
-Type: files; Name: "{app}\libtommath.dll"
-Type: files; Name: "{app}\tcl90.dll"
-Type: files; Name: "{app}\tcl9tk90.dll"
-Type: files; Name: "{app}\tcl.zip"
-Type: files; Name: "{app}\tk.zip"
-Type: files; Name: "{app}\zlib1.dll"
-Type: files; Name: "{app}\vcruntime140.dll"
-Type: files; Name: "{app}\vcruntime140_1.dll"
-Type: files; Name: "{app}\base_library.zip"
-Type: files; Name: "{app}\README.md"
-Type: files; Name: "{app}\README.en.md"
+Type: files; Name: "{app}\*.zip"
+Type: files; Name: "{app}\*.md"
 
 [Files]
 Source: "{#SourceDir}\KeySwitch.exe"; DestDir: "{app}"; Flags: ignoreversion
