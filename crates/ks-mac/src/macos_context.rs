@@ -325,6 +325,40 @@ mod tests {
     }
 
     #[test]
+    fn a_negative_range_is_no_context_and_the_trait_reads_like_the_reader() {
+        let tree = field("text", (-1, 0));
+        assert!(MacFieldReader::new(&tree).read("app", 1).is_none());
+        let tree = field("text", (1, -1));
+        let mut reader = MacFieldReader::new(&tree);
+        assert!(reader.read("app", 1).is_none());
+        reader.close();
+        let tree = field("text", (1, 0));
+        let mut reader = MacFieldReader::new(&tree);
+        assert!(matches!(ManagedFieldReader::read(&reader, "app", 1), Ok(Some(_))));
+        ManagedFieldReader::close(&mut reader);
+    }
+
+    #[test]
+    fn a_selection_elsewhere_or_no_field_is_refused_and_ranges_are_read() {
+        let button = {
+            let mut tree = field("", (0, 0));
+            tree.strings.insert(ROLE_ATTRIBUTE.into(), "AXButton".into());
+            tree
+        };
+        assert!(MacSelectionAccess::new(&button).read().is_err());
+        let mut selected = field("abc", (2, 3));
+        selected.strings.insert(SELECTED_TEXT_ATTRIBUTE.into(), "abc".into());
+        let access = MacSelectionAccess::new(&selected);
+        assert_eq!(access.selected_range("abc").ok().flatten(), Some((2, 3)));
+        assert!(access.selected_range("other").is_err());
+        assert_eq!(access.caret_range(), Some((2, 3)));
+        assert!(access.replace("abc", "x").is_err(), "not settable");
+        assert!(access.replace("other", "x").is_err());
+        let empty = FakeTree::default();
+        assert_eq!(MacSelectionAccess::new(&empty).caret_range(), None);
+    }
+
+    #[test]
     fn utf16_offsets_become_character_indexes() {
         assert_eq!(character_index("привет", 3), Some(3));
         assert_eq!(character_index("a😀b", 3), Some(2));

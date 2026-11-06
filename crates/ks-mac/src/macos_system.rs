@@ -173,6 +173,54 @@ pub fn from_executable(executable: &str) -> Option<Application> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_document_cut_short_registers_nothing_more() {
+        let run = "<key>RunAtLoad</key><true/>";
+        assert_eq!(registered_arguments(run), Vec::<String>::new());
+        assert_eq!(registered_arguments(&format!("{run}<key>ProgramArguments</key><array><string>a</string>")), Vec::<String>::new());
+        assert_eq!(registered_arguments(&format!("{run}<key>ProgramArguments</key><array><string>a</string><string>b</array>")), ["a"]);
+        assert_eq!(registered_arguments("<key>ProgramArguments</key><array><string>a</string></array>"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_paths_come_from_the_home_folder_or_the_given_one() {
+        assert!(launch_agent_path(None).ends_with(format!("{AUTOSTART_LABEL}.plist")));
+        assert!(launch_agent_path(Some(Path::new("/base"))).starts_with("/base"));
+        assert!(!MacApplicationCatalog::default().directories.is_empty());
+    }
+
+    #[test]
+    fn a_name_of_nothing_is_no_program_and_programs_are_listed_once() {
+        assert_eq!(from_executable(""), None);
+        assert_eq!(from_executable(".app"), None);
+        let folder = std::env::temp_dir().join(format!("ks-mac-apps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("a/Same.app")).expect("the folder");
+        std::fs::create_dir_all(folder.join("b/same.app")).expect("the folder");
+        std::fs::create_dir_all(folder.join("b/Other")).expect("the folder");
+        let catalog = MacApplicationCatalog::with_directories(vec![folder.join("a"), folder.join("b"), folder.join("missing")]);
+        let names: Vec<String> = catalog.installed().into_iter().map(|application| application.identifier).collect();
+        assert_eq!(names, ["same"]);
+        std::fs::remove_dir_all(&folder).expect("cleaned");
+    }
+
+    #[test]
+    fn autostart_is_written_with_or_without_hiding_and_a_folder_in_its_place_is_an_error() {
+        let folder = std::env::temp_dir().join(format!("ks-mac-autostart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let path = folder.join("agent.plist");
+        let start = MacAutostartManager::new(Some(path.clone()), Some(std::env::current_exe().expect("this test")));
+        start.set_enabled(false, false).expect("nothing to remove");
+        start.set_enabled(true, false).expect("written");
+        assert!(start.status().effective());
+        start.set_enabled(true, true).expect("written");
+        start.set_enabled(false, false).expect("removed");
+        assert!(!start.status().effective());
+        std::fs::create_dir_all(&path).expect("a folder in its place");
+        assert!(start.set_enabled(false, false).is_err());
+        std::fs::remove_dir_all(&folder).expect("cleaned");
+    }
+
     fn temporary(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("ks-mac-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);

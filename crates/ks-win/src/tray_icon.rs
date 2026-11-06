@@ -239,6 +239,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_badge_says_its_layout_or_a_question() {
+        let ink = Ink { width: 80, height: 3, coverage: (0..240).map(|index| if index % 3 == 0 { 0 } else { 200 }).collect() };
+        for (state, text) in [
+            (TrayState { group: 0, ..TrayState::default() }, "EN"),
+            (TrayState { group: 1, ..TrayState::default() }, "RU"),
+            (TrayState { group: -1, ..TrayState::default() }, "?"),
+            (TrayState { group: 0, enabled: false, ..TrayState::default() }, "EN"),
+        ] {
+            assert_eq!(badge_text(&state), text);
+            let canvas = render(&state, Some(&ink));
+            assert_eq!(canvas.pixels.len(), TRAY_ICON_SIZE_PIXELS * TRAY_ICON_SIZE_PIXELS);
+        }
+        let tall = Ink { width: 2, height: 80, coverage: vec![255; 160] };
+        let _ = render(&TrayState { group: 0, ..TrayState::default() }, Some(&tall));
+    }
+
+    #[test]
+    fn a_point_off_the_picture_is_not_drawn() {
+        let mut canvas = Canvas::new(4);
+        for (x, y) in [(-1, 0), (0, -1), (4, 0), (0, 4)] {
+            canvas.put(x, y, WHITE);
+        }
+        assert!(canvas.pixels.iter().all(|pixel| *pixel == [0, 0, 0, 0]));
+        canvas.put(1, 1, WHITE);
+        assert_eq!(canvas.pixels[5], WHITE);
+    }
+
+    #[test]
     fn badge_has_transparent_corners_and_the_layout_colour() {
         let canvas = render(&TrayState { group: 1, ..TrayState::default() }, None);
         assert_eq!(canvas.pixels[0][3], 0);

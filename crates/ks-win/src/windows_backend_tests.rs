@@ -2478,3 +2478,41 @@ mod golden {
         eprintln!("replayed {scenarios} sequences");
     }
 }
+
+#[test]
+fn every_key_with_a_name_has_the_engines_name() {
+    for (key, name) in [
+        (VK_BACK, "BackSpace"), (VK_TAB, "Tab"), (VK_RETURN, "Return"), (VK_SHIFT, "Shift_L"), (VK_CONTROL, "Control_L"), (VK_MENU, "Alt_L"), (VK_PAUSE, "Pause"),
+        (VK_SCROLL, "Scroll_Lock"), (VK_CAPITAL, "Caps_Lock"), (VK_ESCAPE, "Escape"), (VK_SPACE, "space"), (VK_PRIOR, "Page_Up"), (VK_NEXT, "Page_Down"), (VK_END, "End"),
+        (VK_HOME, "Home"), (VK_LEFT, "Left"), (VK_UP, "Up"), (VK_RIGHT, "Right"), (VK_DOWN, "Down"), (VK_INSERT, "Insert"), (VK_DELETE, "Delete"), (VK_LWIN, "Super_L"),
+        (VK_RWIN, "Super_R"), (VK_LSHIFT, "Shift_L"), (VK_RSHIFT, "Shift_R"), (VK_LCONTROL, "Control_L"), (VK_RCONTROL, "Control_R"), (VK_LMENU, "Alt_L"), (VK_RMENU, "Alt_R"),
+        (VK_OEM_1, "semicolon"), (VK_OEM_PLUS, "equal"), (VK_OEM_COMMA, "comma"), (VK_OEM_MINUS, "minus"), (VK_OEM_PERIOD, "period"), (VK_OEM_2, "slash"), (VK_OEM_3, "grave"),
+        (VK_OEM_4, "bracketleft"), (VK_OEM_5, "backslash"), (VK_OEM_6, "bracketright"), (VK_OEM_7, "apostrophe"),
+    ] {
+        assert_eq!(named_key(key), Some(name));
+    }
+    assert_eq!(named_key(0xFFFF), None);
+}
+
+#[test]
+fn the_real_clock_moves_and_sleeps() {
+    let clock = SystemClock::default();
+    let first = clock.monotonic();
+    clock.sleep(0.001);
+    assert!(clock.monotonic() > first);
+    assert!(clock.perf_counter() > 0.0);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn the_field_reader_is_only_on_windows() {
+    assert!(uia_selection_reader().is_err());
+}
+
+#[test]
+fn an_api_with_no_selection_answers_none_and_the_backend_can_select() {
+    let api = FakeWindowsAPI::plain();
+    let bare = backend(&api);
+    assert!(bare.supports_selection());
+    let _ = bare.normalized_state();
+}

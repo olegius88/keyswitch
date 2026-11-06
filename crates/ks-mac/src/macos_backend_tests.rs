@@ -715,3 +715,43 @@ fn other_refusals_pass_through_untouched() {
     let backend = selecting(&api, Err(refused(RefusalReason::FocusChanged)), None);
     assert_eq!(backend.replace_selection(&selected(), "x", None), Err(refused(RefusalReason::FocusChanged)));
 }
+
+#[test]
+fn the_real_clock_moves_and_sleeps() {
+    let clock = SystemClock::default();
+    let first = clock.monotonic();
+    clock.sleep(0.001);
+    assert!(clock.monotonic() > first);
+}
+
+#[test]
+fn a_mac_answers_for_itself() {
+    let api = FakeMac::new();
+    let mac = backend(&api);
+    assert!(mac.swallows_hotkeys());
+    assert!(mac.supports_selection());
+    assert_eq!(mac.active_application(), api.active_application());
+    let _ = mac.input_anchor();
+    assert!(!mac.restore_window(None));
+    assert!(!mac.keep_window_inactive(1));
+    assert!(mac.sources().is_ok());
+    let dynamic: Arc<dyn MacAPI> = api;
+    assert!(MacBackend::new(Some(dynamic)).is_ok());
+}
+
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn without_the_system_access_nothing_can_be_read_of_a_selection() {
+    use crate::macos_context::{AccessibilityAPI as _, SelectionAccessibilityAPI as _};
+    let access = default_selection_access();
+    assert!(access.read().is_err());
+    assert!(access.replace("a", "b").is_err());
+    assert_eq!(access.caret_range(), None);
+    let none = NoAccessibility;
+    assert_eq!(none.focused_element(), 0);
+    assert_eq!(none.string_attribute(0, "x"), None);
+    assert_eq!(none.range_attribute(0, "x"), None);
+    none.release(0);
+    assert!(!none.attribute_settable(0, "x"));
+    assert!(!none.set_string_attribute(0, "x", "y"));
+}

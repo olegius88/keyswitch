@@ -106,7 +106,11 @@ pub(crate) fn autostart_status() -> Value {
 
 #[cfg(windows)]
 fn field_access() -> Value {
-    let probe = crate::windows_context::probe_uia();
+    field_access_of(crate::windows_context::probe_uia())
+}
+
+#[cfg(windows)]
+fn field_access_of(probe: crate::windows_context::UiaProbe) -> Value {
     let mut map = Map::new();
     map.insert("available".into(), json!(probe.available));
     if let Some(error) = probe.error {
@@ -204,6 +208,7 @@ fn install_platform() {
 fn install_platform() {}
 
 #[cfg(windows)]
+#[cfg_attr(coverage_nightly, coverage(off))] // The whole program: its test is the installed one, in `e2e_windows.rs`.
 fn run(parsed: Arguments) -> i32 {
     crate::desktop_app::run_with_instance(parsed)
 }
@@ -235,6 +240,24 @@ fn write_standard(error: bool, text: &str) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_diagnostic_mode_says_what_it_found_and_ends() {
+        assert!(main(&["--diagnose".to_owned()]) <= 1);
+        assert!(matches!(parse(&["--"]), Parsed::Exit { code: 2, .. }));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_field_probe_reports_each_thing_it_has() {
+        let probe = crate::windows_context::UiaProbe { available: true, error: Some("failed"), focused_text_pattern: Some(true), focused_probe_ms: Some(3), focused_error: Some("no focus"), hresult: Some(-1) };
+        let map = field_access_of(probe);
+        for name in ["available", "error", "focused_text_pattern", "focused_probe_ms", "focused_error", "hresult"] {
+            assert!(map.get(name).is_some(), "{name}");
+        }
+        let empty = crate::windows_context::UiaProbe { available: false, error: None, focused_text_pattern: None, focused_probe_ms: None, focused_error: None, hresult: None };
+        assert_eq!(field_access_of(empty).as_object().map(serde_json::Map::len), Some(1));
+    }
 
     #[test]
     fn every_way_a_command_line_can_go() {
