@@ -10,7 +10,7 @@ impl EngineCore {
     // after the word can only be the closing one, and then the quote in front
     // of it was the opening one. The word is still judged on its own, so the
     // name inside the quotation is corrected while both quotes stay.
-    pub(crate) fn _quotation_closed(head: &KeyEvent, trailing: &[Stroke], boundary: Option<&Stroke>) -> bool {
+    pub fn _quotation_closed(head: &KeyEvent, trailing: &[Stroke], boundary: Option<&Stroke>) -> bool {
         trailing.iter().chain(boundary).any(|stroke| stroke.keycode == head.keycode)
     }
 
@@ -20,7 +20,7 @@ impl EngineCore {
     /// `ощрт` and `john`, not `"ощрт` and `@john`, and with the quote attached
     /// they fall below their own threshold. The word alone decides, and this
     /// head is then replaced together with it (`execute_correction`).
-    pub(crate) fn mention_head(&self, application: &str) -> Strokes {
+    pub fn mention_head(&self, application: &str) -> Strokes {
         if self.symbol_strokes.len() != 1 || self.strokes.is_empty() {
             return Vec::new();
         }
@@ -53,7 +53,7 @@ impl EngineCore {
     /// (`after_mention_head`) and the word that follows decides, as before,
     /// whether the pair was ``@name`` or a quotation. A quote typed after a
     /// caret move or after the layout was chosen by hand is left alone.
-    pub(crate) fn show_mention_head(&mut self, stroke: &Stroke) {
+    pub fn show_mention_head(&mut self, stroke: &Stroke) {
         let application = self.backend.active_application();
         if !self.flag("enabled", true)
             || self.application_excluded(&application)
@@ -88,7 +88,7 @@ impl EngineCore {
     }
 
     /// A key typed after the quote: the member list was not what came next.
-    pub(crate) fn after_mention_head(&mut self, event: &Stroke, boundary: Option<&Stroke>) {
+    pub fn after_mention_head(&mut self, event: &Stroke, boundary: Option<&Stroke>) {
         if self.pending.as_ref().is_some_and(|pending| pending.mode == "mention_shown") {
             // Typed before the quote key came up: nothing was rewritten yet.
             self.log_pending_dropped("typing_continued");
@@ -107,7 +107,7 @@ impl EngineCore {
         self.hide_mention_head(&head, boundary, i64::from(event.keycode));
     }
 
-    pub(crate) fn hide_mention_head(&mut self, head: &Stroke, boundary: Option<&Stroke>, trigger_keycode: i64) {
+    pub fn hide_mention_head(&mut self, head: &Stroke, boundary: Option<&Stroke>, trigger_keycode: i64) {
         if boundary.is_none() && self.pending.as_ref().is_some_and(|pending| pending.mode == "mention_hidden") {
             // Already waiting for the first letter to come up; it takes the
             // letters typed meanwhile along (maybe_execute_pending).
@@ -122,7 +122,7 @@ impl EngineCore {
     }
 
     /// The plan that turns the shown `@` back into the quote, keeping what follows it.
-    pub(crate) fn mention_write_back(&self, head: &Stroke, strokes: &[Stroke], trailing: &[Stroke], boundary: Option<Stroke>, application: &str) -> PlanRef {
+    pub fn mention_write_back(&self, head: &Stroke, strokes: &[Stroke], trailing: &[Stroke], boundary: Option<Stroke>, application: &str) -> PlanRef {
         let head_group = i64::from(head.group);
         let shown_group = self.other_groups(head_group)[0];
         let head_key = std::slice::from_ref(head);

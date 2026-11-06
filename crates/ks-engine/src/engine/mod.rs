@@ -321,18 +321,18 @@ impl EngineCore {
 
     /// `time.monotonic()` of the engine.
     #[inline]
-    pub(crate) fn monotonic(&self) -> f64 {
+    pub fn monotonic(&self) -> f64 {
         (self.clock)()
     }
 
     /// `bool(self.settings.get(path, default))`.
     #[inline]
-    pub(crate) fn flag(&self, path: &str, default: bool) -> bool {
+    pub fn flag(&self, path: &str, default: bool) -> bool {
         self.settings.with_value(path, |value| value.map_or(default, truthy))
     }
 
     /// `str(self.settings.get(path, default))` as the checks against a name read it.
-    pub(crate) fn text_setting(&self, path: &str, default: &str) -> String {
+    pub fn text_setting(&self, path: &str, default: &str) -> String {
         self.settings.with_value(path, |value| match value {
             None => default.to_owned(),
             Some(Value::String(text)) => text.clone(),
@@ -341,7 +341,7 @@ impl EngineCore {
     }
 
     /// `self.settings.get(path, [])`, a list of texts.
-    pub(crate) fn words_setting(&self, path: &str) -> Vec<String> {
+    pub fn words_setting(&self, path: &str) -> Vec<String> {
         self.settings.with_value(path, |value| match value {
             Some(Value::Array(items)) => items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect(),
             _ => Vec::new(),
@@ -349,27 +349,27 @@ impl EngineCore {
     }
 
     #[inline]
-    pub(crate) fn in_models(&self, group: i64) -> bool {
+    pub fn in_models(&self, group: i64) -> bool {
         0 <= group && group.to::<usize>() < self.models.len()
     }
 
     #[inline]
-    pub(crate) fn model(&self, group: i64) -> &Arc<LanguageModel> {
+    pub fn model(&self, group: i64) -> &Arc<LanguageModel> {
         &self.models[group.to::<usize>()]
     }
 
     /// `[group for group in self.models if group != source_group]`.
-    pub(crate) fn other_groups(&self, source_group: i64) -> Vec<i64> {
+    pub fn other_groups(&self, source_group: i64) -> Vec<i64> {
         (0..self.models.len().to::<i64>()).filter(|&group| group != source_group).collect()
     }
 
     /// `{group: self.text_for_group(strokes, group) for group in self.models if group != source_group}`.
-    pub(crate) fn alternatives_of(&self, strokes: &[Stroke], source_group: i64) -> Alternatives {
+    pub fn alternatives_of(&self, strokes: &[Stroke], source_group: i64) -> Alternatives {
         self.other_groups(source_group).into_iter().map(|group| (group, text_for_group(strokes, group))).collect()
     }
 
     /// `term_frequency()`: the tables the context model holds, or read once without one.
-    pub(crate) fn term_frequency(&self) -> EngineResult<Arc<TermTables>> {
+    pub fn term_frequency(&self) -> EngineResult<Arc<TermTables>> {
         if let Some(model) = &self.context_policy.model {
             return Ok(model.tables.clone());
         }
@@ -384,11 +384,11 @@ impl EngineCore {
 
     /// `self.focus_window or 0`.
     #[inline]
-    pub(crate) fn focus_or_zero(&self) -> i64 {
+    pub fn focus_or_zero(&self) -> i64 {
         self.shared.focus_window().unwrap_or(0)
     }
 
-    pub(crate) fn application_excluded(&self, application: &str) -> bool {
+    pub fn application_excluded(&self, application: &str) -> bool {
         self.shared.application_excluded(application)
     }
 
@@ -398,7 +398,7 @@ impl EngineCore {
     /// Both windows take their ranges from the same constants, and a value edited
     /// into the settings file by hand is brought into that range here; one that is
     /// not a number at all falls back to the default.
-    pub(crate) fn bounded_setting(&self, path: &str, default: f64, minimum: f64, maximum: f64) -> f64 {
+    pub fn bounded_setting(&self, path: &str, default: f64, minimum: f64, maximum: f64) -> f64 {
         let value = self.settings.with_value(path, |value| match value {
             None => default,
             Some(Value::Bool(flag)) => f64::from(u8::from(*flag)),
@@ -411,15 +411,15 @@ impl EngineCore {
         if low < maximum { low } else { maximum }
     }
 
-    pub(crate) fn pause_delay(&self) -> f64 {
+    pub fn pause_delay(&self) -> f64 {
         self.bounded_setting("detection.pause_delay_seconds", DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS)
     }
 
-    pub(crate) fn confidence_threshold(&self) -> f64 {
+    pub fn confidence_threshold(&self) -> f64 {
         self.bounded_setting("detection.confidence", DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX)
     }
 
-    pub(crate) fn minimum_word_length(&self) -> i64 {
+    pub fn minimum_word_length(&self) -> i64 {
         self.bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX).to::<i64>()
     }
 

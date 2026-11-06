@@ -143,7 +143,7 @@ impl EngineCore {
     /// A plain space pressed while an automatic correction made at a sign, not at a space, waits for its keys to
     /// come up. A correction at a space may wait for the next word (`start_context_wait`), and one of another kind
     /// (Pause, the early switch, a mention) reaches text of its own: those still give way to the second boundary.
-    pub(crate) fn space_follows_pending_sign(&self, event: &KeyEvent) -> bool {
+    pub fn space_follows_pending_sign(&self, event: &KeyEvent) -> bool {
         let Some(plan) = &self.pending else {
             return false;
         };
@@ -165,7 +165,7 @@ impl EngineCore {
     /// Converting the same keys back continues the chain; anything else starts a
     /// new one. The chain's first plan is what a double press of the hotkey
     /// reasons about: the engine's own decision, or the user's first conversion.
-    pub(crate) fn remember_correction(&mut self, plan: &PlanRef) {
+    pub fn remember_correction(&mut self, plan: &PlanRef) {
         // An undo always puts back the last correction, also past the spaces typed after it, where its keys
         // after the word are more than the correction's (undo_past_spaces): the chain goes on.
         if self.correction_origin.is_none() || (plan.mode != "undo" && self.reversal_of_last_correction(plan).is_none()) {
@@ -208,7 +208,7 @@ impl EngineCore {
     }
 
     /// Whether this press of the conversion hotkey completes a double press.
-    pub(crate) fn double_convert_press(&mut self, event: &KeyEvent) -> bool {
+    pub fn double_convert_press(&mut self, event: &KeyEvent) -> bool {
         let keycode = i64::from(event.keycode);
         if keycode == self.convert_keycode && !self.convert_released && self.convert_press_at != 0.0 {
             // Auto-repeat of the held key: still the first press.
@@ -236,7 +236,7 @@ impl EngineCore {
     /// missed one converted - the second press only opens the offer. If the
     /// first press undid a fix the user had made earlier, the second press puts
     /// the fix back, exactly as a single press would, and the offer follows.
-    pub(crate) fn request_rule_after_double_press(&mut self, trigger_keycode: i64) {
+    pub fn request_rule_after_double_press(&mut self, trigger_keycode: i64) {
         let outcome = self.convert_outcome.take();
         let application = self.backend.active_application();
         if let Some(ConvertOutcome::Plan(outcome)) = &outcome
@@ -318,7 +318,7 @@ impl EngineCore {
     /// keys of their own. They are not this keyboard's typing - the machine where
     /// they are typed has its own switcher - so they are neither words nor
     /// hotkeys nor keys to wait for; only the text they change is no longer known.
-    pub(crate) fn observe_foreign_input(&mut self, event: &KeyEvent) {
+    pub fn observe_foreign_input(&mut self, event: &KeyEvent) {
         if !event.pressed || is_modifier_key(&event.key_name) {
             return;
         }
@@ -345,7 +345,7 @@ impl EngineCore {
     }
 
     /// The last correction, if `plan` converts the same keys back.
-    pub(crate) fn reversal_of_last_correction(&self, plan: &CorrectionPlan) -> Option<PlanRef> {
+    pub fn reversal_of_last_correction(&self, plan: &CorrectionPlan) -> Option<PlanRef> {
         let previous = self.last_correction.as_ref()?;
         if plan.strokes != previous.strokes
             || plan.trailing != previous.trailing
@@ -514,7 +514,7 @@ impl EngineCore {
     /// None unless the text before the caret is the correction's text followed by plain spaces alone: the
     /// word, the signs and the boundary the correction typed, then spaces (`extend_last_committed` adds each
     /// to the last committed word as it is typed, and anything else makes that word stale).
-    fn undo_past_spaces(&self) -> Option<(PlanRef, usize)> {
+    pub fn undo_past_spaces(&self) -> Option<(PlanRef, usize)> {
         let (previous, committed) = (self.last_correction.as_ref()?, self.last_committed.as_ref()?);
         if self.pending.is_some()
             || self.last_committed_stale

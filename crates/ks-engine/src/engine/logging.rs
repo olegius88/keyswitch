@@ -88,7 +88,7 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn _decision_diagnostics(decision: &DetectionDecision) -> Map<String, Value> {
+    pub fn _decision_diagnostics(decision: &DetectionDecision) -> Map<String, Value> {
         let mut map = Map::new();
         map.insert("should_convert".into(), json!(decision.should_convert));
         map.insert("replacement".into(), json!(decision.replacement));
@@ -185,7 +185,7 @@ impl EngineCore {
     /// A correction waits for the release of the key that triggered it, so a
     /// shortcut or a focus change in between silently cancels it: from the
     /// outside the hotkey simply did nothing.
-    pub(crate) fn log_pending_dropped(&self, reason: &str) {
+    pub fn log_pending_dropped(&self, reason: &str) {
         let Some(plan) = &self.pending else {
             return;
         };
@@ -208,7 +208,7 @@ impl EngineCore {
     ///
     /// Without it a log line cannot tell a correction the user's rule forced, or
     /// a word their rule kept, from one the model decided on its own.
-    fn learning_diagnostics(&self, source_group: Option<i64>, word: &str) -> Value {
+    pub fn learning_diagnostics(&self, source_group: Option<i64>, word: &str) -> Value {
         let enabled = self.flag("detection.learning", true);
         let Some(group) = source_group else {
             return json!({"enabled": enabled});
@@ -231,7 +231,7 @@ impl EngineCore {
     }
 
     /// Record a word that was thrown away before it could be corrected.
-    pub(crate) fn log_word_discarded(&self, reason: &str) {
+    pub fn log_word_discarded(&self, reason: &str) {
         if self.strokes.is_empty() && self.symbol_strokes.is_empty() {
             return;
         }
@@ -258,7 +258,7 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn log_context_wait(&self, event: &str, waiting: Option<&WaitingContextWord>, reason: &str, fields: &[(&str, Value)]) {
+    pub fn log_context_wait(&self, event: &str, waiting: Option<&WaitingContextWord>, reason: &str, fields: &[(&str, Value)]) {
         let Some(waiting) = waiting else {
             return;
         };
@@ -309,7 +309,7 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn field_reader_status(&self) -> String {
+    pub fn field_reader_status(&self) -> String {
         let Some(reader) = &self.context_policy.reader else {
             return "not_configured".to_owned();
         };
@@ -319,7 +319,7 @@ impl EngineCore {
         }
     }
 
-    pub(crate) fn field_reader_details(&self) -> Value {
+    pub fn field_reader_details(&self) -> Value {
         if let (Some(reader), Some(platform)) = (&self.context_policy.reader, &self.platform_reader)
             && std::ptr::addr_eq(Arc::as_ptr(reader), Arc::as_ptr(platform))
         {

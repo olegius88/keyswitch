@@ -27,7 +27,7 @@ fn cyrillic_letter(character: char) -> bool {
 }
 
 impl EngineCore {
-    pub(crate) fn begin_word(&mut self, event: &Stroke) {
+    pub fn begin_word(&mut self, event: &Stroke) {
         if !self.strokes.is_empty() {
             return;
         }
@@ -88,7 +88,7 @@ impl EngineCore {
     /// and the word typed so far found in it as the early switch finds it (_`typed_in_field)`: with
     /// no letter right before or after it, the first read is dropped. A field that cannot be read
     /// or matched keeps it.
-    pub(crate) fn insertion_holds(&mut self, typed: &str, ahead: &str, application: &str) -> bool {
+    pub fn insertion_holds(&mut self, typed: &str, ahead: &str, application: &str) -> bool {
         let Some(point) = self.insertion.clone().filter(InsertionPoint::inside_word) else {
             return false;
         };
@@ -131,7 +131,7 @@ impl EngineCore {
     /// fragment agrees with its word and is left alone. At a boundary the word
     /// ends there, so only the letters before the caret belong to it.
     /// Returns None when the word was not begun inside text.
-    pub(crate) fn decide_inside_word(
+    pub fn decide_inside_word(
         &mut self, strokes: &[Stroke], source_group: i64, alternatives: &Alternatives, application: &str, trigger: CorrectionTrigger,
         boundary: Option<&Stroke>,
     ) -> EngineResult<Option<DetectionDecision>> {
@@ -209,7 +209,7 @@ impl EngineCore {
 
     /// Whether the boundary model reads the last `signs` keys of a word as its letters (`сдела.` is `сделаю`)
     /// rather than signs after it (`привет,`); an abstention keeps them signs, as typed.
-    fn signs_are_letters(&self, original: &str, alternative: &str, source_group: i64, target: i64, signs: usize) -> bool {
+    pub fn signs_are_letters(&self, original: &str, alternative: &str, source_group: i64, target: i64, signs: usize) -> bool {
         let Some(model) = self.boundary_model.as_ref().filter(|_| self.in_models(source_group) && self.in_models(target)) else {
             return false;
         };
@@ -334,7 +334,7 @@ impl EngineCore {
     }
 
     /// The field's text before a word just typed, as the reader shows it; None without a read that holds it.
-    fn field_before(&self, typed: &str) -> Option<String> {
+    pub fn field_before(&self, typed: &str) -> Option<String> {
         let reader = self.context_policy.reader.as_ref().filter(|_| self.flag("detection.context_read_field", false))?;
         let application = self.backend.active_application();
         let snapshot = reader.read(&application, self.focus_or_zero())?;
@@ -358,7 +358,7 @@ impl EngineCore {
     /// word of the lexicon or the identifier index is not taken back: the prefix model was right
     /// about a term typed in the other layout that the context model, asked about the unknown
     /// typed reading alone, kept (an English word typed in the Russian layout after Russian prose).
-    pub(crate) fn settle_early_switch(
+    pub fn settle_early_switch(
         &mut self, shown: DetectionDecision, strokes: &[Stroke], shown_group: i64, origin: i64, application: &str, trigger: CorrectionTrigger,
         boundary_text: &str,
     ) -> EngineResult<DetectionDecision> {
@@ -404,14 +404,14 @@ impl EngineCore {
     }
 
     /// Every other layout when a "keep" rule of the user fits the word.
-    pub(crate) fn rejected_targets(&self, source_group: i64, original: &str) -> Vec<i64> {
+    pub fn rejected_targets(&self, source_group: i64, original: &str) -> Vec<i64> {
         if !self.flag("detection.learning", true) || !self.learning.keeps(source_group, original) {
             return Vec::new();
         }
         self.other_groups(source_group)
     }
 
-    pub(crate) fn forced_target_group(&self, source_group: i64, word: &str) -> Option<i64> {
+    pub fn forced_target_group(&self, source_group: i64, word: &str) -> Option<i64> {
         if !self.flag("detection.learning", true) {
             return None;
         }
@@ -421,7 +421,7 @@ impl EngineCore {
     /// What the detector decides about a word before the context model is asked.
     ///
     /// `following` is what was typed right after the word, as each target layout prints it.
-    pub(crate) fn baseline_decision(
+    pub fn baseline_decision(
         &self, original: &str, alternatives: &Alternatives, source_group: i64, application: &str, trigger: CorrectionTrigger,
         following: Option<&Alternatives>,
     ) -> EngineResult<DetectionDecision> {
@@ -457,7 +457,7 @@ impl EngineCore {
     /// neighbour in its planned layout and that layout's language: the converted
     /// next word of a waiting word, which is what the corpus curriculum supplies
     /// for planned frames, or the other reading of the waiting word before it.
-    pub(crate) fn planned_baseline(
+    pub fn planned_baseline(
         &self, original: &str, alternatives: &Alternatives, source_group: i64, next_word: &str, next_group: i64,
     ) -> EngineResult<DetectionDecision> {
         let ignored_words = self.words_setting("exclusions.words");
@@ -564,7 +564,7 @@ impl EngineCore {
         Ok(result.decision.clone())
     }
 
-    pub(crate) fn context_for(&self, application: &str) -> (Alternatives, Option<i64>) {
+    pub fn context_for(&self, application: &str) -> (Alternatives, Option<i64>) {
         if pystr::strip(application).is_empty() {
             return (Vec::new(), None);
         }

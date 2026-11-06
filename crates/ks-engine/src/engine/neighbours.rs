@@ -13,7 +13,7 @@ use serde_json::json;
 
 impl EngineCore {
     /// The model converted a short word that opens the message, with nothing before it.
-    pub(crate) fn opening_conversion(&self, inside: Option<&DetectionDecision>, original: &str) -> bool {
+    pub fn opening_conversion(&self, inside: Option<&DetectionDecision>, original: &str) -> bool {
         let Some(result) = self.context_result.as_ref().filter(|_| inside.is_none()) else {
             return false;
         };
@@ -38,7 +38,7 @@ impl EngineCore {
     /// matches and the wait cancels itself. A token of signs the other layout
     /// types the same (`-`) has nothing to wait for: it stands among the kept
     /// words instead (`keep_for_next_word`).
-    pub(crate) fn start_context_wait(
+    pub fn start_context_wait(
         &mut self, plan: &PlanRef, decision: &DetectionDecision, boundary: &Stroke, trailing: &[Stroke], head: usize, fallback: bool,
     ) -> bool {
         let Some(result) = self.context_result.clone() else {
@@ -85,7 +85,7 @@ impl EngineCore {
         false
     }
 
-    pub(crate) fn cancel_context_wait(&mut self, reason: &str) {
+    pub fn cancel_context_wait(&mut self, reason: &str) {
         self.log_context_wait("context_wait_cancelled", self.context_waiting.as_ref(), reason, &[]);
         self.context_waiting = None;
         // Whatever ends a wait - another field, a caret move, Backspace, a manual
@@ -99,7 +99,7 @@ impl EngineCore {
     ///
     /// `switched` says the early switch converted the next word while it was typed: its keys
     /// are in two layouts, and `decision` is that conversion, from the waiting word's layout.
-    pub(crate) fn resolve_context_wait(
+    pub fn resolve_context_wait(
         &mut self, waiting: Option<&WaitingContextWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision,
         application: &str, alternatives: &Alternatives, switched: bool,
     ) -> EngineResult<Option<(PlanRef, DetectionDecision)>> {
@@ -219,7 +219,7 @@ impl EngineCore {
     /// the `kept_next_word` question it has weights and frames of its own for, and a conversion
     /// it is sure of replaces that word alone: the next word is typed again in its own layout,
     /// and the layout stays there.
-    pub(crate) fn decide_with_kept_neighbour(
+    pub fn decide_with_kept_neighbour(
         &mut self, waiting: &WaitingContextWord, strokes: &[Stroke], boundary: &Stroke, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<PlanRef>> {
         let previous = waiting.plan.clone();
@@ -307,7 +307,7 @@ impl EngineCore {
     /// (`context_action_features.sign_question)`: a one-letter word of the Russian layout after a Cyrillic word, no
     /// Russian word of one letter, before a token that is no dash alone (a dash tells a minus from the dash of a
     /// sentence only by what follows it). The model decides; a conversion takes the sign along (`word_before_kept`).
-    pub(crate) fn decide_letter_before_sign(
+    pub fn decide_letter_before_sign(
         &mut self, kept: &[Arc<KeptWord>], strokes: &[Stroke], boundary: &Stroke, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<PlanRef>> {
         let Some(word) = kept.last() else {
@@ -369,7 +369,7 @@ impl EngineCore {
     /// sign is a Russian letter's key was converted there, the next English word typed in the Russian
     /// layout went back, and the first word stayed Cyrillic (test v47). The plan is the pause's, ended
     /// by this space; only the very word converted, with nothing typed onto it, qualifies.
-    pub(crate) fn provisional_after_pause(
+    pub fn provisional_after_pause(
         &self, paused: Option<&ProvisionalWord>, strokes: &[Stroke], source_group: i64, boundary: &Stroke,
     ) -> Option<ProvisionalWord> {
         let paused = paused?;
@@ -437,7 +437,7 @@ impl EngineCore {
     /// is (`resolve_context_wait`). If the model no longer converts it, one
     /// correction returns both: `vs code`. The engine only asks; the model decides.
     /// Only a word that opened its text is asked again.
-    pub(crate) fn revert_with_next_word(
+    pub fn revert_with_next_word(
         &mut self, provisional: Option<&ProvisionalWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision, application: &str,
     ) -> EngineResult<Option<(PlanRef, DetectionDecision)>> {
         let Some(provisional) = provisional else {
@@ -508,7 +508,7 @@ impl EngineCore {
     }
 
     /// Remember the words left as typed at a space until a later word shows their layout.
-    pub(crate) fn keep_for_next_word(&mut self, kept: Vec<Arc<KeptWord>>, word: Option<Arc<KeptWord>>, boundary: &Stroke) {
+    pub fn keep_for_next_word(&mut self, kept: Vec<Arc<KeptWord>>, word: Option<Arc<KeptWord>>, boundary: &Stroke) {
         if boundary.character != " " || boundary.deferred {
             return;
         }
@@ -598,7 +598,7 @@ impl EngineCore {
     /// (`в 2 vbkkbjyf[ cdtnjds[` converted only `световых`, though the model, asked,
     /// converts `миллионах` before it at p=1.0). A word the user excluded, or one a rule
     /// of theirs keeps, is never taken along: the model is not asked about it (`decide_word`).
-    pub(crate) fn take_along(
+    pub fn take_along(
         &mut self, kept: &[Arc<KeptWord>], plan: &PlanRef, first_characters: usize, application: &str, switched: bool,
     ) -> EngineResult<PlanRef> {
         if self.text_setting("detection.context_policy", "assist") != "assist" {

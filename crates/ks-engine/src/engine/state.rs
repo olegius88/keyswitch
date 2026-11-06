@@ -8,7 +8,7 @@ use ks_config::pycompat::truthy;
 use std::sync::atomic::Ordering;
 
 impl EngineCore {
-    pub(crate) fn complete_deferred_action(&mut self, deliver: bool, reason: &str) {
+    pub fn complete_deferred_action(&mut self, deliver: bool, reason: &str) {
         let action = self.deferred_action.take();
         self.action_deadline = 0.0;
         match self.backend.complete_action(deliver) {
@@ -166,7 +166,7 @@ impl EngineCore {
     }
 
     /// Notice the user moving to another window.
-    pub(crate) fn track_focus(&mut self) -> FocusChange {
+    pub fn track_focus(&mut self) -> FocusChange {
         let Some(focus) = self.shared.focused_window().filter(|focus| focus.window != 0) else {
             return FocusChange { changed: false, ignore_layout: false };
         };

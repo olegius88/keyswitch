@@ -25,7 +25,7 @@ impl EngineCore {
     // Text typed while a modifier of the hotkey is still held would come out as shortcuts (Ctrl+C under a held Alt is
     // Ctrl+Alt+C). The selection is not the word being typed, so that word and whatever waits for it are let go
     // first: a correction of it typed after the selection changed would land in the wrong place.
-    pub(crate) fn schedule_selection_command(&mut self, name: &str) {
+    pub fn schedule_selection_command(&mut self, name: &str) {
         let Some(command) = command_of_hotkey(name) else {
             return;
         };
@@ -48,7 +48,7 @@ impl EngineCore {
     /// A selection hotkey whose keys were not seen to come up in time changes nothing.
     ///
     /// As with `expire_manual_correction`, a timeout is no proof that the keys are up, so nothing is typed.
-    pub(crate) fn expire_selection_command(&mut self) {
+    pub fn expire_selection_command(&mut self) {
         let Some(pending) = self.selection_pending else {
             return;
         };

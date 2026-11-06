@@ -14,7 +14,7 @@ impl EngineCore {
     // `ghbd` of `ghbdtn`, and a correction made of that deletes the wrong letters. Each key that passed the hook
     // in those runs lay within the wait of a key the hook reached HOOK_GAP_MS late (take_hook_gap). What follows
     // is left alone as after an overflowing queue.
-    pub(crate) fn take_hook_gap(&mut self) -> bool {
+    pub fn take_hook_gap(&mut self) -> bool {
         let Some(gap) = self.backend.take_hook_gap() else {
             return false;
         };
@@ -466,7 +466,7 @@ impl EngineCore {
     ///
     /// Composed text, surrogate pairs, combining marks and IME results do
     /// not have the one-key/one-deletion contract used by these backends.
-    pub(crate) fn _safe_text_stroke(event: &KeyEvent) -> bool {
+    pub fn _safe_text_stroke(event: &KeyEvent) -> bool {
         event.characters.iter().all(|char| {
             let mut characters = char.chars();
             match (characters.next(), characters.next()) {
@@ -480,7 +480,7 @@ impl EngineCore {
     }
 
     /// A printable key whose character differs between the layouts.
-    pub(crate) fn _layout_dependent(event: &KeyEvent) -> bool {
+    pub fn _layout_dependent(event: &KeyEvent) -> bool {
         if event.character.is_empty() {
             return false;
         }
@@ -498,14 +498,14 @@ impl EngineCore {
         false
     }
 
-    pub(crate) fn _is_layout_letter(event: &KeyEvent) -> bool {
+    pub fn _is_layout_letter(event: &KeyEvent) -> bool {
         event.characters.iter().any(|character| pystr::isalpha(character))
     }
 
     /// A key that types one and the same sign in every layout (`-`, `_`, `+`, `=`) can join two
     /// words typed in different layouts. A sign that is a letter in another layout is a letter of the
     /// word: `,` is the `б` of `cj,thb` (`собери`), `;` the `ж` of `ye;yj` (`нужно`).
-    pub(crate) fn _joins_parts(stroke: &KeyEvent) -> bool {
+    pub fn _joins_parts(stroke: &KeyEvent) -> bool {
         let Some(first) = stroke.characters.first() else {
             return false;
         };
@@ -531,7 +531,7 @@ impl EngineCore {
                 && character.chars().next().is_some_and(|first| category(first).starts_with('P')))
     }
 
-    pub(crate) fn boundary_enabled(&self, event: &KeyEvent) -> bool {
+    pub fn boundary_enabled(&self, event: &KeyEvent) -> bool {
         let name = event.key_name.as_str();
         if name == "space" || (pystr::isspace(&event.character) && !is_action_boundary_key(name)) {
             return self.flag("detection.correct_on_space", true);
@@ -545,7 +545,7 @@ impl EngineCore {
         self.flag("detection.correct_on_punctuation", true)
     }
 
-    pub(crate) fn _trigger_for_boundary(event: &KeyEvent) -> ks_lang::intent_model::CorrectionTrigger {
+    pub fn _trigger_for_boundary(event: &KeyEvent) -> ks_lang::intent_model::CorrectionTrigger {
         use ks_lang::intent_model::CorrectionTrigger;
         let name = event.key_name.as_str();
         if name == "space" || (pystr::isspace(&event.character) && !is_action_boundary_key(name)) {
@@ -560,7 +560,7 @@ impl EngineCore {
         CorrectionTrigger::Punctuation
     }
 
-    pub(crate) fn matches_hotkey(&self, name: &str, event: &KeyEvent) -> bool {
+    pub fn matches_hotkey(&self, name: &str, event: &KeyEvent) -> bool {
         if !event.pressed {
             return false;
         }
@@ -586,11 +586,11 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn selection_hotkey(&self, event: &KeyEvent) -> Option<&'static str> {
+    pub fn selection_hotkey(&self, event: &KeyEvent) -> Option<&'static str> {
         SELECTION_HOTKEYS.iter().copied().find(|name| self.matches_hotkey(name, event))
     }
 
-    pub(crate) fn caret_unknown(&self) -> bool {
+    pub fn caret_unknown(&self) -> bool {
         // Whether this word is being typed where the engine cannot see the surroundings.
         //
         // An arrow key, Home or Page Up puts the caret somewhere the engine has not
@@ -614,13 +614,13 @@ impl EngineCore {
         self.context_policy.reader.as_ref().is_none_or(|reader| reader.status() != "available")
     }
 
-    pub(crate) fn mark_word_activity(&mut self) {
+    pub fn mark_word_activity(&mut self) {
         self.last_word_input_at = Some(self.monotonic());
         self.pause_correction_pending = true;
         self.pause_deferral_logged = false;
     }
 
-    pub(crate) fn reset_pause_correction(&mut self) {
+    pub fn reset_pause_correction(&mut self) {
         self.last_word_input_at = None;
         self.pause_correction_pending = false;
     }

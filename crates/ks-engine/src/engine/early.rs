@@ -30,7 +30,7 @@ impl EngineCore {
     }
 
     /// Switch the layout as soon as the typed prefix proves it wrong.
-    pub(crate) fn maybe_early_switch(&mut self) -> EngineResult<()> {
+    pub fn maybe_early_switch(&mut self) -> EngineResult<()> {
         if self.boundary_model.is_some()
             && let Some(last) = self.strokes.last()
             && !pystr::isalpha(&last.character)
@@ -176,7 +176,7 @@ impl EngineCore {
     /// Code (Windows logs, 05.09-08.10.2026). Up to `FIELD_PENDING_MAX_CHARACTERS` of the last letters
     /// may be missing, the caret right after the rest. Text typed ahead may follow the word, and
     /// the caret may be seen short of it (`caret_lag`). None for any other text.
-    pub(crate) fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
+    pub fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
         let boundaries: Vec<usize> = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len())).collect();
         for &end in boundaries.iter().rev() {
             let shown = format!("{typed}{}", ahead.get(..end).unwrap_or_default());
@@ -191,7 +191,7 @@ impl EngineCore {
             .map(|short| (pystr::slice(&field.before, None, Some(-pystr::len(&short).to::<i64>())).to_owned(), field.after.clone()))
     }
 
-    pub(crate) fn decide_prefix(&self, baseline: EarlySwitchDecision, field: Option<&FieldContext>) -> EngineResult<(EarlySwitchDecision, f64)> {
+    pub fn decide_prefix(&self, baseline: EarlySwitchDecision, field: Option<&FieldContext>) -> EngineResult<(EarlySwitchDecision, f64)> {
         let mode = self.text_setting("detection.context_policy", "assist");
         if !self.flag("detection.context_aware", true) || (mode != "assist" && mode != "shadow") {
             return Ok((baseline, EARLY_SWITCH_CONFIDENCE));
@@ -241,7 +241,7 @@ impl EngineCore {
     }
 
     /// Extend a scheduled early switch with letters typed before release.
-    pub(crate) fn refresh_early_plan(&mut self, plan: &PlanRef) -> EngineResult<Option<PlanRef>> {
+    pub fn refresh_early_plan(&mut self, plan: &PlanRef) -> EngineResult<Option<PlanRef>> {
         let strokes = self.strokes.clone();
         let prefix = plan.strokes.len();
         if strokes.len() < prefix || strokes[..prefix] != plan.strokes[..] || self.source_group != plan.source_group {
@@ -287,13 +287,13 @@ impl EngineCore {
         })))
     }
 
-    fn log_early_switch(&self, decision: &EarlySwitchDecision, policy: &EarlySwitchPolicy, application: &str, excluded: bool) {
+    pub fn log_early_switch(&self, decision: &EarlySwitchDecision, policy: &EarlySwitchPolicy, application: &str, excluded: bool) {
         if !self.shared.technical_logging() {
             return;
         }
         let mut payload = decision.as_dict();
-        if excluded && let Some(map) = payload.as_object_mut() {
-            map.insert("replacement".into(), json!("<redacted>"));
+        if excluded {
+            payload["replacement"] = json!("<redacted>");
         }
         technical_event!(
             self.shared, "early_switch_evaluation",
@@ -306,7 +306,7 @@ impl EngineCore {
         );
     }
 
-    pub(crate) fn late_stroke_after_early_switch(&self, event: &KeyEvent) -> bool {
+    pub fn late_stroke_after_early_switch(&self, event: &KeyEvent) -> bool {
         let group = i64::from(event.group);
         self.early_switch_at.is_some_and(|switched_at| {
             Some(group) == self.early_switch_origin && group != self.source_group && self.monotonic() - switched_at <= LATE_STROKE_GRACE_SECONDS
@@ -314,7 +314,7 @@ impl EngineCore {
     }
 
     /// Schedule the mixed prefix for replacement after all keys are up.
-    pub(crate) fn convert_late_stroke(&mut self, event: &Stroke) -> Stroke {
+    pub fn convert_late_stroke(&mut self, event: &Stroke) -> Stroke {
         let target_group = self.source_group;
         let delay_ms = self.early_switch_at.map(|switched_at| ms(self.monotonic() - switched_at));
         let converted = key_of(KeyEvent {
@@ -340,7 +340,7 @@ impl EngineCore {
     }
 
     /// Remember that the engine itself just switched the layout.
-    pub(crate) fn note_engine_switch(&mut self, group: i64) {
+    pub fn note_engine_switch(&mut self, group: i64) {
         self.engine_switch_at = Some(self.monotonic());
         self.engine_switch_group = Some(group);
         // The layout the engine chose supersedes the user's earlier manual
@@ -354,18 +354,18 @@ impl EngineCore {
     /// The request stays posted. VS Code confirmed one a second after it was asked for, the
     /// correction had been given up by then, and the layout that came was booked as the
     /// user's own pick: it protected the next word from correction.
-    pub(crate) fn note_unconfirmed_switch(&mut self, error: &ks_backend::BackendError) {
+    pub fn note_unconfirmed_switch(&mut self, error: &ks_backend::BackendError) {
         if let ks_backend::BackendError::LayoutSwitchUnconfirmed { group, .. } = error {
             self.note_engine_switch(i64::from(*group));
         }
     }
 
     /// The current word must be neither corrected nor switched early.
-    pub(crate) fn word_protected(&self, source_group: i64) -> bool {
+    pub fn word_protected(&self, source_group: i64) -> bool {
         self.early_switch_undone || (self.flag("detection.respect_manual_layout", true) && self.manual_layout_group == Some(source_group))
     }
 
-    pub(crate) fn protection_details(&self) -> Value {
+    pub fn protection_details(&self) -> Value {
         json!({
             "reason": if self.early_switch_undone { "early_switch_undone" } else { "manual_layout" },
             "group": self.manual_layout_group,
@@ -379,7 +379,7 @@ impl EngineCore {
     /// `strokes` and `trailing` are the committed word exactly as `commit_word`
     /// recorded it: Pause, undo and Backspace delete `strokes + trailing + boundary`,
     /// so a literal comma left out here leaves one letter of the word on screen.
-    pub(crate) fn finish_early_switch(&mut self, strokes: Strokes, boundary: Option<Stroke>, application: &str, final_group: i64, trailing: Strokes) {
+    pub fn finish_early_switch(&mut self, strokes: Strokes, boundary: Option<Stroke>, application: &str, final_group: i64, trailing: Strokes) {
         let origin = self.early_switch_origin.take();
         self.early_switch_at = None;
         let Some(origin) = origin else {
@@ -426,7 +426,7 @@ impl EngineCore {
     ///
     /// The text was replaced before this runs, so a full or locked disk is reported
     /// and the bookkeeping after it (undo, callbacks, the learning prompt) goes on.
-    pub(crate) fn record_history(&self, original: &str, replacement: &str, application: &str, confidence: f64) {
+    pub fn record_history(&self, original: &str, replacement: &str, application: &str, confidence: f64) {
         if !self.flag("general.keep_history", true) {
             return;
         }
@@ -438,7 +438,7 @@ impl EngineCore {
 
     // -- Typo correction (typo_correction.py): one slip in a finished word, undone in the word's own injection --
     /// The corrector while `detection.correct_typos` is on; its lists load once per process, on first use.
-    pub(crate) fn typo_corrector(&mut self) -> EngineResult<Option<Arc<TypoCorrector>>> {
+    pub fn typo_corrector(&mut self) -> EngineResult<Option<Arc<TypoCorrector>>> {
         if !self.flag("detection.correct_typos", true) {
             return Ok(None);
         }
@@ -456,7 +456,7 @@ impl EngineCore {
     /// in the wrong layout and misspelt (`yhjvfkmyj`) is `нормально` after one injection, not two. A capital opens
     /// the word only at the start of a message or a sentence: one in the middle of a sentence is a name. A word whose
     /// correction the user took back (`schedule_undo`) is left as typed from then on.
-    pub(crate) fn typo_plan(&mut self, base: &PlanRef, keys: &[Stroke]) -> EngineResult<Option<PlanRef>> {
+    pub fn typo_plan(&mut self, base: &PlanRef, keys: &[Stroke]) -> EngineResult<Option<PlanRef>> {
         let corrector = self.typo_corrector()?;
         let group = base.target_group;
         let Some(corrector) = corrector else {
@@ -553,7 +553,7 @@ impl EngineCore {
     ///
     /// Typing on into the next word, or Enter or Tab delivered after it, leaves it; Backspace into it, Pause, undo, a
     /// click or the caret moved away go back to it, or may.
-    pub(crate) fn personal_word_settled(&mut self, kept: bool) {
+    pub fn personal_word_settled(&mut self, kept: bool) {
         let word = std::mem::take(&mut self.personal_pending);
         if !word.is_empty() && kept && self.personal.keep(&word) {
             technical_event!(self.shared, "personal_word_added", "reason": "left_as_typed", "letters": pystr::len(&word));
@@ -561,7 +561,7 @@ impl EngineCore {
     }
 
     /// Whether the last correction is a typo correction that undo can still take back (`schedule_undo`).
-    pub(crate) fn typo_correction_reversible(&self) -> bool {
+    pub fn typo_correction_reversible(&self) -> bool {
         let (Some(previous), Some(committed)) = (&self.last_correction, &self.last_committed) else {
             return false;
         };

@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::learning::{LearnedRule, RuleAction, RuleMatch};
-use ks_engine::engine::{PlanRef, QueueItem};
+use ks_engine::engine::{InsertionPoint, PlanRef, QueueItem};
 use ks_replay::harness::{Backend, Bundle, CaretReader, KEYS, PAUSE_KEYCODE, Session, UnreadField};
 use serde_json::{Value, json};
 
@@ -264,12 +264,17 @@ fn add_rule(session: &mut Session, dice: &mut Dice) {
 /// What the engine holds about a word grows old while the person does something else: every guard on it must hold.
 fn age_what_is_held(session: &mut Session, dice: &mut Dice) {
     let core = &mut session.core;
-    let kind = dice.below(7);
+    let kind = dice.below(12);
     let changed = |plan: &PlanRef, kind: usize| {
         let mut plan = (**plan).clone();
         match kind {
             0 => "another program".clone_into(&mut plan.application),
             1 => plan.boundary = None,
+            3 => plan.boundary = plan.boundary.as_ref().map(|boundary| Arc::new(KeyEvent { deferred: true, ..(**boundary).clone() })),
+            4 => plan.original.clear(),
+            5 => "a b".clone_into(&mut plan.original),
+            6 => plan.mode = "context_phrase",
+            7 => plan.trailing = plan.strokes.clone(),
             // A plan always goes from one layout to the other: this is the other way round, never to itself.
             _ => std::mem::swap(&mut plan.source_group, &mut plan.target_group),
         }
@@ -359,6 +364,61 @@ fn strange_key(session: &mut Session, dice: &mut Dice) {
     let key_name = *dice.of(&["dead_acute", "Multi_key", "a", "U1F600", "VoidSymbol"]);
     let shown = character.to_owned();
     session.tap(KeyEvent { pressed: true, keycode: 200, key_name: key_name.to_owned(), character: shown.clone(), characters: vec![shown.clone(), shown], group, ..KeyEvent::default() });
+}
+
+/// The engine's own state put by hand where only a rare order of events brings it. The next keys and timers must cope.
+fn disturb(session: &mut Session, dice: &mut Dice) {
+    let comma = key_event(session, ',', 0).map(Arc::new);
+    let now = session.core.monotonic();
+    let group = |dice: &mut Dice| i64::try_from(dice.below(3)).expect("small");
+    let core = &mut session.core;
+    match dice.below(30) {
+        0 => core.last_committed_stale = true,
+        1 => {
+            core.pressed.insert(200);
+        }
+        2 => {
+            core.pressed.clear();
+            core.modifier_keycodes.clear();
+        }
+        3 => {
+            core.modifier_keycodes.insert(50);
+        }
+        4 => core.untracked_token = true,
+        5 => core.untracked_token = false,
+        6 => core.symbol_strokes.extend(comma),
+        7 => core.source_group = -1,
+        8 => core.source_group = group(dice),
+        9 => core.shared.input_overflow.store(true, Ordering::Relaxed),
+        10 => core.wait_deferral_logged = -1,
+        11 => core.early_switch_origin = Some(group(dice)),
+        12 => core.early_switch_origin = None,
+        13 => core.insertion = Some(InsertionPoint { head: (*dice.of(&["", "ab", "при"])).to_owned(), tail: (*dice.of(&["", "cd", "вет"])).to_owned() }),
+        14 => core.insertion = None,
+        15 => core.pending.clone_from(&core.last_committed),
+        16 => core.caret_moved = true,
+        17 => core.position_unknown = true,
+        18 => core.foreign_input_active = !core.foreign_input_active,
+        19 => core.manual_layout_group = Some(group(dice)),
+        20 => core.convert_press_at = if dice.one_in(2) { 0.0 } else { now },
+        21 => core.field_wait = None,
+        22 => core.strokes.clear(),
+        23 => core.pause_correction_pending = true,
+        24 => core.last_word_input_at = None,
+        25 => core.mention_shown.clone_from(&comma),
+        26 => core.early_switch_at = None,
+        27 => core.manual_layout_word = !core.manual_layout_word,
+        28 => core.pause_agreement_open = !core.pause_agreement_open,
+        _ => core.last_committed = None,
+    }
+    match dice.below(6) {
+        0 => {
+            let _ = session.core.run_timers();
+        }
+        1 => session.core.retry_field_wait(),
+        2 => press_pause(session),
+        _ => {}
+    }
 }
 
 fn step(session: &mut Session, dice: &mut Dice, window: &mut i64) {
@@ -518,6 +578,41 @@ fn a_long_walk_stops_nowhere() {
         if let Some(ortho) = ortho {
             session.core.context_policy.ortho = ortho;
         }
+        bundle.give_back(session);
+    }
+    bundle.clean();
+}
+
+/// The same walk with the engine's own state pushed about between the steps.
+#[test]
+fn a_disturbed_walk_stops_nowhere() {
+    let mut bundle = Bundle::load(None);
+    for seed in 1..=WALKS / 3 {
+        let mut dice = Dice(0x2545_f491_4f6c_dd1d ^ seed.wrapping_mul(0x94d0_49bb_1331_11eb));
+        let group = i32::try_from(dice.below(2)).expect("small");
+        let mut session = bundle.session(dice.of(APPLICATIONS), group, Vec::new());
+        session.recovers = true;
+        if dice.one_in(3) {
+            let _ = session.core.settings.set("diagnostics.technical_logging", json!(true), false);
+        }
+        let backend = session.backend.clone();
+        session.core.context_policy.reader = Some(Arc::new(CaretReader { backend }));
+        let mut window = 1;
+        for _ in 0..STEPS {
+            step(&mut session, &mut dice, &mut window);
+            if dice.one_in(2) {
+                disturb(&mut session, &mut dice);
+            }
+            if dice.one_in(3) {
+                session.core.shared.input_overflow.store(false, Ordering::Relaxed);
+            }
+            let (text, caret) = (session.backend.text(), session.backend.caret());
+            assert!(caret <= text.len(), "seed {seed}");
+        }
+        session.core.shared.input_overflow.store(false, Ordering::Relaxed);
+        session.core.pressed.clear();
+        session.core.modifier_keycodes.clear();
+        session.idle(2.0);
         bundle.give_back(session);
     }
     bundle.clean();

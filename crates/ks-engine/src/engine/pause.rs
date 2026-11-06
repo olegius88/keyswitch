@@ -91,7 +91,7 @@ impl EngineCore {
     /// meant, while `jr` and Enter at once was asked at Enter (the laptop, 02.11.2026). A suggestion is asked again too:
     /// a pause brings no new context, but the end of the message is the action's own question. A word already
     /// converted at its boundary has nothing left to convert.
-    pub(crate) fn settle_context_wait_at_action(&mut self, event: &KeyEvent) -> EngineResult<()> {
+    pub fn settle_context_wait_at_action(&mut self, event: &KeyEvent) -> EngineResult<()> {
         let Some(waiting) = self.context_waiting.clone() else {
             return Ok(());
         };
@@ -418,7 +418,7 @@ impl EngineCore {
     }
 
     /// Forget presses whose release was never delivered (focus changes).
-    pub(crate) fn prune_stale_presses(&mut self, now: f64, older_than: f64, keep: Option<u32>) {
+    pub fn prune_stale_presses(&mut self, now: f64, older_than: f64, keep: Option<u32>) {
         let mut stale: Vec<u32> = self
             .pressed_since
             .iter()

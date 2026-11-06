@@ -58,7 +58,7 @@ impl EngineCore {
 
     /// The word's keys, the signs split off its end, whether its segmentation is certain, and
     /// whether the boundary model, asked, could not split it (it abstained).
-    pub(crate) fn completed_word(&mut self, strokes: &[Stroke], source_group: i64) -> (Strokes, Strokes, bool, bool) {
+    pub fn completed_word(&mut self, strokes: &[Stroke], source_group: i64) -> (Strokes, Strokes, bool, bool) {
         let whole = || strokes.to_vec();
         let Some(model) = self.boundary_model.clone().filter(|_| self.in_models(source_group)) else {
             return (whole(), Vec::new(), true, false);
@@ -125,7 +125,7 @@ impl EngineCore {
     /// never replaced. A head that itself looks like a wrong-layout word
     /// abstains: one span cannot fix two words, and manual Pause still
     /// converts the whole token.
-    pub(crate) fn literal_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub fn literal_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
         if !self.in_models(source_group)
             || !self.flag("detection.protect_code", true)
             || !self.flag("detection.context_aware", true)
@@ -176,7 +176,7 @@ impl EngineCore {
     /// typed in two layouts. As after a slash, the head is never replaced, a head segment that itself
     /// looks like a word in the wrong layout abstains (one span cannot fix two words), and only
     /// the contextual model is asked.
-    fn joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub fn joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
         if !self.flag("detection.context_aware", true)
             || self.text_setting("detection.context_policy", "assist") != "assist"
             || self.context_policy.model.is_none()
@@ -189,7 +189,7 @@ impl EngineCore {
     /// The strokes up to the last joining sign, when the token is parts joined by it and every part before
     /// it is settled as typed (`joined_head`); 0 otherwise. Pause converts the part after them alone, whatever
     /// decides automatic corrections (`schedule_manual_conversion`).
-    pub(crate) fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
         let last_join = strokes.iter().rposition(|stroke| Self::_joins_parts(stroke));
         let targets = self.other_groups(source_group);
         let Some(last_join) = last_join else {
@@ -229,7 +229,7 @@ impl EngineCore {
     /// stands). Signs split off the end (`replayed_signs`) stay split off the part: `mongo-cthdbcf/` is
     /// `mongo-сервиса.`. Otherwise the token stays as the whole of it was judged, with that
     /// judgement's context result.
-    pub(crate) fn decide_joined_part(
+    pub fn decide_joined_part(
         &mut self, strokes: &[Stroke], signs: &[Stroke], source_group: i64, targets: &[i64], application: &str, trigger: CorrectionTrigger,
         boundary: Option<&Stroke>, whole: &DetectionDecision,
     ) -> EngineResult<Option<(usize, DetectionDecision)>> {
@@ -316,7 +316,7 @@ impl EngineCore {
     /// sign in both layouts but another one. The word is judged without them and, if it
     /// converts, they are replayed with it; a token that is a word as typed (`хлеб`) keeps
     /// its letters, and a key that types the same sign in both layouts is no part of this.
-    pub(crate) fn replayed_signs(&self, strokes: &[Stroke], source_group: i64) -> usize {
+    pub fn replayed_signs(&self, strokes: &[Stroke], source_group: i64) -> usize {
         let targets = self.other_groups(source_group);
         let Some(&target) = targets.first() else {
             return 0;
@@ -346,7 +346,7 @@ impl EngineCore {
         count
     }
 
-    pub(crate) fn with_signs(&self, plan: &PlanRef, signs: &[Stroke]) -> PlanRef {
+    pub fn with_signs(&self, plan: &PlanRef, signs: &[Stroke]) -> PlanRef {
         if signs.is_empty() {
             return plan.clone();
         }
@@ -366,7 +366,7 @@ impl EngineCore {
     /// pressed for the layout the word was meant in - unless it is a quotation mark and
     /// one opened the word (`opened`): then it closes the quotation, and `"john"` keeps
     /// both quotes.
-    pub(crate) fn _replay_sign_with_word(plan: &PlanRef, opened: &[Stroke]) -> PlanRef {
+    pub fn _replay_sign_with_word(plan: &PlanRef, opened: &[Stroke]) -> PlanRef {
         let Some(boundary) = plan.boundary.clone() else {
             return plan.clone();
         };
@@ -392,7 +392,7 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn plan_from_decision(
+    pub fn plan_from_decision(
         &self, strokes: &[Stroke], boundary: Option<&Stroke>, application: &str, decision: &DetectionDecision, mode: &'static str,
     ) -> PlanRef {
         if mode == "boundary"
@@ -423,7 +423,7 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn context_field_id(&self) -> String {
+    pub fn context_field_id(&self) -> String {
         self.context_result
             .as_ref()
             .and_then(|result| result.field.as_ref())
@@ -434,7 +434,7 @@ impl EngineCore {
     /// The start of a word still being typed: `PAUSE_WORD_START_LETTERS` letters that many words of
     /// their own language begin with, whose other reading is no word of the other language's prose.
     /// `иг` is the start of `игру` and `bu` no English word, while `ша` typed for `if` is.
-    pub(crate) fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
+    pub fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
         if pystr::len(original) != PAUSE_WORD_START_LETTERS || !pystr::isalpha(original) || !self.in_models(group) {
             return Ok(false);
         }
@@ -456,7 +456,7 @@ impl EngineCore {
     /// few such keys typed after it, got only the other layout, and erased and typed the word again (13.10.2026;
     /// 9 of the 16 such presses in the PC logs since 01.10 were followed by the word typed again by hand).
     /// Letters, Backspace, the arrow keys, a click, Enter and Tab end the reach as before.
-    pub(crate) fn pause_reaches_past(&self, keys: &[Stroke]) -> bool {
+    pub fn pause_reaches_past(&self, keys: &[Stroke]) -> bool {
         let Some(plan) = &self.last_committed else {
             return false;
         };
@@ -478,7 +478,7 @@ impl EngineCore {
     ///
     /// They are the same in every layout, so they take the group of the word's boundary: a correction types its
     /// literal keys in one layout.
-    pub(crate) fn extend_last_committed(&mut self, keys: &[Stroke]) {
+    pub fn extend_last_committed(&mut self, keys: &[Stroke]) {
         let plan = self.last_committed.clone().expect("a last committed word");
         let boundary = plan.boundary.clone().expect("with a boundary");
         let group = boundary.group;
@@ -496,7 +496,7 @@ impl EngineCore {
     /// was typed or clicked since (it is not stale), no literal punctuation
     /// sits between the word and that boundary, and the boundary is not
     /// Enter or Tab, whose effect on the text one Backspace cannot undo.
-    pub(crate) fn reopenable_committed_word(&self) -> Option<PlanRef> {
+    pub fn reopenable_committed_word(&self) -> Option<PlanRef> {
         let plan = self.last_committed.as_ref()?;
         let boundary = plan.boundary.as_ref()?;
         if self.last_committed_stale
@@ -512,7 +512,7 @@ impl EngineCore {
         Some(plan.clone())
     }
 
-    pub(crate) fn layout_name(&self, group: i64) -> String {
+    pub fn layout_name(&self, group: i64) -> String {
         self.settings.with_value("detection.layouts", |names| {
             let default = ["us", "ru"];
             match names {
@@ -522,7 +522,7 @@ impl EngineCore {
         })
     }
 
-    pub(crate) fn layout_letters(&self, group: i64) -> HashSet<char> {
+    pub fn layout_letters(&self, group: i64) -> HashSet<char> {
         let keys = match self.layout_name(group).as_str() {
             "us" => ks_text::layouts::US_KEYS,
             "ru" => ks_text::layouts::RU_KEYS,
@@ -536,7 +536,7 @@ impl EngineCore {
         letters
     }
 
-    pub(crate) fn _letters_before(text: &str) -> String {
+    pub fn _letters_before(text: &str) -> String {
         let mut start = text.len();
         for (index, character) in text.char_indices().rev() {
             if !ks_text::ucd::isalpha(character) {
@@ -547,12 +547,12 @@ impl EngineCore {
         text.get(start..).unwrap_or_default().to_owned()
     }
 
-    pub(crate) fn _letters_after(text: &str) -> String {
+    pub fn _letters_after(text: &str) -> String {
         let end = text.char_indices().find(|(_, character)| !ks_text::ucd::isalpha(*character)).map_or(text.len(), |(index, _)| index);
         text.get(..end).unwrap_or_default().to_owned()
     }
 
-    pub(crate) fn _reads_alike(plan: &CorrectionPlan) -> bool {
+    pub fn _reads_alike(plan: &CorrectionPlan) -> bool {
         // A token of signs that the other layout types the same (`-`, `2`): nothing in it to convert.
         plan.original == plan.replacement && !any_alpha(&plan.original)
     }
@@ -561,7 +561,7 @@ impl EngineCore {
     ///
     /// `t\`` is `её`, while `t` alone, `е`, is no word. When the word without the
     /// sign is a word itself, the boundary model's split stands.
-    pub(crate) fn sign_reads_as_letter(&self, plan: &PlanRef) -> bool {
+    pub fn sign_reads_as_letter(&self, plan: &PlanRef) -> bool {
         let keys: Strokes = plan.strokes.iter().chain(plan.trailing.iter()).cloned().collect();
         let whole = text_for_group(&keys, plan.target_group);
         self.known_reading(plan.target_group, &whole) && !self.model(plan.target_group).score(&plan.replacement).known
@@ -570,7 +570,7 @@ impl EngineCore {
     /// Whether a lexicon of the group holds the text, spelt with `ё` or with `е`: Russian writes `ё` as `е` as often
     /// as not, and a lexicon may hold one spelling alone. The shipped one holds `ее` and not `её`, and `T\`` opening a
     /// sentence stayed for `Её` (the development sentences of the Tatoeba dump, 22.10.2026).
-    pub(crate) fn known_reading(&self, group: i64, text: &str) -> bool {
+    pub fn known_reading(&self, group: i64, text: &str) -> bool {
         let model = self.model(group);
         model.score(text).known || model.score(&text.replace('ё', "е").replace('Ё', "Е")).known
     }
@@ -578,7 +578,7 @@ impl EngineCore {
     /// Whether the text is a word of the group's language: the lexicon holds it (`known_reading`), or prose of that
     /// language uses it at least `KEPT_WORD_PROSE_MIN_COUNT` times (the term tables): the shipped Russian lexicon holds no
     /// `ой`, `ох` or `эх`.
-    pub(crate) fn word_of_its_language(&self, group: i64, text: &str) -> EngineResult<bool> {
+    pub fn word_of_its_language(&self, group: i64, text: &str) -> EngineResult<bool> {
         let prose = if group == 1 { "russian" } else { "english" };
         Ok(self.known_reading(group, text) || self.term_frequency()?.term(prose).count(&pystr::casefold(text)) >= KEPT_WORD_PROSE_MIN_COUNT)
     }

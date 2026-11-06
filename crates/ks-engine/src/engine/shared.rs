@@ -103,7 +103,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Shared {
-    pub(crate) fn new(
+    pub fn new(
         settings: Arc<SettingsStore>, backend: Arc<dyn InputBackend>, clock: Clock, models_len: usize, snapshot: EngineSnapshot,
     ) -> Arc<Shared> {
         let swallows_hotkeys = backend.swallows_hotkeys();
@@ -145,7 +145,7 @@ impl Shared {
 
     /// `self.settings.subscribe(self.settings_changed)`. What the hook reads changes at once, on the caller's thread; the
     /// rest of the change is the worker's.
-    pub(crate) fn subscribe_settings(shared: &Arc<Shared>) {
+    pub fn subscribe_settings(shared: &Arc<Shared>) {
         let weak = Arc::downgrade(shared);
         let unsubscribe = shared.settings.subscribe(Arc::new(move |path: &str, value: &Value| {
             if let Some(shared) = weak.upgrade() {
@@ -163,7 +163,7 @@ impl Shared {
     }
 
     /// `action_keys`, `own_hotkeys` and `injected_input`, read from the settings for the hook.
-    pub(crate) fn refresh_hook_settings(&self) {
+    pub fn refresh_hook_settings(&self) {
         self.action_keys.store(self.configured_action_keys(), Ordering::Relaxed);
         let hotkeys = Arc::new(self.configured_hotkeys());
         *self.own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
@@ -203,7 +203,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         f64::from_bits(self.prompt_key_deadline.load(Ordering::Relaxed))
     }
 
-    pub(crate) fn set_prompt_key_deadline(&self, deadline: f64) {
+    pub fn set_prompt_key_deadline(&self, deadline: f64) {
         self.prompt_key_deadline.store(deadline.to_bits(), Ordering::Relaxed);
     }
 
@@ -212,7 +212,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         (window != NO_WINDOW).then_some(window)
     }
 
-    pub(crate) fn set_sensitive_context_window(&self, window: Option<i64>) {
+    pub fn set_sensitive_context_window(&self, window: Option<i64>) {
         self.sensitive_context_window.store(window.unwrap_or(NO_WINDOW), Ordering::Relaxed);
     }
 
@@ -233,7 +233,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         self.test_field_focused.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn accepts_injected(&self, event: &KeyEvent) -> bool {
+    pub fn accepts_injected(&self, event: &KeyEvent) -> bool {
         // Whether input another program injected is treated as the user's typing.
         //
         // A key that carries a character instead of a key position (VK_PACKET on
@@ -312,17 +312,17 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         }
     }
 
-    pub(crate) fn key_filter(self: &Arc<Self>) -> KeyFilter {
+    pub fn key_filter(self: &Arc<Self>) -> KeyFilter {
         let shared = self.clone();
         Arc::new(move |event: &KeyEvent| shared.consumes_key(event))
     }
 
-    pub(crate) fn key_listener(self: &Arc<Self>) -> KeyListener {
+    pub fn key_listener(self: &Arc<Self>) -> KeyListener {
         let shared = self.clone();
         Arc::new(move |event: KeyEvent| shared.enqueue(event))
     }
 
-    pub(crate) fn post(&self, command: Command) {
+    pub fn post(&self, command: Command) {
         locked(&self.inbox).commands.push_back(command);
         self.wake.notify_one();
     }
@@ -360,7 +360,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
     }
 
     /// A setting another thread changed, for `apply_commands`.
-    pub(crate) fn take_command(&self) -> Option<Command> {
+    pub fn take_command(&self) -> Option<Command> {
         locked(&self.inbox).commands.pop_front()
     }
 
@@ -370,11 +370,11 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
     }
 
     /// Everything queued, taken out; `put_back` returns what stays, in front of whatever arrived since.
-    pub(crate) fn take_queued(&self) -> Vec<QueueItem> {
+    pub fn take_queued(&self) -> Vec<QueueItem> {
         locked(&self.inbox).events.drain(..).collect()
     }
 
-    pub(crate) fn put_back(&self, items: Vec<QueueItem>) {
+    pub fn put_back(&self, items: Vec<QueueItem>) {
         let mut inbox = locked(&self.inbox);
         for item in items.into_iter().rev() {
             inbox.events.push_front(item);
@@ -392,7 +392,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         locked(&self.inbox).events.pop_front()
     }
 
-    pub(crate) fn application_excluded(&self, application: &str) -> bool {
+    pub fn application_excluded(&self, application: &str) -> bool {
         if let Some(window) = self.sensitive_context_window()
             && Some(window) == self.focus_window()
         {
@@ -413,11 +413,11 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         locked(&self.guarded).snapshot.clone()
     }
 
-    pub(crate) fn current_group(&self) -> i64 {
+    pub fn current_group(&self) -> i64 {
         locked(&self.guarded).snapshot.current_group
     }
 
-    pub(crate) fn correction_count(&self) -> i64 {
+    pub fn correction_count(&self) -> i64 {
         locked(&self.guarded).snapshot.correction_count
     }
 
@@ -430,7 +430,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         locked(&self.guarded).correction_callbacks.push(callback);
     }
 
-    pub(crate) fn correction_callbacks(&self) -> Vec<CorrectionCallback> {
+    pub fn correction_callbacks(&self) -> Vec<CorrectionCallback> {
         locked(&self.guarded).correction_callbacks.clone()
     }
 
@@ -624,12 +624,12 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         }
     }
 
-    pub(crate) fn technical_logging(&self) -> bool {
+    pub fn technical_logging(&self) -> bool {
         self.settings.with_value("diagnostics.technical_logging", |value| value.is_some_and(truthy))
     }
 
     /// The technical record, after its words that look like a password went into stars (`log_privacy`).
-    pub(crate) fn emit_technical(&self, payload: Map<String, Value>) {
+    pub fn emit_technical(&self, payload: Map<String, Value>) {
         let record = locked(&self.log_redactor).record(&payload);
         let options = ks_text::JsonOptions {
             ensure_ascii: false,
@@ -641,7 +641,7 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         ks_config::logsetup::info("keyswitch.engine", &message);
     }
 
-    pub(crate) fn focused_window(&self) -> Option<FocusInfo> {
+    pub fn focused_window(&self) -> Option<FocusInfo> {
         self.backend.focused_window()
     }
 }

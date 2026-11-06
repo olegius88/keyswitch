@@ -56,7 +56,7 @@ impl EngineCore {
 
     /// The text typed after ``original``: the keys queued, and the word begun since if ``original`` is
     /// not the word in progress (a decision put off to a later key: the next word's letters are taken).
-    pub(crate) fn typed_after(&self, original: &str) -> String {
+    pub fn typed_after(&self, original: &str) -> String {
         let same = self.strokes.iter().map(|stroke| stroke.character.as_str()).collect::<String>() == original;
         if same { self.typed_ahead(&self.strokes) } else { self.typed_ahead(&[]) }
     }
@@ -72,7 +72,7 @@ impl EngineCore {
     /// changed field: with the field reader on, `ghbdtn vbh` typed with the `v` pressed
     /// before the space came up stayed as typed, its next word with it (Windows field
     /// logs, 08.10.2026). Plain text only, up to the first key that is not.
-    pub(crate) fn typed_ahead(&self, typed: &[Stroke]) -> String {
+    pub fn typed_ahead(&self, typed: &[Stroke]) -> String {
         let planned: Vec<*const KeyEvent> = typed.iter().map(Arc::as_ptr).collect();
         let mut ahead = String::new();
         // The strokes outside `typed` come first; the queue is looked at only if they do not end the text.
