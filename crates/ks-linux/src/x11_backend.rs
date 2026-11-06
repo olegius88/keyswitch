@@ -10,6 +10,7 @@
 //! by both and never across a call to the server.
 
 use ks_cast::To as _;
+use std::io;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -26,7 +27,7 @@ use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{
     BACKSPACE_KEYSYM, INJECTION_SECONDS_PER_EVENT, KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
-    LEFT_KEYSYM, MAX_TRACKED_OWN_WINDOWS, MAX_UNICODE_CODEPOINT, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
+    LEFT_KEYSYM, MAX_TRACKED_OWN_WINDOWS, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
     MIN_INJECTION_DEADLINE_SECONDS, SHIFT_L_KEYSYM, X11_BUTTON_PRESS, X11_KEY_PRESS, X11_KEY_RELEASE, X11_MAX_KEYCODE,
     X11_MIN_KEYCODE, X11_WHEEL_BUTTONS, XKB_GROUP_STATE_MASK, XKB_GROUP_STATE_SHIFT, XRECORD_EVENT_SIZE_BYTES,
     XRECORD_EVENT_TYPE_MASK, XRECORD_FROM_SERVER, XRECORD_START_OF_DATA,
@@ -342,14 +343,7 @@ impl Shared {
                 done.set();
             })
         };
-        match worker {
-            Ok(handle) => *lock(&self.thread) = Some((handle, done)),
-            Err(error) => {
-                self.running.store(false, Ordering::SeqCst);
-                self.close();
-                return Err(failed(format!("Не удалось запустить поток XRecord: {error}")));
-            }
-        }
+        *lock(&self.thread) = Some((worker.map_err(|error| self.spawn_failed(&error))?, done));
         if !self.capture_start_finished.wait(Duration::from_secs_f64(KEYBOARD_LISTENER_START_TIMEOUT_SECONDS)) {
             self.close();
             return Err(failed(format!(
@@ -457,7 +451,7 @@ impl Shared {
             }
         }
         let codepoint = keysym_to_utf32(keysym);
-        if codepoint == 0 || codepoint > MAX_UNICODE_CODEPOINT {
+        if codepoint == 0 {
             return String::new();
         }
         let Some(base) = char::from_u32(codepoint) else { return String::new() };
@@ -564,6 +558,13 @@ impl Shared {
         }
         api.flush();
         Ok(())
+    }
+
+    /// A thread the system refused: nothing runs, and the connection goes.
+    fn spawn_failed(&self, error: &io::Error) -> X11Error {
+        self.running.store(false, Ordering::SeqCst);
+        self.close();
+        failed(format!("Не удалось запустить поток XRecord: {error}"))
     }
 
     fn stop(&self) {

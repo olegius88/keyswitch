@@ -13,6 +13,10 @@ const SHIFT_L: u8 = 50;
 const LEFT: u8 = 113;
 const RETURN: u8 = 36;
 const TAB: u8 = 23;
+const BACK_TAB: u8 = 24;
+const EMOJI: u8 = 25;
+const SURROGATE: u8 = 26;
+const LINE_FEED: u8 = 27;
 const SHIFT: u32 = SHIFT_MASK;
 
 fn sym(keysyms: &[u32]) -> Vec<u32> {
@@ -40,6 +44,10 @@ fn keymap() -> KeyMap {
     put(LEFT, 1, 1, 1, sym(&[0xff51]));
     put(RETURN, 1, 1, 1, sym(&[0xff0d]));
     put(TAB, 1, 1, 1, sym(&[0xff09]));
+    put(BACK_TAB, 1, 1, 1, sym(&[0xfe20]));
+    put(EMOJI, 1, 1, 1, sym(&[0x0101_f600]));
+    put(SURROGATE, 1, 1, 1, sym(&[0x0100_d800]));
+    put(LINE_FEED, 1, 1, 1, sym(&[0xff0a]));
     KeyMap { min_keycode: 8, max_keycode: 120, types: vec![alphabetic, one_level, two_level], keys }
 }
 
@@ -72,6 +80,9 @@ struct FakeState {
     pids: HashMap<u32, u32>,
     classes: HashMap<u32, (String, String)>,
     pid_queries: usize,
+    no_context: bool,
+    no_keyboard_state: bool,
+    missing_keysyms: Vec<u32>,
 }
 
 struct Fake {
@@ -110,7 +121,7 @@ impl X11Api for Fake {
         Ok((2, 2))
     }
     fn record_create_context(&self) -> Result<u32, String> {
-        Ok(77)
+        Ok(if self.with(|state| state.no_context) { 0 } else { 77 })
     }
     fn record_enable(&self, _context: u32, sink: &mut dyn FnMut(RecordChunk)) -> Result<(), String> {
         for chunk in self.with(|state| std::mem::take(&mut state.chunks)) {
@@ -140,9 +151,15 @@ impl X11Api for Fake {
         self.map.lookup_keysym(keycode, state)
     }
     fn keycode_for_keysym(&self, keysym: u32) -> u8 {
+        if self.with(|state| state.missing_keysyms.contains(&keysym)) {
+            return 0;
+        }
         self.map.keycode_for_keysym(keysym)
     }
     fn xkb_state(&self) -> Option<XkbState> {
+        if self.with(|state| state.no_keyboard_state) {
+            return None;
+        }
         self.with(|state| Some(XkbState { group: state.group, locked_mods: state.locked_mods }))
     }
     fn lock_group(&self, group: u8) -> bool {
@@ -917,4 +934,160 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
         backend.close_backend();
         assert!(backend.shared.api().is_none());
     }
+}
+
+#[test]
+fn a_connection_is_opened_once_and_a_start_uses_it() {
+    let fake = Fake::new();
+    let backend = fake.backend();
+    backend.open().expect("open");
+    backend.open().expect("already open");
+    assert!(backend.supports_selection());
+    fake.with(|state| state.block_record = true);
+    *lock(&backend.shared.context) = 5;
+    let starts = thread::scope(|scope| {
+        let starting = scope.spawn(|| backend.start(Arc::new(|_| {})));
+        thread::sleep(Duration::from_millis(50));
+        backend.shared.capture_ready.set();
+        backend.shared.capture_start_finished.set();
+        starting.join().unwrap()
+    });
+    assert!(starts.is_ok());
+    backend.close();
+}
+
+#[test]
+fn a_context_the_server_refuses_or_a_capture_it_never_confirms_stops_the_start() {
+    let fake = Fake::new();
+    fake.with(|state| state.no_context = true);
+    let backend = fake.backend();
+    assert_eq!(backend.start(Arc::new(|_| {})).expect_err("no context").to_string(), "Не удалось создать контекст XRecord");
+    let fake = Fake::new();
+    fake.with(|state| state.block_record = true);
+    let backend = fake.backend();
+    assert!(backend.start(Arc::new(|_| {})).expect_err("no answer").to_string().contains("не подтвердил"));
+    assert!(backend.shared.api().is_none());
+    assert!(fake.backend().shared.spawn_failed(&io::Error::other("no threads")).to_string().contains("no threads"));
+}
+
+#[test]
+fn keys_of_rare_keysyms_read_as_what_they_type() {
+    let fake = Fake::new();
+    let backend = opened(&fake);
+    assert_eq!(backend.character_for_keycode(EMOJI, 0, 0), "😀");
+    assert_eq!(backend.character_for_keycode(SURROGATE, 0, 0), "");
+    assert_eq!(backend.character_for_keycode(LINE_FEED, 0, 0), "\u{a}");
+    assert_eq!(backend.character_for_keycode(BACKSPACE, 0, 0), "");
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = events.clone();
+    fake.with(|state| {
+        state.chunks = vec![chunk(4, Vec::new()), chunk(0, payload(2, BACK_TAB, 0, 1))];
+    });
+    backend.start(Arc::new(move |event| lock(&sink).push(event))).expect("started");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock(&events).is_empty() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    backend.stop();
+    assert_eq!(lock(&events).first().map(|event: &KeyEvent| event.character.clone()), Some("\t".to_owned()));
+}
+
+#[test]
+fn the_list_of_own_windows_is_kept_short() {
+    let fake = Fake::new();
+    let backend = opened(&fake);
+    for window in 0..u32::try_from(MAX_TRACKED_OWN_WINDOWS).unwrap() + 2 {
+        fake.with(|state| state.focus = Some(window + 1000));
+        let _ = backend.focused_window();
+    }
+    assert!(lock(&backend.shared.own_windows).len() <= MAX_TRACKED_OWN_WINDOWS);
+}
+
+#[test]
+fn a_stop_waits_for_the_capture_only_so_long_and_never_for_itself() {
+    let fake = Fake::new();
+    // Marked running with no context, and with a context and no connection.
+    let backend = fake.backend();
+    backend.shared.running.store(true, Ordering::SeqCst);
+    backend.stop();
+    *lock(&backend.shared.context) = 5;
+    backend.stop();
+    backend.shared.running.store(false, Ordering::SeqCst);
+    // A capture that does not end in time is left behind.
+    let slow = thread::spawn(|| thread::sleep(Duration::from_secs(3)));
+    *lock(&backend.shared.thread) = Some((slow, Arc::new(Event::default())));
+    let began = Instant::now();
+    backend.stop();
+    assert!(began.elapsed() < Duration::from_secs(3));
+    // A stop from the capture's own thread.
+    let backend = Arc::new(fake.backend());
+    let go = Arc::new(Event::default());
+    let (worker, signal) = (backend.clone(), go.clone());
+    let handle = thread::spawn(move || {
+        assert!(signal.wait(Duration::from_secs(5)));
+        worker.stop();
+    });
+    *lock(&backend.shared.thread) = Some((handle, Arc::new(Event::default())));
+    go.set();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while lock(&backend.shared.thread).is_some() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(lock(&backend.shared.thread).is_none());
+}
+
+#[test]
+fn a_correction_needs_the_state_of_the_keyboard_and_a_shift_key() {
+    let fake = Fake::new();
+    let backend = opened(&fake);
+    let strokes = [stroke(false)];
+    fake.with(|state| state.no_keyboard_state = true);
+    assert!(backend.inject_correction(injection(&strokes, 1, None)).expect_err("no state").to_string().contains("Caps Lock"));
+    fake.with(|state| {
+        state.no_keyboard_state = false;
+        state.missing_keysyms = vec![SHIFT_L_KEYSYM];
+    });
+    assert!(backend.inject_correction(injection(&strokes, 1, None)).expect_err("no shift").to_string().contains("BackSpace/Shift"));
+}
+
+#[test]
+fn a_selection_is_read_and_written_as_far_as_the_server_lets_it() {
+    let selected = SelectedText { text: "ghbdtn".to_owned(), source: "atspi".to_owned() };
+    // Nothing open yet.
+    let fake = Fake::new();
+    let backend = fake.backend();
+    assert!(backend.replace_selection(&selected, "a", None).is_err());
+    let backend = selection_backend(&fake, None);
+    // Read twice: one source.
+    assert!(backend.read_selection("app", 5).is_ok());
+    assert!(backend.read_selection("app", 5).is_ok());
+    // A field that writes it itself and no layout asked for.
+    let written = selection_backend(&fake, Some(false));
+    assert!(written.read_selection("app", 5).is_ok());
+    assert_eq!(written.replace_selection(&selected, "привет", None), Ok(false));
+    // What the keys need.
+    fake.with(|state| state.no_keyboard_state = true);
+    assert!(backend.replace_selection(&selected, "a", None).is_err());
+    fake.with(|state| {
+        state.no_keyboard_state = false;
+        state.missing_keysyms = vec![SHIFT_L_KEYSYM];
+    });
+    assert!(backend.replace_selection(&selected, "a", None).is_err());
+    fake.with(|state| state.missing_keysyms = vec![LEFT_KEYSYM]);
+    assert!(backend.replace_selection(&selected, "a", None).is_err());
+    fake.with(|state| state.missing_keysyms.clear());
+    // A capital with Shift, a capital and a sign under Caps Lock, a character the caret cannot be counted over.
+    assert_eq!(backend.replace_selection(&selected, "A", None), Ok(true));
+    assert!(fake.calls().contains(&Call::Fake(true, SHIFT_L)));
+    fake.with(|state| state.locked_mods = u8::try_from(LOCK_MASK).unwrap());
+    assert_eq!(backend.replace_selection(&selected, "A,", None), Ok(true));
+    fake.with(|state| state.locked_mods = 0);
+    assert_eq!(backend.replace_selection(&selected, "😀", None), Ok(false));
+    // A key the server refuses is forgotten with what was expected.
+    fake.with(|state| {
+        state.fakes_seen = 0;
+        state.fail_fake = Some(0);
+    });
+    assert!(backend.replace_selection(&selected, "a", None).is_err());
+    assert_eq!(expected_len(&backend), 0);
 }
