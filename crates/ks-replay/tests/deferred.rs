@@ -77,7 +77,12 @@ fn calls_wait_for_the_engine_and_reach_it() {
     deferred.start(failed.clone()).unwrap();
     drop(held);
     assert!(deferred.engine().is_ok() && deferred.ready());
-    run(&posted);
+    // The builder posts its calls just after the engine is ready.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while *subscribed.lock().unwrap() == 0 && Instant::now() < deadline {
+        run(&posted);
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert_eq!(*subscribed.lock().unwrap(), 1);
     assert!(heard.lock().unwrap().is_empty());
     let count = subscribed.clone();

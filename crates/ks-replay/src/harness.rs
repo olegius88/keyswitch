@@ -15,7 +15,7 @@ use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_lang::{LanguageModel, Resources};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 pub const PAUSE_KEYCODE: u32 = 127;
@@ -81,6 +81,7 @@ struct EditorState {
     serial: usize,
     failing: bool,
     panicking: bool,
+    swallows: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -96,6 +97,9 @@ pub struct Correction {
     pub caret_after: usize,
 }
 
+/// Whether the next editors keep the program's own hotkeys from the window, as a Mac does.
+pub static SWALLOWS: AtomicBool = AtomicBool::new(false);
+
 /// Model editing and submission before the passive observer sees a key.
 pub struct Backend {
     state: Mutex<EditorState>,
@@ -105,7 +109,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed) }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -256,7 +260,11 @@ impl InputBackend for Backend {
     fn close(&self) {}
 
     fn current_group(&self) -> Result<i32, BackendError> {
-        Ok(self.lock().group)
+        let state = self.lock();
+        if state.failing {
+            return Err(BackendError::Failed("the window is gone".to_owned()));
+        }
+        Ok(state.group)
     }
 
     fn switch_group(&self, group: i32) -> Result<(), BackendError> {
@@ -266,6 +274,10 @@ impl InputBackend for Backend {
         }
         state.group = group;
         Ok(())
+    }
+
+    fn swallows_hotkeys(&self) -> bool {
+        self.lock().swallows
     }
 
     fn active_application(&self) -> String {

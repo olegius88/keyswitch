@@ -159,7 +159,14 @@ fn walk_everything() -> Result<(), String> {
         // Every control once; after that only what opens a dialog, whose answer is what changes between the rounds.
         for widget in widgets.iter().filter(|widget| acts(widget) && (round == 0 || widget.is::<gtk::Button>())) {
             if widget.root().is_some() {
-                note(format!("{answer} {} {}", widget.type_(), widget.downcast_ref::<gtk::Button>().and_then(gtk::Button::label).unwrap_or_default()));
+                note(format!(
+                    "{answer} {} label {:?} icon {:?} tooltip {:?} row {:?}",
+                    widget.type_(),
+                    widget.downcast_ref::<gtk::Button>().and_then(gtk::Button::label),
+                    widget.downcast_ref::<gtk::Button>().and_then(gtk::Button::icon_name),
+                    widget.tooltip_text(),
+                    widget.ancestor(adw::PreferencesRow::static_type()).and_then(|row| row.downcast::<adw::PreferencesRow>().ok()).map(|row| row.title()),
+                ));
                 change(widget);
                 pump(1);
                 if widget.is::<gtk::Button>() {
