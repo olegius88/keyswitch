@@ -58,7 +58,7 @@ fn exact_sums_and_means() {
     assert_eq!(fsum(&[f64::INFINITY, f64::NEG_INFINITY]), Err(FsumError::InfMinusInf));
     assert_eq!(fsum(&[f64::MAX, f64::MAX]), Err(FsumError::Overflow));
     assert!(fsum(&[f64::NAN, 1.0]).is_ok_and(f64::is_nan));
-    assert_eq!(fsum(&[1.0, 1e-16, 1e-16]), Ok(1.0000000000000002));
+    assert_eq!(fsum(&[1.0, 1e-16, 1e-16]), Ok(1.000_000_000_000_000_2));
     assert_eq!(fmean(&[]), None);
     assert_eq!(fmean(&[1.0, 2.0]), Some(1.5));
     assert_eq!(pstdev(&[]), None);
