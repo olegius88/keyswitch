@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use logcourier::batching::compact;
 use logcourier::catalog::{current_catalog, decode_index, deliver, list_entries, verify_connection};
@@ -59,6 +60,7 @@ struct Group {
     refuse_up_to: RefCell<i64>,
     answers: RefCell<VecDeque<Value>>,
     answers_for: RefCell<Vec<(String, Value)>>,
+    fail_delete: RefCell<bool>,
 }
 
 impl Group {
@@ -105,6 +107,9 @@ impl Client for Group {
                 json!({"message_id": *self.next_message.borrow(), "chat": {"id": CHAT.parse::<i64>().unwrap()}})
             }
             "deleteMessages" => {
+                if *self.fail_delete.borrow() {
+                    return Err(Error::telegram_with("Telegram HTTP 500: try later", 0, 500));
+                }
                 let first = params["message_ids"][0].as_i64().unwrap();
                 if first <= *self.refuse_up_to.borrow() {
                     return Err(Error::telegram_with("Telegram HTTP 400: message can't be deleted", 0, 400));
@@ -363,7 +368,7 @@ fn the_service_says_what_stops_it_sends_when_asked_and_stops_when_told() {
     let failing = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (shared, stop_making) = (group.clone(), failing.clone());
     let make: MakeClient = Arc::new(move |_token| {
-        if stop_making.load(std::sync::atomic::Ordering::SeqCst) {
+        if stop_making.load(Ordering::SeqCst) {
             return Err(Error::telegram_with("slow down", 3, 429));
         }
         let client: Box<dyn Client> = Box::new(shared.clone());
@@ -401,7 +406,7 @@ fn the_service_says_what_stops_it_sends_when_asked_and_stops_when_told() {
     service.update(settings.clone(), "1:token".to_owned());
     service.send_now();
     wait("Новых архивов");
-    failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    failing.store(true, Ordering::SeqCst);
     append(&log, "2026-11-04 12:00:01,000 0.66.1 INFO keyswitch: b\n");
     service.send_now();
     wait("slow down");
@@ -1165,4 +1170,95 @@ fn a_new_file_that_is_no_copy_of_an_old_one_starts_from_its_beginning() {
     std::fs::write(dir.0.join("placeholder"), "keeps the old number of the file taken").unwrap();
     append(&log, "2026-11-04 12:00:00,000 0.66.1 INFO keyswitch: other text, and longer than the first one was\n");
     assert!(collector.scan(&config).unwrap().0 >= 1);
+}
+
+#[test]
+fn a_chain_alone_means_the_collector_has_written_to_the_group() {
+    let dir = Dir::new();
+    let config = config(&dir.0.join("app.log"));
+    let store = Store::open(&dir.0.join("data")).unwrap();
+    assert!(!store.delivered(&config.destination()).unwrap());
+    store.set(&format!("{}{}", logcourier::store::HEAD_DIGEST_KEY, config.destination()), &json!("sum")).unwrap();
+    assert!(store.delivered(&config.destination()).unwrap());
+}
+
+#[test]
+fn a_failure_of_telegram_while_clearing_is_reported_as_it_is() {
+    let dir = Dir::new();
+    let (group, config, store) = delivered_group(&dir);
+    let key = format!("{}{}", logcourier::store::RESET_KEY, config.destination());
+    store.set(&key, &json!({"top": 3, "next": 3, "kept": null})).unwrap();
+    *group.fail_delete.borrow_mut() = true;
+    let refused = reset_group(&store, &config, &group, false, &never(), &|_| {}).unwrap_err();
+    assert!(refused.to_string().contains("500"), "{refused}");
+}
+
+#[test]
+fn the_service_carries_on_an_unfinished_clearing_and_says_what_goes_wrong() {
+    use logcourier::service::{MakeClient, Notify, Service};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    let dir = Dir::new();
+    let log = dir.0.join("app.log");
+    append(&log, "2026-11-04 12:00:00,000 0.66.1 INFO keyswitch: a\n");
+    let mut settings = config(&log);
+    settings.sources[0].include_existing = true;
+    settings.sources.push(Source::new(dir.0.join("folder-of-nothing").join("x.log").display().to_string(), "пропавший"));
+    std::fs::create_dir_all(dir.0.join("not-a-file.log")).unwrap();
+    settings.sources.push(Source::new(dir.0.join("not-a-file.log").display().to_string(), "папка"));
+    {
+        let store = Store::open(&dir.0.join("data")).unwrap();
+        store.set(&format!("{}{}", logcourier::store::RESET_KEY, settings.destination()), &json!({"top": 3, "next": 3, "kept": null})).unwrap();
+    }
+    let heard: Arc<Mutex<Vec<String>>> = Arc::default();
+    let sink = heard.clone();
+    let notify: Notify = Arc::new(move |message, _stats| sink.lock().unwrap().push(message));
+    let group = SharedGroup(Arc::new(Mutex::new(Group::default())));
+    // 0: the group answers; 1: the program cannot start a client, with no words for the person; 2: Telegram asks for a pause.
+    let mode = Arc::new(AtomicUsize::new(0));
+    let (shared, kind) = (group.clone(), mode.clone());
+    let make: MakeClient = Arc::new(move |_token| match kind.load(Ordering::SeqCst) {
+        0 => {
+            let client: Box<dyn Client> = Box::new(shared.clone());
+            Ok(client)
+        }
+        1 => Err(Error::Os("OSError")),
+        _ => Err(Error::telegram_with("slow down", 1, 429)),
+    });
+    let wait = |text: &str| {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(20) {
+            if heard.lock().unwrap().iter().any(|message| message.contains(text)) {
+                heard.lock().unwrap().clear();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("never heard {text:?}: {:?}", heard.lock().unwrap());
+    };
+    settings.auto_send = false;
+    let service = Service::start_with(dir.0.join("data"), settings.clone(), "1:token".to_owned(), notify, make);
+    wait("не завершена");
+    mode.store(1, Ordering::SeqCst);
+    settings.auto_send = true;
+    service.update(settings.clone(), "1:token".to_owned());
+    wait("Операция не завершена");
+    service.send_now();
+    wait("продолжится через");
+    mode.store(0, Ordering::SeqCst);
+    service.reset(true);
+    wait("Группа очищена");
+    mode.store(2, Ordering::SeqCst);
+    service.send_now();
+    wait("slow down");
+    mode.store(0, Ordering::SeqCst);
+    service.update(settings.clone(), "1:token".to_owned());
+    service.send_now();
+    wait("источник недоступен");
+    service.stop();
+    let started = Instant::now();
+    while !service.is_finished() && started.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(service.is_finished());
 }

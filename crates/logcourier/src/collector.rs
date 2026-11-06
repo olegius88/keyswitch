@@ -51,18 +51,25 @@ fn identity_of(file: &File) -> Result<String> {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
-        // SAFETY: the handle is the open file's and the structure is written by the call.
-        let info = unsafe {
-            let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-            if GetFileInformationByHandle(file.as_raw_handle(), &raw mut info) == 0 {
-                return Err(Error::Os("OSError"));
-            }
-            info
-        };
+        let info = file_information(file)?;
         let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
         Ok(format!("{}:{index}", info.dwVolumeSerialNumber))
+    }
+}
+
+/// The system's call on a file that is open; nothing a test can make it refuse.
+#[cfg(windows)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn file_information(file: &File) -> Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+    // SAFETY: the handle is the open file's and the structure is written by the call.
+    unsafe {
+        let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+        if GetFileInformationByHandle(file.as_raw_handle(), &raw mut info) == 0 {
+            return Err(Error::Os("OSError"));
+        }
+        Ok(info)
     }
 }
 

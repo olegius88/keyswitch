@@ -140,6 +140,38 @@ pub fn sha256_hex(data: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    /// What `datetime.fromisoformat` accepts and refuses, as the Python answered.
+    #[test]
+    fn dates_are_read_only_when_they_are_dates() {
+        for (text, date) in [
+            ("2026-11-04", Some("2026-11-04")),
+            ("2024-02-29", Some("2024-02-29")),
+            ("2000-02-29", Some("2000-02-29")),
+            ("1900-02-29", None),
+            ("2023-02-29", None),
+            ("2023-02-28", Some("2023-02-28")),
+            ("2026-04-31", None),
+            ("2026-04-30", Some("2026-04-30")),
+            ("2026-13-01", None),
+            ("0000-01-01", None),
+            ("2026-01-00", None),
+            ("2026/01/01", None),
+            ("2026-01/01", None),
+            ("x026-01-01", None),
+            ("2026-x1-01", None),
+            ("2026-01-x1", None),
+            ("short", None),
+            ("2026-11-04T12:00:00+00:00", Some("2026-11-04")),
+            ("2026-11-04 12:00", Some("2026-11-04")),
+            ("2026-11-04T1", None),
+            ("2026-11-04Txx", None),
+            ("2026-11-04T12x", None),
+            ("2026-11-04\u{e9}12", None),
+        ] {
+            assert_eq!(iso_date(text), date, "{text:?}");
+        }
+    }
+
     #[test]
     fn times_read_as_in_python() {
         assert_eq!(iso_at(0.0), "1970-01-01T00:00:00+00:00");

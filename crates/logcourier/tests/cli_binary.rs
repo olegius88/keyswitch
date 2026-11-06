@@ -133,3 +133,21 @@ fn the_data_folder_of_this_system() {
         .expect("it runs");
     assert!(output.status.success(), "{}", said(&output));
 }
+
+/// On Windows the window is real: the self-test opens it, looks at it and closes it.
+#[cfg(windows)]
+#[test]
+fn the_window_tests_itself() {
+    let data = Folder::new("self-test");
+    let output = run(&data.0, &["self-test", "--output", &data.0.join("window.txt").display().to_string()], None);
+    assert!(output.status.code().is_some(), "{}", said(&output));
+}
+
+/// A Mac has no settings window: the program says so and reads its file.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mac_has_no_window() {
+    let data = Folder::new("no-window");
+    let output = run(&data.0, &[], None);
+    assert_eq!(output.status.code(), Some(1), "{}", said(&output));
+}

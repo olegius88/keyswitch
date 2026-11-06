@@ -64,6 +64,7 @@ mod platform {
         value: String,
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // The system's store: what it refuses cannot be arranged in a test.
     fn read_one(target: &str) -> Result<Option<Credential>, ()> {
         let name = wide(target);
         let mut found: *mut CREDENTIALW = null_mut();
@@ -93,6 +94,7 @@ mod platform {
         Ok(Some(credential))
     }
 
+    #[cfg_attr(coverage_nightly, coverage(off))] // The system's store: what it refuses cannot be arranged in a test.
     fn write_one(target: &str, user: &str, value: &str) -> Result<(), ()> {
         let (mut name, mut owner, mut comment) = (wide(target), wide(user), wide("Stored using python-keyring"));
         let mut blob: Vec<u8> = value.encode_utf16().flat_map(u16::to_le_bytes).collect();

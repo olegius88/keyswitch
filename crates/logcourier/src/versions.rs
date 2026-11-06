@@ -206,6 +206,37 @@ pub fn caption(metadata: &Value) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_version_has_only_the_tail_it_may_have() {
+        for (text, good) in [("0.66.1", true), ("0.66.1-rc1", true), ("0.66.1+build", true), ("0.66.1x", false), ("0.66", false), ("0.66.1-", false), ("0.66.1-!", false), ("", false)] {
+            assert_eq!(is_version(text), good, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_header_is_read_only_when_all_of_it_is_there() {
+        for line in [
+            &b"2026-11-04 12:00:00,123  INFO keyswitch: x"[..],
+            b"2026-11-04 12:00:00,123 0.66.1",
+            b"2026-11-04 12:00:00,123 0.66.1 INFO keyswitch.: x",
+            b"2026-11-04 12:00:00,123 0.66.1 INFO keyswitch x",
+            b"2026-11-04 12:00:00,123 0.66.1 INFO other: x",
+            b"2026-11-04 12:00:00,123 nonsense INFO keyswitch: x",
+        ] {
+            assert_eq!(header_version(line), None, "{}", String::from_utf8_lossy(line));
+        }
+        assert_eq!(text(&serde_json::json!(5)), "5");
+        assert_eq!(text(&serde_json::json!(null)), "None");
+        assert_eq!(text(&serde_json::json!("a")), "a");
+    }
+
+    #[test]
+    fn a_line_of_no_record_inside_a_fragment_keeps_the_version_of_the_one_before() {
+        let data = b"2026-11-04 12:00:00,123 0.66.1 INFO keyswitch: x\ncontinued\n";
+        let (length, version) = take_fragment(data, None, true, b"");
+        assert_eq!((length, version.as_deref()), (data.len(), Some("0.66.1")));
+    }
+
     const LINE: &[u8] = b"2026-11-04 12:00:00,123 0.66.1 INFO keyswitch.engine: x\n";
     const NEXT: &[u8] = b"2026-11-04 12:00:01,000 0.70.0 INFO keyswitch: y\n";
 
