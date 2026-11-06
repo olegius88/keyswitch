@@ -72,6 +72,9 @@ const OWN_FILES: [&str; 29] = [
     "resources/models/prefix_policy_v1.json",
 ];
 
+/// Folders a cycle writes into: empty in a small tree, never links.
+const OWN_FOLDERS: [&str; 2] = ["model/boundary_v1/engine-history", "model/prefix_v1/engine-history"];
+
 fn mirror(source: &Path, target: &Path, relative: &str) {
     std::fs::create_dir_all(target).expect("a folder");
     for entry in std::fs::read_dir(source).expect("a folder of the repository") {
@@ -83,6 +86,8 @@ fn mirror(source: &Path, target: &Path, relative: &str) {
         let path = if relative.is_empty() { name.clone() } else { format!("{relative}/{name}") };
         if OWN_FILES.contains(&path.as_str()) {
             std::fs::copy(entry.path(), target.join(&name)).expect("a copy");
+        } else if OWN_FOLDERS.contains(&path.as_str()) {
+            std::fs::create_dir_all(target.join(&name)).expect("a folder");
         } else if OWN_FILES.iter().any(|file| file.starts_with(&format!("{path}/"))) {
             mirror(&entry.path(), &target.join(&name), &path);
         } else {
