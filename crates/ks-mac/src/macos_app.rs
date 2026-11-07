@@ -11,6 +11,9 @@ use crate::macos_backend::MacBackend;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const PERMISSION_REQUEST_MESSAGE: &str = "KeySwitch нужен доступ к клавиатуре. Открываю «Конфиденциальность и безопасность» → «Универсальный доступ»: включите там KeySwitch, и программа продолжит сама.";
 pub const PERMISSION_GRANTED_MESSAGE: &str = "Доступ получен, KeySwitch начинает работу.";
+/// The settings window's status while the permission is missing, in place of the engine's last action.
+pub const PERMISSION_WAIT_STATUS: &str = "Ждёт доступа к клавиатуре: включите KeySwitch в «Конфиденциальность и безопасность» → «Универсальный доступ».";
+pub const SECOND_COPY_MESSAGE: &str = "KeySwitch уже запущен, эта копия закрывается.";
 const USAGE: &str = "usage: keyswitch [-h] [--hidden] [--diagnose] [--version]\n";
 
 /// The `resources` folder of the bundle (`Contents/Resources/resources`), beside the executable in a build tree, or the

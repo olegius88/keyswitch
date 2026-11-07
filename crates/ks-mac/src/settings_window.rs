@@ -15,8 +15,8 @@ use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
 use serde_json::{Value, json};
 
-use crate::desktop_app::{Services, quit};
-use crate::macos_app::VERSION;
+use crate::desktop_app::{Services, awaiting_permission, quit};
+use crate::macos_app::{PERMISSION_WAIT_STATUS, VERSION};
 use crate::macos_native::run_on_main;
 use crate::macos_system::MacApplicationCatalog;
 use crate::macos_objc::{Id, open_path, string, text_of};
@@ -377,7 +377,8 @@ impl Ui {
             status_line(snapshot.enabled, snapshot.running),
             ks_config::indicator::layout_label(snapshot.current_group),
             snapshot.correction_count,
-            snapshot.last_action
+            // The engine has not started yet, and its last action would say the models are loading long after they have.
+            if awaiting_permission() { PERMISSION_WAIT_STATUS } else { snapshot.last_action.as_str() }
         );
         if !snapshot.last_error.is_empty() {
             text.push_str(&format!("\n{}", snapshot.last_error));

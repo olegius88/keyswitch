@@ -4,6 +4,7 @@ use ks_cast::To as _;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
@@ -20,7 +21,7 @@ use objc2::{class, msg_send};
 use serde_json::Value;
 
 use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS};
-use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, resource_dir};
+use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, SECOND_COPY_MESSAGE, resource_dir};
 use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
 use crate::macos_native::{NativeAccessibility, run_on_main, run_on_main_after};
@@ -43,7 +44,6 @@ pub struct Services {
 struct App {
     services: Arc<Services>,
     permission: Arc<MacBackend>,
-    awaiting_permission: bool,
     tray: Option<StatusItem>,
     autostart: MacAutostartManager,
     closing: bool,
@@ -51,6 +51,14 @@ struct App {
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+}
+
+/// Whether the program still waits for the Accessibility permission: the menu and the settings window say so meanwhile.
+/// Not a field of `App`, so the settings window can ask while `App` is borrowed.
+static AWAITING_PERMISSION: AtomicBool = AtomicBool::new(false);
+
+pub fn awaiting_permission() -> bool {
+    AWAITING_PERMISSION.load(Ordering::SeqCst)
 }
 
 fn with_app<T>(action: impl FnOnce(&mut App) -> T) -> Option<T> {
@@ -102,7 +110,7 @@ fn tray_state(app: &App) -> TrayState {
         sound_enabled: setting_bool(&services.settings, "general.sound", false),
         notifications_enabled: setting_bool(&services.settings, "general.notifications", true),
         indicator_style: normalize_indicator_style(&services.settings.get("appearance.indicator_style").unwrap_or_else(|| Value::String("letters".into()))),
-        awaiting_permission: app.awaiting_permission,
+        awaiting_permission: awaiting_permission(),
     }
 }
 
@@ -287,11 +295,10 @@ fn wait_for_permission(no_engine: bool) {
 fn carry_on(no_engine: bool) {
     logsetup::info(LOGGER, PERMISSION_GRANTED_MESSAGE);
     println!("{PERMISSION_GRANTED_MESSAGE}");
-    let engine = with_app(|app| {
-        app.awaiting_permission = false;
-        app.services.engine.clone()
-    });
+    AWAITING_PERMISSION.store(false, Ordering::SeqCst);
+    let engine = with_app(|app| app.services.engine.clone());
     sync_tray();
+    settings_window::refresh_status();
     if let Some(engine) = engine
         && !no_engine
     {
@@ -325,7 +332,9 @@ fn only_copy() -> Result<Option<std::fs::File>, ()> {
 
 pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let Ok(_instance_lock) = only_copy() else {
-        println!("KeySwitch уже запущен");
+        // The log already has this copy's start line: without this one it would look like a start that did nothing.
+        logsetup::info(LOGGER, SECOND_COPY_MESSAGE);
+        println!("{SECOND_COPY_MESSAGE}");
         return 0;
     };
     let settings = Arc::new(SettingsStore::new(None));
@@ -347,6 +356,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
         }
     };
     let granted = backend.permission_granted();
+    AWAITING_PERMISSION.store(!granted, Ordering::SeqCst);
     let input: Arc<dyn InputBackend> = backend.clone();
     let resources = ks_lang::Resources::new(resource_dir());
     let build: Build = {
@@ -363,7 +373,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
     let autostart = MacAutostartManager::new(None, None);
-    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), awaiting_permission: !granted, tray: None, autostart, closing: false }));
+    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), tray: None, autostart, closing: false }));
     settings_window::create(services.clone());
     let showing = setting_bool(&settings, "appearance.show_indicator", true);
     if showing {
