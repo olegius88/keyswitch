@@ -126,11 +126,12 @@ fn authored_scenarios_frame_what_their_words_allow() {
     let refused = build_corpus(&with_scenarios(&json!({"schema_version": 2})), detector, portable);
     assert!(refused.is_err_and(|error| error.contains("invalid scenarios")));
     // Russian words, one of them an English word in the other layout (руки, herb); every trusted short word as one that
-    // never opens a message; short unknown tokens; an inside context with a tail of no word after it.
+    // never opens a message; short unknown tokens, one of them (if) a word the detector converts to on its own; an inside
+    // context with a tail of no word after it.
     let trusted: Vec<&str> = ks_lang::short_words::trusted_short_words(1);
     let scenarios = json!({
         "schema_version": 1, "russian": ["руки", "работа", "погода", "дорога", "машина"], "short_russian_not_opening": trusted,
-        "technical_terms": ["ab", "xq", "js", "go", "qz"], "english_unknown": ["ok", "zz", "hi", "wq"], "russian_unknown": ["ыв"],
+        "technical_terms": ["ab", "xq", "js", "go", "qz"], "english_unknown": ["ok", "zz", "hi", "wq", "if"], "russian_unknown": ["ыв"],
         "inside_contexts": ["", "я думаю что "], "inside_after": {"russian": "!!", "english": "?"},
     });
     let tools = with_scenarios(&scenarios);
@@ -151,7 +152,7 @@ fn the_evidence_of_a_frame_drops_what_training_drops_for_some_families() {
     let tools = Tools::new(&tree(), resources.clone(), portable.clone(), BTreeSet::new()).expect("the tools");
     let frame = |identifier: &str, original: &str, group: i64, before: &str| ActionRow::new(identifier, original, group, field_of("Telegram", "field", before, "", FieldRole::Text), "space", ContextAction::Convert, "test", " ");
     // A word before the caret that is no pair of keys in either layout gives the frame no context of its own.
-    let mixed = frame_evidence(&tools, &frame("mixed:1", "ghbdtn", 0, "привет словоñ "), "train", detector, None);
+    let mixed = frame_evidence(&tools, &frame("mixed:1", "ghbdtn", 0, "привет словоabc "), "train", detector, None);
     let plain = frame_evidence(&tools, &frame("mixed:1", "ghbdtn", 0, ""), "train", detector, None);
     assert_eq!(mixed.original, plain.original);
     // Commands of one family share the identifier dropout; a few families of unknown tokens train without their counts.

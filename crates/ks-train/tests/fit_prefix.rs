@@ -279,14 +279,17 @@ fn the_prefix_corpus_verifies_against_what_it_froze_and_names_each_split_that_di
     own_file(&directory.join("corpus.json"), receipt.to_string().as_bytes());
     let same = succeeded(&on(&small).output().expect("the trainer starts"));
     assert_eq!(same.matches(": same").count(), 4, "{same}");
-    // A receipt that pins other bytes, another count of rows, another count of families.
+    // A frozen generation is never written over.
+    refused(&on(&small).arg("--freeze").arg(&frozen).output().expect("the trainer starts"), "refusing to overwrite frozen prefix examples");
+    // Other rows, and a receipt that pins other bytes, another count of rows, another count of families.
+    own_file(&directory.join("train.jsonl.gz"), &gz("{}\n"));
     let mut changed = receipt;
-    changed["sha256"]["train"] = json!("0");
-    changed["rows"]["development"] = json!(0);
-    changed["families"]["calibration"] = json!(0);
+    changed["sha256"]["development"] = json!("0");
+    changed["rows"]["calibration"] = json!(0);
+    changed["families"]["test"] = json!(0);
     own_file(&directory.join("corpus.json"), changed.to_string().as_bytes());
     let answer = on(&small).output().expect("the trainer starts");
-    refused(&answer, "3 splits of the prefix corpus differ");
+    refused(&answer, "4 splits of the prefix corpus differ");
     let said = String::from_utf8_lossy(&answer.stdout);
-    assert!(said.contains("test: same") && said.contains("train: DIFFERS"), "{said}");
+    assert_eq!(said.matches(": DIFFERS").count(), 4, "{said}");
 }
