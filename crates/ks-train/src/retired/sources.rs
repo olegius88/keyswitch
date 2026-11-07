@@ -135,3 +135,71 @@ pub const ORTHO_V2: SourceArchive = SourceArchive {
         ("tools/train_ortho_v2.py", "326ec3784b1128d5bd0c287ed4a8538c93fbdc6fe02973e6263184b66e51b5eb"),
     ],
 };
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::retired::testing::{Tree, refused};
+
+    const KEPT: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const OTHER: &str = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+    const ARCHIVE: SourceArchive = SourceArchive { name: "probe", frozen: &["model/frozen"], sources: &[("tools/kept.py", KEPT), ("tools/also.py", OTHER)] };
+
+    #[test]
+    fn no_table_or_an_empty_one_pins_nothing() {
+        let root = Path::new("/nonexistent");
+        refused(ARCHIVE.verify(&Value::Null, root), "missing historical source pins");
+        refused(ARCHIVE.verify(&json!([KEPT]), root), "missing historical source pins");
+        refused(ARCHIVE.verify(&json!({}), root), "missing historical source pins");
+    }
+
+    #[test]
+    fn a_pin_is_a_lowercase_digest_of_sixty_four_digits() {
+        let root = Path::new("/nonexistent");
+        for digest in [json!(1), json!("0123"), json!(KEPT.to_uppercase()), json!("g".repeat(64))] {
+            refused(ARCHIVE.verify(&json!({"tools/kept.py": digest}), root), "invalid historical source pin");
+        }
+    }
+
+    #[test]
+    fn a_pin_names_a_plain_path_of_the_tree_once() {
+        let root = Path::new("/nonexistent");
+        for name in ["/tools/kept.py", "c:/tools/kept.py", "tools/../kept.py", "tools/./kept.py", "tools//kept.py"] {
+            refused(ARCHIVE.verify(&json!({name: KEPT}), root), "invalid or duplicate historical source path");
+        }
+        refused(ARCHIVE.verify(&json!({"tools\\kept.py": KEPT, "tools/kept.py": KEPT}), root), "invalid or duplicate historical source path");
+    }
+
+    #[test]
+    fn an_archived_source_carries_its_reviewed_digest_whatever_its_separator() {
+        let root = Path::new("/nonexistent");
+        let normalized = ARCHIVE.verify(&json!({"tools\\kept.py": KEPT}), root).expect("a reviewed pin");
+        assert_eq!(normalized.get("tools/kept.py"), Some(&json!(KEPT)));
+        refused(ARCHIVE.verify(&json!({"tools/kept.py": OTHER}), root), "unapproved historical source identity: tools/kept.py");
+        refused(ARCHIVE.verify(&json!({"tools/gone.py": KEPT}), root), "probe: historical source is not archived: tools/gone.py");
+        // A folder whose name only begins like a frozen one is not frozen.
+        refused(ARCHIVE.verify(&json!({"model/frozen-later/file": KEPT}), root), "historical source is not archived");
+        assert_eq!(ARCHIVE.all_paths(), ["tools/kept.py", "tools/also.py"]);
+        assert_eq!(ARCHIVE.recorded_digest("tools/kept.py", &json!(KEPT), root).expect("a reviewed pin"), KEPT);
+    }
+
+    #[test]
+    fn a_frozen_file_is_read_in_place() {
+        let tree = Tree::new("sources");
+        tree.write("model/frozen/file", b"evidence");
+        let digest = checksum(&tree.path("model/frozen/file")).expect("a digest");
+        assert!(ARCHIVE.verify(&json!({"model/frozen/file": digest}), &tree.root).is_ok());
+        refused(ARCHIVE.verify(&json!({"model/frozen/file": KEPT}), &tree.root), "historical source changed: model/frozen/file");
+        refused(ARCHIVE.verify(&json!({"model/frozen/gone": KEPT}), &tree.root), "model/frozen/gone");
+    }
+
+    #[test]
+    fn recorded_provenance_names_exactly_the_files_of_its_tool() {
+        let root = Path::new("/nonexistent");
+        let pins = json!({"tools/kept.py": KEPT, "tools/also.py": OTHER});
+        assert_eq!(ARCHIVE.recorded(&pins, &["tools/also.py", "tools/kept.py"], root).expect("the same files").len(), 2);
+        refused(ARCHIVE.recorded(&pins, &["tools/kept.py"], root), "probe: recorded provenance names other files than its tool records");
+        refused(ARCHIVE.recorded(&json!({}), &["tools/kept.py"], root), "missing historical source pins");
+    }
+}

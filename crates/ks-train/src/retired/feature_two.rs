@@ -230,3 +230,98 @@ fn decode(text: &str) -> Result<Vec<u8>, String> {
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::super::testing::{Tree, refused, repository};
+    use super::*;
+    use std::io::Write as _;
+
+    /// The probes of one process share a scratch folder: one verification at a time.
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn kept() -> Value {
+        let mut raw = Vec::new();
+        MultiGzDecoder::new(std::fs::File::open(repository().join(OBSERVATIONS)).expect("the archive")).read_to_end(&mut raw).expect("gzip");
+        serde_json::from_slice(&raw).expect("json")
+    }
+
+    fn observed(tree: &Tree, value: &Value) -> Result<(), String> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&serde_json::to_vec(value).expect("json")).expect("in memory");
+        tree.write(OBSERVATIONS, &encoder.finish().expect("in memory"));
+        verify(&tree.root)
+    }
+
+    /// The archive without its records and with the base loader probe only, so that the probes at the end are reached quickly.
+    fn small(kept: &Value) -> Value {
+        let mut value = kept.clone();
+        value["records"] = json!([]);
+        value["features"] = json!([]);
+        for label in ["baseline-context-v1.json", "candidate.json"] {
+            value["predictions"][label]["digest"] = json!(hex(&Sha256::digest(b"")));
+        }
+        value["loads"] = json!([kept["loads"][0]]);
+        value
+    }
+
+    #[test]
+    fn the_numbers_of_today_are_the_archived_ones() {
+        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (tree, kept) = (Tree::new("feature-two"), kept());
+        assert!(observed(&tree, &small(&kept)).is_ok());
+        let mut value = kept.clone();
+        value["plan_sha256"] = json!("0");
+        refused(observed(&tree, &value), "feature-2 probe plan changed");
+        let mut value = small(&kept);
+        value["softmax"][0]["result"][0] = json!("0x1.0000000000000p+0");
+        refused(observed(&tree, &value), "softmax #0");
+        let mut value = small(&kept);
+        value["softmax"][0]["result"].as_array_mut().expect("a softmax answer").pop();
+        refused(observed(&tree, &value), "softmax #0");
+        let mut value = kept.clone();
+        value["features"] = json!(vec!["0"; kept["features"].as_array().expect("digests").len()]);
+        refused(observed(&tree, &value), "extract_context_features #");
+        let mut value = small(&kept);
+        value["predictions"]["baseline-context-v1.json"]["model"] = json!({});
+        refused(observed(&tree, &value), "feature-2 numerical behaviour changed: load baseline-context-v1.json");
+        let mut value = small(&kept);
+        value["predictions"]["baseline-context-v1.json"]["digest"] = json!("0");
+        refused(observed(&tree, &value), "feature-2 numerical behaviour changed: baseline-context-v1.json predict");
+    }
+
+    #[test]
+    fn the_loader_of_today_loads_what_the_archived_one_did() {
+        let _serial = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (tree, kept) = (Tree::new("feature-two-loads"), kept());
+        let base = kept["loads"][0].clone();
+        let with_loads = |loads: Value| {
+            let mut value = small(&kept);
+            value["loads"] = loads;
+            value
+        };
+        let mut changed = base.clone();
+        changed["sha256"] = json!("0");
+        refused(observed(&tree, &with_loads(json!([changed]))), "feature-2 probe differs from the plan: base");
+        let mut changed = base.clone();
+        changed["loaded"] = Value::Null;
+        refused(observed(&tree, &with_loads(json!([changed]))), "feature-2 loader changed: base");
+        // A probe that does not declare feature 2 may load, but only as the archive saw it.
+        let mut undeclared = base.clone();
+        undeclared["feature_two"] = json!(false);
+        undeclared["label"] = json!("undeclared");
+        assert!(observed(&tree, &with_loads(json!([base, undeclared]))).is_ok());
+        undeclared["loaded"] = Value::Null;
+        refused(observed(&tree, &with_loads(json!([base, undeclared]))), "feature-2 loader loads what the archive did not: undeclared");
+        refused(observed(&tree, &with_loads(json!([base, {"label": "huge", "sha256": "0"}]))), "an unknown large probe: huge");
+        refused(observed(&tree, &with_loads(json!([base, {"label": "text", "content": "not base64!"}]))), "invalid base64");
+    }
+
+    #[test]
+    fn base64_reads_every_letter_of_its_alphabet() {
+        assert_eq!(decode("+/8=").expect("base64"), [0xfb, 0xff]);
+        assert_eq!(decode("QUJDYWJjMDEy").expect("base64"), b"ABCabc012");
+        refused(decode("a b"), "invalid base64");
+    }
+}

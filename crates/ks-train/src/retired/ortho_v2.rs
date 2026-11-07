@@ -2,7 +2,7 @@
 //! replay rebuilds the key corpus, the frozen dictionary verdicts, the trusted labels, the candidate, its seal and the
 //! one-shot test report and compares all of them with the frozen files; none of it can install anything.
 use ks_cast::To as _;
-use super::read_object;
+use super::{read_object, unchanged};
 use super::sources::ORTHO_V2;
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
@@ -86,21 +86,29 @@ fn gate_family(keys: &str) -> bool {
 fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> {
     let mut counts = BTreeMap::new();
     for (script, path, expected) in LEXICONS {
-        for (word, frequency) in read_lexicon(root, path, expected)? {
-            if script_of(&word) != Some(script) {
-                continue;
-            }
-            let keys = to_keys(&word)?;
-            if keys.is_empty() || pystr::len(&keys) > MAXIMUM_TOKEN_CHARACTERS {
-                continue;
-            }
-            let bits = i128::from(128 - frequency.unsigned_abs().leading_zeros());
-            let weight = bits.clamp(1, MAXIMUM_LEXICON_WEIGHT).to::<i64>();
-            let entry = counts.entry((script.to_owned(), keys)).or_insert(weight);
-            *entry = (*entry).max(weight);
-        }
+        count_lexicon(&mut counts, script, read_lexicon(root, path, expected)?)?;
     }
     Ok(counts)
+}
+
+/// The words of one list written in its own script, as key sequences no longer than a token may be.
+fn count_lexicon(counts: &mut BTreeMap<(String, String), i64>, script: &str, words: BTreeMap<String, i128>) -> Result<(), String> {
+    for (word, frequency) in words {
+        if script_of(&word) != Some(script) {
+            continue;
+        }
+        let keys = to_keys(&word)?;
+        // A word of a script has a letter, and every letter is a key.
+        assert!(!keys.is_empty(), "a word of a script has keys: {word}");
+        if pystr::len(&keys) > MAXIMUM_TOKEN_CHARACTERS {
+            continue;
+        }
+        let bits = i128::from(128 - frequency.unsigned_abs().leading_zeros());
+        let weight = bits.clamp(1, MAXIMUM_LEXICON_WEIGHT).to::<i64>();
+        let entry = counts.entry((script.to_owned(), keys)).or_insert(weight);
+        *entry = (*entry).max(weight);
+    }
+    Ok(())
 }
 
 /// `rows`: one row per (split, script, key sequence), with occurrence and shape counts; the word lists after them.
@@ -115,9 +123,8 @@ fn corpus_rows(root: &Path) -> Result<Vec<Row>, String> {
             }
             let Some(script) = script_of(raw) else { continue };
             let keys = to_keys(raw)?;
-            if keys.is_empty() {
-                continue;
-            }
+            // A token of a script has a letter, and every letter is a key.
+            assert!(!keys.is_empty(), "a token of a script has keys: {raw}");
             *counts.entry((assigned.split, script, keys)).or_default().entry(shape_of(raw, position)).or_insert(0) += 1;
         }
     }
@@ -144,9 +151,7 @@ fn verify_corpus(root: &Path) -> Result<Vec<Row>, String> {
     let directory = root.join(DIRECTORY);
     let tokens = directory.join("tokens.jsonl.gz");
     let rows = corpus_rows(root)?;
-    if rows_text(&rows) != gz_text(&tokens)? {
-        return Err("token corpus is not reproducible from the frozen source".to_owned());
-    }
+    unchanged(rows_text(&rows).as_bytes(), gz_text(&tokens)?.as_bytes(), "token corpus is not reproducible from the frozen source")?;
     let (mut by_split, mut by_script, mut occurrences, mut gated): (BTreeMap<String, i64>, BTreeMap<String, i64>, BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
     for row in &rows {
         let key = format!("{}:{}", row.split, row.script);
@@ -173,9 +178,7 @@ fn verify_corpus(root: &Path) -> Result<Vec<Row>, String> {
         "types_by_split": by_split, "types_by_split_script": by_script, "occurrences_by_split_script": occurrences,
         "maximum_token_characters": MAXIMUM_TOKEN_CHARACTERS, "tokens_sha256": checksum(&tokens)?, "provenance": sources,
     });
-    if crate::train_json(&report) != std::fs::read(&path).map_err(|error| error.to_string())? {
-        return Err("corpus receipt is missing or changed; a frozen split is never overwritten".to_owned());
-    }
+    unchanged(&crate::train_json(&report), &std::fs::read(&path).map_err(|error| error.to_string())?, "corpus receipt is missing or changed; a frozen split is never overwritten")?;
     Ok(rows)
 }
 
@@ -214,9 +217,7 @@ fn verify_known(root: &Path, rows: &[Row]) -> Result<(), String> {
     }
     let evidence = directory.join("known-evidence.json.gz");
     let text = String::from_utf8(canonical(&Value::Object(known_words))).map_err(|error| error.to_string())?;
-    if text != gz_text(&evidence)? {
-        return Err("dictionary evidence is not reproducible from these dictionaries".to_owned());
-    }
+    unchanged(text.as_bytes(), gz_text(&evidence)?.as_bytes(), "dictionary evidence is not reproducible from these dictionaries")?;
     let path = directory.join("known-receipt.json");
     let recorded = read_object(&path)?;
     let generator = ORTHO_V2.recorded_digest("tools/ortho_v2_known.py", recorded.get("generator_sha256").unwrap_or(&Value::Null), root)?;
@@ -228,9 +229,7 @@ fn verify_known(root: &Path, rows: &[Row]) -> Result<(), String> {
         "known_by_script": known_by_script, "forms_by_script": forms_by_script,
         "scope": "the frequency list of model/intent_v1/sources plus Hunspell, which is what the runtime means by `known`; a machine whose speller differs will license more or fewer conversions than this evidence measured",
     });
-    if crate::train_json(&receipt) != std::fs::read(&path).map_err(|error| error.to_string())? {
-        return Err("dictionary receipt is missing or changed".to_owned());
-    }
+    unchanged(&crate::train_json(&receipt), &std::fs::read(&path).map_err(|error| error.to_string())?, "dictionary receipt is missing or changed")?;
     Ok(())
 }
 
@@ -281,9 +280,7 @@ fn verify_labels(root: &Path) -> Result<(), String> {
     }
     let labels = directory.join("verified-labels.json.gz");
     let payload: Map<String, Value> = trusted.iter().map(|(script, words)| ((*script).to_owned(), json!(words))).collect();
-    if String::from_utf8(canonical(&Value::Object(payload))).map_err(|error| error.to_string())? != gz_text(&labels)? {
-        return Err("verified labels are not reproducible from these dictionaries".to_owned());
-    }
+    unchanged(String::from_utf8(canonical(&Value::Object(payload))).map_err(|error| error.to_string())?.as_bytes(), gz_text(&labels)?.as_bytes(), "verified labels are not reproducible from these dictionaries")?;
     let path = directory.join("verified-receipt.json");
     let recorded = read_object(&path)?;
     let verified_sequences: BTreeMap<&str, usize> = trusted.iter().map(|(script, words)| (*script, words.len())).collect();
@@ -300,9 +297,7 @@ fn verify_labels(root: &Path) -> Result<(), String> {
         "hunspell": hunspell_block(root)?, "sentences": counts, "verified_sequences": verified_sequences,
         "scope": "a sentence-level verdict about a token-level label; it removes the inherited labels this corpus cannot support, and it cannot invent the ones it never had",
     });
-    if crate::train_json(&receipt) != std::fs::read(&path).map_err(|error| error.to_string())? {
-        return Err("verified-label receipt is missing or changed".to_owned());
-    }
+    unchanged(&crate::train_json(&receipt), &std::fs::read(&path).map_err(|error| error.to_string())?, "verified-label receipt is missing or changed")?;
     Ok(())
 }
 
@@ -740,6 +735,12 @@ pub fn verify(root: &Path) -> Result<Value, String> {
             return Err(format!("historical ortho-v2 anchor changed: {name}"));
         }
     }
+    historical_evidence(root)
+}
+
+/// What the anchored files say, checked as if nothing anchored them.
+fn historical_evidence(root: &Path) -> Result<Value, String> {
+    let directory = root.join(DIRECTORY);
     let table = Value::Object(ORTHO_V2.sources.iter().map(|(name, digest)| ((*name).to_owned(), json!(digest))).collect());
     ORTHO_V2.verify(&table, root)?;
     let receipt = read_object(&directory.join("corpus-receipt.json"))?;
@@ -805,15 +806,130 @@ pub fn replay(root: &Path) -> Result<Value, String> {
     let pins = ORTHO_V2.recorded(seal.get("provenance").unwrap_or(&Value::Null), &SEAL_PROVENANCE, root)?;
     let (candidate, sealed) = fit(root, &rows, &settings, &known, &pins)?;
     let read = |name: &str| std::fs::read(directory.join(name)).map_err(|error| error.to_string());
-    if candidate != read("candidate.json")? {
-        return Err("orthotactic candidate is not reproducible".to_owned());
-    }
-    if sealed != read("seal.json")? {
-        return Err("orthotactic seal is not reproducible".to_owned());
-    }
-    if test_report(root, &rows, &settings, &known)? != read("report.json")? {
-        return Err("orthotactic test report is not reproducible".to_owned());
-    }
+    unchanged(&candidate, &read("candidate.json")?, "orthotactic candidate is not reproducible")?;
+    unchanged(&sealed, &read("seal.json")?, "orthotactic seal is not reproducible")?;
+    unchanged(&test_report(root, &rows, &settings, &known)?, &read("report.json")?, "orthotactic test report is not reproducible")?;
     result["frozen_replay"] = json!(true);
     Ok(result)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::super::testing::{Tree, refused, repository};
+    use super::*;
+
+    const FILES: [&str; 7] = ["seal.json", "report.json", "config.json", "corpus-receipt.json", "sources/known-receipt.json", "sources/verified-receipt.json", "candidate.json"];
+
+    /// The tree's evidence back to the repository's, then changed by `edit`, and checked past its anchors.
+    fn evidence_after(tree: &Tree, edit: impl FnOnce(&Tree)) -> Result<Value, String> {
+        for name in FILES {
+            tree.write(&format!("{DIRECTORY}/{name}"), &std::fs::read(repository().join(DIRECTORY).join(name)).expect("a file"));
+        }
+        tree.remove("resources/models/ortho_v2.json");
+        edit(tree);
+        historical_evidence(&tree.root)
+    }
+
+    fn edit(tree: &Tree, name: &str, change: impl FnOnce(&mut Value)) {
+        tree.edit(&format!("{DIRECTORY}/{name}"), change);
+    }
+
+    #[test]
+    fn the_receipts_the_seal_and_the_report_describe_the_candidate() {
+        let tree = Tree::new("ortho-evidence");
+        assert_eq!(evidence_after(&tree, |_| ()).expect("the kept evidence")["promoted"], json!(false));
+        refused(evidence_after(&tree, |tree| edit(tree, "corpus-receipt.json", |receipt| receipt["tokens_sha256"] = json!("0"))), "key-space corpus does not match its receipt");
+        refused(evidence_after(&tree, |tree| edit(tree, "corpus-receipt.json", |receipt| drop(receipt["provenance"].as_object_mut().expect("pins").remove("tools/ortho_v2_corpus.py")))), "recorded provenance names other files");
+        refused(evidence_after(&tree, |tree| edit(tree, "sources/known-receipt.json", |receipt| receipt["evidence_sha256"] = json!("0"))), "dictionary evidence does not match its receipt");
+        refused(evidence_after(&tree, |tree| edit(tree, "sources/known-receipt.json", |receipt| receipt["generator_sha256"] = json!("0"))), "invalid historical source pin");
+        refused(evidence_after(&tree, |tree| edit(tree, "sources/verified-receipt.json", |receipt| receipt["labels_sha256"] = json!("0"))), "verified labels do not match their receipt");
+        let sealed = "orthotactic seal or provenance changed";
+        refused(evidence_after(&tree, |tree| edit(tree, "seal.json", |seal| seal["stage"] = json!("after-test"))), sealed);
+        refused(evidence_after(&tree, |tree| edit(tree, "seal.json", |seal| seal["candidate_sha256"] = json!("0"))), sealed);
+        refused(evidence_after(&tree, |tree| edit(tree, "seal.json", |seal| drop(seal["provenance"].as_object_mut().expect("pins").remove("model/ortho_v2/config.json")))), "recorded provenance names other files");
+        refused(evidence_after(&tree, |tree| edit(tree, "seal.json", |seal| seal["config"]["order"] = json!(0))), "orthotactic configuration changed after the seal");
+        let undescribed = "orthotactic report does not describe this candidate";
+        for field in ["seal_sha256", "candidate_sha256", "thresholds"] {
+            refused(evidence_after(&tree, |tree| edit(tree, "report.json", |report| report[field] = json!("0"))), undescribed);
+        }
+        refused(evidence_after(&tree, |tree| edit(tree, "report.json", |report| report["promotion_passed"] = json!(true))), "a v2 candidate now passes its promotion rule");
+        refused(evidence_after(&tree, |tree| tree.write("resources/models/ortho_v2.json", b"{}")), "a v2 artifact is installed");
+    }
+
+    #[test]
+    fn an_anchored_file_that_changed_stops_the_check() {
+        let tree = Tree::new("ortho-anchor");
+        edit(&tree, "report.json", |report| report["promotion_passed"] = json!(true));
+        refused(verify(&tree.root), "historical ortho-v2 anchor changed: report.json");
+    }
+
+    #[test]
+    fn a_word_list_gives_its_own_script_s_words_no_longer_than_a_token() {
+        let mut counts = BTreeMap::new();
+        let words: BTreeMap<String, i128> = [("hello", 5), ("привет", 3), ("a".repeat(40).as_str(), 7), ("123", 1)].iter().map(|(word, frequency)| ((*word).to_owned(), *frequency)).collect();
+        count_lexicon(&mut counts, "en", words).expect("rows");
+        assert_eq!(counts, [(("en".to_owned(), "hello".to_owned()), 3)].into_iter().collect());
+    }
+
+    #[test]
+    fn a_counted_artifact_is_of_schema_one() {
+        assert!(CountedModel::new(&json!({"schema_version": 2})).is_err_and(|refusal| refusal == "unexpected counted artifact"));
+    }
+
+    /// A model that scores every sequence zero and converts whatever scores above `threshold`.
+    fn flat(threshold: i64) -> CountedModel {
+        let channel = json!({"grams": "", "logprob": [], "backoff": [], "uniform": 0});
+        let shapes = json!({"lower": 0, "initial": 0, "inner": 0, "upper": 0});
+        let payload = json!({
+            "schema_version": 1, "scale": 1, "order": 1, "version": "flat", "models": {"en": channel, "ru": channel},
+            "prose_shape": {"en": shapes, "ru": shapes}, "acronym_shape": {"en": shapes, "ru": shapes}, "thresholds": {"en": threshold, "ru": threshold},
+        });
+        CountedModel::new(&payload).expect("a counted model")
+    }
+
+    #[test]
+    fn a_false_conversion_of_a_repeated_token_is_counted_as_one() {
+        let known: Known = SCRIPTS.iter().map(|script| ((*script).to_owned(), HashSet::new())).collect();
+        let samples = vec![("en".to_owned(), "hello".to_owned(), "lower".to_owned(), 3), ("en".to_owned(), "world".to_owned(), "lower".to_owned(), 1)];
+        let converting = baseline_outcome(&flat(-1), &samples, 1, false, &known);
+        assert!(converting.negative_types >= 2 && converting.false_types == converting.negative_types, "every negative converts");
+        assert!(0 < converting.false_repeated_types && converting.false_repeated_types < converting.false_types, "only the token seen three times repeats");
+        let keeping = baseline_outcome(&flat(1), &samples, 1, false, &known);
+        assert_eq!((keeping.negative_types, keeping.false_types), (converting.negative_types, 0));
+        let scored = [("hello", 2), ("world", 1)].map(|(keys, weight)| Scored { script: "en".to_owned(), direction: "en", total: 5.0, weight, keys: keys.to_owned(), shape: "lower".to_owned() });
+        let attested: HashSet<String> = ["hello".to_owned()].into_iter().collect();
+        let counted = outcome(&scored, &[("en", 0.0), ("ru", 0.0)].into_iter().collect(), &[4, 8], &attested);
+        assert_eq!(counted["counts"]["en:false_repeated_types"], json!(1), "{counted}");
+        assert_eq!(counted["counts"]["en:false_attested_types"], json!(1), "{counted}");
+    }
+
+    fn totals_of(negative_types: i64, false_types: i64, recall: f64) -> Totals {
+        Totals { negative_types, negative_occurrences: negative_types, false_types, false_occurrences: false_types, false_repeated_types: 0, false_attested_types: 0, recall }
+    }
+
+    #[test]
+    fn a_candidate_is_promoted_with_enough_negatives_no_false_conversion_and_a_gain_in_recall() {
+        let promotion = json!({"minimum_test_negatives": 10, "minimum_recall_gain": 0.01});
+        let baseline = totals_of(100, 3, 0.5);
+        assert!(promoted(&totals_of(100, 0, 0.6), &baseline, &promotion, "test_"));
+        assert!(!promoted(&totals_of(5, 0, 0.6), &baseline, &promotion, "test_"));
+        assert!(!promoted(&totals_of(100, 1, 0.6), &baseline, &promotion, "test_"));
+        assert!(!promoted(&totals_of(100, 0, 0.505), &baseline, &promotion, "test_"));
+        assert!(!promoted(&totals_of(100, 0, 0.6), &baseline, &promotion, "gate_"));
+    }
+
+    #[test]
+    fn a_report_names_why_a_candidate_was_not_promoted_only_when_it_was_not() {
+        let root = repository();
+        let mut settings = read_json(&root.join(DIRECTORY).join("config.json")).expect("the config");
+        settings["promotion"] = json!({"minimum_unseen_negatives": 0, "minimum_gate_negatives": 0, "minimum_test_negatives": 0, "minimum_recall_gain": 0.0});
+        let known: Known = SCRIPTS.iter().map(|script| ((*script).to_owned(), HashSet::new())).collect();
+        let report = |settings: &Value| -> Value { serde_json::from_slice(&test_report(&root, &[], settings, &known).expect("a report")).expect("json") };
+        let passing = report(&settings);
+        assert_eq!((&passing["promotion_passed"], &passing["not_promoted_because"]), (&json!(true), &Value::Null));
+        settings["promotion"]["minimum_gate_negatives"] = json!(1);
+        let failing = report(&settings);
+        assert_eq!((&failing["promotion_passed"], &failing["not_promoted_because"]), (&json!(false), &json!(NOT_PROMOTED)));
+    }
 }

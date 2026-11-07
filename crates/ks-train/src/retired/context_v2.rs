@@ -3,8 +3,8 @@
 //! evaluation, and nothing here may install the candidate.
 use ks_cast::To as _;
 use super::context_frames::{Frame, TECHNICAL_KEEP, all_frames, frames_sha256};
-use super::read_object;
 use super::sources::CONTEXT_V2;
+use super::{read_object, unchanged};
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
 use crate::kernel::{self, Packed};
@@ -157,9 +157,8 @@ fn pack(items: &[(&Frame, &str)], names: &[String], cache: &Cache, importance: &
             return Err("invalid training target or importance".to_owned());
         }
         for (name, value) in extract_baseline_features(&evidence(row, profile, cache)?) {
-            if !value.is_finite() {
-                return Err("non-finite feature".to_owned());
-            }
+            // Every baseline feature is a constant, a sum of signed character-gram scales or the clamped score delta.
+            assert!(value.is_finite(), "a baseline feature is finite by construction: {name}");
             if let Some(index) = vocabulary.get(name.as_str()) {
                 packed.indices.push(*index);
                 packed.values.push(value);
@@ -380,6 +379,12 @@ pub fn verify(root: &Path) -> Result<Value, String> {
             return Err(format!("historical context-v2 anchor changed: {name}"));
         }
     }
+    historical_evidence(root)
+}
+
+/// What the anchored files say, checked as if nothing anchored them.
+fn historical_evidence(root: &Path) -> Result<Value, String> {
+    let directory = root.join(DIRECTORY);
     let seal = read_object(&directory.join("candidate-seal.json"))?;
     let pins = seal.get("provenance").cloned().unwrap_or(Value::Null);
     CONTEXT_V2.recorded(&pins, &PROVENANCE, root).or_else(|_| CONTEXT_V2.verify(&pins, root))?;
@@ -464,15 +469,9 @@ pub fn replay(root: &Path) -> Result<Value, String> {
     let pins = CONTEXT_V2.verify(seal.get("provenance").unwrap_or(&Value::Null), root)?;
     let (artifact, sealed) = fit(root, &frames, &cache, &pins)?;
     let read = |name: &str| std::fs::read(directory.join(name)).map_err(|error| error.to_string());
-    if artifact != read("candidate.json")? {
-        return Err("context-v2 candidate changed".to_owned());
-    }
-    if sealed != read("candidate-seal.json")? {
-        return Err("context-v2 seal changed".to_owned());
-    }
-    if evaluate(root, &frames, &cache)? != read("report.json")? {
-        return Err("context-v2 numeric report changed".to_owned());
-    }
+    unchanged(&artifact, &read("candidate.json")?, "context-v2 candidate changed")?;
+    unchanged(&sealed, &read("candidate-seal.json")?, "context-v2 seal changed")?;
+    unchanged(&evaluate(root, &frames, &cache)?, &read("report.json")?, "context-v2 numeric report changed")?;
     result["frozen_training_replay"] = json!(true);
     result["frozen_numeric_regression"] = json!(true);
     Ok(result)
@@ -498,4 +497,287 @@ pub fn verify_corpus_receipt(root: &Path) -> Result<Value, String> {
         return Err("corpus receipt is missing or changed; a frozen split is never overwritten".to_owned());
     }
     Ok(Value::Object(content))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::super::context_frames::REAL_PHRASE;
+    use super::super::testing::{Tree, refused, repository};
+    use super::*;
+
+    fn frame(identifier: &str, split: &'static str, action: &'static str, cluster: &str, family: &str) -> Frame {
+        Frame {
+            identifier: identifier.to_owned(),
+            cluster: cluster.to_owned(),
+            split,
+            locale: "eng".to_owned(),
+            original: format!("ghbdtn{identifier}"),
+            alternative: "привет".to_owned(),
+            group: 0,
+            before: "say ".to_owned(),
+            after: String::new(),
+            application: "Code",
+            role: "unknown",
+            trigger: "space",
+            action,
+            focus_family: family.to_owned(),
+            category: REAL_PHRASE,
+        }
+    }
+
+    /// Lexical evidence for these frames in both profiles.
+    fn cache_of(frames: &[Frame]) -> Cache {
+        frames.iter().flat_map(|row| PROFILES.iter().map(move |profile| (key(row, profile), (row.action == "convert", false, true, 1.5)))).collect()
+    }
+
+    #[test]
+    fn a_group_or_a_focus_family_shared_across_splits_is_leakage() {
+        let clean = [frame("a", "train", "keep", "one", "f1"), frame("b", "test", "keep", "two", "f2"), frame("c", "lexical_test", "keep", "three", "f3")];
+        let audited = audit(&clean).expect("no leak");
+        assert_eq!(audited["rows"], json!(3));
+        for (left, right) in [("train", "test"), ("train", "lexical_test"), ("train", "development"), ("train", "calibration"), ("development", "calibration"), ("development", "test")] {
+            refused(audit(&[frame("a", left, "keep", "same", "f1"), frame("b", right, "keep", "same", "f2")]), "source-group leakage");
+        }
+        refused(audit(&[frame("a", "train", "keep", "one", "family"), frame("b", "lexical_test", "keep", "two", "family")]), "focus-family leakage");
+    }
+
+    #[test]
+    fn a_threshold_is_the_lowest_within_the_budget_of_false_conversions() {
+        // Rows: a conversion wanted and made, a conversion made against a keep, a keep chosen, a conversion too unsure.
+        let predictions = [0.1, 0.9, 0.0, 0.0, 0.05, 0.95, 0.0, 0.0, 0.7, 0.2, 0.1, 0.0, 0.3, 0.6, 0.1, 0.0];
+        let labels = [1, 0, 0, 1];
+        let (threshold, counted) = select_threshold(&predictions, &labels, &[0.99, 0.5, 0.92], 0).expect("a threshold");
+        assert_eq!(threshold.to_bits(), 0.99_f64.to_bits());
+        assert_eq!(counted, json!({"rows": 4, "false_conversions": 0, "converted_correctly": 0}));
+        let (threshold, counted) = select_threshold(&predictions, &labels, &[0.5], 1).expect("a threshold");
+        assert_eq!(threshold.to_bits(), 0.5_f64.to_bits());
+        assert_eq!(counted, json!({"rows": 4, "false_conversions": 1, "converted_correctly": 2}));
+        refused(select_threshold(&predictions, &labels, &[0.5, 0.9], 0), "no calibration threshold meets the declared safety budget");
+    }
+
+    #[test]
+    fn a_row_is_packed_with_a_positive_finite_weight_and_its_known_features() {
+        let rows = [frame("a", "train", "keep", "one", "f"), frame("b", "train", "convert", "two", "g")];
+        let mut technical = rows[1].clone();
+        technical.category = TECHNICAL_KEEP;
+        let cache = cache_of(&[rows[0].clone(), technical.clone()]);
+        let items = [(&rows[0], "portable"), (&technical, "portable")];
+        let names = vec!["bias".to_owned(), "unheard-of".to_owned()];
+        let packed = pack(&items, &names, &cache, &[1.0, 2.0, 1.0, 1.0], 3.0).expect("a pack");
+        assert_eq!(packed.rows(), 2);
+        assert_eq!(packed.importance, [1.0, 6.0]);
+        assert_eq!(packed.indices, [0, 0]);
+        refused(pack(&items, &names, &cache, &[0.0, 1.0, 1.0, 1.0], 1.0), "invalid training target or importance");
+        refused(pack(&items, &names, &cache, &[f64::NAN, 1.0, 1.0, 1.0], 1.0), "invalid training target or importance");
+        let unseen = frame("unseen", "train", "keep", "three", "h");
+        refused(pack(&[(&unseen, "portable")], &names, &cache, &[1.0; WIDTH], 1.0), "a frame without lexical evidence");
+        let mut unknown = rows[0].clone();
+        unknown.action = "guess";
+        refused(pack(&[(&unknown, "portable")], &names, &cache, &[1.0; WIDTH], 1.0), "an unknown action");
+    }
+
+    #[test]
+    fn a_fit_needs_every_action_and_both_held_out_splits() {
+        let root = repository();
+        let pins = Map::new();
+        let all = |split: &'static str, tag: &str| ACTIONS.iter().map(|action| frame(&format!("{split}-{tag}-{}", action.as_str()), split, action.as_str(), &format!("{split}-{tag}"), "f")).collect::<Vec<Frame>>();
+        let keeps: Vec<Frame> = (0..4).map(|index| frame(&index.to_string(), "train", "keep", "one", "f")).collect();
+        refused(fit(&root, &keeps, &cache_of(&keeps), &pins), "training needs all four actions");
+        let trained = all("train", "x");
+        refused(fit(&root, &trained, &cache_of(&trained), &pins), "empty development or calibration split");
+        let mut developed = trained.clone();
+        developed.extend(all("development", "y"));
+        refused(fit(&root, &developed, &cache_of(&developed), &pins), "empty development or calibration split");
+    }
+
+    #[test]
+    fn promotion_fails_on_every_rule_the_config_declares() {
+        let counts = |rows: i64, desired: i64, correct: i64, wrong: i64, detector: i64, technical: i64| {
+            json!({"counts": {"rows": rows, "desired_conversions": desired, "converted_correctly": correct, "false_conversions": wrong, "baseline_false_conversions": detector}, "categories": {TECHNICAL_KEEP: {"false_conversions": technical}}})
+        };
+        let gate = json!({"minimum_recall": 0.9, "maximum_false_conversion_rate": 0.01, "maximum_technical_false_conversions": 0});
+        let good = counts(200, 100, 95, 0, 1, 0);
+        assert!(promotion_failures(&good, &counts(200, 100, 90, 1, 1, 0), &gate).is_empty());
+        assert_eq!(promotion_failures(&counts(100, 100, 95, 0, 0, 0), &good, &gate), ["empty evaluation class"]);
+        assert_eq!(promotion_failures(&counts(100, 0, 0, 0, 0, 0), &good, &gate), ["empty evaluation class"]);
+        assert_eq!(
+            promotion_failures(&counts(200, 100, 50, 5, 1, 2), &counts(200, 100, 60, 1, 1, 0), &gate),
+            ["recall below declared minimum", "false conversion rate above budget", "more false conversions than v1", "fewer correct conversions than v1", "more false conversions than detector", "technical text converted"]
+        );
+    }
+
+    #[test]
+    fn the_config_is_of_schema_one_and_feature_version_two() {
+        let tree = Tree::new("context-config");
+        let path = "model/context_v2/config.json";
+        let kept = tree.json(path);
+        assert!(config(&tree.root).is_ok());
+        for (field, value) in [("schema_version", 2), ("feature_version", 3)] {
+            let mut changed = kept.clone();
+            changed[field] = json!(value);
+            tree.write(path, &serde_json::to_vec(&changed).expect("json"));
+            refused(config(&tree.root), "incompatible experiment configuration");
+        }
+    }
+
+    #[test]
+    fn the_lexical_cache_is_the_one_its_receipt_names() {
+        let tree = Tree::new("context-cache");
+        tree.edit("model/context_v2/lexical-receipt.json", |receipt| receipt["sha256"] = json!("0"));
+        refused(load_cache(&tree.root), "lexical cache checksum mismatch");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut encoder, b"[]").expect("in memory");
+        let packed = encoder.finish().expect("in memory");
+        tree.write("model/context_v2/sources/lexical-evidence.json.gz", &packed);
+        let digest = checksum(&tree.path("model/context_v2/sources/lexical-evidence.json.gz")).expect("a digest");
+        tree.edit("model/context_v2/lexical-receipt.json", |receipt| receipt["sha256"] = json!(digest));
+        refused(load_cache(&tree.root), "invalid lexical cache");
+    }
+
+    #[test]
+    fn the_numeric_replay_reads_only_feature_two_models() {
+        let tree = Tree::new("context-evaluate");
+        let shipped = std::fs::read(repository().join("resources/models/context_policy_v1.json")).expect("the shipped model");
+        tree.write("model/context_v2/candidate.json", &shipped);
+        refused(evaluate(&tree.root, &[], &Cache::new()), "historical numeric replay requires feature-2 models");
+        tree.write("model/context_v2/candidate.json", &std::fs::read(repository().join("model/context_v2/candidate.json")).expect("the candidate"));
+        tree.write("model/context_v2/baseline-context-v1.json", &shipped);
+        refused(evaluate(&tree.root, &[], &Cache::new()), "historical numeric replay requires feature-2 models");
+    }
+
+    #[test]
+    fn the_epoch_kept_is_the_one_of_the_lowest_development_loss() {
+        let mut trained = Vec::new();
+        for action in ACTIONS {
+            for copy in 0..3 {
+                trained.push(frame(&format!("{}{copy}", action.as_str()), "train", action.as_str(), "train", "f"));
+            }
+        }
+        // The development rows are the training rows with other answers: the more the fit learns, the worse it does on them.
+        let other = |row: &Frame, split: &'static str, action: &'static str| Frame { identifier: format!("{split}:{}", row.identifier), split, cluster: split.to_owned(), action, ..row.clone() };
+        let mut frames = trained.clone();
+        frames.extend(trained.iter().map(|row| other(row, "development", if row.action == "keep" { "convert" } else { "keep" })));
+        frames.extend(trained.iter().map(|row| other(row, "calibration", "keep")));
+        let cache = cache_of(&trained);
+        let (_, seal) = fit(&repository(), &frames, &cache, &Map::new()).expect("a fit");
+        let seal: Value = serde_json::from_slice(&seal).expect("json");
+        assert_eq!(seal["selected_epoch"], json!(1), "{seal}");
+    }
+
+    #[test]
+    fn an_anchored_file_that_changed_stops_the_check() {
+        let tree = Tree::new("context-anchor");
+        tree.edit("model/context_v2/candidate-seal.json", |seal| seal["stage"] = json!("after-test"));
+        refused(verify(&tree.root), "historical context-v2 anchor changed: candidate-seal.json");
+    }
+
+    #[test]
+    fn the_corpus_receipt_is_rebuilt_from_the_snapshot() {
+        let tree = Tree::new("context-corpus");
+        assert!(verify_corpus_receipt(&tree.root).is_ok());
+        tree.edit("model/context_v2/corpus-receipt.json", |receipt| receipt["license"] = json!("other"));
+        refused(verify_corpus_receipt(&tree.root), "corpus receipt is missing or changed");
+    }
+
+    const FILES: [&str; 6] = ["candidate-seal.json", "report.json", "engine-report.json", "candidate.json", "lexical-receipt.json", "corpus-receipt.json"];
+
+    /// The tree's evidence back to the repository's, then changed by `edit`, and checked past its anchors.
+    fn evidence_after(tree: &Tree, edit: impl FnOnce(&Tree)) -> Result<Value, String> {
+        for name in FILES {
+            tree.write(&format!("{DIRECTORY}/{name}"), &std::fs::read(repository().join(DIRECTORY).join(name)).expect("a file"));
+        }
+        edit(tree);
+        historical_evidence(&tree.root)
+    }
+
+    fn edit(tree: &Tree, name: &str, change: impl FnOnce(&mut Value)) {
+        tree.edit(&format!("{DIRECTORY}/{name}"), change);
+    }
+
+    #[test]
+    fn the_seal_names_the_candidate_and_its_pinned_sources() {
+        let tree = Tree::new("context-seal");
+        refused(evidence_after(&tree, |tree| edit(tree, "candidate-seal.json", |seal| seal["provenance"]["tools/train_context_v2.py"] = json!("0".repeat(64)))), "unapproved historical source identity");
+        let sealed = "candidate seal or provenance changed";
+        refused(evidence_after(&tree, |tree| edit(tree, "candidate-seal.json", |seal| seal["stage"] = json!("after-test"))), sealed);
+        refused(evidence_after(&tree, |tree| edit(tree, "candidate-seal.json", |seal| seal["artifact_sha256"] = json!("0"))), sealed);
+        let identity = "candidate identity changed";
+        refused(evidence_after(&tree, |tree| edit(tree, "candidate-seal.json", |seal| seal["model_version"] = json!("context-v1-other"))), identity);
+        refused(evidence_after(&tree, |tree| edit(tree, "candidate-seal.json", |seal| seal["conversion_threshold"] = json!(0.5))), identity);
+        let shipped = |tree: &Tree| {
+            tree.write(&format!("{DIRECTORY}/candidate.json"), &std::fs::read(repository().join("resources/models/context_policy_v1.json")).expect("the shipped model"));
+            let digest = checksum(&tree.path(&format!("{DIRECTORY}/candidate.json"))).expect("a digest");
+            edit(tree, "candidate-seal.json", |seal| seal["artifact_sha256"] = json!(digest));
+            edit(tree, "engine-report.json", |report| report["provenance"]["model/context_v2/candidate.json"] = json!(digest));
+        };
+        refused(evidence_after(&tree, shipped), identity);
+    }
+
+    #[test]
+    fn the_runtime_history_is_the_one_the_engine_report_names() {
+        let tree = Tree::new("context-history");
+        let regression = |value: Value| move |tree: &Tree| edit(tree, "engine-report.json", |report| report["runtime_regression"] = value);
+        // Without a history the evidence goes on to the report.
+        let no_history = |tree: &Tree| {
+            regression(Value::Null)(tree);
+            edit(tree, "report.json", |report| report["reserve_used"] = json!(true));
+        };
+        refused(evidence_after(&tree, no_history), "candidate evaluation identity changed");
+        refused(evidence_after(&tree, regression(json!({}))), "invalid runtime regression history");
+        let mismatch = "runtime regression history mismatch";
+        refused(evidence_after(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"]["previous_report"] = json!("model/elsewhere.json"))), mismatch);
+        refused(evidence_after(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"]["previous_sha256"] = json!("0"))), mismatch);
+        let other_selection = |tree: &Tree| {
+            let previous = format!("{DIRECTORY}/engine-history/other.json");
+            tree.write(&previous, br#"{"source_ids": []}"#);
+            let digest = checksum(&tree.path(&previous)).expect("a digest");
+            regression(json!({"previous_report": previous, "previous_sha256": digest}))(tree);
+        };
+        refused(evidence_after(&tree, other_selection), "runtime regression selection changed");
+    }
+
+    #[test]
+    fn the_report_describes_the_sealed_candidate_with_possible_counts() {
+        let tree = Tree::new("context-report");
+        let report = |change: fn(&mut Value)| move |tree: &Tree| edit(tree, "report.json", change);
+        let identity = "candidate evaluation identity changed";
+        refused(evidence_after(&tree, report(|report| report["seal_sha256"] = json!("0"))), identity);
+        refused(evidence_after(&tree, report(|report| report["artifact_sha256"] = json!("0"))), identity);
+        refused(evidence_after(&tree, report(|report| report["audit"] = json!({}))), identity);
+        let track = "missing independent evaluation track";
+        refused(evidence_after(&tree, report(|report| report["results"] = json!([]))), track);
+        refused(evidence_after(&tree, report(|report| drop(report["results"].as_object_mut().expect("tracks").remove("test:portable")))), track);
+        let metrics = "missing candidate metrics";
+        refused(evidence_after(&tree, report(|report| drop(report["results"]["test:portable"].as_object_mut().expect("a track").remove("candidate")))), metrics);
+        refused(evidence_after(&tree, report(|report| drop(report["results"]["test:portable"].as_object_mut().expect("a track").remove("v1")))), metrics);
+        refused(evidence_after(&tree, report(|report| report["results"]["test:portable"]["candidate"]["counts"]["rows"] = json!(-1))), "invalid candidate counts");
+        refused(evidence_after(&tree, report(|report| drop(report["results"]["test:portable"]["v1"]["counts"].as_object_mut().expect("counts").remove("rows")))), "invalid candidate counts");
+        let impossible = "impossible candidate counts";
+        refused(evidence_after(&tree, report(|report| report["results"]["test:portable"]["candidate"]["counts"]["desired_conversions"] = json!(0))), impossible);
+        refused(evidence_after(&tree, report(|report| report["results"]["test:portable"]["candidate"]["counts"]["desired_conversions"] = json!(25_653))), impossible);
+        refused(evidence_after(&tree, report(|report| report["results"]["test:portable"]["candidate"]["counts"]["converted_correctly"] = json!(10_116))), impossible);
+    }
+
+    #[test]
+    fn the_report_and_the_engine_say_the_candidate_failed_as_its_metrics_do() {
+        let tree = Tree::new("context-promotion");
+        let contradicts = "candidate promotion result contradicts the metrics";
+        refused(evidence_after(&tree, |tree| edit(tree, "report.json", |report| report["promotion_failures"] = json!({}))), contradicts);
+        refused(evidence_after(&tree, |tree| edit(tree, "report.json", |report| report["promotion_passed"] = json!(true))), contradicts);
+        refused(evidence_after(&tree, |tree| edit(tree, "engine-report.json", |report| report["promotion_passed"] = json!(true))), contradicts);
+        let all_passing = |tree: &Tree| {
+            edit(tree, "report.json", |report| {
+                let counts = |correct: i64| json!({"counts": {"rows": 200, "desired_conversions": 100, "converted_correctly": correct, "false_conversions": 0, "baseline_false_conversions": 0}});
+                let names: Vec<String> = report["results"].as_object().expect("tracks").keys().cloned().collect();
+                for name in &names {
+                    report["results"][name] = json!({"candidate": counts(100), "v1": counts(90)});
+                    report["promotion_failures"][name] = json!([]);
+                }
+            });
+        };
+        refused(evidence_after(&tree, all_passing), contradicts);
+        let replaced = |tree: &Tree| tree.write("resources/models/context_policy_v1.json", &std::fs::read(repository().join(DIRECTORY).join("candidate.json")).expect("the candidate"));
+        refused(evidence_after(&tree, replaced), "research candidate must not replace the shipping model");
+    }
 }
