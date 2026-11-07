@@ -13,8 +13,31 @@ pub(crate) fn tree() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("the repository")
 }
 
+/// The folders of earlier runs whose process has ended. A test leaves its folder for a look after a failure, and over a
+/// few days of runs they filled the temporary folder. Only Linux tells a live process by its folder in /proc; elsewhere
+/// nothing is removed.
+fn remove_stale_scratch() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix("ks-train-") else { continue };
+        // `ks-train-<name>-<process>-<number>`: the name may hold dashes, the last two parts do not.
+        let mut parts = rest.rsplit('-');
+        let (Some(_), Some(process)) = (parts.next(), parts.next()) else { continue };
+        let ended = process.parse::<u32>().is_ok_and(|process| process != std::process::id() && !Path::new(&format!("/proc/{process}")).exists());
+        if ended {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 pub(crate) fn scratch(name: &str) -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
+    static CLEANED: std::sync::Once = std::sync::Once::new();
+    CLEANED.call_once(remove_stale_scratch);
     let path = std::env::temp_dir().join(format!("ks-train-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     std::fs::create_dir_all(&path).expect("a folder");
     path
