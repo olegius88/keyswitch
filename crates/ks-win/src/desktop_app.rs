@@ -463,6 +463,8 @@ impl App {
             TrayAction::ToggleEngine => self.toggle("enabled", true),
             TrayAction::ToggleSound => self.toggle("general.sound", false),
             TrayAction::ToggleNotifications => self.toggle("general.notifications", true),
+            // Only macOS waits for a permission; the menu of Windows never offers its pane.
+            TrayAction::OpenPermissionSettings => {}
             TrayAction::QuitApplication => self.shutdown(),
         }
     }

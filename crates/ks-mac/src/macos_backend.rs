@@ -474,6 +474,13 @@ impl MacBackend {
         }
         granted
     }
+
+    /// Show the pane where the permission is given, without asking for it again: the menu's way there while the program
+    /// waits.
+    #[must_use]
+    pub fn open_permission_settings(&self) -> bool {
+        self.inner.api.open_accessibility_settings()
+    }
 }
 
 impl InputBackend for MacBackend {

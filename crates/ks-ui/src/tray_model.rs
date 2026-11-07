@@ -12,6 +12,9 @@ pub const HISTORY_LABEL: &str = "История исправлений…";
 pub const EXCLUSIONS_LABEL: &str = "Программы-исключения…";
 pub const ABOUT_LABEL: &str = "О программе…";
 pub const QUIT_LABEL: &str = "Выход";
+/// The menu of a program that waits for macOS to let it watch the keyboard: what it waits for and where that is given.
+pub const PERMISSION_WAIT_LABEL: &str = "Ждёт доступа к клавиатуре";
+pub const PERMISSION_SETTINGS_LABEL: &str = "Открыть «Универсальный доступ»…";
 
 /// `TrayActions`: what a menu line asks the application to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +27,8 @@ pub enum TrayAction {
     ShowHistory,
     ShowExclusions,
     ShowAbout,
+    /// macOS: the pane of System Settings where the permission the program waits for is given.
+    OpenPermissionSettings,
     QuitApplication,
 }
 
@@ -34,11 +39,13 @@ pub struct TrayState {
     pub sound_enabled: bool,
     pub notifications_enabled: bool,
     pub indicator_style: &'static str,
+    /// macOS: the program has no permission to watch the keyboard yet and waits for it.
+    pub awaiting_permission: bool,
 }
 
 impl Default for TrayState {
     fn default() -> Self {
-        TrayState { group: -1, enabled: true, sound_enabled: false, notifications_enabled: true, indicator_style: "letters" }
+        TrayState { group: -1, enabled: true, sound_enabled: false, notifications_enabled: true, indicator_style: "letters", awaiting_permission: false }
     }
 }
 
@@ -85,10 +92,19 @@ fn separator() -> MenuEntry {
     MenuEntry { separator: true, ..MenuEntry::default() }
 }
 
-/// The menu as it should look right now.
+/// The menu as it should look right now. While the program waits for the permission nothing else in it would work, so
+/// it says so and offers the way to the switch, and a way out.
 #[must_use]
 pub fn menu_entries(state: &TrayState) -> Vec<MenuEntry> {
-    use TrayAction::{SwitchLayout, ShowSettings, ToggleEngine, ToggleSound, ToggleNotifications, ShowHistory, ShowExclusions, ShowAbout, QuitApplication};
+    use TrayAction::{SwitchLayout, ShowSettings, ToggleEngine, ToggleSound, ToggleNotifications, ShowHistory, ShowExclusions, ShowAbout, OpenPermissionSettings, QuitApplication};
+    if state.awaiting_permission {
+        return vec![
+            line(PERMISSION_WAIT_LABEL, None, None, false, false),
+            line(PERMISSION_SETTINGS_LABEL, Some(OpenPermissionSettings), None, true, true),
+            separator(),
+            line(QUIT_LABEL, Some(QuitApplication), None, true, false),
+        ];
+    }
     vec![
         line(&format!("{CURRENT_LAYOUT_PREFIX}: {}", state.label()), None, None, false, false),
         line(&state.alternate_layout_label(), Some(SwitchLayout), None, state.can_switch_layout(), false),
@@ -134,6 +150,19 @@ mod tests {
         let unknown = menu_entries(&TrayState::default());
         assert!(!unknown[1].enabled);
         assert_eq!(unknown[1].label, "Переключить язык");
+    }
+
+    #[test]
+    fn a_program_waiting_for_the_permission_offers_its_pane_and_a_way_out() {
+        let entries = menu_entries(&TrayState { group: 0, awaiting_permission: true, ..TrayState::default() });
+        let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
+        assert_eq!(labels, [PERMISSION_WAIT_LABEL, PERMISSION_SETTINGS_LABEL, "", QUIT_LABEL]);
+        assert!(!entries[0].enabled && entries[0].action.is_none());
+        assert_eq!(entries[1].action, Some(TrayAction::OpenPermissionSettings));
+        assert!(entries[1].enabled && entries[1].default);
+        assert!(entries[2].separator);
+        assert_eq!(entries[3].action, Some(TrayAction::QuitApplication));
+        assert!(!TrayState::default().awaiting_permission);
     }
 
     #[test]

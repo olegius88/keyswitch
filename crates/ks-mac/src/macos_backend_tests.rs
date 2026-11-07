@@ -667,6 +667,7 @@ fn the_permission_is_asked_for_and_its_pane_opened_while_it_is_missing() {
     let backend = backend(&api);
     assert!(!backend.permission_granted());
     assert!(!backend.request_permission());
+    assert!(backend.open_permission_settings());
     api.trusted.store(true, Ordering::SeqCst);
     assert!(backend.request_permission());
 }
