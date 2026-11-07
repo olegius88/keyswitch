@@ -11,7 +11,8 @@ use ks_config::logsetup::{format_record, utc_time, Level, LogRecord, RotatingFil
 use ks_config::personal_words::PersonalWords;
 use ks_config::selection_commands::*;
 use ks_config::{app_quirks, indicator, log_privacy, selection_text, settings_diagnostics};
-use ks_text::{json_dumps, JsonOptions};
+use ks_config::constants::USER_DATA_JSON_INDENT;
+use ks_text::{json_dumps, Indent, JsonOptions};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -48,7 +49,47 @@ fn tempdir(tag: &str) -> PathBuf {
     d
 }
 fn file_hex(path: &Path) -> Value {
-    std::fs::read(path).map_or(Value::Null, |b| Value::String(hex(&b)))
+    std::fs::read(path).map_or(Value::Null, |b| Value::String(hex(&as_python_file(&b))))
+}
+/// A settings tree as the Python program holds it: without the settings it never had (`SETTINGS_SINCE_PYTHON`), which
+/// the Rust program adds to every table and file.
+fn as_python(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(settings_diagnostics::without_settings_since_python(map)),
+        other => other.clone(),
+    }
+}
+/// The value at a dotted `path` (or the whole table, "*") as the Python held it.
+fn as_python_at(path: &str, value: &Value) -> Value {
+    if path == "*" {
+        return as_python(value);
+    }
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut wrapped = value.clone();
+    for part in parts.iter().rev() {
+        wrapped = json!({ *part: wrapped });
+    }
+    let mut kept = as_python(&wrapped);
+    for part in &parts {
+        kept = kept[*part].clone();
+    }
+    kept
+}
+/// The bytes of a settings file as the Python would have written them: the same text without those settings. Any other
+/// file, or one that holds none of them, stays as it is.
+fn as_python_file(bytes: &[u8]) -> Vec<u8> {
+    let Ok(Value::Object(map)) = serde_json::from_slice::<Value>(bytes) else { return bytes.to_vec() };
+    let kept = settings_diagnostics::without_settings_since_python(&map);
+    if kept == map {
+        return bytes.to_vec();
+    }
+    (json_dumps(&Value::Object(kept), &JsonOptions { ensure_ascii: false, indent: Some(Indent::Spaces(USER_DATA_JSON_INDENT)), ..JsonOptions::default() }) + "\n").into_bytes()
+}
+/// A diagnostics snapshot as the Python would have logged it: its table is named by the hash of the Python's defaults.
+fn snapshot_as_python(text: &str, store: &SettingsStore) -> String {
+    let full = settings_diagnostics::defaults_sha256(&store.defaults());
+    let python = settings_diagnostics::defaults_sha256(&settings_diagnostics::without_settings_since_python(&store.defaults()));
+    text.replace(&full, &python)
 }
 fn listing(dir: &Path) -> Value {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -64,7 +105,7 @@ fn listing(dir: &Path) -> Value {
                     name = format!("{}<T>", &name[..n - 15]);
                 }
             }
-            out.push((name, hex(&std::fs::read(e.path()).unwrap())));
+            out.push((name, hex(&as_python_file(&std::fs::read(e.path()).unwrap()))));
         }
     }
     out.sort();
@@ -108,20 +149,21 @@ fn settings() {
         let store = SettingsStore::new(Some(path.clone()));
         let calls: Arc<Mutex<Vec<Value>>> = Arc::default();
         let rec = calls.clone();
-        let _ = store.subscribe(Arc::new(move |k: &str, v: &Value| rec.lock().unwrap().push(json!([k, jt(v)]))));
+        // A change of the whole table ("*") carries the table, which the Python held without the newer settings.
+        let _ = store.subscribe(Arc::new(move |k: &str, v: &Value| rec.lock().unwrap().push(json!([k, jt(&as_python_at(k, v))]))));
         for (op, want) in r["ops"].as_array().unwrap().iter().zip(r["results"].as_array().unwrap()) {
             let a = |i: usize| s(&op[i]);
             let got: Value = match a(0) {
-                "get" => store.get(a(1)).map_or(json!({"missing": true}), |v| json!({"v": jt(&v)})),
+                "get" => store.get(a(1)).map_or(json!({"missing": true}), |v| json!({"v": jt(&as_python_at(a(1), &v))})),
                 "set" => {
                     store.set(a(1), serde_json::from_str(a(2)).unwrap(), op[3].as_bool().unwrap()).unwrap();
                     Value::Null
                 }
-                "default" => store.default(a(1)).map_or(json!({"missing": true}), |v| json!({"v": jt(&v)})),
+                "default" => store.default(a(1)).map_or(json!({"missing": true}), |v| json!({"v": jt(&as_python_at(a(1), &v))})),
                 "is_default" => json!(store.is_default(a(1))),
                 "restore_default" => json!(store.restore_default(a(1)).unwrap()),
-                "snapshot" => json!(jt(&Value::Object(store.snapshot()))),
-                "defaults" => json!(jt(&Value::Object(store.defaults()))),
+                "snapshot" => json!(jt(&as_python(&Value::Object(store.snapshot())))),
+                "defaults" => json!(jt(&as_python(&Value::Object(store.defaults())))),
                 "reset" => {
                     store.reset().unwrap();
                     Value::Null
@@ -138,7 +180,7 @@ fn settings() {
             };
             f.eq(&format!("{id} {op} r"), &got, &want["r"]);
             f.eq(&format!("{id} {op} file"), &file_hex(&path), &want["file"]);
-            f.eq(&format!("{id} {op} snap"), &json!(jt(&Value::Object(store.snapshot()))), &want["snap"]);
+            f.eq(&format!("{id} {op} snap"), &json!(jt(&as_python(&Value::Object(store.snapshot())))), &want["snap"]);
         }
         f.eq(&format!("{id} calls"), &Value::Array(calls.lock().unwrap().clone()), &r["calls"]);
         f.eq(&format!("{id} dir"), &listing(&dir), &r["dir"]);
@@ -546,11 +588,11 @@ fn misc() {
                 for p in r["sets"].as_array().unwrap() {
                     store.set(s(&p[0]), serde_json::from_str(s(&p[1])).unwrap(), false).unwrap();
                 }
-                f.eq("snapshot", &json!(jt(&Value::Object(settings_diagnostics::settings_snapshot(&store)))), &r["snapshot"]);
+                f.eq("snapshot", &json!(snapshot_as_python(&jt(&Value::Object(settings_diagnostics::settings_snapshot(&store))), &store)), &r["snapshot"]);
                 for (key, want) in r["changes"].as_object().unwrap() {
                     let (p, t) = key.split_once('\0').unwrap();
                     let c = settings_diagnostics::setting_change(&store, p, &serde_json::from_str(t).unwrap());
-                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| jt(&Value::Object(m)))), want);
+                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| snapshot_as_python(&jt(&Value::Object(m)), &store))), want);
                 }
             }
             "line" => {

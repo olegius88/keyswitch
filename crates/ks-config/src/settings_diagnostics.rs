@@ -33,7 +33,9 @@ pub fn without_settings_since_python(settings: &SettingsData) -> SettingsData {
             table = table.and_then(|map| map.get_mut(part)).and_then(Value::as_object_mut);
         }
         if let Some(map) = table {
-            map.remove(name);
+            // `remove` of a map that keeps its order swaps the last key into the place of the one removed; the
+            // table must keep the Python's order.
+            map.shift_remove(name);
         }
     }
     kept
