@@ -232,3 +232,34 @@ fn the_count_of_the_technical_vocabulary_is_chosen_on_the_development_texts() {
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
     assert!(read(&vocabulary.join("report-vocabulary.json")).get("vocabulary").is_some());
 }
+
+#[test]
+fn a_table_of_other_words_or_other_counts_or_another_selection_does_not_verify() {
+    let small = small_tree("typo-other", &recipe());
+    let folder = scratch("typo-other-sources");
+    let mut paths = sources(&folder);
+    // Training texts with capitals inside a word, a short word, a word that opens with Ё and a word counted once.
+    let lines: Vec<String> = (0..60)
+        .map(|index| json!({"qid": index, "text": "ВебСокет дом Ёлочка вебсокет через docker", "kind": "x", "mix": "y"}).to_string())
+        .chain([json!({"qid": 99, "text": "однажды", "kind": "x", "mix": "y"}).to_string()])
+        .collect();
+    std::fs::write(&paths.messages, gz(&(lines.join("\n") + "\n"))).expect("a file");
+    paths.pins[2] = digest(&std::fs::read(&paths.messages).expect("a file"));
+    assert!(command(&small, &paths, false).expect("built"));
+    assert!(command(&small, &paths, true).expect("verified"));
+    // The same words counted otherwise, and one word more.
+    let list = std::fs::read_to_string(&paths.en).expect("a list");
+    for changed in [list.replacen("today 5000", "today 9000", 1), format!("{list}extraword 500\n")] {
+        let en = folder.join("other-en.txt");
+        std::fs::write(&en, &changed).expect("a list");
+        let mut pins = paths.pins.clone();
+        pins[1] = digest(changed.as_bytes());
+        let other = Paths { ru: paths.ru.clone(), en, messages: paths.messages.clone(), code: paths.code.clone(), pins };
+        assert!(!command(&small, &other, true).expect("compared"));
+    }
+    let receipt = small.join("resources/typo-frequency.receipt.json");
+    let mut changed = read(&receipt);
+    changed["locales"]["en_US"]["selection"] = json!({});
+    std::fs::write(&receipt, serde_json::to_vec(&changed).expect("json")).expect("a file");
+    assert!(!command(&small, &paths, true).expect("compared"));
+}

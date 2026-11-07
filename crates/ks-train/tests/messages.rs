@@ -393,3 +393,21 @@ fn a_command_nobody_knows_says_so() {
     assert!(ks_train::messages::command(&["nothing".to_owned()], &tree(), &ks_lang::Resources::new(tree().join("resources"))).unwrap_err().contains("unknown command"));
     let _ = &SOURCES.taiga;
 }
+
+#[test]
+fn a_latin_c_beside_a_latin_word_is_no_lookalike() {
+    let folder = scratch("devchat-c");
+    let (root, comments, out) = (folder.join("root"), folder.join("comments"), folder.join("out"));
+    std::fs::create_dir_all(root.join("model/context_v3")).expect("a folder");
+    // The receipt names the builder's source by its hash.
+    std::os::unix::fs::symlink(tree().join("crates"), root.join("crates")).expect("a link");
+    std::fs::create_dir_all(comments.join("posts")).expect("a folder");
+    std::fs::write(comments.join("posts/question-of-post.json"), b"{}").expect("a file");
+    gz_write(&comments.join("comments-1.json.gz"), serde_json::to_vec(&json!([{"post_id": 1, "body": "работает c docker тут"}, {"post_id": 2, "body": "привет c миром тут"}])).expect("json").as_slice());
+    let dump = folder.join("dump.jsonl.zst");
+    zstd(&dump, &[json!({"text_markdown": "старый текст"})]);
+    let pin = ks_train::corpus::checksum(&dump).expect("a checksum");
+    std::fs::write(root.join("model/context_v3/devchat-test-batches.json"), serde_json::to_vec(&json!({"dump_sha256": pin})).expect("json")).expect("a file");
+    let counts = ks_train::messages::build_devchat(&root, &comments, &dump, &out, &[]).expect("the pools");
+    assert_eq!(counts["dropped:lookalike"].as_i64(), Some(1), "{counts}");
+}

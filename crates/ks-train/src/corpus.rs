@@ -166,9 +166,10 @@ pub fn typo_variants(original: &str, identifier: &str) -> Vec<String> {
         collect(&[&letters[..adjacent], &letters[adjacent + 1..=adjacent + 1], &letters[adjacent..=adjacent], &letters[adjacent + TRANSPOSE_PAIR_CHARACTERS..]]),
         collect(&[&letters[..inside], &letters[inside..=inside], &letters[inside..]]),
     ];
+    // The three edits are one letter shorter, as long and one letter longer than the word: none repeats another.
     let mut result: Vec<String> = Vec::new();
     for variant in variants {
-        if variant != original && !result.contains(&variant) {
+        if variant != original {
             result.push(variant);
         }
     }

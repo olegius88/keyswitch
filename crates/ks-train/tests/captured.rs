@@ -223,3 +223,15 @@ fn the_heads_on_captured_questions_leave_out_what_they_were_told_to() {
         assert!(frames.iter().all(|frame| frame.original != "да"), "{head}: {report}");
     }
 }
+
+#[test]
+fn a_curated_letter_alone_in_a_field_keeps_its_answer() {
+    let alone = [("before", json!("")), ("after", json!(""))];
+    let rows = vec![question(1, "я", "z", 1, &alone), question(1, "z", "я", 0, &[("before", json!("")), ("after", json!("")), ("label", json!("convert"))])];
+    let manifest = manifest_of("letters.jsonl.xz", 1, &rows);
+    let mut wanted = options();
+    wanted["minimum_word_characters"] = json!(1);
+    let (frames, report) = captured_source_curriculum(&TOOLS, &captured_sources(&manifest).expect("the sources")[0], &wanted).expect("the frames");
+    assert!(frames.iter().any(|frame| frame.original == "я" && frame.action == ContextAction::Keep), "{report}");
+    assert!(frames.iter().any(|frame| frame.original == "z" && frame.action == ContextAction::Convert), "{report}");
+}
