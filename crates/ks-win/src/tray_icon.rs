@@ -25,6 +25,10 @@ const DISABLED_SLASH_NEAR_PIXELS: f64 = 12.0;
 const DISABLED_SLASH_FAR_PIXELS: f64 = 52.0;
 const DISABLED_SLASH_WIDTH_PIXELS: f64 = 7.0;
 const DISABLED_SLASH_RGBA: Rgba = [255, 255, 255, 235];
+/// The letters of a switched-off badge: light grey on its grey, dimmer than white but plain to read. Crossed out by the
+/// slash, the large letters read wrong at the small sizes (`EN` as `EKI`), so the grey alone says the badge is off; a
+/// flag, which has no letters to spoil, keeps its slash.
+pub const DISABLED_LETTERS_RGBA: Rgba = [210, 210, 210, 255];
 const RUSSIAN_FLAG_BAND_COUNT: usize = 3;
 const RUSSIAN_FLAG_SECOND_BAND_NUMERATOR: usize = 2;
 const RUSSIAN_FLAG_BLUE_RGBA: Rgba = [0, 57, 166, 255];
@@ -141,8 +145,8 @@ impl Canvas {
         }
     }
 
-    /// Blend white over the badge with the glyph coverage, the ink centred and its corner on an icon pixel.
-    fn text(&mut self, ink: &Ink) {
+    /// Blend `color` over the badge with the glyph coverage, the ink centred and its corner on an icon pixel.
+    fn text(&mut self, ink: &Ink, color: Rgba) {
         let left = on_icon_pixel((self.size.low::<i32>() - ink.width.low::<i32>()) / 2);
         let top = on_icon_pixel((self.size.low::<i32>() - ink.height.low::<i32>()) / 2);
         for row in 0..ink.height {
@@ -154,7 +158,8 @@ impl Canvas {
                 }
                 let pixel = &mut self.pixels[y.to::<usize>() * self.size + x.to::<usize>()];
                 for channel in 0..3 {
-                    pixel[channel] = ((pixel[channel].to::<u32>() * (255 - cover) + 255 * cover + 127) / 255).low::<u8>();
+                    pixel[channel] =
+                        ((pixel[channel].to::<u32>() * (255 - cover) + color[channel].to::<u32>() * cover + 127) / 255).low::<u8>();
                 }
             }
         }
@@ -244,6 +249,14 @@ pub fn render(state: &TrayState, ink: Option<&Ink>, side: usize) -> Canvas {
     let mut canvas = Canvas::new(side);
     if is_flag(state) {
         draw_flag(&mut canvas, state.group);
+        if !state.enabled {
+            canvas.line(
+                (scaled(DISABLED_SLASH_NEAR_PIXELS, side), scaled(DISABLED_SLASH_FAR_PIXELS, side)),
+                (scaled(DISABLED_SLASH_FAR_PIXELS, side), scaled(DISABLED_SLASH_NEAR_PIXELS, side)),
+                scaled(DISABLED_SLASH_WIDTH_PIXELS, side),
+                DISABLED_SLASH_RGBA,
+            );
+        }
     } else {
         let background = if !state.enabled {
             BADGE_DISABLED_RGBA
@@ -257,16 +270,8 @@ pub fn render(state: &TrayState, ink: Option<&Ink>, side: usize) -> Canvas {
         let radius = scaled(BADGE_CORNER_RADIUS_PIXELS.to::<f64>(), side).round().to::<i32>();
         canvas.rounded_rectangle(0, 0, last, last, radius, background);
         if let Some(ink) = ink {
-            canvas.text(ink);
+            canvas.text(ink, if state.enabled { WHITE } else { DISABLED_LETTERS_RGBA });
         }
-    }
-    if !state.enabled {
-        canvas.line(
-            (scaled(DISABLED_SLASH_NEAR_PIXELS, side), scaled(DISABLED_SLASH_FAR_PIXELS, side)),
-            (scaled(DISABLED_SLASH_FAR_PIXELS, side), scaled(DISABLED_SLASH_NEAR_PIXELS, side)),
-            scaled(DISABLED_SLASH_WIDTH_PIXELS, side),
-            DISABLED_SLASH_RGBA,
-        );
     }
     canvas
 }
@@ -369,6 +374,17 @@ mod tests {
         assert_eq!(us.pixels[3 * 64 + 4], WHITE);
         assert_eq!(us.pixels[4 * 64 + 3], WHITE);
         assert_eq!(us.pixels[4 * 64 + 4], US_FLAG_CANTON_RGBA);
+    }
+
+    #[test]
+    fn a_switched_off_badge_is_grey_with_dim_letters_and_no_slash() {
+        let ink = Ink { width: 40, height: 24, coverage: vec![255; 960] };
+        let off = render(&TrayState { group: 0, enabled: false, ..TrayState::default() }, Some(&ink), SIDE);
+        assert_eq!(off.pixels[32 * SIDE + 32], DISABLED_LETTERS_RGBA);
+        assert_eq!(off.pixels[2 * SIDE + 32], BADGE_DISABLED_RGBA);
+        // Where the slash crossed the badge, the badge is grey.
+        assert_eq!(off.pixels[52 * SIDE + 12], BADGE_DISABLED_RGBA);
+        assert!(off.pixels.iter().all(|pixel| *pixel != WHITE && *pixel != DISABLED_SLASH_RGBA));
     }
 
     #[test]

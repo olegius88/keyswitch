@@ -396,6 +396,7 @@ impl Tray {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::tray_icon::DISABLED_LETTERS_RGBA;
     use std::io::Write as _;
     use std::path::Path;
 
@@ -472,8 +473,9 @@ mod tests {
         }
     }
 
-    /// The badges at every scale: the letters take most of the icon. With `KS_TRAY_ICON_DIR` set, each picture is written
-    /// there as a PNG at its own size, and all of them on one enlarged sheet, a row a badge, for a look.
+    /// The badges at every scale: the letters take most of the icon, and a switched-off badge has nothing brighter than its
+    /// dimmed letters, no slash across them. With `KS_TRAY_ICON_DIR` set, each picture is written there as a PNG at its own
+    /// size, and all of them on one enlarged sheet, a row a badge, for a look.
     #[test]
     fn the_letters_fill_the_badge_at_every_scale() {
         let folder = std::env::var_os("KS_TRAY_ICON_DIR");
@@ -483,10 +485,12 @@ mod tests {
             for (_, side) in SCALES {
                 let pixels = icon_pixels(&state, side);
                 assert_eq!(pixels.len(), side * side * 4);
-                if state.enabled {
-                    let (width, height) = letter_extent(side, &pixels);
-                    assert!(width * 4 >= side * 3, "{name} at {side}: the letters are {width} pixels wide");
-                    assert!(height * 5 >= side * 2, "{name} at {side}: the letters are {height} pixels tall");
+                let (width, height) = letter_extent(side, &pixels);
+                assert!(width * 4 >= side * 3, "{name} at {side}: the letters are {width} pixels wide");
+                assert!(height * 5 >= side * 2, "{name} at {side}: the letters are {height} pixels tall");
+                if !state.enabled {
+                    let brightest = pixels.chunks(4).flat_map(|pixel| pixel[..3].to_vec()).max().unwrap();
+                    assert_eq!(brightest, DISABLED_LETTERS_RGBA[0], "{name} at {side}: something is brighter than the letters");
                 }
                 if let Some(folder) = &folder {
                     std::fs::create_dir_all(folder).unwrap();
