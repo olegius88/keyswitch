@@ -1637,9 +1637,9 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
     for (family, hashes) in &families.hashes_by_family {
         // Being in the base corpus is what this extension is for; being in anyone's test is not.
         let mut reasons: Vec<String> = alias_reasons(hashes, &families.physical_by_family[family], family, &exclusions).into_iter().filter(|reason| reason != "family-in-base-corpus").collect();
-        if (base_test_families.contains(family) || ledger_families.contains(family) || meets(hashes, &test_aliases)) && !reasons.iter().any(|reason| reason == "prior-accessed-test-family") {
-            reasons.push("prior-accessed-test-family".to_owned());
-        }
+        let in_test = base_test_families.contains(family) || ledger_families.contains(family) || meets(hashes, &test_aliases);
+        // The memberships are read again here: a sealed test that claimed the family since the exclusions were loaded marks it too.
+        mark_test_family(&mut reasons, in_test);
         // A word the base fits follows its split; one the base fits in two splits cannot be fitted in one and measured in another.
         let splits: BTreeSet<&String> = hashes.iter().filter_map(|alias| alias_splits.get(alias)).collect();
         if meets(hashes, &contested) || splits.len() > 1 {
@@ -1711,6 +1711,13 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
         std::fs::write(path, ks_text::json_dumps(&report, &options) + "\n").map_err(|error| error.to_string())?;
     }
     Ok(json!({"written": true, "manifest_sha256": report["manifest_sha256"], "added_by_split": metadata["fitting"]["added_by_split"], "added_rows": metadata["fitting"]["added_rows"], "quarantine_reasons": metadata["fitting"]["quarantine_reasons"]}))
+}
+
+/// A family some test holds carries the reason once, whether the exclusions or the memberships read again found it.
+fn mark_test_family(reasons: &mut Vec<String>, in_test: bool) {
+    if in_test && !reasons.iter().any(|reason| reason == "prior-accessed-test-family") {
+        reasons.push("prior-accessed-test-family".to_owned());
+    }
 }
 
 #[cfg(test)]
@@ -1858,6 +1865,16 @@ mod tests {
         known.prior_test_families.insert("family".to_owned());
         known.prefix_aliases.insert("alias".to_owned());
         assert_eq!(alias_reasons(&hashes, &BTreeSet::new(), "family", &known), ["prior-accessed-test-family", "prefix-curriculum-prior-exposure"]);
+        // A family a test claimed after the exclusions were read gets the reason at the end; one that has it keeps one.
+        let mut reasons = vec!["prefix-curriculum-prior-exposure".to_owned()];
+        mark_test_family(&mut reasons, true);
+        assert_eq!(reasons, ["prefix-curriculum-prior-exposure", "prior-accessed-test-family"]);
+        mark_test_family(&mut reasons, true);
+        mark_test_family(&mut reasons, false);
+        assert_eq!(reasons.len(), 2);
+        let mut free = Vec::new();
+        mark_test_family(&mut free, false);
+        assert!(free.is_empty());
     }
 
     #[test]

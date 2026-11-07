@@ -1209,10 +1209,12 @@ mod tests {
 
     #[test]
     fn a_test_row_counts_only_where_its_keys_can_be_typed() {
-        let rows = [corpus_row("word", Some(0), "a"), corpus_row("123", Some(0), "b"), corpus_row("naïve", Some(0), "c"), corpus_row("слово", Some(1), "d")];
+        let rows = [corpus_row("word", Some(0), "a"), corpus_row("123", Some(0), "b"), corpus_row("naïve", Some(0), "c"), corpus_row("слово", Some(1), "d"), corpus_row("mixed", None, "e")];
         let counts = sequence_document_counts(&rows);
         assert_eq!(counts["unsupported_selected_by_group"]["0"], json!(2));
         assert_eq!(counts["screenable_documents_by_group"]["1"], json!(1));
+        // A row of no layout group is typed as it is, without a wrong layout to restore.
+        assert_eq!(counts["screenable_documents_by_group"]["None"], json!(1));
     }
 
     #[test]
