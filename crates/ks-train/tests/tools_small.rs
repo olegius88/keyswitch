@@ -317,6 +317,9 @@ fn a_chat_test_run_by_hand_says_its_floors() {
         .args(["--jobs", "1"])
         .output()
         .expect("the trainer starts");
-    let answer = done(&run);
-    assert!(answer.contains("\"floors\"") && answer.contains("\"messages\"") && output.is_file(), "{answer}");
+    // A candidate no better than the baseline fails the floor of F1, and the command says so by its exit status, as the
+    // Python's did; the floors are printed either way.
+    let answer = said(&run);
+    assert_eq!(run.status.code(), Some(1), "{answer}");
+    assert!(answer.contains("\"f1_better_than_baseline\":false") && answer.contains("\"messages\"") && output.is_file(), "{answer}");
 }
