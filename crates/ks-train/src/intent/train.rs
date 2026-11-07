@@ -62,11 +62,9 @@ pub fn seal_artifact(built: &Candidate, manifest: &mut Map<String, Value>) -> Re
     let provenance = manifest["build_provenance_sha256"].as_str().ok_or("a provenance digest")?.to_owned();
     let version = format!("intent-v1-{}", provenance.get(..seal::VERSION_HASH_CHARACTERS).unwrap_or_default());
     let metadata = Value::Object(manifest.clone());
-    let encoded = seal::encode_model(&seal::ModelFile { version: &version, quantized: &built.quantized, fingerprints: &built.fingerprints, selections: &built.selections, veto: &built.veto, bias: built.bias, calibration: &built.calibration, fnv_seed: built.config.feature_hash_seed, membership_seed: built.config.membership_hash_seed, metadata: Some(&metadata) })?;
+    let encoded = seal::encode_model(&seal::ModelFile { version: &version, quantized: &built.quantized, fingerprints: &built.fingerprints, selections: &built.selections, veto: &built.veto, bias: built.bias, calibration: &built.calibration, fnv_seed: built.config.feature_hash_seed, membership_seed: built.config.membership_hash_seed, metadata: &metadata })?;
     let loaded = ks_lang::intent_model::LinearNgramModel::from_bytes(encoded.clone(), None).map_err(|error| error.name.to_string())?;
-    if seal::runtime_parameters(&loaded) != built.parameters {
-        return Err("serialized KSLM parameters differ from the sealed candidate".to_owned());
-    }
+    held(seal::runtime_parameters(&loaded) == built.parameters, "serialized KSLM parameters differ from the sealed candidate")?;
     manifest.insert("artifact_sha256".to_owned(), json!(hex(&Sha256::digest(&encoded))));
     manifest.insert("artifact_model_version".to_owned(), json!(version));
     Ok(encoded)
@@ -109,10 +107,20 @@ impl Outputs {
 }
 
 fn compiler_identity() -> String {
-    match std::process::Command::new("rustc").arg("--version").output() {
+    identity_of(std::process::Command::new("rustc").arg("--version").output())
+}
+
+/// What a compiler said of itself, or that there is none to ask.
+fn identity_of(answer: std::io::Result<std::process::Output>) -> String {
+    match answer {
         Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).trim().to_owned(),
         _ => "absent".to_owned(),
     }
+}
+
+/// A check of the run against what it measured or built before: the same, or the reason it stops.
+fn held(same: bool, what: &str) -> Result<(), String> {
+    if same { Ok(()) } else { Err(what.to_owned()) }
 }
 
 /// `TrainingEnvironmentProvenance`: the machine, for the reader rather than for the seal.
@@ -189,9 +197,7 @@ pub fn train(root: &Path, workers: usize, outputs: &Outputs) -> Result<i32, Stri
     if !outputs.dry_run && gates_passed {
         let encoded = seal_artifact(&built, &mut manifest)?;
         recheck()?;
-        if probe::measure()["probe_sha256"] != environment["environment_probe"]["probe_sha256"] {
-            return Err("the environment changed while this run was in progress; nothing produced across that boundary can be trusted".to_owned());
-        }
+        held(probe::measure()["probe_sha256"] == environment["environment_probe"]["probe_sha256"], "the environment changed while this run was in progress; nothing produced across that boundary can be trusted")?;
         receipt.verify()?;
         let mut sidecar = environment.clone();
         sidecar.insert("artifact_model_version".to_owned(), manifest["artifact_model_version"].clone());
@@ -272,4 +278,26 @@ pub fn rejection_receipt(root: &Path, version: u32, strict_report: &Path, remedi
         "failure": failure,
         "remediation": remediation,
     }))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_report_holds_what_the_manifest_has_and_a_receipt_what_it_can_carry() {
+        assert_eq!(report_of(&Map::new()), json!({}));
+        let deep = json!({"a": {"b": {"c": {"d": 1}}}, "many": (0..20).collect::<Vec<i32>>(), "few": [1, 2]});
+        assert_eq!(compact(&deep, 0), json!({"a": {"b": {"c": {"omitted_keys": ["d"]}}}, "many": {"omitted_items": 20}, "few": [1, 2]}));
+    }
+
+    #[test]
+    fn a_compiler_that_does_not_answer_is_absent() {
+        assert_eq!(identity_of(Err(std::io::Error::other("no rustc"))), "absent");
+        let failed = std::process::Command::new(std::env::current_exe().expect("this test")).arg("--no-such-flag").output();
+        assert_eq!(identity_of(failed), "absent");
+        held(true, "moved").expect("the same");
+        assert_eq!(held(false, "moved").unwrap_err(), "moved");
+    }
 }

@@ -550,19 +550,12 @@ fn direction_curve(selected: &[Scored<'_>], direction: usize, maximum_false_posi
     }
     let mut metrics = Confusion { true_positive: 0, false_negative: positives, true_negative: negatives, false_positive: 0 };
     let mut typo_metrics = Confusion { true_positive: 0, false_negative: typo_positives, true_negative: typo_negatives, false_positive: 0 };
+    // The point of each pair of false-positive counts with the most true positives. Walking down the scores, a later point
+    // with the same counts added no negative, so it added a positive: it always has more true positives and replaces the one
+    // before it.
     let mut best: BTreeMap<(i64, i64), Point> = BTreeMap::new();
     let mut record = |threshold: f64, metrics: Confusion, typo_metrics: Confusion| {
-        let key = (metrics.false_positive, typo_metrics.false_positive);
-        let replace = match best.get(&key) {
-            None => true,
-            Some(current) => {
-                (metrics.true_positive, typo_metrics.true_positive) > (current.1.true_positive, current.2.true_positive)
-                    || ((metrics.true_positive, typo_metrics.true_positive) == (current.1.true_positive, current.2.true_positive) && threshold > current.0)
-            }
-        };
-        if replace {
-            best.insert(key, (threshold, metrics, typo_metrics));
-        }
+        best.insert((metrics.false_positive, typo_metrics.false_positive), (threshold, metrics, typo_metrics));
     };
     record(next_up(ordered[0].calibrated), metrics, typo_metrics);
     let mut index = 0;
@@ -640,8 +633,8 @@ fn choose_directional(selected: &[Scored<'_>], policy: &ThresholdPolicy) -> Resu
             let logits = [first.0, second.0];
             let metrics = first.1.add(&second.1);
             let typos = first.2.add(&second.2);
+            // The typos are some of the rows: their false positives are never more than all of them.
             if metrics.false_positive > policy.maximum_false_positives
-                || typos.false_positive > policy.maximum_false_positives
                 || metrics.precision() + RATE_TOLERANCE < policy.precision_floor
                 || wilson_upper(metrics.false_positive, metrics.negatives(), SELECTION_Z) > policy.max_fpr + RATE_TOLERANCE
             {
@@ -968,7 +961,8 @@ fn maximum_margin(base: &Selections, by_trigger: &BTreeMap<&'static str, Vec<Sco
         let intercepts = zero[name].1.logits;
         for item in items.iter().filter(|item| item.example.label) {
             let critical = item.calibrated - intercepts[item.direction];
-            if !critical.is_finite() || !(0.0..=cap).contains(&critical) {
+            // A margin that is no number, or no finite one, is outside the finite range up to the cap.
+            if !(0.0..=cap).contains(&critical) {
                 continue;
             }
             candidates.push(critical);
@@ -1252,5 +1246,40 @@ mod tests {
             }
         }
         let _ = settings;
+    }
+
+    #[test]
+    fn a_sum_that_overflows_is_left_without_its_compensation() {
+        let settings = config();
+        let item = example(CorrectionTrigger::Space, true, "identity");
+        let rows = Featured { examples: vec![&item], offsets: vec![0, 2], indices: vec![0, 1], values: vec![1e300, 1e300] };
+        let mut model = Ftrl::new(&settings);
+        model.z[0] = -1e300;
+        model.z[1] = -1e300;
+        assert!(model.score(&rows, 0).is_infinite());
+        let mut scratch = Vec::new();
+        model.run_epoch(&rows, &[0], &mut scratch);
+        assert!(!greater(&[1.0, 2.0], &[1.0, 2.0]));
+    }
+
+    #[test]
+    fn a_threshold_whose_typos_are_too_often_wrong_is_not_the_best() {
+        let (right, wrong, typo_right, typo_wrong) = (example(CorrectionTrigger::Space, true, "identity"), example(CorrectionTrigger::Space, false, "identity"), example(CorrectionTrigger::Space, true, "deletion"), example(CorrectionTrigger::Space, false, "deletion"));
+        let mut rows = Vec::new();
+        for direction in 0..2 {
+            for _ in 0..100 {
+                rows.push(scored(&right, 10.0, false, direction));
+                rows.push(scored(&typo_right, 10.0, true, direction));
+            }
+            for _ in 0..10 {
+                rows.push(scored(&typo_wrong, 5.0, true, direction));
+            }
+            for _ in 0..1000 {
+                rows.push(scored(&wrong, 0.0, false, direction));
+            }
+        }
+        let policy = ThresholdPolicy { precision_floor: 0.5, max_fpr: 1.0, minimum_recall: 0.5, minimum_specificity: 0.5, typo_precision_floor: 0.5, minimum_typo_recall: 0.5, typo_minimum_specificity: 0.99, typo_max_fpr: 1.0, maximum_false_positives: 100 };
+        let chosen = choose_directional(&rows, &policy).expect("a threshold");
+        assert_eq!(chosen.typo_metrics.false_positive, 0);
     }
 }

@@ -246,3 +246,75 @@ fn an_independent_set_is_frozen_once_and_compared_later() {
     let again = trainer().arg("ortho").arg("--tree").arg(&small).arg("--freeze-independent").arg(&description).arg("--files").arg(&folder).output().expect("it runs");
     assert!(!again.status.success());
 }
+
+#[test]
+fn a_snapshot_or_a_generation_that_is_not_the_frozen_one_stops_at_once() {
+    use ks_train::ortho_inputs::{freeze, load_phrases};
+    let root = scratch("ortho-phrases");
+    let source = root.join("model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz");
+    std::fs::create_dir_all(source.parent().expect("a folder")).expect("a folder");
+    assert!(load_phrases(&root).is_err());
+    std::fs::write(&source, gz("1\teng\tA phrase.\t2026\n")).expect("a file");
+    assert!(load_phrases(&root).map(|_| ()).unwrap_err().contains("checksum mismatch"));
+    // A generation is written once.
+    let output = scratch("ortho-generation");
+    std::fs::write(output.join("corpus-receipt.json"), b"{}").expect("a file");
+    assert!(freeze(&root, &output).unwrap_err().contains("do not overwrite"));
+    std::fs::write(output.join("tokens.jsonl.gz"), gz("")).expect("a file");
+    assert!(freeze(&root, &output).unwrap_err().contains("do not overwrite"));
+}
+
+/// A file of a dump with more rows of its table, and its new pin.
+fn with_rows(path: &Path, rows: &str) -> String {
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::MultiGzDecoder::new(std::fs::File::open(path).expect("a dump")), &mut text).expect("text");
+    text.push_str(rows);
+    let packed = gz(&text);
+    std::fs::write(path, &packed).expect("a dump");
+    digest(&packed)
+}
+
+#[test]
+fn prose_is_taken_from_authors_that_may_be_and_each_category_once() {
+    let folder = scratch("prose-more");
+    let mut pins = prose_dump(&folder);
+    // An excluded author's prose, a page filed as a category, a category inside its own descendant.
+    pins[0].1 = with_rows(&folder.join("ruwikisource-20260901-page.sql.gz"), "INSERT INTO `page` VALUES (40,14,'Проза_Чехова',0,1);\n");
+    pins[2].1 = with_rows(&folder.join("ruwikisource-20260901-categorylinks.sql.gz"), "INSERT INTO `categorylinks` VALUES (40,100,'subcat'),(40,108,'subcat'),(13,103,'subcat'),(10,104,'subcat');\n");
+    let list: Vec<(&str, &str)> = pins.iter().map(|(name, pin)| (name.as_str(), pin.as_str())).collect();
+    let (_, summary) = derive_prose(&folder, &list).expect("derived");
+    assert_eq!(summary["authors"], json!({"Иван Петров": 1900}));
+}
+
+#[test]
+fn a_set_is_sampled_and_compared_row_by_row() {
+    let folder = scratch("ortho-sample");
+    let lines: String = (0..40).map(|index| format!("привет номер {index} здесь\n")).collect();
+    std::fs::write(folder.join("ru.txt"), &lines).expect("a file");
+    let described = json!({"sample_namespace": "small:a", "previous_sample_namespace": "small:b", "files": [{"locale": "ru_RU", "name": "ru.txt", "sha256": digest(lines.as_bytes()), "reader": "lines", "sample_percent": 50, "taken_by_an_earlier_set_percent": 0}]});
+    let description = folder.join("description.json");
+    std::fs::write(&description, serde_json::to_vec(&described).expect("json")).expect("a description");
+    let frozen = folder.join("tokens.jsonl.gz");
+    std::fs::write(&frozen, gz("{\"split\": \"test\", \"script\": \"ru\", \"keys\": \"ghbdtn\", \"shapes\": {\"lower\": 100}}\n")).expect("a file");
+    let (within, rows) = check_rows_within(&support::tree(), &description, &folder, "ru.txt", &frozen).expect("compared");
+    assert!(within == 1 && rows > within, "{within} of {rows}");
+    // A web list whose line names no form.
+    let small = small_tree("ortho-web", &recipe());
+    let web = folder.join("web.txt.gz");
+    let packed = gz("header\n 100\nслово 90\nкот- 80\n");
+    std::fs::write(&web, &packed).expect("a file");
+    assert!(verify_pinned_lexicon_sources(&small, Some((&web, &digest(&packed))), None).unwrap_err().contains("lexicon checks differ"));
+}
+
+#[test]
+fn an_independent_set_asks_the_dictionaries_only_of_what_can_be_typed() {
+    let small = small_tree("ortho-typed", &recipe());
+    let folder = scratch("ortho-typed-set");
+    let english = "The café is open here today\nThe second sentence of words\n";
+    std::fs::write(folder.join("en.txt"), english).expect("a file");
+    let described = json!({"name": "typed", "sample_namespace": "small:a", "previous_sample_namespace": "small:b", "files": [{"locale": "en_US", "name": "en.txt", "sha256": digest(english.as_bytes()), "reader": "lines", "sample_percent": 100, "taken_by_an_earlier_set_percent": 0}]});
+    let description = folder.join("description.json");
+    std::fs::write(&description, serde_json::to_vec(&described).expect("json")).expect("a description");
+    let receipt = freeze_independent(&small, &description, &folder).expect("frozen");
+    assert_eq!(receipt["set"], json!("typed"));
+}

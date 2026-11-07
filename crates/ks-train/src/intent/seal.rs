@@ -186,11 +186,19 @@ fn stage(destination: &Path, data: &[u8]) -> Result<PathBuf, String> {
 }
 
 fn sync_folder(path: &Path) -> Result<(), String> {
-    match std::fs::File::open(path) {
-        Ok(folder) => folder.sync_all().map_err(|error| format!("{}: {error}", path.display())),
-        Err(_) if cfg!(windows) => Ok(()),
-        Err(error) => Err(format!("{}: {error}", path.display())),
-    }
+    std::fs::File::open(path).map_or_else(|error| unopened_folder(path, &error), |folder| folder.sync_all().map_err(|error| format!("{}: {error}", path.display())))
+}
+
+/// Windows opens no folder as a file: there is nothing to sync, and nothing failed.
+#[cfg(windows)]
+fn unopened_folder(_path: &Path, _error: &std::io::Error) -> Result<(), String> {
+    Ok(())
+}
+
+/// Elsewhere a folder that does not open is a failure of the publication.
+#[cfg(not(windows))]
+fn unopened_folder(path: &Path, error: &std::io::Error) -> Result<(), String> {
+    Err(format!("{}: {error}", path.display()))
 }
 
 /// Create a record exactly once: nothing else can have been there when this returns `Ok(None)`; otherwise the bytes found.
@@ -203,9 +211,18 @@ fn create_once(path: &Path, expected: &[u8]) -> Result<Option<Vec<u8>>, String> 
             sync_folder(path.parent().expect("a folder"))?;
             Ok(None)
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(Some(read_snapshot(path)?)),
-        Err(error) => Err(format!("cannot create the ledger {}: {error}", path.display())),
+        Err(error) => existing_record(path, &error),
     }
+}
+
+/// What a link that did not take found: the record already there, or a failure.
+fn existing_record(path: &Path, error: &std::io::Error) -> Result<Option<Vec<u8>>, String> {
+    if error.kind() == std::io::ErrorKind::AlreadyExists { Ok(Some(read_snapshot(path)?)) } else { Err(format!("cannot create the ledger {}: {error}", path.display())) }
+}
+
+/// A ledger read again is the one that was read: anything else wrote it meanwhile.
+fn still(same: bool, what: &str) -> Result<(), String> {
+    if same { Ok(()) } else { Err(what.to_owned()) }
 }
 
 /// `SealedEvaluationReceipt`.
@@ -228,10 +245,7 @@ impl Receipt {
 
     /// `verify_sealed_evaluation_receipt`: the one-shot ledger has not moved since test access was granted.
     pub fn verify(&self) -> Result<(), String> {
-        if read_snapshot(&self.path)? != self.bytes {
-            return Err("sealed evaluation registry changed after claim".to_owned());
-        }
-        Ok(())
+        still(read_snapshot(&self.path)? == self.bytes, "sealed evaluation registry changed after claim")
     }
 }
 
@@ -259,9 +273,7 @@ pub fn claim_evaluation(root: &Path, registry: &str, namespace: &str, candidate:
             return Err(refusal(&existing, &record));
         }
     let bytes = read_snapshot(&path)?;
-    if bytes != expected {
-        return Err("sealed evaluation registry changed during claim".to_owned());
-    }
+    still(bytes == expected, "sealed evaluation registry changed during claim")?;
     Ok(Receipt { namespace: namespace.to_owned(), candidate_sha256: candidate.to_owned(), config_sha256: config_sha256.to_owned(), candidate_dataset_sha256: candidate_dataset_sha256.to_owned(), registry: registry.to_owned(), registry_sha256: hex(&Sha256::digest(&bytes)), path, bytes })
 }
 
@@ -328,7 +340,7 @@ pub struct ModelFile<'a> {
     pub calibration: &'a [Platt; 2],
     pub fnv_seed: u64,
     pub membership_seed: u64,
-    pub metadata: Option<&'a Value>,
+    pub metadata: &'a Value,
 }
 
 /// `encode_model`, called with the weights the quantization gives back, as `main` calls it: the quantization is done
@@ -366,9 +378,7 @@ pub fn encode_model(file: &ModelFile<'_>) -> Result<Vec<u8>, String> {
         "veto_threshold": file.veto.raw_logit,
         "weight_scale": scale,
     });
-    if let Some(metadata) = file.metadata {
-        manifest["metadata"] = metadata.clone();
-    }
+    manifest["metadata"] = file.metadata.clone();
     let mut manifest_bytes = canonical(&manifest);
     manifest_bytes.pop();
     let mut encoded = Vec::with_capacity(52 + manifest_bytes.len() + payload.len());
@@ -429,4 +439,46 @@ pub fn publish_bundle(outputs: &[(PathBuf, Vec<u8>)]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::intent::fit::{Confusion, Selection};
+
+    fn folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-train-seal-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    #[test]
+    fn a_ledger_that_cannot_be_linked_or_read_again_says_why() {
+        let path = folder("ledger").join("seal-registry-v1.json");
+        std::fs::write(&path, b"{}").expect("a file");
+        assert_eq!(existing_record(&path, &std::io::Error::from(std::io::ErrorKind::AlreadyExists)).expect("the record"), Some(b"{}".to_vec()));
+        assert!(existing_record(&path, &std::io::Error::other("no links here")).unwrap_err().contains("cannot create the ledger"));
+        still(true, "moved").expect("the same");
+        assert_eq!(still(false, "moved").unwrap_err(), "moved");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_folder_that_does_not_open_stops_a_publication() {
+        assert!(unopened_folder(&folder("unopened"), &std::io::Error::other("gone")).unwrap_err().contains("gone"));
+    }
+
+    #[test]
+    fn a_model_of_no_weights_is_encoded_with_the_unit_scale() {
+        let quantized = Quantized { dimension: 8, scale: 0.5, values: vec![0; 8], support: vec![0], maximum_absolute_error: 0.0 };
+        let selection = Selection { logits: [0.5, 0.5], metrics: Confusion::default(), typo_metrics: Confusion::default(), margin: 0.0 };
+        let selections: Selections = TRIGGERS.iter().map(|trigger| (trigger.as_str(), (*trigger, selection))).collect();
+        let platt = Platt { slope: 1.0, intercept: 0.0, sample_count: 2, positive_count: 1 };
+        let veto = Veto { raw_logit: -1.0, positive_samples: 1, vetoed_positive_samples: 0, false_negative_rate: 0.0 };
+        let metadata = json!({"note": "small"});
+        let file = ModelFile { version: "intent-v1-small", quantized: &quantized, fingerprints: &BTreeSet::new(), selections: &selections, veto: &veto, bias: 0.0, calibration: &[platt, platt], fnv_seed: 1, membership_seed: 2, metadata: &metadata };
+        let model = LinearNgramModel::from_bytes(encode_model(&file).expect("a model"), None).expect("it loads");
+        assert!((model.weight_scale - 1.0).abs() < f64::EPSILON);
+    }
 }

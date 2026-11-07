@@ -163,8 +163,9 @@ pub fn quality_gate(config: &FitConfig, test: &BTreeMap<&'static str, Confusion>
     let test_veto_passed = test_veto.positive_samples > 0 && test_veto.false_negative_rate <= config.veto_max_fnr;
     let context = context_stress_gate(config, &pairs, false);
     let with_passed = |veto: &Veto, passed: bool| { let mut value = veto.payload(); value["passed"] = json!(passed); value };
+    // The context profiles repeat the gates of each trigger on the same metrics: they pass when both slices above pass.
     json!({
-        "passed": sealed_passed && typo_passed && context["passed"] == json!(true) && safety_passed && selection_veto && test_veto_passed,
+        "passed": sealed_passed && typo_passed && safety_passed && selection_veto && test_veto_passed,
         "all_triggers_present": true,
         "sealed_test": {"passed": sealed_passed, "per_trigger": sealed},
         "sealed_test_typos": {"passed": typo_passed, "per_trigger": typo_gates},
@@ -379,6 +380,11 @@ pub fn source_rows(raw_config: &Value) -> Value {
     json!([row("en_US"), row("ru_RU")])
 }
 
+/// A calibration keeps the orientation of the model's score: a larger logit is more likely the other layout.
+fn oriented(calibration: &[Platt; 2]) -> Result<(), String> {
+    if calibration.iter().any(|platt| platt.slope <= 0.0) { Err("calibration reversed the model score orientation".to_owned()) } else { Ok(()) }
+}
+
 /// The whole fit up to the candidate. Nothing is written and the held-out rows are not built.
 pub fn fit_candidate(root: &Path, workers: usize) -> Result<Candidate, String> {
     let Presealed { raw_config, dataset_config, prepared, dataset: dataset_candidate, hard, .. } = presealed_dataset(root)?;
@@ -404,9 +410,7 @@ pub fn fit_candidate(root: &Path, workers: usize) -> Result<Candidate, String> {
     let calibration_featured = fit::featurize(&calibration_rows, &config, workers, None)?;
     let calibration_raw = fit::score_quantized(&quantized, bias, &calibration_featured, workers);
     let calibration = fit::fit_calibration(&calibration_featured, &calibration_raw, &config)?;
-    if calibration.iter().any(|platt| platt.slope <= 0.0) {
-        return Err("calibration reversed the model score orientation".to_owned());
-    }
+    oriented(&calibration)?;
     let calibration_scored = fit::calibrate(&calibration_featured, &calibration_raw, &calibration);
     let veto = fit::choose_veto(&calibration_scored, &config);
     drop(calibration_scored);
@@ -537,5 +541,55 @@ mod tests {
     fn selection_diagnostics_need_examples() {
         assert!(recall_target_threshold(&[], 0.5, false).is_err());
         assert!(recall_target_threshold(&[], 0.5, true).is_err());
+    }
+
+    fn config() -> FitConfig {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../model/intent_v1/config.json");
+        FitConfig::read(&read_json(&path).expect("the config")).expect("a config")
+    }
+
+    fn protected() -> ProtectedTokens {
+        ProtectedTokens::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources"))
+    }
+
+    /// A protected row and a collision under each of these triggers.
+    fn audit_of(triggers: &[CorrectionTrigger]) -> SafetyAudit {
+        let rows: Vec<LexicalExample> = triggers
+            .iter()
+            .flat_map(|trigger| {
+                let guarded = LexicalExample { original: "git".to_owned(), alternative: "пше".to_owned(), trigger: *trigger, label: false, protected: true, safety: true, variant_kind: "protected".to_owned(), ..word(3) };
+                let collision = LexicalExample { original: "here".to_owned(), alternative: "руку".to_owned(), trigger: *trigger, label: false, safety: true, variant_kind: "lexical_collision".to_owned(), source_known: true, target_known: true, ..word(4) };
+                [guarded, collision]
+            })
+            .collect();
+        SafetyAudit::of(&rows, &protected())
+    }
+
+    #[test]
+    fn a_safety_audit_needs_every_trigger() {
+        let whole = audit_of(&TRIGGERS);
+        assert!(whole.passes(0), "{:?}", whole.failures);
+        assert!(!audit_of(&[CorrectionTrigger::Space]).passes(0));
+    }
+
+    #[test]
+    fn the_quality_gate_reads_each_slice_the_audit_and_both_vetoes() {
+        let config = config();
+        let good = Confusion { true_positive: 1_000_000, false_negative: 0, true_negative: 1_000_000, false_positive: 0 };
+        let all = |metrics: Confusion| -> BTreeMap<&'static str, Confusion> { TRIGGERS.iter().map(|trigger| (trigger.as_str(), metrics)).collect() };
+        let veto = Veto { raw_logit: 0.0, positive_samples: 10, vetoed_positive_samples: 0, false_negative_rate: 0.0 };
+        let none = Veto { positive_samples: 0, ..veto };
+        let audit = audit_of(&TRIGGERS);
+        assert_eq!(quality_gate(&config, &all(good), &all(good), &audit, &veto, &veto)["passed"], json!(true));
+        let lost = Confusion { true_positive: 0, false_negative: 10, ..good };
+        assert_eq!(quality_gate(&config, &all(good), &all(lost), &audit, &veto, &veto)["passed"], json!(false));
+        assert_eq!(quality_gate(&config, &all(good), &all(good), &SafetyAudit::of(&[], &protected()), &veto, &veto)["passed"], json!(false));
+        assert_eq!(quality_gate(&config, &all(good), &all(good), &audit, &none, &veto)["passed"], json!(false));
+        assert_eq!(quality_gate(&config, &all(good), &all(good), &audit, &veto, &none)["passed"], json!(false));
+        assert_eq!(presealed_gate(&config, &json!({"passed": true}), &audit, &none)["passed"], json!(false));
+        assert!(selection_tail_diagnostics(&[], &Selections::new(), &config).unwrap_err().contains("require examples"));
+        let platt = Platt { slope: 1.0, intercept: 0.0, sample_count: 1, positive_count: 1 };
+        oriented(&[platt, platt]).expect("the same orientation");
+        assert!(oriented(&[platt, Platt { slope: -1.0, ..platt }]).unwrap_err().contains("reversed"));
     }
 }

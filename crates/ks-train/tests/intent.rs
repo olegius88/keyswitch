@@ -717,3 +717,105 @@ fn a_manifest_that_does_not_fit_stops_the_strict_evaluation_where_it_differs() {
     let replay = run(intent(&other.tree).arg("--verify").args(["--jobs", "1"]));
     assert!(!replay.status.success(), "{}", said(&replay));
 }
+
+#[test]
+fn a_frozen_corpus_whose_rows_do_not_add_up_is_refused() {
+    use ks_lang::detector::ProtectedTokens;
+    use ks_train::intent::{dataset, pipeline};
+    let small = &*PUBLISHED;
+    let config = read(&config_of(small));
+    let shape = pipeline::dataset_config(&config).expect("a dataset");
+    let protected = ProtectedTokens::load(&small.tree.join("resources"));
+    let raw = dataset::read_frozen(&small.tree, &config["hard_negative_development"]["source"]).expect("the corpus");
+    let frozen: Value = serde_json::from_slice(&raw).expect("json");
+    let refused = |corpus: &Value, config: &Value, words: &str| {
+        let said = dataset::decode_hard_negative_corpus(&serde_json::to_vec(corpus).expect("json"), config, &shape, &protected).map(|_| ()).unwrap_err();
+        assert!(said.contains(words), "{words}: {said}");
+    };
+    let mut fewer = frozen.clone();
+    fewer["rows"].as_array_mut().expect("rows").pop();
+    refused(&fewer, &config, "compact row count is inconsistent");
+    // A protected word, typed either way round.
+    for (group, correct, wrong) in [(0, "github", "пшерги"), (1, "пшерги", "github")] {
+        let mut guarded = frozen.clone();
+        let row = &mut guarded["rows"][0];
+        row["physical_signature"] = json!("github");
+        row["correct_group"] = json!(group);
+        row["correct_typo"] = json!(correct);
+        row["wrong_typo"] = json!(wrong);
+        refused(&guarded, &config, "contains a protected token");
+    }
+    // A row of the other group than the counts say.
+    let mut moved = frozen.clone();
+    let row = moved["rows"][0].clone();
+    moved["rows"][0]["correct_group"] = json!(1 - row["correct_group"].as_i64().expect("a group"));
+    moved["rows"][0]["correct_typo"] = row["wrong_typo"].clone();
+    moved["rows"][0]["wrong_typo"] = row["correct_typo"].clone();
+    refused(&moved, &config, "disagree with group counts");
+    // Roles that leave rows out, a field longer than a field can be, an expansion that is not the pinned one.
+    let mut fewer_roles = config.clone();
+    fewer_roles["hard_negative_development"]["words_per_group"]["train"] = json!(21);
+    refused(&frozen, &fewer_roles, "left unused rows");
+    let mut long = frozen.clone();
+    long["rows"][0]["variant_kind"] = json!("x".repeat(300));
+    refused(&long, &config, "non-empty bounded text");
+    let zero = "0".repeat(64);
+    let mut pinned = frozen;
+    pinned["expanded_corpus_sha256"] = json!(zero);
+    let mut repinned = config.clone();
+    repinned["external_evaluation"]["unknown_typo_development_corpus_sha256"] = json!(zero);
+    refused(&pinned, &repinned, "expanded corpus SHA-256 mismatch");
+}
+
+#[test]
+fn an_evaluation_that_is_not_strict_reports_and_passes() {
+    let small = &*PUBLISHED;
+    let report = small.folder.join("lenient.json");
+    let answer = run(intent(&small.tree).arg("--evaluate").args(["--comparison-sample", "20", "--latency-sample", "5", "--jobs", "2"]).arg("--output").arg(&report));
+    assert!(answer.status.success(), "{}", said(&answer));
+    assert!(read(&report).get("strict_gates").is_some());
+}
+
+#[test]
+fn a_rejection_names_its_version_and_carries_what_its_failed_gates_say() {
+    let small = &*PUBLISHED;
+    let report = small.folder.join("failed.json");
+    write_json(&report, &json!({"strict_gates": {"a": false, "safety": false, "veto": false}, "strict_passed": false, "veto": {"items": (0..20).collect::<Vec<i32>>()}}));
+    let reject = |version: &str, output: &Path| run(intent(&small.tree).arg("--reject").args(["--version", version]).arg("--strict-report").arg(&report).arg("--output").arg(output));
+    assert!(said(&reject("99", &small.folder.join("rejected-v99.json"))).contains("is not v99"));
+    let receipt = small.folder.join("rejected-v28.json");
+    let answer = reject("28", &receipt);
+    assert!(answer.status.success(), "{}", said(&answer));
+    let written = read(&receipt);
+    assert_eq!(written["failure"]["veto"], json!({"items": {"omitted_items": 20}}));
+    assert!(written["failure"].get("safety").is_none());
+}
+
+#[test]
+fn a_replay_finds_each_file_that_is_not_the_one_it_makes_again() {
+    let small = prepared("intent-replay", &|_| ());
+    let path = config_of(&small);
+    let good = read(&path);
+    // A lexicon that holds the typos the development corpus chose: they are sealed rows now, and it has to choose others.
+    let relative = good["sources"]["languages"]["en_US"]["path"].as_str().expect("a path").to_owned();
+    let lexicon = small.tree.join(&relative);
+    let words = std::fs::read_to_string(&lexicon).expect("a lexicon");
+    let frozen = read(&small.tree.join(good["hard_negative_development"]["source"]["path"].as_str().expect("a path")));
+    let chosen: String = frozen["rows"].as_array().expect("rows").iter().filter(|row| row["correct_group"] == json!(0)).map(|row| format!("1000 {}\n", row["correct_typo"].as_str().expect("a typo"))).collect();
+    let more = words.replacen("\\end\\", &format!("{chosen}\\end\\"), 1);
+    std::fs::write(&lexicon, &more).expect("a lexicon");
+    let mut other = good.clone();
+    pin(&mut other, "/sources/languages/en_US", &relative, more.as_bytes());
+    write_json(&path, &other);
+    let preseal = run(intent(&small.tree).arg("--preseal"));
+    assert!(said(&preseal).contains("frozen hard-negative source differs"), "{}", said(&preseal));
+    std::fs::write(&lexicon, &words).expect("a lexicon");
+    write_json(&path, &good);
+    let fitted = run(intent(&small.tree).arg("--fit").args(["--jobs", "2"]));
+    assert!(fitted.status.success(), "{}", said(&fitted));
+    let report = small.tree.join("model/intent_v1/test-report.json");
+    let bytes = std::fs::read(&report).expect("the report");
+    std::fs::write(&report, [bytes.as_slice(), b"\n"].concat()).expect("a report");
+    let replay = run(intent(&small.tree).arg("--verify").args(["--jobs", "2"]));
+    assert!(said(&replay).contains("1 sections differ"), "{}", said(&replay));
+}
