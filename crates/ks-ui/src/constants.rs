@@ -8,3 +8,6 @@ pub const HISTORY_LIMIT_SETTING_MAX: f64 = 5000.0;
 pub const HISTORY_LIMIT_SETTING_STEP: f64 = 10.0;
 pub const CONFIDENCE_SETTING_STEP: f64 = 0.1;
 pub const PAUSE_DELAY_SETTING_STEP_SECONDS: f64 = 0.1;
+/// The default conversion hotkey as the texts of this system name it: a Mac keyboard has no Pause, and the macOS
+/// default is Control+Option+K (`ks_config::constants::MACOS_HOTKEY_DEFAULTS`).
+pub const CONVERT_HOTKEY_NAME: &str = if cfg!(target_os = "macos") { "Control+Option+K" } else { "Pause" };

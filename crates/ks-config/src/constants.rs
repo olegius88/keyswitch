@@ -128,14 +128,21 @@ pub const HOTKEY_SELECTION_TRANSLITERATE: &str = "selection_transliterate";
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
 pub const DEFAULT_SELECTION_CASE_HOTKEY: &str = "Alt+Pause";
 pub const DEFAULT_SELECTION_TRANSLITERATE_HOTKEY: &str = "Alt+Scroll_Lock";
-/// A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the selection
-/// hotkeys default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys.
+/// `hotkeys.convert_last`, the manual conversion and its double press that offers a rule: Pause.
+pub const HOTKEY_CONVERT_LAST: &str = "convert_last";
+pub const DEFAULT_CONVERT_LAST_HOTKEY: &str = "Pause";
+/// A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the conversion and
+/// the selection hotkeys default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys.
 /// `config::default_settings` puts them in place of the others on macOS.
-pub const MACOS_SELECTION_HOTKEY_DEFAULTS: [(&str, &str); 3] = [
+pub const MACOS_HOTKEY_DEFAULTS: [(&str, &str); 4] = [
+    (HOTKEY_CONVERT_LAST, "Ctrl+Alt+K"),
     (HOTKEY_SELECTION_LAYOUT, "Ctrl+Alt+L"),
     (HOTKEY_SELECTION_CASE, "Ctrl+Alt+U"),
     (HOTKEY_SELECTION_TRANSLITERATE, "Ctrl+Alt+T"),
 ];
+/// The macOS defaults are schema 9: there the conversion hotkey became Control+Option+K, and a file of an older schema
+/// that holds Pause, the seeded default, takes it once. The other systems keep Pause and stay at schema 8.
+pub const MACOS_CONVERT_HOTKEY_SCHEMA_VERSION: i64 = 9;
 
 /// The shipped settings; the persisted file is seeded from it and merged over it. Key order is the file's order.
 pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
@@ -192,7 +199,7 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
         },
         "hotkeys": {
             "toggle": "Ctrl+Alt+P",
-            "convert_last": "Pause",
+            HOTKEY_CONVERT_LAST: DEFAULT_CONVERT_LAST_HOTKEY,
             "undo": "Ctrl+Alt+Z",
             HOTKEY_SELECTION_LAYOUT: DEFAULT_SELECTION_LAYOUT_HOTKEY,
             HOTKEY_SELECTION_CASE: DEFAULT_SELECTION_CASE_HOTKEY,

@@ -1,8 +1,9 @@
 //! Persistent, observable application settings.
 
 use crate::constants::{
-    DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SETTINGS, EARLY_SWITCH_DEFAULT_SCHEMA_VERSION, MACOS_SELECTION_HOTKEY_DEFAULTS,
-    PAUSE_DELAY_DEFAULT_SCHEMA_VERSION, PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS, UNREADABLE_FILE_SUFFIX,
+    DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SETTINGS, EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
+    HOTKEY_CONVERT_LAST, MACOS_CONVERT_HOTKEY_SCHEMA_VERSION, MACOS_HOTKEY_DEFAULTS, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
+    PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS, UNREADABLE_FILE_SUFFIX,
     UNREADABLE_FILE_TIME_FORMAT, USER_DATA_JSON_INDENT,
 };
 use crate::logsetup::{local_time, strftime, warning};
@@ -86,15 +87,17 @@ fn running_on_windows() -> bool {
 }
 
 /// The shipped settings of `platform` (the running one by default, `Some("darwin")` for macOS): `DEFAULT_SETTINGS`
-/// everywhere, but on macOS the selection hotkeys use keys a Mac keyboard has (`MACOS_SELECTION_HOTKEY_DEFAULTS`).
+/// everywhere, but on macOS the conversion and selection hotkeys use keys a Mac keyboard has (`MACOS_HOTKEY_DEFAULTS`),
+/// in schema `MACOS_CONVERT_HOTKEY_SCHEMA_VERSION`.
 pub fn default_settings(platform: Option<&str>) -> SettingsData {
     let mut defaults = DEFAULT_SETTINGS.clone();
     let running = if cfg!(target_os = "macos") { "darwin" } else { "other" };
     if platform.unwrap_or(running) == "darwin" {
         let hotkeys = defaults.get_mut("hotkeys").and_then(Value::as_object_mut).expect("the defaults have a hotkeys table");
-        for (name, value) in MACOS_SELECTION_HOTKEY_DEFAULTS {
+        for (name, value) in MACOS_HOTKEY_DEFAULTS {
             hotkeys.insert(name.to_string(), Value::String(value.to_string()));
         }
+        defaults.insert("schema_version".into(), Value::from(MACOS_CONVERT_HOTKEY_SCHEMA_VERSION));
     }
     defaults
 }
@@ -177,7 +180,7 @@ impl SettingsStore {
             return;
         };
         state.data = deep_merge(&self.defaults, loaded_mapping);
-        Self::adopt_new_defaults(&mut state.data, loaded_mapping);
+        Self::adopt_new_defaults(&mut state.data, loaded_mapping, &self.defaults);
     }
 
     /// Let a file written by an older schema take the defaults that changed since.
@@ -185,16 +188,21 @@ impl SettingsStore {
     /// The persisted file is seeded from the shipped defaults, so a value equal to the old default is most likely the
     /// seed and not a choice. Schema 7 turned the early layout switch on; a schema-6 file with it off adopts that
     /// once. Schema 8 shortened the pause correction from 1.5 s; an older file with the old pause adopts the new one
-    /// once. The schema version written back marks the adoption done, so a value set again afterwards holds.
-    fn adopt_new_defaults(data: &mut SettingsData, loaded: &SettingsData) {
+    /// once. Schema 9, on macOS only, made Control+Option+K the conversion hotkey: a file holding Pause, which a Mac
+    /// keyboard has not, takes it once (elsewhere Pause is the default and stays). The schema version written back
+    /// marks the adoption done, so a value set again afterwards holds.
+    fn adopt_new_defaults(data: &mut SettingsData, loaded: &SettingsData, defaults: &SettingsData) {
         let Some(version) = loaded.get("schema_version") else { return };
         // isinstance(version, int) and not a bool; a size beyond 64 bits reads as a float here and gives the same answer.
         let Some(version) = version.as_i64().filter(|_| is_py_int(version)) else { return };
-        if version >= PAUSE_DELAY_DEFAULT_SCHEMA_VERSION {
+        let schema = defaults["schema_version"].as_i64().expect("the defaults name their schema");
+        if version >= schema {
             return;
         }
         let detection = loaded.get("detection").and_then(Value::as_object);
-        if let (Some(detection), Some(Value::Object(current))) = (detection, data.get_mut("detection")) {
+        if version < PAUSE_DELAY_DEFAULT_SCHEMA_VERSION
+            && let (Some(detection), Some(Value::Object(current))) = (detection, data.get_mut("detection"))
+        {
             if version < EARLY_SWITCH_DEFAULT_SCHEMA_VERSION && detection.get("early_switch") == Some(&Value::Bool(false)) {
                 current.insert("early_switch".into(), Value::Bool(true));
             }
@@ -206,7 +214,12 @@ impl SettingsStore {
                 current.insert("pause_delay_seconds".into(), default.unwrap_or(Value::Null));
             }
         }
-        data.insert("schema_version".into(), DEFAULT_SETTINGS["schema_version"].clone());
+        let seeded = loaded.get("hotkeys").and_then(|hotkeys| hotkeys.get(HOTKEY_CONVERT_LAST)).and_then(Value::as_str) == Some(DEFAULT_CONVERT_LAST_HOTKEY);
+        if seeded {
+            let hotkeys = data.get_mut("hotkeys").and_then(Value::as_object_mut).expect("a table of hotkeys merged over the defaults' table");
+            hotkeys.insert(HOTKEY_CONVERT_LAST.into(), defaults["hotkeys"][HOTKEY_CONVERT_LAST].clone());
+        }
+        data.insert("schema_version".into(), defaults["schema_version"].clone());
     }
 
     fn save_locked(&self, data: &SettingsData) -> io::Result<()> {
@@ -500,7 +513,43 @@ mod tests {
     #[test]
     fn macos_hotkeys() {
         let mac = default_settings(Some("darwin"));
+        let linux = default_settings(Some("linux"));
         assert_eq!(mac["hotkeys"]["selection_layout"], json!("Ctrl+Alt+L"));
-        assert_eq!(default_settings(Some("linux"))["hotkeys"]["selection_layout"], json!("Shift+Pause"));
+        assert_eq!(linux["hotkeys"]["selection_layout"], json!("Shift+Pause"));
+        assert_eq!((mac["hotkeys"]["convert_last"].clone(), mac["schema_version"].clone()), (json!("Ctrl+Alt+K"), json!(9)));
+        assert_eq!((linux["hotkeys"]["convert_last"].clone(), linux["schema_version"].clone()), (json!("Pause"), json!(8)));
+    }
+
+    /// What `load` makes of `file` with the defaults of `platform`.
+    fn loaded_on(platform: &str, file: &Value) -> SettingsData {
+        let defaults = default_settings(Some(platform));
+        let loaded = file.as_object().cloned().unwrap();
+        let mut data = deep_merge(&defaults, &loaded);
+        SettingsStore::adopt_new_defaults(&mut data, &loaded, &defaults);
+        data
+    }
+
+    #[test]
+    fn the_macos_conversion_hotkey_takes_the_place_of_pause_once() {
+        let seeded = json!({"schema_version": 8, "hotkeys": {"convert_last": "Pause"}, "detection": {"pause_delay_seconds": 1.5}});
+        let mac = loaded_on("darwin", &seeded);
+        assert_eq!((mac["hotkeys"]["convert_last"].clone(), mac["schema_version"].clone()), (json!("Ctrl+Alt+K"), json!(9)));
+        // A schema-8 file took the shorter pause already: its value is the person's.
+        assert_eq!(mac["detection"]["pause_delay_seconds"], json!(1.5));
+        // Elsewhere Pause is the default, and the schema stays.
+        let linux = loaded_on("linux", &seeded);
+        assert_eq!((linux["hotkeys"]["convert_last"].clone(), linux["schema_version"].clone()), (json!("Pause"), json!(8)));
+        // A key the person chose stays, and so does Pause chosen again after the step.
+        let chosen = loaded_on("darwin", &json!({"schema_version": 8, "hotkeys": {"convert_last": "Ctrl+Alt+J"}}));
+        assert_eq!((chosen["hotkeys"]["convert_last"].clone(), chosen["schema_version"].clone()), (json!("Ctrl+Alt+J"), json!(9)));
+        let again = loaded_on("darwin", &json!({"schema_version": 9, "hotkeys": {"convert_last": "Pause"}}));
+        assert_eq!(again["hotkeys"]["convert_last"], json!("Pause"));
+        // An older Mac file takes both steps; one with no hotkeys, or another value there, keeps the rest.
+        let old = loaded_on("darwin", &json!({"schema_version": 6, "hotkeys": {"convert_last": "Pause"}, "detection": {"early_switch": false}}));
+        assert_eq!((old["hotkeys"]["convert_last"].clone(), old["detection"]["early_switch"].clone()), (json!("Ctrl+Alt+K"), json!(true)));
+        let bare = loaded_on("darwin", &json!({"schema_version": 8}));
+        assert_eq!((bare["hotkeys"]["convert_last"].clone(), bare["schema_version"].clone()), (json!("Ctrl+Alt+K"), json!(9)));
+        let odd = loaded_on("darwin", &json!({"schema_version": 8, "hotkeys": {"convert_last": 5}}));
+        assert_eq!(odd["hotkeys"]["convert_last"], json!(5));
     }
 }
