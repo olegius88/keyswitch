@@ -56,7 +56,7 @@ fn file_hex(path: &Path) -> Value {
 fn as_python(value: &Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(settings_diagnostics::without_settings_since_python(map)),
-        other => other.clone(),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) | Value::Array(_) => value.clone(),
     }
 }
 /// The value at a dotted `path` (or the whole table, "*") as the Python held it.
