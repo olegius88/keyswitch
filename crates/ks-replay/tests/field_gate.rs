@@ -83,6 +83,9 @@ fn a_word_that_stays_right_passes_and_a_word_that_breaks_does_not() {
     stops(&answer, 1, "broken=1");
     let written: Value = serde_json::from_slice(&std::fs::read(&record).expect("a record")).expect("json");
     assert_eq!(written["broken"][0]["candidate"], json!("ghbdtn"));
+    // It names the owner's words: only this user reads it.
+    #[cfg(unix)]
+    assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&record).expect("a record").permissions()) & 0o777, 0o600);
 }
 
 #[test]

@@ -207,6 +207,24 @@ fn option(arguments: &[String], name: &str) -> Option<String> {
     arguments.iter().position(|argument| argument == name).and_then(|index| arguments.get(index + 1)).cloned()
 }
 
+/// A folder only this user can open: the replays write the owner's typing into it, and the temporary folder is shared.
+fn private_folder(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// A file only this user can read, for the record of the words that changed.
+fn private_write(path: &Path, text: &str) -> std::io::Result<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(path)?, text.as_bytes())
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let root = PathBuf::from(option(&arguments, "--root").unwrap_or_else(|| fail("--root is required")));
@@ -231,7 +249,7 @@ fn main() {
         fail("the field manifest names no battery");
     }
     let scratch = std::env::temp_dir().join(format!("field-gate-{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).unwrap_or_else(|_| fail("no scratch folder"));
+    private_folder(&scratch).unwrap_or_else(|_| fail("no scratch folder"));
     let (next, failures) = (AtomicUsize::new(0), Mutex::new(Vec::new()));
     std::thread::scope(|scope| {
         for _ in 0..jobs.max(1) {
@@ -260,7 +278,7 @@ fn main() {
     let result = compare(&released, &candidate, &verdicts);
     if let Some(record) = option(&arguments, "--record") {
         let payload = json!({"broken": result.broken, "fixed": result.fixed});
-        let _ = std::fs::write(record, ks_text::json_dumps(&payload, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() }));
+        let _ = private_write(Path::new(&record), &ks_text::json_dumps(&payload, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), ..ks_text::JsonOptions::default() }));
     }
     println!(
         "field regression gate: rows={}, excluded={}, released_right={}, candidate_right={}, fixed={}, broken={}, verdicts_used={}, needs_owner={}",
