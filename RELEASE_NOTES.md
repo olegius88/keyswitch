@@ -30,6 +30,8 @@ KeySwitch переписан на Rust: в программе больше не�
 - macOS: исправление показывается в Центре уведомлений; страница обновлений говорит, что новую версию для Mac ставят вручную со страницы выпуска.
 - Linux: строки в окне выбора программы откликаются на щелчок; в 0.66.2 щелчок по ним ничего не делал.
 - Linux: окно настроек больше не зависает, если настройку быстро поменять дважды (два быстрых щелчка по «Включено» или смена из меню значка при открытом окне).
+- Раскладку можно переключать одиночным нажатием модификатора, как в Punto Switcher и Caramba: настройка «Переключать раскладку одной клавишей» на странице «Горячие клавиши» (левый или правый Shift либо Ctrl, по умолчанию выключено). Shift с буквой, Ctrl+C и системные Alt+Shift, Ctrl+Shift раскладку не меняют; в README описано, какие клавиши её переключают.
+- macOS: ручное преобразование и двойное нажатие для правила — на Control+Option+K. Раньше они стояли на Pause, которой на клавиатуре Mac нет, и не работали; настройка с Pause один раз заменяется новым сочетанием, выбранная вручную клавиша остаётся.
 - Слово, набранное в третьей раскладке (не английской и не русской), остаётся как набрано. Непредвиденная ошибка больше не останавливает программу: забывается только набираемое слово.
 
 ### Если нужно вернуться на 0.66.2
@@ -72,6 +74,8 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 - macOS: a correction is shown in Notification Center; the updates page says that a new Mac version is installed by hand from the release page.
 - Linux: the rows of the program picker answer a click; in 0.66.2 a click on them did nothing.
 - Linux: the settings window no longer hangs when a setting is changed twice in quick succession (two fast clicks on «Включено», or a change from the tray menu while the window is open).
+- The layout can be switched with a lone tap of a modifier, as in Punto Switcher and Caramba: the setting «Переключать раскладку одной клавишей» (switch the layout with a single key) on the Hotkeys page (the left or right Shift or Ctrl, off by default). Shift with a letter, Ctrl+C and the system's Alt+Shift or Ctrl+Shift do not switch it; the README says which keys switch the layout.
+- macOS: the manual conversion and the double press that offers a rule are on Control+Option+K. They were on Pause, which a Mac keyboard does not have, and did not work; a setting that still holds Pause takes the new shortcut once, a key chosen by hand stays.
 - A word typed in a third layout, neither English nor Russian, is left as typed. An error nobody foresaw no longer stops the program: only the word being typed is forgotten.
 
 ### Going back to 0.66.2

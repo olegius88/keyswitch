@@ -390,11 +390,12 @@ impl Shared {
         let timestamp = i64::from(u32::from_ne_bytes([payload[4], payload[5], payload[6], payload[7]]));
         let state = u16::from_ne_bytes([payload[28], payload[29]]);
         if event_type == X11_BUTTON_PRESS {
-            // For a button event the detail byte is the button: the wheel moves the view, not the caret.
-            return if X11_WHEEL_BUTTONS.contains(&keycode) {
-                None
+            // For a button event the detail byte is the button. The wheel moves the view, not the caret: it is reported
+            // only as a turn, which ends a lone press of the layout switch key (Ctrl+wheel zooms).
+            return Some(if X11_WHEEL_BUTTONS.contains(&keycode) {
+                KeyEvent::wheel(timestamp)
             } else {
-                Some(KeyEvent {
+                KeyEvent {
                     pressed: true,
                     keycode: 0,
                     key_name: "Pointer".to_owned(),
@@ -404,8 +405,8 @@ impl Shared {
                     state: 0,
                     timestamp,
                     ..KeyEvent::default()
-                })
-            };
+                }
+            });
         }
         if event_type != X11_KEY_PRESS && event_type != X11_KEY_RELEASE {
             return None;

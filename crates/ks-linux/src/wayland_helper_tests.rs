@@ -525,6 +525,7 @@ fn peer_pair() -> (HelperClient, UnixStream, Arc<Mutex<Vec<HelperKey>>>) {
             key.keycode == EVDEV_KEY_PAUSE
         }),
         on_pointer: Box::new(|_| {}),
+        on_wheel: Box::new(|_| {}),
         on_repeat_reset: Box::new(|_| {}),
         on_caps_lock: Box::new(|_| {}),
         on_input_reset: Box::new(|| {}),
@@ -928,6 +929,18 @@ fn keys_and_clicks_are_read_only_as_far_as_they_mean_something() {
     rig.os.st().events.entry(pointer).or_default().extend([event(EV_REL, EVDEV_REL_X, 1), event(EV_KEY, EVDEV_KEY_A, KEY_VALUE_PRESS), event(EV_KEY, EVDEV_BTN_TASK + 1, KEY_VALUE_PRESS)]);
     helper.read_pointer(pointer).unwrap();
     assert!(rig.channel.sent().is_empty());
+    // The wheel, both ways and in high resolution, read together: one turn.
+    let turns = EVDEV_WHEEL_CODES.map(|code| event(EV_REL, code, 1));
+    rig.os.st().events.entry(pointer).or_default().extend(turns);
+    helper.read_pointer(pointer).unwrap();
+    assert_eq!(rig.channel.sent(), [(HELPER_MSG_WHEEL, 5000u32.to_be_bytes().to_vec())]);
+    // A finger down on a touchpad tells as a turn; the finger coming up, or another code of a relative axis, does not.
+    rig.os.st().events.entry(pointer).or_default().extend([event(EV_KEY, EVDEV_BTN_TOUCH, KEY_VALUE_RELEASE), event(EV_REL, EVDEV_REL_Y, 1)]);
+    helper.read_pointer(pointer).unwrap();
+    assert!(rig.channel.sent().is_empty());
+    rig.os.st().events.entry(pointer).or_default().push_back(event(EV_KEY, EVDEV_BTN_TOUCH, KEY_VALUE_PRESS));
+    helper.read_pointer(pointer).unwrap();
+    assert_eq!(rig.channel.sent(), [(HELPER_MSG_WHEEL, 5000u32.to_be_bytes().to_vec())]);
 }
 
 #[test]
@@ -1006,13 +1019,14 @@ fn a_keyboard_denied_at_the_start_says_how_to_allow_it() {
 fn callbacks_client() -> (HelperClient, UnixStream, Arc<Mutex<Vec<String>>>) {
     let (parent, helper_side) = UnixStream::pair().unwrap();
     let said: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let (key, pointer, repeat, caps, reset) = (said.clone(), said.clone(), said.clone(), said.clone(), said.clone());
+    let (key, pointer, wheel, repeat, caps, reset) = (said.clone(), said.clone(), said.clone(), said.clone(), said.clone(), said.clone());
     let callbacks = HelperCallbacks {
         on_key: Box::new(move |event| {
             lock(&key).push(format!("key {}", event.seq));
             event.seq % 2 == 0
         }),
         on_pointer: Box::new(move |time| lock(&pointer).push(format!("pointer {time}"))),
+        on_wheel: Box::new(move |time| lock(&wheel).push(format!("wheel {time}"))),
         on_repeat_reset: Box::new(move |time| lock(&repeat).push(format!("repeat {time}"))),
         on_caps_lock: Box::new(move |on| lock(&caps).push(format!("caps {on}"))),
         on_input_reset: Box::new(move || lock(&reset).push("reset".to_owned())),
@@ -1060,6 +1074,8 @@ fn the_client_hands_each_message_to_its_place() {
     send(&mut helper_side, HELPER_MSG_KEY, &[1]);
     send(&mut helper_side, HELPER_MSG_POINTER, &7_u32.to_be_bytes());
     send(&mut helper_side, HELPER_MSG_POINTER, &[1]);
+    send(&mut helper_side, HELPER_MSG_WHEEL, &6_u32.to_be_bytes());
+    send(&mut helper_side, HELPER_MSG_WHEEL, &[1]);
     send(&mut helper_side, HELPER_MSG_REPEAT_RESET, &8_u32.to_be_bytes());
     send(&mut helper_side, HELPER_MSG_REPEAT_RESET, &[1]);
     send(&mut helper_side, HELPER_MSG_CAPS_LOCK, &[1]);
@@ -1069,10 +1085,10 @@ fn the_client_hands_each_message_to_its_place() {
     send(&mut helper_side, HELPER_MSG_EMIT_ACK, &[0; 8]);
     send(&mut helper_side, HELPER_MSG_KEY_DOWN, &[0; 5]);
     let deadline = Instant::now() + Duration::from_secs(5);
-    while lock(&said).len() < 8 && Instant::now() < deadline {
+    while lock(&said).len() < 9 && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(*lock(&said), ["key 1", "key 2", "key 3", "key 4", "pointer 7", "repeat 8", "caps true", "reset"]);
+    assert_eq!(*lock(&said), ["key 1", "key 2", "key 3", "key 4", "pointer 7", "wheel 6", "repeat 8", "caps true", "reset"]);
     assert_eq!(read_frame(&mut helper_side), (HELPER_CMD_VERDICT, {
         let mut body = 1_u32.to_be_bytes().to_vec();
         body.push(HELPER_VERDICT_PASS.low::<u8>());
@@ -1272,6 +1288,7 @@ fn a_client_with_nowhere_to_answer_and_nobody_to_tell_ends_its_threads() {
             false
         }),
         on_pointer: Box::new(|_| {}),
+        on_wheel: Box::new(|_| {}),
         on_repeat_reset: Box::new(|_| {}),
         on_caps_lock: Box::new(|_| {}),
         on_input_reset: Box::new(|| {}),

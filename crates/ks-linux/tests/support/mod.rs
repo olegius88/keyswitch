@@ -35,6 +35,8 @@ pub(crate) const PAUSE_KEYSYM: u32 = 0xff13;
 pub(crate) const RETURN_KEYSYM: u32 = 0xff0d;
 pub(crate) const CONTROL_L_KEYSYM: u32 = 0xffe3;
 pub(crate) const BACKSPACE_KEYSYM: u32 = 0xff08;
+pub(crate) const SHIFT_L_KEYSYM: u32 = 0xffe1;
+pub(crate) const SHIFT_R_KEYSYM: u32 = 0xffe2;
 
 /// Physical US-layout keys, independent of any input method.
 pub(crate) struct Typer {
@@ -73,6 +75,13 @@ impl Typer {
         let keycode = self.keycode(keysym)?;
         self.event(KEY_PRESS_EVENT, keycode, KEY_PRESS_DELAY_MS)?;
         self.event(KEY_RELEASE_EVENT, keycode, KEY_RELEASE_DELAY_MS)?;
+        self.sync()
+    }
+
+    /// The key goes down and stays down, or comes up.
+    pub(crate) fn hold_keysym(&self, keysym: u32, pressed: bool) -> Result<(), String> {
+        let keycode = self.keycode(keysym)?;
+        self.event(if pressed { KEY_PRESS_EVENT } else { KEY_RELEASE_EVENT }, keycode, KEY_PRESS_DELAY_MS)?;
         self.sync()
     }
 

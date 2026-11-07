@@ -2162,6 +2162,12 @@ impl NativeWaylandApi {
                     listener(NativeKeyEvent { pointer: true, ..NativeKeyEvent::new(true, 0, timestamp) });
                 })
             },
+            on_wheel: {
+                let listener = listener.clone();
+                Box::new(move |timestamp| {
+                    listener(NativeKeyEvent { wheel: true, ..NativeKeyEvent::new(false, 0, timestamp) });
+                })
+            },
             on_repeat_reset: {
                 let listener = listener.clone();
                 Box::new(move |timestamp| {

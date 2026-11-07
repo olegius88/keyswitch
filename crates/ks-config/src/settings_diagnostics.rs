@@ -2,14 +2,16 @@
 
 use ks_cast::To as _;
 use crate::config::{SettingsData, SettingsStore};
-use crate::constants::LOGGED_SETTING_VALUE_MAX_CHARACTERS;
+use crate::constants::{LOGGED_SETTING_VALUE_MAX_CHARACTERS, SETTINGS_SINCE_PYTHON};
 use crate::pycompat::py_eq;
 use ks_text::pystr;
 use ks_text::{json_dumps, JsonOptions};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-fn defaults_sha256(defaults: &SettingsData) -> String {
+/// The name of a table of defaults in the technical journal: the SHA-256 of its JSON with sorted keys.
+#[must_use]
+pub fn defaults_sha256(defaults: &SettingsData) -> String {
     let options = JsonOptions {
         ensure_ascii: false,
         sort_keys: true,
@@ -18,6 +20,23 @@ fn defaults_sha256(defaults: &SettingsData) -> String {
     };
     let text = json_dumps(&Value::Object(defaults.clone()), &options);
     Sha256::digest(text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// `settings` without the dotted paths of `SETTINGS_SINCE_PYTHON`: the table as the Python program shipped it.
+#[must_use]
+pub fn without_settings_since_python(settings: &SettingsData) -> SettingsData {
+    let mut kept = settings.clone();
+    for path in SETTINGS_SINCE_PYTHON {
+        let (parents, name) = path.rsplit_once('.').unwrap_or(("", path));
+        let mut table = Some(&mut kept);
+        for part in parents.split('.').filter(|part| !part.is_empty()) {
+            table = table.and_then(|map| map.get_mut(part)).and_then(Value::as_object_mut);
+        }
+        if let Some(map) = table {
+            map.remove(name);
+        }
+    }
+    kept
 }
 
 const LOGGABLE_STRING_TRUNCATED_CHARACTERS: usize = LOGGED_SETTING_VALUE_MAX_CHARACTERS - "...".len();
@@ -106,6 +125,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_python_table_is_the_defaults_without_the_settings_it_never_had() {
+        let defaults = crate::config::default_settings(Some("linux"));
+        let python = without_settings_since_python(&defaults);
+        assert!(defaults["detection"].get("layout_switch_key").is_some());
+        assert!(python["detection"].get("layout_switch_key").is_none());
+        // The hash the traces of the Python's engine name its defaults by.
+        assert_eq!(defaults_sha256(&python), "bb6151bb4466c9d4f0e156483a52bf40135d7bdd01b62ae115553caf66ecfe9f");
+        assert_ne!(defaults_sha256(&defaults), defaults_sha256(&python));
+        // A table without the parent of such a setting loses nothing.
+        let bare = json!({"enabled": true}).as_object().cloned().unwrap();
+        assert_eq!(without_settings_since_python(&bare), bare);
+    }
+
+    #[test]
     fn a_known_name_that_is_gone_is_reported_missing() {
         let defaults = json!({"a": 1}).as_object().cloned().unwrap();
         let current = json!({}).as_object().cloned().unwrap();
@@ -124,7 +157,7 @@ mod tests {
         let settings = store("defaults");
         let snapshot = settings_snapshot(&settings);
         assert_eq!(snapshot["format"], "overrides-v1");
-        assert_eq!(snapshot["defaults_schema"], 8);
+        assert_eq!(snapshot["defaults_schema"], crate::config::default_settings(None)["schema_version"]);
         assert_eq!(snapshot["overrides"], json!({}));
         assert_eq!(snapshot["defaults_sha256"].as_str().unwrap().len(), 64);
     }

@@ -755,6 +755,20 @@ fn a_pointer_with_nobody_listening_and_a_key_with_no_layouts_pass() {
 }
 
 #[test]
+fn a_turned_wheel_is_reported_as_a_turn_and_moves_no_pointer_epoch() {
+    let (_api, backend, events) = make();
+    let wheel = NativeKeyEvent { wheel: true, ..key(0, 1, false) };
+    let epoch = backend.inner.state().pointer_epoch;
+    assert!(!backend.inner.handle_native(wheel));
+    let turn = lock(&events).last().cloned().expect("the turn");
+    assert_eq!((turn.key_name.as_str(), turn.pressed, turn.group), ("Wheel", false, POINTER_EVENT_GROUP));
+    assert_eq!(backend.inner.state().pointer_epoch, epoch);
+    // Nobody listening: the turn goes nowhere.
+    *lock(&backend.inner.listener) = None;
+    assert!(!backend.inner.handle_native(wheel));
+}
+
+#[test]
 fn a_layout_the_compositor_never_confirms_is_said_to_be_unconfirmed() {
     let (api, backend, _events) = make();
     api.st().ignores_switch = true;

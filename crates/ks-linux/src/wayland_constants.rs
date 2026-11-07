@@ -88,6 +88,11 @@ pub const EVDEV_KEY_LEFTMETA: u32 = 125;
 pub const EVDEV_KEY_RIGHTMETA: u32 = 126;
 pub const EVDEV_REL_X: u32 = 0x00;
 pub const EVDEV_REL_Y: u32 = 0x01;
+/// The wheels of a pointer, both ways and in high resolution (linux/input-event-codes.h).
+pub const EVDEV_WHEEL_CODES: [u32; 4] = [0x06, 0x08, 0x0b, 0x0c];
+/// A finger down on a touchpad. A touchpad scrolls by its touches, which the compositor turns into a scroll, so a touch
+/// tells as a turn of the wheel does: whatever it does, a modifier held over it was not tapped alone.
+pub const EVDEV_BTN_TOUCH: u32 = 0x14a;
 pub const EVDEV_ABS_MT_POSITION_X: u32 = 0x35;
 pub const EVDEV_BTN_MOUSE: u32 = 0x110;
 pub const EVDEV_BTN_TASK: u32 = 0x117;
@@ -125,6 +130,8 @@ pub const HELPER_MSG_EMIT_ACK: u32 = 6;
 pub const HELPER_MSG_KEY_DOWN: u32 = 7;
 pub const HELPER_MSG_REPEAT_RESET: u32 = 8;
 pub const HELPER_MSG_INPUT_RESET: u32 = 9;
+/// A wheel of a pointer turned: no key, it ends a lone press of the layout switch key (Ctrl+wheel zooms).
+pub const HELPER_MSG_WHEEL: u32 = 10;
 pub const HELPER_CMD_VERDICT: u32 = 101;
 pub const HELPER_CMD_EMIT_BATCH: u32 = 102;
 pub const HELPER_CMD_SET_GRAB: u32 = 103;

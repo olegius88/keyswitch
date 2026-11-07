@@ -90,6 +90,7 @@ pub fn native_key_event(
         replayed: injected && (extra == KEYSWITCH_REPLAY_INFO || extra == KEYSWITCH_FOREIGN_REPLAY_INFO),
         // Any other injected key comes from another program: remote control, a macro, an on-screen keyboard.
         foreign: injected && extra != KEYSWITCH_EXTRA_INFO && extra != KEYSWITCH_REPLAY_INFO,
+        wheel: false,
     })
 }
 
@@ -232,7 +233,7 @@ mod win32 {
     use crate::constants::{
         ASYNC_KEY_DOWN_BIT, CF_PRIVATEFIRST, CF_PRIVATELAST, CF_UNICODETEXT, CLIPBOARD_DIB_FORMATS,
         CLIPBOARD_FORMATS_SYNTHESIZED_FROM_DIB, CLIPBOARD_HANDLE_FORMATS, CLIPBOARD_HISTORY_FORMAT_NAME, GA_ROOT, GMEM_MOVEABLE,
-        GWL_EXSTYLE, HC_ACTION, INPUT_KEYBOARD, PM_NOREMOVE, POINTER_INVALIDATING_MESSAGES, PROCESS_IMAGE_NAME_BUFFER_CHARACTERS,
+        GWL_EXSTYLE, HC_ACTION, INPUT_KEYBOARD, PM_NOREMOVE, POINTER_INVALIDATING_MESSAGES, WHEEL_MESSAGES, PROCESS_IMAGE_NAME_BUFFER_CHARACTERS,
         PROCESS_QUERY_LIMITED_INFORMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
         THREAD_PRIORITY_ABOVE_NORMAL, TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG, TRANSLATED_TEXT_BUFFER_CHARACTERS, UTF16_CODE_UNIT_BYTES,
         VK_CAPITAL, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_CLASS_NAME_MAX_CHARACTERS, WM_INPUTLANGCHANGEREQUEST, WM_QUIT, WM_USER,
@@ -366,10 +367,13 @@ mod win32 {
     extern "system" fn mouse_callback(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
         if code == HC_ACTION {
             // SAFETY: for HC_ACTION the system passes a MSLLHOOKSTRUCT in lParam, valid for this call.
-            append_time(unsafe { (*data.pointer::<MSLLHOOKSTRUCT>()).time });
-            // A button press invalidates the caret position; a scroll does not.
+            let time = unsafe { (*data.pointer::<MSLLHOOKSTRUCT>()).time };
+            append_time(time);
+            // A button press invalidates the caret position; a scroll does not, it only ends a lone press of a modifier.
             if POINTER_INVALIDATING_MESSAGES.contains(&message.low::<u32>()) {
                 call_listener(NativeKeyEvent::new(true, 0, 0, false, false, 0));
+            } else if WHEEL_MESSAGES.contains(&message.low::<u32>()) {
+                call_listener(NativeKeyEvent { wheel: true, ..NativeKeyEvent::new(false, 0, 0, false, false, i64::from(time)) });
             }
         }
         // SAFETY: the arguments are the ones the system passed in, and the hook handle is ignored by CallNextHookEx.

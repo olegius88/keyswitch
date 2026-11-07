@@ -16,7 +16,7 @@ use gtk::{gdk, gio, glib, pango};
 use ks_backend::{BackendProbe, InputBackend};
 use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS};
+use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::{log_directory, log_path, log_status, rotation_summary};
@@ -25,6 +25,7 @@ use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
 use ks_engine::EngineSnapshot;
+use ks_engine::engine::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
 use ks_engine::constants::{
     CONFIDENCE_SETTING_MAX, CONFIDENCE_SETTING_MIN, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, FIELD_CATCH_UP_CHOICES, MINIMUM_WORD_LENGTH_SETTING_MAX, MINIMUM_WORD_LENGTH_SETTING_MIN,
@@ -1446,6 +1447,20 @@ impl Builder<'_> {
 
     fn hotkeys(&mut self) {
         let page = self.pages.page("hotkeys", "Горячие клавиши", "Комбинации распознаются глобально. Нажмите Enter после редактирования поля.");
+        let switching = group("Смена раскладки");
+        let keys: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(key, _)| *key).collect();
+        let labels: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(_, label)| *label).collect();
+        let current = setting_text(&self.services.settings, "detection.layout_switch_key", DEFAULT_LAYOUT_SWITCH_KEY);
+        switching.add(&self.combo_row(
+            "detection.layout_switch_key",
+            LAYOUT_SWITCH_KEY_TITLE,
+            LAYOUT_SWITCH_KEY_DESCRIPTION,
+            &labels,
+            keys.iter().map(|key| (*key).to_owned()).collect(),
+            index_of(&keys, &current, 0),
+            false,
+        ));
+        page.append(&switching);
         let commands = group("Команды");
         commands.add(&self.hotkey_row("hotkeys.toggle", "Пауза / продолжение", "Временно выключает автоматические исправления"));
         commands.add(&self.hotkey_row("hotkeys.convert_last", "Преобразовать последнее слово", "Меняет раскладку принудительно, без решения словаря"));

@@ -2,7 +2,8 @@
 
 use super::logging::technical_event;
 use super::types::{Stroke, EngineSnapshot, CorrectionPlan, LearningPrompt, Hotkey, is_modifier_key, PROMPT_KEYS, Update};
-use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS};
+use super::layout_tap::configured_layout_switch_key;
+use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, WHEEL_KEY_NAME};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
 use ks_config::pycompat::truthy;
@@ -81,6 +82,8 @@ pub struct Shared {
     // Input other programs inject (remote control, macros) counts as typing
     // only with detection.injected_input; read by the hook, so cached here.
     injected_input: AtomicBool,
+    // Whether a layout switch key is set: only then is a turned wheel queued (`enqueue_wheel`).
+    layout_tap_enabled: AtomicBool,
     sensitive_context_window: AtomicI64,
     focus_window: AtomicI64,
     action_keys: AtomicU8,
@@ -117,6 +120,7 @@ impl Shared {
             input_suspended: AtomicBool::new(false),
             test_field_focused: AtomicBool::new(false),
             injected_input: AtomicBool::new(false),
+            layout_tap_enabled: AtomicBool::new(false),
             sensitive_context_window: AtomicI64::new(NO_WINDOW),
             focus_window: AtomicI64::new(NO_WINDOW),
             action_keys: AtomicU8::new(0),
@@ -162,12 +166,13 @@ impl Shared {
         self.settings.with_value(path, |value| value.map_or(default, truthy))
     }
 
-    /// `action_keys`, `own_hotkeys` and `injected_input`, read from the settings for the hook.
+    /// `action_keys`, `own_hotkeys`, `injected_input` and `layout_tap_enabled`, read from the settings for the hook.
     pub fn refresh_hook_settings(&self) {
         self.action_keys.store(self.configured_action_keys(), Ordering::Relaxed);
         let hotkeys = Arc::new(self.configured_hotkeys());
         *self.own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
         self.injected_input.store(self.flag("detection.injected_input", false), Ordering::Relaxed);
+        self.layout_tap_enabled.store(configured_layout_switch_key(&self.settings).is_some(), Ordering::Relaxed);
     }
 
     fn configured_action_keys(&self) -> u8 {
@@ -293,6 +298,10 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         if event.synthetic {
             return;
         }
+        if event.key_name == WHEEL_KEY_NAME {
+            self.enqueue_wheel(event);
+            return;
+        }
         if event.key_name == "Pointer" {
             self.set_prompt_key_deadline(0.0);
         }
@@ -310,6 +319,23 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
             // callbacks. The worker invalidates the text before its next action.
             self.input_overflow.store(true, Ordering::Relaxed);
         }
+    }
+
+    /// A turned wheel only ends a lone press of the layout switch key (`follow_layout_tap`). It is queued only while that
+    /// key is set, once for a run of turns, never in place of a key, and it is no typing (`typed_events` counts what the
+    /// hook saw during a correction, a wheel included would read as a key that went past it).
+    fn enqueue_wheel(&self, event: KeyEvent) {
+        if !self.layout_tap_enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut inbox = locked(&self.inbox);
+        let after_wheel = inbox.events.back().is_some_and(|item| matches!(item, QueueItem::Key(key) if key.key_name == WHEEL_KEY_NAME));
+        if after_wheel || inbox.events.len() >= ENGINE_EVENT_QUEUE_MAX_SIZE {
+            return;
+        }
+        inbox.events.push_back(QueueItem::Key(Arc::new(event)));
+        drop(inbox);
+        self.wake.notify_one();
     }
 
     pub fn key_filter(self: &Arc<Self>) -> KeyFilter {

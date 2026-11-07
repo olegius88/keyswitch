@@ -58,6 +58,7 @@ mod scenario {
     const CAPS_LOCK_SELECTOR: i32 = 1;
     const IOHID_PARAM_CONNECT: u32 = 1;
     const SHIFT: u16 = 0x38;
+    const RIGHT_SHIFT: u16 = 0x3C;
     const CONTROL: u16 = 0x3B;
     const OPTION: u16 = 0x3A;
     const COMMAND: u16 = 0x37;
@@ -364,11 +365,51 @@ mod scenario {
         Ok(())
     }
 
+    /// Pause has no key on a Mac: the conversion hotkey is Control+Option+K there. The word is one no correction at a pause
+    /// would touch, so only the hotkey converts it.
+    fn conversion(driver: &Driver) -> Result<(), String> {
+        driver.put_text("")?;
+        driver.select(0)?;
+        driver.type_keys("the hello", false)?;
+        let typed = driver.value();
+        driver.chord('k', &[CONTROL, OPTION])?;
+        let converted = driver.wait_change(&typed);
+        driver.check("conversion hotkey", converted == "the руддщ" && driver.group() == 1, &format!("{typed:?} became {converted:?}"));
+        Ok(())
+    }
+
+    /// The layout switch key (Left Shift here): a lone tap switches the layout and keeps the next word as typed; Right
+    /// Shift and Shift held over a letter switch nothing.
+    fn layout_key(driver: &Driver) -> Result<(), String> {
+        driver.put_text("")?;
+        driver.select(0)?;
+        driver.key(SHIFT, true)?;
+        driver.key(SHIFT, false)?;
+        std::thread::sleep(Duration::from_millis(500));
+        let tapped = driver.group();
+        driver.check("layout key tap", tapped == 1, &format!("group {tapped}"));
+        driver.type_keys("hello ", false)?;
+        std::thread::sleep(SETTLED);
+        driver.check("the word after the tap stays as typed", driver.value() == "руддщ ", &driver.value());
+        driver.key(RIGHT_SHIFT, true)?;
+        driver.key(RIGHT_SHIFT, false)?;
+        driver.chord('a', &[SHIFT])?;
+        std::thread::sleep(Duration::from_millis(500));
+        let kept = driver.group();
+        driver.check("right shift and shift with a letter", kept == 1 && driver.value() == "руддщ Ф", &format!("group {kept}, {:?}", driver.value()));
+        driver.key(SHIFT, true)?;
+        driver.key(SHIFT, false)?;
+        std::thread::sleep(Duration::from_millis(500));
+        let back = driver.group();
+        driver.check("layout key tap back", back == 0, &format!("group {back}"));
+        Ok(())
+    }
+
     fn run(binary: &Path) -> Result<(), String> {
         let root = std::env::temp_dir().join(format!("keyswitch-e2e-{}", std::process::id()));
         std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
-        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false))] {
+        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
         }
         let mut child: Child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
@@ -387,6 +428,8 @@ mod scenario {
             typing(&driver)?;
             selection(&driver)?;
             words(&driver)?;
+            conversion(&driver)?;
+            layout_key(&driver)?;
             driver.release_modifiers()
         })();
         let _ = child.kill();

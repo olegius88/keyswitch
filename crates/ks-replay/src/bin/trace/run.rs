@@ -7,6 +7,8 @@ use super::entries::{self, Args, Outcome};
 use flate2::read::GzDecoder;
 use ks_backend::{FieldReader, InputBackend};
 use ks_config::config::SettingsStore;
+use ks_config::constants::SETTINGS_SINCE_PYTHON;
+use ks_config::settings_diagnostics::{defaults_sha256, without_settings_since_python};
 use ks_config::history::HistoryStore;
 use ks_config::logsetup;
 use ks_context::input_context::{Clock, InputContext};
@@ -66,6 +68,9 @@ pub(crate) struct Worker {
     root: PathBuf,
     log: std::fs::File,
     serial: u64,
+    /// The name of the defaults in the technical log and the name the traces of the Python's engine give them, which
+    /// lack the settings it never had (`SETTINGS_SINCE_PYTHON`); set while such a trace runs.
+    python_defaults: Option<(String, String)>,
 }
 
 struct Difference {
@@ -287,6 +292,7 @@ impl Worker {
             root,
             log,
             serial: 0,
+            python_defaults: None,
         }
     }
 
@@ -298,7 +304,11 @@ impl Worker {
     fn new_lines(&mut self) -> Vec<String> {
         let mut text = String::new();
         let _ = self.log.read_to_string(&mut text);
-        text.lines().filter_map(|line| line.find("TECHNICAL ").map(|at| line.get(at..).unwrap_or_default().to_owned())).collect()
+        let lines = text.lines().filter_map(|line| line.find("TECHNICAL ").map(|at| line.get(at..).unwrap_or_default().to_owned()));
+        match &self.python_defaults {
+            Some((current, python)) => lines.map(|line| line.replace(current.as_str(), python)).collect(),
+            None => lines.collect(),
+        }
     }
 
     fn slot(&mut self, choice: Choice) -> &mut Option<Kind> {
@@ -437,7 +447,18 @@ impl Worker {
         write("learning.json", "learning");
         write("personal-words.json", "personal");
         let settings = Arc::new(SettingsStore::new(Some(settings_path)));
-        let snapshot = Value::Object(settings.snapshot());
+        // A trace of the Python's engine holds none of the settings it never had; each of them holds its default, which
+        // leaves the engine as the Python's, and the log names the defaults as the Python did. A trace that holds them is
+        // compared whole.
+        let python = SETTINGS_SINCE_PYTHON.iter().all(|path| trace["settings"].pointer(&format!("/{}", path.replace('.', "/"))).is_none());
+        let mut snapshot = settings.snapshot();
+        self.python_defaults = None;
+        if python {
+            snapshot = without_settings_since_python(&snapshot);
+            let defaults = settings.defaults();
+            self.python_defaults = Some((defaults_sha256(&defaults), defaults_sha256(&without_settings_since_python(&defaults))));
+        }
+        let snapshot = Value::Object(snapshot);
         if let Some((path, a, b)) = first_difference(&trace["settings"], &snapshot, "") {
             let _ = std::fs::remove_dir_all(&root);
             return (0, differ(format!("not run: settings {path}"), format!("python {a}; rust {b}")));

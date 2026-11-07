@@ -17,13 +17,14 @@ use ks_engine::constants::{
     FIELD_CATCH_UP_CHOICES, MINIMUM_WORD_LENGTH_SETTING_MAX, MINIMUM_WORD_LENGTH_SETTING_MIN, PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS, PREFIX_MIN_CHARACTERS, SELECTION_HOTKEYS, UNDO_AVAILABLE_WINDOW_SECONDS,
 };
+use ks_engine::engine::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
 use ks_engine::rule_editor::{action_text, condition_text, other_layout_text};
 use ks_text::pystr;
 use ks_text::russian_text::{HOURS, SECONDS, quantity};
 use serde_json::{Map, Value, json};
 
 use crate::constants::{
-    CONFIDENCE_SETTING_STEP, HISTORY_LIMIT_SETTING_MAX, HISTORY_LIMIT_SETTING_MIN, HISTORY_LIMIT_SETTING_STEP,
+    CONFIDENCE_SETTING_STEP, CONVERT_HOTKEY_NAME, HISTORY_LIMIT_SETTING_MAX, HISTORY_LIMIT_SETTING_MIN, HISTORY_LIMIT_SETTING_STEP,
     NUMBER_DISPLAY_DECIMAL_PLACES, PAUSE_DELAY_SETTING_STEP_SECONDS, UPDATE_CHECK_INTERVAL_MS,
 };
 
@@ -199,10 +200,12 @@ pub fn autocorrection_settings() -> Vec<SettingSpec> {
         spec(
             "detection.hold_after_caret_move",
             "Не исправлять слово сразу после перемещения курсора",
-            "Стрелки, Home и Page Up уводят курсор туда, где программа не видела набора, а чаще всего \
-             курсор переносят внутрь уже написанного, чтобы дописать или поправить слово. Такое слово \
-             не переключается автоматически; Pause переключит его вручную. Если чтение контекста \
-             активного поля работает, текст перед курсором известен и правило не применяется.",
+            &format!(
+                "Стрелки, Home и Page Up уводят курсор туда, где программа не видела набора, а чаще всего \
+                 курсор переносят внутрь уже написанного, чтобы дописать или поправить слово. Такое слово \
+                 не переключается автоматически; {CONVERT_HOTKEY_NAME} переключит его вручную. Если чтение контекста \
+                 активного поля работает, текст перед курсором известен и правило не применяется."
+            ),
             Bool,
         ),
         spec(
@@ -254,9 +257,11 @@ pub fn autocorrection_settings() -> Vec<SettingSpec> {
         spec(
             "detection.learning",
             "Правила переключения",
-            "Правила из списка на странице «Обслуживание» действуют, а двойное нажатие клавиши \
-             ручного преобразования (Pause) предлагает правило для последнего слова. Правило \
-             появляется только по кнопке OK в окне правила.",
+            &format!(
+                "Правила из списка на странице «Обслуживание» действуют, а двойное нажатие клавиши \
+                 ручного преобразования ({CONVERT_HOTKEY_NAME}) предлагает правило для последнего слова. Правило \
+                 появляется только по кнопке OK в окне правила."
+            ),
             Bool,
         ),
         spec(
@@ -322,6 +327,10 @@ pub fn trigger_settings() -> Vec<SettingSpec> {
 #[must_use]
 pub fn hotkey_settings() -> Vec<SettingSpec> {
     let mut specs = vec![
+        choice(
+            spec("detection.layout_switch_key", LAYOUT_SWITCH_KEY_TITLE, &format!("{LAYOUT_SWITCH_KEY_DESCRIPTION}."), Choice),
+            &LAYOUT_SWITCH_KEY_LABELS,
+        ),
         spec("hotkeys.toggle", "Включить или приостановить", "Глобальная пауза автоматического переключения.", Text),
         spec(
             "hotkeys.convert_last",
@@ -912,7 +921,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 18 + 1 + 6 + 6 + 10 + 2 + 1 + 1);
+        assert_eq!(count, 18 + 1 + 6 + 7 + 10 + 2 + 1 + 1);
     }
 
     #[test]
@@ -932,7 +941,14 @@ mod tests {
         assert!(find(&hotkeys, "hotkeys.undo").description.ends_with("Доступно 10 секунд после исправления."));
         assert!(find(&update_settings(), "updates.check_automatically").description.ends_with("раз в 6 часов."));
         assert!(find(&autocorrection_settings(), "detection.early_switch_min_length").description.contains("значение 3 действует"));
-        assert_eq!(hotkeys.len(), 6);
+        assert_eq!(hotkeys.len(), 7);
+        let tap = find(&hotkeys, "detection.layout_switch_key");
+        assert_eq!((tap.kind, control_text(tap, Some(&json!(""))), control_text(tap, Some(&json!("Shift_L")))), (Choice, "Выключено".to_owned(), "Левый Shift".to_owned()));
+        assert_eq!(choice_value(tap, "Правый Ctrl"), "Control_R");
+        // The texts name the conversion hotkey of this system: Pause has no key on a Mac.
+        let named = |path: &str| find(&autocorrection_settings(), path).description.contains(&format!("{CONVERT_HOTKEY_NAME} "));
+        assert!(named("detection.hold_after_caret_move") && CONVERT_HOTKEY_NAME == if cfg!(target_os = "macos") { "Control+Option+K" } else { "Pause" });
+        assert!(find(&autocorrection_settings(), "detection.learning").description.contains(&format!("({CONVERT_HOTKEY_NAME})")));
         assert!(capture_hint_text().ends_with("через 3 секунды."));
     }
 

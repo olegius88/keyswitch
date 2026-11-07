@@ -15,6 +15,10 @@ pub const COMPLETED_ACTION_EVENT_COUNT: i32 = 2;
 pub const LAYOUT_GROUP_COUNT: i32 = 2;
 /// Layout group a synthetic pointer event carries: it belongs to no layout.
 pub const POINTER_EVENT_GROUP: i32 = -1;
+/// Key name of the event a turned mouse wheel or a touchpad scroll gives (Ctrl+wheel zooms, Shift+wheel scrolls sideways).
+/// It is no key and moves no caret: all it does is end a lone press of the layout switch key, so the backends report it
+/// and the engine queues it only while that key is set.
+pub const WHEEL_KEY_NAME: &str = "Wheel";
 /// Key name of a key event that carries a character instead of a key position (`VK_PACKET` on
 /// Windows, sent with `KEYEVENTF_UNICODE` by remote control and on-screen keyboards).
 pub const UNICODE_PACKET_KEY_NAME: &str = "Packet";

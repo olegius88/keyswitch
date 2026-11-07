@@ -123,19 +123,35 @@ pub const PAUSE_DELAY_DEFAULT_SCHEMA_VERSION: i64 = 8;
 pub const HOTKEY_SELECTION_LAYOUT: &str = "selection_layout";
 pub const HOTKEY_SELECTION_CASE: &str = "selection_case";
 pub const HOTKEY_SELECTION_TRANSLITERATE: &str = "selection_transliterate";
+/// `detection.layout_switch_key`: the modifier that switches the layout when it is pressed and released alone, named as
+/// every backend names it, or empty for none. None is the default, so that nobody who updates finds a lone Shift
+/// switching the layout. Alt is not offered (a lone Alt opens the menu bar of a Windows program), nor is Caps Lock (it
+/// would also toggle capitals).
+pub const DEFAULT_LAYOUT_SWITCH_KEY: &str = "";
+pub const LAYOUT_SWITCH_KEYS: [&str; 4] = ["Shift_L", "Shift_R", "Control_L", "Control_R"];
+/// Settings the Python program never had. Each default leaves the engine as the Python's was, so the traces of the
+/// Python's engine hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
+pub const SETTINGS_SINCE_PYTHON: [&str; 1] = ["detection.layout_switch_key"];
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
 pub const DEFAULT_SELECTION_CASE_HOTKEY: &str = "Alt+Pause";
 pub const DEFAULT_SELECTION_TRANSLITERATE_HOTKEY: &str = "Alt+Scroll_Lock";
-/// A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the selection
-/// hotkeys default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys.
+/// `hotkeys.convert_last`, the manual conversion and its double press that offers a rule: Pause.
+pub const HOTKEY_CONVERT_LAST: &str = "convert_last";
+pub const DEFAULT_CONVERT_LAST_HOTKEY: &str = "Pause";
+/// A Mac keyboard has neither Pause nor Scroll Lock, and the macOS backend names no such key. There the conversion and
+/// the selection hotkeys default to Control+Option with a letter, the modifiers of the shipped toggle and undo hotkeys.
 /// `config::default_settings` puts them in place of the others on macOS.
-pub const MACOS_SELECTION_HOTKEY_DEFAULTS: [(&str, &str); 3] = [
+pub const MACOS_HOTKEY_DEFAULTS: [(&str, &str); 4] = [
+    (HOTKEY_CONVERT_LAST, "Ctrl+Alt+K"),
     (HOTKEY_SELECTION_LAYOUT, "Ctrl+Alt+L"),
     (HOTKEY_SELECTION_CASE, "Ctrl+Alt+U"),
     (HOTKEY_SELECTION_TRANSLITERATE, "Ctrl+Alt+T"),
 ];
+/// The macOS defaults are schema 9: there the conversion hotkey became Control+Option+K, and a file of an older schema
+/// that holds Pause, the seeded default, takes it once. The other systems keep Pause and stay at schema 8.
+pub const MACOS_CONVERT_HOTKEY_SCHEMA_VERSION: i64 = 9;
 
 /// The shipped settings; the persisted file is seeded from it and merged over it. Key order is the file's order.
 pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
@@ -166,6 +182,7 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
             "correct_on_tab": true,
             "correct_on_punctuation": true,
             "respect_manual_layout": true,
+            "layout_switch_key": DEFAULT_LAYOUT_SWITCH_KEY,
             // A word kept in its layout and typed with two capitals at its start (`ПРивет`, `HEllo`) gets
             // its second letter lowercase when the lexicon knows the word so written (engine fix_double_capitals).
             "fix_double_capitals": true,
@@ -192,7 +209,7 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
         },
         "hotkeys": {
             "toggle": "Ctrl+Alt+P",
-            "convert_last": "Pause",
+            HOTKEY_CONVERT_LAST: DEFAULT_CONVERT_LAST_HOTKEY,
             "undo": "Ctrl+Alt+Z",
             HOTKEY_SELECTION_LAYOUT: DEFAULT_SELECTION_LAYOUT_HOTKEY,
             HOTKEY_SELECTION_CASE: DEFAULT_SELECTION_CASE_HOTKEY,

@@ -43,6 +43,17 @@ pub(crate) fn is_action_boundary_key(name: &str) -> bool {
     ACTION_BOUNDARY_KEYS.contains(&name)
 }
 
+/// A lone press of the layout switch key (`detection.layout_switch_key`), from its first press until it comes up or anything
+/// else happens (`layout_tap`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayoutTap {
+    pub keycode: u32,
+    /// `monotonic()` at the first press: repeats of the held key leave it.
+    pub pressed_at: f64,
+    /// The layout the press came with.
+    pub group: i64,
+}
+
 /// What the focus probe found: another window, or one whose layout is moot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusChange {

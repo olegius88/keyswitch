@@ -234,6 +234,8 @@ pub const WM_LBUTTONDOWN: u32 = 0x0201;
 pub const WM_RBUTTONDOWN: u32 = 0x0204;
 pub const WM_MBUTTONDOWN: u32 = 0x0207;
 pub const WM_XBUTTONDOWN: u32 = 0x020B;
+pub const WM_MOUSEWHEEL: u32 = 0x020A;
+pub const WM_MOUSEHWHEEL: u32 = 0x020E;
 pub const LLKHF_EXTENDED: u32 = 0x01;
 pub const LLKHF_INJECTED: u32 = 0x10;
 pub const KEYEVENTF_EXTENDEDKEY: u32 = 0x0001;
@@ -295,6 +297,9 @@ pub const MODIFIER_KEYS: [u32; 11] = [
 /// Not the wheel: a scroll moves the view, not the caret. Reported as a click it discarded the word being typed and the
 /// words before it, 141 times a minute while a page was scrolled.
 pub const POINTER_INVALIDATING_MESSAGES: [u32; 4] = [WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN];
+/// The wheel, both ways: reported only as a turn, which ends a lone press of the layout switch key (Ctrl+wheel zooms,
+/// Shift+wheel scrolls sideways).
+pub const WHEEL_MESSAGES: [u32; 2] = [WM_MOUSEWHEEL, WM_MOUSEHWHEEL];
 
 // ---------------------------------------------------------------------------- windows_registry.py, windows_instance_native.py
 

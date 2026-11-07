@@ -16,6 +16,13 @@ fn a_key_event_says_what_is_held() {
 }
 
 #[test]
+fn a_turned_wheel_is_no_key_of_any_layout() {
+    let wheel = KeyEvent::wheel(7);
+    assert_eq!((wheel.key_name.as_str(), wheel.pressed, wheel.keycode, wheel.group, wheel.timestamp), ("Wheel", false, 0, -1, 7));
+    assert_eq!((wheel.character_for(0), wheel.character_for(1)), ("", ""));
+}
+
+#[test]
 fn an_error_prints_its_message() {
     assert_eq!(BackendError::Failed("no display".to_owned()).to_string(), "no display");
 }

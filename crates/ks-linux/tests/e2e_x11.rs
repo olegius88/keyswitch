@@ -17,7 +17,7 @@ use ks_engine::{KeySwitchEngine, LearningPrompt};
 use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use ks_linux::linux_app::{engine_builder, new_backend};
 use serde_json::json;
-use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, dbus_call};
+use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, dbus_call};
 
 const CASES: [Case; 15] = [
     Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),
@@ -262,6 +262,30 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
             return Err("early switch".to_owned());
         }
         println!("EARLY_SWITCH_E2E_OK");
+        // The layout switch key: a lone Left Shift switches the layout and keeps the next word as typed; Right Shift,
+        // Shift held over a letter and the setting turned off switch nothing.
+        set("detection.early_switch", json!(false))?;
+        set("detection.layout_switch_key", json!("Shift_L"))?;
+        prepare(1, "")?;
+        settle(INTER_CASE);
+        typer.tap_keysym(SHIFT_L_KEYSYM)?;
+        settle(MENU_LAYOUT);
+        if group() != 0 || engine.snapshot().current_group != 0 {
+            return Err(format!("layout key: backend={} engine={}", group(), engine.snapshot().current_group));
+        }
+        typer.type_keys("ghbdtn ")?;
+        settle(SETTLE);
+        typer.tap_keysym(SHIFT_R_KEYSYM)?;
+        typer.hold_keysym(SHIFT_L_KEYSYM, true)?;
+        typer.type_keys("a")?;
+        typer.hold_keysym(SHIFT_L_KEYSYM, false)?;
+        set("detection.layout_switch_key", json!(""))?;
+        typer.tap_keysym(SHIFT_L_KEYSYM)?;
+        settle(SETTLE);
+        if entry.text() != "ghbdtn A" || group() != 0 {
+            return Err(format!("layout key: text={:?} group={}", entry.text().as_str(), group()));
+        }
+        println!("LAYOUT_KEY_TAP_E2E_OK");
         let names = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames", &[])?;
         if names.contains("org.freedesktop.portal.Desktop") || names.contains("org.freedesktop.portal.Documents") {
             return Err("GUI tests unexpectedly activated a desktop or document portal".to_owned());

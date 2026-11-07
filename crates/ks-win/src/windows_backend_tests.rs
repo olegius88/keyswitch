@@ -1569,6 +1569,20 @@ fn pointer_events_are_observed_without_being_suppressed() {
     assert_eq!(subject.release_input().unwrap(), 0);
 }
 
+#[test]
+fn a_turned_wheel_is_reported_as_a_turn_and_moves_no_pointer_epoch() {
+    let subject = backend(&FakeWindowsAPI::plain());
+    let events = collected();
+    // No listener yet: the turn goes nowhere.
+    assert!(!subject.handle_native(NativeKeyEvent { wheel: true, ..NativeKeyEvent::new(false, 0, 0, false, false, 7) }));
+    subject.set_listener(Some(collecting(&events)));
+    let epoch = subject.inner.pointer_epoch.load(Ordering::Relaxed);
+    assert!(!subject.handle_native(NativeKeyEvent { wheel: true, ..NativeKeyEvent::new(false, 0, 0, false, false, 7) }));
+    let event = events.lock().unwrap()[0].clone();
+    assert_eq!((event.key_name.as_str(), event.pressed, event.timestamp, event.group), ("Wheel", false, 7, POINTER_EVENT_GROUP));
+    assert_eq!(subject.inner.pointer_epoch.load(Ordering::Relaxed), epoch);
+}
+
 // --------------------------------------------------------------------------------- the withheld Enter (action barrier)
 
 fn deferring_backend(api: &Arc<FakeWindowsAPI>) -> WindowsBackend {
@@ -2551,6 +2565,7 @@ mod golden {
                 timestamp: number(&op["ts"]),
                 replayed: flag(&op["replayed"]),
                 foreign: flag(&op["foreign"]),
+                wheel: false,
             })),
             "hold" => {
                 subject.hold_input();

@@ -100,6 +100,8 @@ pub struct NativeKeyEvent {
     pub injected: bool,
     pub replayed: bool,
     pub pointer: bool,
+    /// A turn of a pointer's wheel, no key.
+    pub wheel: bool,
     pub repeat_reset: bool,
     pub seq: u32,
     pub delivered: bool,
@@ -511,6 +513,13 @@ impl Inner {
     }
 
     fn handle_native(&self, native: NativeKeyEvent) -> bool {
+        if native.wheel {
+            // The view moves, not the caret, and no correction waits on it (pointer_epoch).
+            if let Some(listener) = self.listener() {
+                listener(KeyEvent::wheel(i64::from(native.timestamp)));
+            }
+            return false;
+        }
         if native.input_reset {
             self.reset_input_state();
             return false;

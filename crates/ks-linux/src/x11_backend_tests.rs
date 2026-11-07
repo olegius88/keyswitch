@@ -286,12 +286,15 @@ fn the_group_is_the_one_in_the_event_state_and_a_missing_one_gives_no_character(
 }
 
 #[test]
-fn return_and_tab_carry_their_control_characters_and_a_wheel_is_ignored() {
+fn return_and_tab_carry_their_control_characters_and_a_wheel_is_only_a_turn() {
     let fake = Fake::new();
     let backend = opened(&fake);
     assert_eq!(backend.shared.decode_event(&*fake, &payload(2, RETURN, 0, 1)).expect("return").character, "\n");
     assert_eq!(backend.shared.decode_event(&*fake, &payload(2, TAB, 0, 1)).expect("tab").character, "\t");
-    assert!(backend.shared.decode_event(&*fake, &payload(4, 4, 0, 1)).is_none(), "the wheel moves the view, not the caret");
+    for button in [4, 5, 6, 7] {
+        let turn = backend.shared.decode_event(&*fake, &payload(4, button, 0, 1)).expect("a turn of the wheel");
+        assert_eq!((turn.key_name.as_str(), turn.pressed, turn.timestamp), ("Wheel", false, 1), "the wheel moves the view, not the caret");
+    }
     let click = backend.shared.decode_event(&*fake, &payload(4, 1, 0, 9)).expect("a click");
     assert_eq!((click.key_name.as_str(), click.group, click.timestamp, click.characters.len()), ("Pointer", -1, 9, 2));
     assert!(backend.shared.decode_event(&*fake, &payload(6, 1, 0, 9)).is_none(), "a motion is not a key");

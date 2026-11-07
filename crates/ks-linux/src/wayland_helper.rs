@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use crate::constants::{KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS};
 use crate::wayland_access::access_hint;
-use crate::wayland_constants::{HELPER_MAX_FRAME_BYTES, HELPER_FRAME_HEADER_BYTES, MICROSECONDS_PER_MILLISECOND, UINT32_MODULO_MASK, EV_KEY, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, EVDEV_BTN_STYLUS, EVDEV_BTN_GAMEPAD, EV_ABS, EVDEV_ABS_MT_POSITION_X, EV_REL, EVDEV_REL_X, EVDEV_REL_Y, EVDEV_BTN_MOUSE, EVDEV_REQUIRED_KEYBOARD_KEYS, HELPER_MSG_ERROR, WAYLAND_UINPUT_SETTLE_SECONDS, HELPER_MSG_READY, WAYLAND_HELPER_POLL_TIMEOUT_MS, HELPER_SOCKET_CHUNK_BYTES, HELPER_CMD_STOP, HELPER_CMD_VERDICT, HELPER_CMD_EMIT_BATCH, HELPER_MSG_EMIT_ACK, HELPER_EMIT_ACTION, HELPER_EMIT_ITEM_BYTES, KEY_VALUE_RELEASE, EV_SYN, SYN_REPORT, KEY_VALUE_PRESS, HELPER_CMD_SEQ_ACK, HELPER_CMD_QUERY_KEY_DOWN, HELPER_MSG_KEY_DOWN, HELPER_CMD_SET_GRAB, HELPER_EMIT_TEXT, WAYLAND_UINPUT_BURST_TRANSITIONS, TRANSITION_EVENTS, WAYLAND_UINPUT_BURST_PAUSE_SECONDS, HELPER_KEY_FORCED, WAYLAND_HELPER_VERDICT_TIMEOUT_MS, HELPER_KEY_NEEDS_VERDICT, HELPER_MSG_KEY, KEY_VALUE_REPEAT, EVDEV_MODIFIER_KEYS, EVDEV_KEY_CAPSLOCK, HELPER_MSG_REPEAT_RESET, EVDEV_BTN_TASK, HELPER_MSG_POINTER, LED_CAPSL, HELPER_MSG_CAPS_LOCK, HELPER_MSG_INPUT_RESET, WAYLAND_GRAB_WAIT_TIMEOUT_SECONDS, WAYLAND_GRAB_POLL_SECONDS, WAYLAND_GRAB_RELEASE_SETTLE_SECONDS, HELPER_EMIT_UNCHECKED, WAYLAND_HELPER_COMMAND_TIMEOUT_SECONDS, HELPER_VERDICT_SWALLOW, HELPER_VERDICT_PASS};
+use crate::wayland_constants::{HELPER_MAX_FRAME_BYTES, HELPER_FRAME_HEADER_BYTES, MICROSECONDS_PER_MILLISECOND, UINT32_MODULO_MASK, EV_KEY, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, EVDEV_BTN_STYLUS, EVDEV_BTN_GAMEPAD, EV_ABS, EVDEV_ABS_MT_POSITION_X, EV_REL, EVDEV_REL_X, EVDEV_REL_Y, EVDEV_BTN_MOUSE, EVDEV_BTN_TOUCH, EVDEV_WHEEL_CODES, EVDEV_REQUIRED_KEYBOARD_KEYS, HELPER_MSG_ERROR, WAYLAND_UINPUT_SETTLE_SECONDS, HELPER_MSG_READY, WAYLAND_HELPER_POLL_TIMEOUT_MS, HELPER_SOCKET_CHUNK_BYTES, HELPER_CMD_STOP, HELPER_CMD_VERDICT, HELPER_CMD_EMIT_BATCH, HELPER_MSG_EMIT_ACK, HELPER_EMIT_ACTION, HELPER_EMIT_ITEM_BYTES, KEY_VALUE_RELEASE, EV_SYN, SYN_REPORT, KEY_VALUE_PRESS, HELPER_CMD_SEQ_ACK, HELPER_CMD_QUERY_KEY_DOWN, HELPER_MSG_KEY_DOWN, HELPER_CMD_SET_GRAB, HELPER_EMIT_TEXT, WAYLAND_UINPUT_BURST_TRANSITIONS, TRANSITION_EVENTS, WAYLAND_UINPUT_BURST_PAUSE_SECONDS, HELPER_KEY_FORCED, WAYLAND_HELPER_VERDICT_TIMEOUT_MS, HELPER_KEY_NEEDS_VERDICT, HELPER_MSG_KEY, KEY_VALUE_REPEAT, EVDEV_MODIFIER_KEYS, EVDEV_KEY_CAPSLOCK, HELPER_MSG_REPEAT_RESET, EVDEV_BTN_TASK, HELPER_MSG_POINTER, HELPER_MSG_WHEEL, LED_CAPSL, HELPER_MSG_CAPS_LOCK, HELPER_MSG_INPUT_RESET, WAYLAND_GRAB_WAIT_TIMEOUT_SECONDS, WAYLAND_GRAB_POLL_SECONDS, WAYLAND_GRAB_RELEASE_SETTLE_SECONDS, HELPER_EMIT_UNCHECKED, WAYLAND_HELPER_COMMAND_TIMEOUT_SECONDS, HELPER_VERDICT_SWALLOW, HELPER_VERDICT_PASS};
 
 /// seq, pressed, keycode, time, flags (`HELPER_KEY_*`): `!IBHIB`.
 const MSG_KEY_SIZE: usize = 12;
@@ -677,10 +677,19 @@ impl<'a> WaylandInputHelper<'a> {
         if !self.grab_enabled {
             return Ok(());
         }
+        // A turn of the wheel comes as several events; one message tells of all those read together.
+        let mut turned = None;
         for event in events {
             if event.ev_type == EV_KEY && (EVDEV_BTN_MOUSE..=EVDEV_BTN_TASK).contains(&event.code) && event.value == KEY_VALUE_PRESS {
                 self.send(HELPER_MSG_POINTER, &event.timestamp_ms().to_be_bytes())?;
+            } else if (event.ev_type == EV_REL && EVDEV_WHEEL_CODES.contains(&event.code))
+                || (event.ev_type == EV_KEY && event.code == EVDEV_BTN_TOUCH && event.value == KEY_VALUE_PRESS)
+            {
+                turned = Some(event.timestamp_ms());
             }
+        }
+        if let Some(timestamp) = turned {
+            self.send(HELPER_MSG_WHEEL, &timestamp.to_be_bytes())?;
         }
         Ok(())
     }
@@ -932,6 +941,7 @@ type ResetCallback = Box<dyn Fn() + Send + Sync>;
 pub struct HelperCallbacks {
     pub on_key: KeyCallback,
     pub on_pointer: TimestampCallback,
+    pub on_wheel: TimestampCallback,
     pub on_repeat_reset: TimestampCallback,
     pub on_caps_lock: CapsCallback,
     pub on_input_reset: ResetCallback,
@@ -1218,6 +1228,9 @@ impl ClientShared {
                 HELPER_MSG_INPUT_RESET => (self.callbacks.on_input_reset)(),
                 HELPER_MSG_POINTER if payload.len() >= 4 => {
                     (self.callbacks.on_pointer)(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]));
+                }
+                HELPER_MSG_WHEEL if payload.len() >= 4 => {
+                    (self.callbacks.on_wheel)(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]));
                 }
                 HELPER_MSG_REPEAT_RESET if payload.len() >= 4 => {
                     (self.callbacks.on_repeat_reset)(u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]));
