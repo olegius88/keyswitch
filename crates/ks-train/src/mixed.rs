@@ -1037,6 +1037,56 @@ fn table_value(table: &Table) -> Value {
     Value::Object(map)
 }
 
+/// `evaluate`'s reading of the chosen texts, the three pairs typing them and the floors on what they typed: the results,
+/// the discordance and the floors, or what stopped it by its kind alone, never with a word of what it was reading.
+fn typed_floors(request: &DevchatRequest<'_>, files: &[(PathBuf, PathBuf, String)], chosen: &[Member]) -> Result<[Value; 3], &'static str> {
+    // The texts are read only after the claim; a member's text is its hash in the members file.
+    let wanted: HashSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();
+    let mut found: HashMap<String, String> = HashMap::new();
+    for (messages, _, _) in files {
+        for line in gz_lines(messages).map_err(|_| "ReadError")? {
+            let row: Value = serde_json::from_str(&line).map_err(|_| "ReadError")?;
+            let text = row["text"].as_str().unwrap_or("").to_owned();
+            let key = hex_digest(&text);
+            if wanted.contains(key.as_str()) {
+                found.insert(key, text);
+            }
+        }
+    }
+    if found.len() != wanted.len() {
+        // `Refusal("the messages file lacks members the draw chose")`.
+        return Err("Refusal");
+    }
+    let texts: Vec<String> = chosen.iter().map(|member| found[&member.text].clone()).collect();
+    let bench = Bench::new(request.resource_dir).map_err(|_| "TypingError")?;
+    let candidate_rows = typed_rows(&bench, request.candidate, &texts, request.workers).map_err(|_| "TypingError")?;
+    let released_rows = typed_rows(&bench, request.released, &texts, request.workers).map_err(|_| "TypingError")?;
+    let baseline_rows = typed_rows(&bench, request.baseline, &texts, request.workers).map_err(|_| "TypingError")?;
+    let tables = [counts(&candidate_rows, chosen), counts(&released_rows, chosen), counts(&baseline_rows, chosen)];
+    if tables.iter().any(|table| TYPING_MODES.iter().any(|mode| !table.contains_key(*mode))) {
+        // A mode no chosen message is typed in has no count to compare: the floors of the Python raise a KeyError.
+        return Err("KeyError");
+    }
+    let theirs: HashMap<(usize, &str), Option<bool>> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
+    let mut paired: BTreeMap<&str, (i64, i64)> = TYPING_MODES.iter().map(|mode| (*mode, (0, 0))).collect();
+    for (index, mode, outcome) in &candidate_rows {
+        let other = theirs[&(*index, mode.as_str())];
+        let entry = paired.get_mut(mode.as_str()).expect("a mode");
+        entry.0 += i64::from(*outcome == Some(true) && other != Some(true));
+        entry.1 += i64::from(*outcome != Some(true) && other == Some(true));
+    }
+    let (candidate_table, released_table, baseline_table) = (&tables[0], &tables[1], &tables[2]);
+    let restored = |table: &Table| RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>();
+    let floors = json!({
+        "every_message_typed": true,
+        "f1_better_than_baseline": net(candidate_table) >= net(baseline_table) + DEVCHAT_MIN_NET_MARGIN && corruptions(candidate_table) <= corruptions(baseline_table),
+        "f3_not_worse_than_released": RESTORING_MODES.iter().all(|mode| loss_chance(paired[mode].1, paired[mode].0) >= DEVCHAT_SIGNIFICANCE) && restored(candidate_table) >= restored(released_table) && corruptions(candidate_table) <= corruptions(released_table),
+    });
+    let results = json!({"candidate": table_value(candidate_table), "released": table_value(released_table), "baseline": table_value(baseline_table)});
+    let paired_value: Map<String, Value> = paired.iter().map(|(mode, (gains, losses))| ((*mode).to_owned(), json!({"gains": gains, "losses": losses}))).collect();
+    Ok([results, Value::Object(paired_value), floors])
+}
+
 pub struct DevchatRequest<'a> {
     pub root: &'a Path,
     pub resource_dir: &'a Path,
@@ -1221,47 +1271,18 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
         candidate.clone()
     };
     let mut result = json!({"split": split, "access": key, "messages": chosen.len(), "pairs": pairs, "bench": BENCH});
-    // The texts are read only after the claim; a member's text is its hash in the members file.
-    let wanted: HashSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();
-    let mut found: HashMap<String, String> = HashMap::new();
-    for (messages, _, _) in &files {
-        for line in gz_lines(messages)? {
-            let row: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
-            let text = row["text"].as_str().unwrap_or("").to_owned();
-            let key = hex_digest(&text);
-            if wanted.contains(key.as_str()) {
-                found.insert(key, text);
-            }
+    // Whatever stops the read after the claim is recorded as its kind alone, so that no read of the test goes unrecorded.
+    match typed_floors(request, &files, &chosen) {
+        Ok([results, discordance, floors]) => {
+            result["results"] = results;
+            result["discordance"] = discordance;
+            result["floors"] = floors;
+        }
+        Err(kind) => {
+            result["error"] = json!(kind);
+            result["floors"] = json!({"every_message_typed": false});
         }
     }
-    if found.len() != wanted.len() {
-        return Err("the messages file lacks members the draw chose".to_owned());
-    }
-    let texts: Vec<String> = chosen.iter().map(|member| found[&member.text].clone()).collect();
-    let bench = Bench::new(request.resource_dir)?;
-    let candidate_rows = typed_rows(&bench, request.candidate, &texts, request.workers)?;
-    let released_rows = typed_rows(&bench, request.released, &texts, request.workers)?;
-    let baseline_rows = typed_rows(&bench, request.baseline, &texts, request.workers)?;
-    let tables = [counts(&candidate_rows, &chosen), counts(&released_rows, &chosen), counts(&baseline_rows, &chosen)];
-    let theirs: HashMap<(usize, &str), Option<bool>> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
-    let mut paired: BTreeMap<&str, (i64, i64)> = TYPING_MODES.iter().map(|mode| (*mode, (0, 0))).collect();
-    for (index, mode, outcome) in &candidate_rows {
-        let other = theirs[&(*index, mode.as_str())];
-        let entry = paired.get_mut(mode.as_str()).expect("a mode");
-        entry.0 += i64::from(*outcome == Some(true) && other != Some(true));
-        entry.1 += i64::from(*outcome != Some(true) && other == Some(true));
-    }
-    let (candidate_table, released_table, baseline_table) = (&tables[0], &tables[1], &tables[2]);
-    let restored = |table: &Table| RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>();
-    let floors = json!({
-        "every_message_typed": true,
-        "f1_better_than_baseline": net(candidate_table) >= net(baseline_table) + DEVCHAT_MIN_NET_MARGIN && corruptions(candidate_table) <= corruptions(baseline_table),
-        "f3_not_worse_than_released": RESTORING_MODES.iter().all(|mode| loss_chance(paired[mode].1, paired[mode].0) >= DEVCHAT_SIGNIFICANCE) && restored(candidate_table) >= restored(released_table) && corruptions(candidate_table) <= corruptions(released_table),
-    });
-    result["results"] = json!({"candidate": table_value(candidate_table), "released": table_value(released_table), "baseline": table_value(baseline_table)});
-    let paired_value: Map<String, Value> = paired.iter().map(|(mode, (gains, losses))| ((*mode).to_owned(), json!({"gains": gains, "losses": losses}))).collect();
-    result["discordance"] = Value::Object(paired_value);
-    result["floors"] = floors;
     if split == "dev" {
         result["runtime"] = pins;
         private_record(&development, &result, false)?;

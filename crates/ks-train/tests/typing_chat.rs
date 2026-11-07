@@ -1,5 +1,5 @@
 //! The chat test at its edges: a ledger not made yet, a folder holding other files, a batch that repeats members, members the
-//! messages lack, a candidate much worse than the released model.
+//! messages lack, a candidate much worse than the released model, messages that leave a typing mode untyped.
 mod support;
 
 use flate2::Compression;
@@ -9,7 +9,7 @@ use ks_train::mixed::{DevchatRequest, devchat};
 use serde_json::{Value, json};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use support::{chat_messages, digest, recipe, scratch, small_tree};
+use support::{chat_messages, digest, recipe, scratch, small_tree, trainer};
 
 /// Short messages of each shape the bench plans: Russian with a term, a term with Russian, words that open with Ё or ё, a
 /// digit first, one-letter words, English. Each typing mode has a message to type: a table of the pairs holds every mode.
@@ -123,13 +123,24 @@ fn a_development_read_makes_its_ledger_and_passes_over_other_files() {
 }
 
 #[test]
-fn a_member_the_messages_do_not_hold_stops_the_read() {
-    let run = chat("chat-lacking", &TEXTS, 6);
+fn a_member_the_messages_do_not_hold_is_recorded_as_a_read_that_failed() {
+    // Every mixed message of the test is drawn, the one whose text no messages file holds among them.
+    let run = chat("chat-lacking", &TEXTS, 7);
     let mut listed = members(&TEXTS);
     listed.push(json!({"text": digest("нет такого сообщения".as_bytes()), "question": "lost", "mix": "mixed"}).to_string());
-    std::fs::write(run.directory.join("devchat-dev.members.jsonl.gz"), gz(&listed)).expect("a file");
-    let said = run_chat(&run, "dev").expect_err("a member without its message");
-    assert!(said.contains("lacks members"), "{said}");
+    std::fs::write(run.directory.join("devchat-test.members.jsonl.gz"), gz(&listed)).expect("a file");
+    run_chat(&run, "dev").expect("a development result");
+    allowed(&run);
+    // The test is claimed before its texts are read: the read that then stops is recorded with the claim.
+    let result = run_chat(&run, "test").expect("a recorded result");
+    assert_eq!(result["error"], json!("Refusal"));
+    assert_eq!(result["floors"], json!({"every_message_typed": false}));
+    let key = result["access"].as_str().expect("the access");
+    assert!(run.ledger.join(format!("{key}.access.json")).is_file());
+    let recorded: Value = serde_json::from_slice(&std::fs::read(run.ledger.join(format!("{key}.result.json"))).expect("the result")).expect("json");
+    assert_eq!(recorded["error"], json!("Refusal"));
+    // Read again, the test gives what was recorded.
+    assert_eq!(run_chat(&run, "test").expect("the record"), recorded);
 }
 
 #[test]
@@ -177,4 +188,59 @@ fn a_candidate_that_keeps_what_the_released_model_restores_is_worse() {
     let losses = result["discordance"].as_object().expect("the pairs").values().filter_map(|mode| mode["losses"].as_i64()).max();
     assert!(losses >= Some(5), "{}", result["discordance"]);
     assert_eq!(result["floors"]["f3_not_worse_than_released"], json!(false), "{}", result["discordance"]);
+}
+
+#[test]
+fn a_read_whose_messages_leave_a_mode_untyped_is_recorded_as_failed() {
+    // No message changes from Russian to English: nothing is typed forgetting that change.
+    let run = chat("chat-no-mode", &["привет как дела", "git status показывает"], 2);
+    let result = run_chat(&run, "dev").expect("a result");
+    assert_eq!(result["error"], json!("KeyError"));
+    assert_eq!(result["floors"], json!({"every_message_typed": false}));
+    assert!(result.get("results").is_none() && result.get("discordance").is_none());
+    let development = run.ledger.join(format!("{}.dev.json", ks_train::corpus::checksum(&run.candidate).expect("a checksum")));
+    let recorded: Value = serde_json::from_slice(&std::fs::read(&development).expect("the record")).expect("json");
+    assert_eq!(recorded["floors"], result["floors"]);
+    assert!(recorded["runtime"].is_object());
+}
+
+/// The command as a person runs it, on a test this candidate read before: it gives the recorded result.
+fn command_on_recorded(name: &str, floors: &Value) -> std::process::Output {
+    let run = chat(name, &TEXTS, 6);
+    std::fs::create_dir_all(&run.ledger).expect("a folder");
+    let access = json!({"pairs": {"candidate": {"sha256": ks_train::corpus::checksum(&run.candidate).expect("a checksum")}}, "test_membership": {"messages": ["m"], "questions": ["q"]}});
+    std::fs::write(run.ledger.join("a.access.json"), serde_json::to_vec(&access).expect("json")).expect("a record");
+    std::fs::write(run.ledger.join("a.result.json"), serde_json::to_vec(&json!({"floors": floors, "messages": 6})).expect("json")).expect("a record");
+    trainer()
+        .arg("devchat")
+        .arg("--tree")
+        .arg(&run.tree)
+        .args(["--split", "test"])
+        .arg("--directory")
+        .arg(&run.directory)
+        .arg("--candidate")
+        .arg(&run.candidate)
+        .arg("--released")
+        .arg(&run.candidate)
+        .arg("--baseline")
+        .arg(&run.baseline)
+        .arg("--output")
+        .arg(run.folder.join("command.json"))
+        .arg("--ledger")
+        .arg(&run.ledger)
+        .arg("--sequences-ledger")
+        .arg(&run.sequences)
+        .args(["--jobs", "1"])
+        .output()
+        .expect("the trainer starts")
+}
+
+#[test]
+fn the_command_fails_when_a_floor_of_the_read_fails() {
+    let held = command_on_recorded("chat-command-held", &json!({"every_message_typed": true, "f1_better_than_baseline": true, "f3_not_worse_than_released": true}));
+    assert!(held.status.success(), "{}", String::from_utf8_lossy(&held.stderr));
+    let failed = command_on_recorded("chat-command-failed", &json!({"every_message_typed": false}));
+    assert_eq!(failed.status.code(), Some(1));
+    let said: Value = serde_json::from_slice(&failed.stdout).expect("the summary");
+    assert_eq!(said["floors"], json!({"every_message_typed": false}));
 }

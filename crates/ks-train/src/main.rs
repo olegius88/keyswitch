@@ -457,7 +457,7 @@ fn typing_command(arguments: &[String]) -> i32 {
             let baseline = option(arguments, "--baseline").map_or_else(|| root.join("model/context_v3/baseline-context-v1.json"), PathBuf::from);
             let ledger = option(arguments, "--ledger").map_or_else(|| ledger_root.join("devchat-test-ledger"), PathBuf::from);
             let sequences = option(arguments, "--sequences-ledger").map_or_else(|| ledger_root.join("context-action-test-ledger"), PathBuf::from);
-            ks_train::mixed::devchat(&ks_train::mixed::DevchatRequest {
+            let read = ks_train::mixed::devchat(&ks_train::mixed::DevchatRequest {
                 root: &root,
                 resource_dir: &resource_dir,
                 split: option(arguments, "--split").expect("--split is required"),
@@ -469,8 +469,16 @@ fn typing_command(arguments: &[String]) -> i32 {
                 ledger: &ledger,
                 sequences_ledger: &sequences,
                 workers: jobs,
-            })
-            .map(|report| serde_json::json!({"floors": report["floors"], "messages": report["messages"]}))
+            });
+            match read {
+                Ok(report) => {
+                    println!("{}", serde_json::json!({"floors": report["floors"], "messages": report["messages"]}));
+                    // As `evaluate_devchat_test.main`: a read whose floors do not all hold is a failed run.
+                    let held = report["floors"].as_object().is_some_and(|floors| floors.values().all(|value| value == &serde_json::Value::Bool(true)));
+                    return i32::from(!held);
+                }
+                Err(error) => Err(error),
+            }
         }
     };
     match result {
