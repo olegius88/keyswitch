@@ -161,6 +161,7 @@ jobs:
             throw "KeySwitch did not take its single-instance mutex in a minute"
           }
           $running = Start-Process -FilePath $app -ArgumentList "--hidden" -PassThru
+          $null = $running.Handle
           Wait-Mutex
           $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
           New-Item -Path $runKey -Force | Out-Null
@@ -176,7 +177,8 @@ jobs:
           if (Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) { throw "the uninstaller's copy did not finish in two minutes" }
           if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path $app) { throw "the uninstaller left KeySwitch.exe behind" }
-          if (-not $running.HasExited) { throw "the uninstaller left KeySwitch running" }
+          # A process killed by another ends a moment after the call that killed it returns.
+          if (-not $running.WaitForExit(10000)) { throw "the uninstaller left KeySwitch running" }
           if ((Get-ItemProperty -Path $runKey).PSObject.Properties.Name -contains "KeySwitch") { throw "the uninstaller left the autostart value behind" }
       - name: The published 0.66.2 updated the way its own updater does
         shell: pwsh
@@ -207,13 +209,14 @@ jobs:
           Run-Bounded (Join-Path $old "KeySwitch-Setup-0.66.2-${{ matrix.architecture }}.exe") @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 300000
           if (-not (Test-Path (Join-Path $root "python3*.dll"))) { throw "0.66.2 did not install its Python runtime where this check looks" }
           $python = Start-Process -FilePath $app -ArgumentList "--hidden" -PassThru
+          $null = $python.Handle
           Wait-Mutex
           # The arguments of keyswitch.updates in 0.66.2: the program starts the installer and quits.
           $update = Start-Process -FilePath $setup -ArgumentList "/SP-", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/NORESTARTAPPLICATIONS", "/KEYSWITCHUPDATE=1" -PassThru
           $null = $update.Handle
           if (-not $update.WaitForExit(300000)) { $update.Kill(); throw "the update did not finish in five minutes" }
           if ($update.ExitCode -ne 0) { throw "the update exited with $($update.ExitCode)" }
-          if (-not $python.HasExited) { throw "the update left 0.66.2 running" }
+          if (-not $python.WaitForExit(10000)) { throw "the update left 0.66.2 running" }
           $relaunched = $null
           for ($attempt = 0; $attempt -lt 120 -and -not $relaunched; $attempt++) {
             Start-Sleep -Milliseconds 250
@@ -232,7 +235,7 @@ jobs:
           if ($foreign) { throw "the update left files of 0.66.2: $($foreign -join ', ')" }
           # Installed by hand over the running program, as a user downloading the next release does.
           Run-Bounded $setup @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") 120000
-          if (-not $relaunched.HasExited) { throw "the installer over the running KeySwitch left it running" }
+          if (-not $relaunched.WaitForExit(10000)) { throw "the installer over the running KeySwitch left it running" }
           Run-Bounded $app @("--smoke-ui") 120000
       - uses: actions/upload-artifact@v7
         with:

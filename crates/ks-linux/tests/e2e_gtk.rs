@@ -570,6 +570,20 @@ fn rule_window(app: &Rc<gtk_app::App>) {
         pump(5);
         app.rule_editor_closed();
     }
+    // A draft the rule cannot be built from, alone in the window, so that its refusal is what the confirmation meets.
+    for pattern in ["", "ghbdtn проба"] {
+        app.open_rule_editor(draft(pattern), None);
+        pump(5);
+        if let Some(editor) = app.rule_editor.borrow().as_ref() {
+            editor.confirm();
+        }
+        pump(5);
+        if let Some(editor) = app.rule_editor.borrow_mut().take() {
+            editor.destroy();
+        }
+        pump(5);
+        app.rule_editor_closed();
+    }
     // A rule that cannot be saved: a folder where its file goes.
     let rules = ks_config::history::data_dir().join("learning.json");
     let saved = std::fs::read(&rules).ok();
