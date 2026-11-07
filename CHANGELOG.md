@@ -11,6 +11,7 @@ All notable changes to KeySwitch are documented in this file.
 - Windows: the settings window, the tray icon and the rule dialogs are drawn with the system's own controls instead of Tk.
 - macOS: a correction is shown in Notification Center; the updates page says that an update is installed by hand from the release page, as it always was on a Mac; a login item written by an earlier version still starts the program.
 - Linux: the rows of the program picker answer a click; in 0.66.2 they did nothing.
+- Linux: the settings window no longer echoes a setting changed twice in quick succession (two fast clicks on «Включено», or a change from the tray while the window is open) back and forth with the engine, which rewrote config.json without end and could stop the window answering; it shows the setting as it stands.
 - A word typed in a third layout, neither English nor Russian, is left as typed instead of being dropped with an error, and an error nobody foresaw no longer stops the program: the word being typed is forgotten and typing goes on.
 - Every package carries the licences of the components it is built from, checked against the lockfile; the Debian package and the Mac archives now carry the notice of the Onboard word lists (GPL-3.0 or later) too.
 - For developers: models are trained, checked and released with `ks-train` and `ks-release` (see `docs/model-cycle.md`), which rebuild every model in the repository byte for byte; every line and branch of the program and the tools runs in the tests, and CI refuses a release otherwise.
