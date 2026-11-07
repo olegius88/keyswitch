@@ -136,10 +136,11 @@ fn accepted(speller: &dyn SpellChecker, form: &str) -> bool {
     speller.check(form) || speller.check(&format!("{}{}", pystr::upper(pystr::slice(form, Some(0), Some(1))), pystr::slice(form, Some(1), None)))
 }
 
-/// `prefix_owner`: the first onboard word (sorted) that the form begins without being it.
+/// `prefix_owner`: the first onboard word (sorted) that the form begins without being it. The word after the partition
+/// point sorts after the form, so it is never the form itself.
 fn prefix_owner<'a>(onboard: &'a [String], form: &str) -> Option<&'a str> {
     let index = onboard.partition_point(|word| word.as_str() <= form);
-    onboard.get(index).map(String::as_str).filter(|word| word.starts_with(form) && *word != form)
+    onboard.get(index).map(String::as_str).filter(|word| word.starts_with(form))
 }
 
 fn split_forms(forms: &[String], onboard: &[String], speller: &dyn SpellChecker) -> (Vec<String>, Vec<(String, String)>) {
@@ -151,6 +152,14 @@ fn split_forms(forms: &[String], onboard: &[String], speller: &dyn SpellChecker)
         }
     }
     (kept, dropped)
+}
+
+/// The speller loaded the pinned dictionary of the tree, or the run is told how to make it load that one.
+fn loaded_from(speller: &dyn SpellChecker, root: &Path, dictionary: &str) -> Result<(), String> {
+    if !speller.available() || Path::new(speller.source()).canonicalize().map_err(io)? != root.join(dictionary).canonicalize().map_err(io)? {
+        return Err(format!("the reference Hunspell dictionary is not the one loaded; run with KEYSWITCH_HUNSPELL_PATH={}", root.join(HUNSPELL_ROOT).display()));
+    }
+    Ok(())
 }
 
 /// `reference_inputs`: the onboard vocabulary and the reference dictionary, each checked against the intent pins.
@@ -165,9 +174,7 @@ fn reference_inputs(root: &Path) -> Result<(Vec<String>, Box<dyn SpellChecker>, 
         return Err("reference lexicon or dictionary differs from the intent configuration".to_owned());
     }
     let speller = ks_hunspell::HunspellDictionary::new(LEXICON_LOCALE, &ks_config::history::data_dir());
-    if !speller.available() || Path::new(speller.source()).canonicalize().map_err(io)? != root.join(&dictionary).canonicalize().map_err(io)? {
-        return Err(format!("the reference Hunspell dictionary is not the one loaded; run with KEYSWITCH_HUNSPELL_PATH={}", root.join(HUNSPELL_ROOT).display()));
-    }
+    loaded_from(&speller, root, &dictionary)?;
     let (frequencies, _) = LanguageModel::_read_arpa(&lexicon);
     let mut onboard: BTreeSet<String> = frequencies.iter().map(|(word, _)| word.to_owned()).collect();
     onboard.extend(locale_fallbacks(LEXICON_LOCALE).iter().map(|word| LanguageModel::normalize(word)));
@@ -336,7 +343,11 @@ fn index_entry(package: &Path, pool_path: &str) -> Result<String, String> {
 
 /// `%a, %d %b %Y %H:%M:%S UTC` of the current moment.
 fn release_date() -> String {
-    let seconds = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>();
+    release_date_at((std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>())
+}
+
+/// `%a, %d %b %Y %H:%M:%S UTC` of a moment, in seconds since the epoch.
+fn release_date_at(seconds: i64) -> String {
     let (days, rest) = (seconds.div_euclid(SECONDS_PER_DAY), seconds.rem_euclid(SECONDS_PER_DAY));
     const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -572,6 +583,20 @@ mod tests {
         assert!(!stanza.lines().any(|line| line == "Enabled: no"));
         let key = std::fs::read_to_string(root.join("packaging/keyswitch-archive-keyring.asc")).unwrap();
         assert!(key.contains("BEGIN PGP PUBLIC KEY BLOCK") && !key.contains("PRIVATE KEY BLOCK"));
+    }
+
+    #[test]
+    fn a_speller_without_a_dictionary_did_not_load_the_pinned_one() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let dictionary = format!("{HUNSPELL_ROOT}/{LEXICON_LOCALE}.dic");
+        assert!(loaded_from(&ks_lang::DisabledSpellChecker, &root, &dictionary).unwrap_err().contains("KEYSWITCH_HUNSPELL_PATH="));
+    }
+
+    #[test]
+    fn a_release_is_dated_in_the_utc_calendar_in_every_month() {
+        assert_eq!(release_date_at(0), "Thu, 01 Jan 1970 00:00:00 UTC");
+        assert_eq!(release_date_at(951_782_400 + 3_723), "Tue, 29 Feb 2000 01:02:03 UTC");
+        assert_eq!(release_date_at(1_700_000_000), "Tue, 14 Nov 2023 22:13:20 UTC");
     }
 
     #[test]

@@ -203,13 +203,7 @@ fn main() {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         let size = |name: &str| option(&arguments, name).map_or(5000, |value| value.parse().expect("a number"));
-        match ks_train::detector::command(&resources, size("--sample"), size("--dictionary-sample"), arguments.iter().any(|argument| argument == "--strict")) {
-            Ok(code) => std::process::exit(code),
-            Err(error) => {
-                eprintln!("{error}");
-                std::process::exit(1);
-            }
-        }
+        std::process::exit(command_status(ks_train::detector::command(&resources, size("--sample"), size("--dictionary-sample"), arguments.iter().any(|argument| argument == "--strict"))));
     }
     if arguments.first().map(String::as_str) == Some("ortho") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
@@ -258,14 +252,7 @@ fn main() {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let private = option(&arguments, "--private").map_or_else(|| root.join(".t"), PathBuf::from);
         let paths = ks_train::typo_frequency::Paths::in_private(&private);
-        match ks_train::typo_frequency::command(&root, &paths, arguments.iter().any(|argument| argument == "--verify")) {
-            Ok(true) => return,
-            Ok(false) => std::process::exit(1),
-            Err(error) => {
-                eprintln!("{error}");
-                std::process::exit(1);
-            }
-        }
+        std::process::exit(check_status(ks_train::typo_frequency::command(&root, &paths, arguments.iter().any(|argument| argument == "--verify"))));
     }
     if arguments.first().map(String::as_str) == Some("engine") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
@@ -324,6 +311,28 @@ fn main() {
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(1);
+        }
+    }
+}
+
+/// The exit status of a command that gives its own: that one, or 1 after saying why it stopped.
+fn command_status(result: Result<i32, String>) -> i32 {
+    match result {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// The exit status of a check: 0 when it holds, 1 when it does not or could not be made, after saying why.
+fn check_status(result: Result<bool, String>) -> i32 {
+    match result {
+        Ok(held) => i32::from(!held),
+        Err(error) => {
+            eprintln!("{error}");
+            1
         }
     }
 }
@@ -630,5 +639,25 @@ fn base_command(arguments: &[String]) -> Result<serde_json::Value, String> {
         }
         Some("inventory") => base::prefix_inventory(&root, &option(arguments, "--corpus").map_or_else(|| root.join("model/prefix_v1"), PathBuf::from), &required("--output")?),
         _ => Err("base freeze|reconcile|technical|merge|inventory".to_owned()),
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_status_is_the_command_s_own_or_one_when_it_stopped() {
+        assert_eq!(command_status(Ok(0)), 0);
+        assert_eq!(command_status(Ok(3)), 3);
+        assert_eq!(command_status(Err("it stopped".to_owned())), 1);
+    }
+
+    #[test]
+    fn a_check_that_holds_is_zero_and_anything_else_one() {
+        assert_eq!(check_status(Ok(true)), 0);
+        assert_eq!(check_status(Ok(false)), 1);
+        assert_eq!(check_status(Err("it could not be made".to_owned())), 1);
     }
 }
