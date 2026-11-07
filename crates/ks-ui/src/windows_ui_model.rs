@@ -6,6 +6,7 @@ use ks_cast::To as _;
 use std::fmt;
 
 use ks_config::app_quirks::MENTION_HEADS;
+use ks_config::constants::HINTS_SETTING;
 use ks_config::history::HistoryEntry;
 use ks_config::learning::LearnedRule;
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
@@ -28,14 +29,21 @@ use crate::constants::{
     NUMBER_DISPLAY_DECIMAL_PLACES, PAUSE_DELAY_SETTING_STEP_SECONDS, UPDATE_CHECK_INTERVAL_MS,
 };
 
+/// The titles of the pages the hints name (`hints`); the GTK window's pages have the same titles, and the macOS window
+/// calls the system page by its own one.
+pub const AUTOCORRECTION_PAGE_TITLE: &str = "Автокоррекция";
+pub const HOTKEYS_PAGE_TITLE: &str = "Горячие клавиши";
+pub const SYSTEM_PAGE_TITLE: &str = "Внешний вид и система";
+pub const MAC_SYSTEM_PAGE_TITLE: &str = "Внешний вид";
+
 /// `PAGE_NAMES`: the pages in the order of the navigation.
 pub const PAGE_NAMES: [(&str, &str); 10] = [
     ("overview", "Обзор"),
-    ("autocorrection", "Автокоррекция"),
+    ("autocorrection", AUTOCORRECTION_PAGE_TITLE),
     ("layouts", "Раскладки"),
-    ("hotkeys", "Горячие клавиши"),
+    ("hotkeys", HOTKEYS_PAGE_TITLE),
     ("exclusions", "Исключения"),
-    ("appearance", "Внешний вид и система"),
+    ("appearance", SYSTEM_PAGE_TITLE),
     ("history", "История"),
     ("updates", "Обновления"),
     ("maintenance", "Обслуживание"),
@@ -69,6 +77,11 @@ pub const SELECTION_HOTKEY_DESCRIPTIONS: [(&str, &str); 3] = [
          (Privet → Привет). Мягкий знак эта таблица не передаёт",
     ),
 ];
+/// The titles of the settings the hints name, in every settings window.
+pub const EARLY_SWITCH_TITLE: &str = "Ранняя смена раскладки";
+pub const HINTS_SETTING_TITLE: &str = "Показывать подсказки о возможностях";
+pub const HINTS_SETTING_DESCRIPTION: &str =
+    "Короткие пояснения у курсора и у значка: что умеет программа и что нового в выпуске. Каждое показывается один раз";
 /// What both settings windows say of `detection.field_catch_up`.
 pub const FIELD_CATCH_UP_TITLE: &str = "Ждать отстающее поле";
 pub const FIELD_CATCH_UP_DESCRIPTION: &str = "Браузеры и редакторы на Electron показывают набранное с задержкой. Сколько ждать, \
@@ -235,7 +248,7 @@ pub fn autocorrection_settings() -> Vec<SettingSpec> {
         ),
         spec(
             "detection.early_switch",
-            "Ранняя смена раскладки",
+            EARLY_SWITCH_TITLE,
             "Менять раскладку уже по первым буквам, не дожидаясь конца слова. Включено по умолчанию: пара моделей context-v3 + prefix-v2 прошла запечатанную проверку в этом режиме без порчи правильно набранного текста. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм.",
             Bool,
         ),
@@ -395,6 +408,7 @@ pub fn system_settings() -> Vec<SettingSpec> {
         ),
         spec("general.notifications", "Уведомления об исправлениях", "Показывать исходное и исправленное слово.", Bool),
         spec("general.sound", "Звук исправления", "Воспроизводить системный сигнал после замены.", Bool),
+        spec(HINTS_SETTING, HINTS_SETTING_TITLE, &format!("{HINTS_SETTING_DESCRIPTION}."), Bool),
         spec("general.keep_history", "Сохранять историю", "Записывать локально только пары исправленных слов.", Bool),
         number(
             spec("history.limit", "Размер истории", "Максимальное число локально сохранённых исправлений.", Int),
@@ -921,7 +935,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 18 + 1 + 6 + 7 + 10 + 2 + 1 + 1);
+        assert_eq!(count, 18 + 1 + 6 + 7 + 11 + 2 + 1 + 1);
     }
 
     #[test]

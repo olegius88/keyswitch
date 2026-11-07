@@ -1089,12 +1089,14 @@ dependencies = [
 name = "ks-ui"
 version = "0.70.0"
 dependencies = [
+ "ks-backend",
  "ks-cast",
  "ks-config",
  "ks-context",
  "ks-engine",
  "ks-text",
  "ks-updates",
+ "serde",
  "serde_json",
 ]
 

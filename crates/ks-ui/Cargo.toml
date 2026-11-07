@@ -15,7 +15,12 @@ ks-text.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true
 ks-updates = { path = "../ks-updates" }
-serde_json.workspace = true
+serde.workspace = true
+# raw_value: hints.json keeps what a newer version wrote as the JSON text it read.
+serde_json = { workspace = true, features = ["raw_value"] }
+
+[dev-dependencies]
+ks-backend.workspace = true
 
 [lints]
 workspace = true
