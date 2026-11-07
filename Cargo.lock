@@ -1080,6 +1080,7 @@ dependencies = [
  "num-bigint",
  "regex",
  "ruzstd",
+ "serde",
  "serde_json",
  "sha1",
  "sha2",
