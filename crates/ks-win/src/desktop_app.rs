@@ -37,7 +37,8 @@ use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, 
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MB_OK, MSG, MSGFLT_ALLOW,
     PostMessageW, PostQuitMessage, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SetForegroundWindow, SetTimer, ShowWindow,
-    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WM_TIMER,
+    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETTINGCHANGE,
+    WM_TIMER,
 };
 
 use crate::constants::{
@@ -567,11 +568,22 @@ fn host_message(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> O
             unsafe { PostQuitMessage(0) };
             Some(0)
         }
+        WM_DPICHANGED | WM_DISPLAYCHANGE | WM_SETTINGCHANGE => {
+            // The scale of the icon's monitor may have changed, or the taskbar moved to another monitor. The window's own
+            // handling goes on after this.
+            with_app(|app| {
+                if let Some(tray) = app.tray.borrow().as_ref() {
+                    tray.refresh_size();
+                }
+            });
+            None
+        }
         _ if message == TASKBAR_CREATED.load(Ordering::SeqCst) && message != 0 => {
-            // Explorer restarted: the shell has forgotten the icon.
+            // Explorer restarted: the shell has forgotten the icon, and the taskbar may be on a monitor of another scale.
             with_app(|app| {
                 if let Some(tray) = app.tray.borrow().as_ref() {
                     tray.add();
+                    tray.refresh_size();
                 }
             });
             Some(0)

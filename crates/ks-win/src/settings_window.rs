@@ -458,6 +458,10 @@ unsafe extern "system" fn frame_proc(window: HWND, message: u32, wparam: WPARAM,
         return unsafe { DefWindowProcW(window, message, wparam, lparam) };
     };
     if let Some(result) = ui.frame_message(message, wparam, lparam) {
+        if message == WM_DPICHANGED {
+            // The host draws the tray icon for the new scale too.
+            let _ = (ui.services.host)(window, message, wparam, lparam);
+        }
         return result;
     }
     if let Some(result) = (ui.services.host)(window, message, wparam, lparam) {
