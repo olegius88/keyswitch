@@ -55,10 +55,8 @@ type Entry = (String, Vec<u8>);
 
 fn float_arithmetic() -> Vec<Entry> {
     let mut out = Vec::new();
+    // Every double of the table is a finite accumulator that is not below zero (-0.0 is not), as an `n` of FTRL is.
     for old_n in doubles() {
-        if !old_n.is_finite() || old_n < 0.0 {
-            continue;
-        }
         for gradient in doubles() {
             let new_n = old_n + gradient * gradient;
             if !new_n.is_finite() {

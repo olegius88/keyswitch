@@ -86,9 +86,13 @@ pub fn load_phrases(root: &Path) -> Result<Vec<Phrase>, String> {
     if checksum(&path)? != SOURCE_SHA256 {
         return Err("frozen CC0 source checksum mismatch".to_owned());
     }
-    let raw = String::from_utf8(gz_read(&path)?).map_err(|error| error.to_string())?;
+    parse_phrases(&String::from_utf8(gz_read(&path)?).map_err(|error| error.to_string())?)
+}
+
+/// The rows of the snapshot: identifier, language, text and date of a change, the English and Russian ones kept.
+fn parse_phrases(raw: &str) -> Result<Vec<Phrase>, String> {
     let mut phrases: BTreeMap<i64, Phrase> = BTreeMap::new();
-    for line in pystr::splitlines(&raw, true) {
+    for line in pystr::splitlines(raw, true) {
         let fields: Vec<&str> = line.strip_suffix('\n').unwrap_or(line).split('\t').collect();
         let [identifier, language, text, _modified] = fields.as_slice() else { return Err("invalid CC0 TSV row".to_owned()) };
         if *language != "eng" && *language != "rus" {
@@ -298,21 +302,28 @@ fn label(raw: &str, locale: &str, words: &WordLists) -> Result<Option<&'static s
 fn lexicon_rows(root: &Path) -> Result<BTreeMap<(String, String), i64>, String> {
     let mut counts: BTreeMap<(String, String), i64> = BTreeMap::new();
     for (script, path, expected, _) in LEXICONS {
-        for (word, frequency) in read_lexicon(root, path, expected)? {
-            if script_of(&word) != Some(script) {
-                continue;
-            }
-            let keys = to_keys(&word)?;
-            if keys.is_empty() || keys.chars().count() > MAXIMUM_TOKEN_CHARACTERS {
-                continue;
-            }
-            let bits = 128 - (frequency.unsigned_abs()).leading_zeros();
-            let weight = i64::from(bits.clamp(1, MAXIMUM_LEXICON_WEIGHT));
-            let entry = counts.entry((script.to_owned(), keys)).or_insert(0);
-            *entry = (*entry).max(weight);
-        }
+        weigh_words(script, read_lexicon(root, path, expected)?, &mut counts)?;
     }
     Ok(counts)
+}
+
+/// The words of a list of this script, each as its keys with the weight of its frequency, the largest of a key kept.
+fn weigh_words(script: &str, words: BTreeMap<String, i128>, counts: &mut BTreeMap<(String, String), i64>) -> Result<(), String> {
+    for (word, frequency) in words {
+        if script_of(&word) != Some(script) {
+            continue;
+        }
+        let keys = to_keys(&word)?;
+        // A word of a script has a letter, and so a key.
+        if keys.chars().count() > MAXIMUM_TOKEN_CHARACTERS {
+            continue;
+        }
+        let bits = 128 - (frequency.unsigned_abs()).leading_zeros();
+        let weight = i64::from(bits.clamp(1, MAXIMUM_LEXICON_WEIGHT));
+        let entry = counts.entry((script.to_owned(), keys)).or_insert(0);
+        *entry = (*entry).max(weight);
+    }
+    Ok(())
 }
 
 type TokenRow = (String, String, String, BTreeMap<String, i64>);
@@ -330,10 +341,8 @@ fn corpus_rows(root: &Path) -> Result<Vec<TokenRow>, String> {
                 continue;
             }
             let Some(script) = label(raw, &assigned.phrase.locale, &lists)? else { continue };
+            // A token with a script has a letter, and so a key.
             let keys = to_keys(raw)?;
-            if keys.is_empty() {
-                continue;
-            }
             *counts.entry((split.to_owned(), script.to_owned(), keys)).or_default().entry(shape_of(raw, position).to_owned()).or_insert(0) += 1;
         }
     }
@@ -458,6 +467,11 @@ fn known_forms(rows: &[Row]) -> HashMap<&'static str, HashSet<String>> {
     result
 }
 
+/// A verdict of a model without its dictionary would say "not known" of every word Hunspell knows.
+fn require_speller(model: &LanguageModel, script: &str) -> Result<(), String> {
+    if model.speller.available() { Ok(()) } else { Err(format!("no {script} speller: refusing to freeze a partial verdict")) }
+}
+
 /// `reference_models`: the engine's models over the reference word lists and dictionaries of Layout Intent v1.
 fn reference_models(root: &Path) -> Result<HashMap<&'static str, LanguageModel>, String> {
     let frozen = crate::intent::frozen_dictionaries(root)?;
@@ -467,9 +481,7 @@ fn reference_models(root: &Path) -> Result<HashMap<&'static str, LanguageModel>,
         let supplement = ks_lang::lexicon_supplement::supplement_words(&root.join("resources"), locale).map_err(|error| error.name.to_string())?;
         let speller = ks_hunspell::HunspellDictionary::in_roots(locale, std::slice::from_ref(&frozen));
         let model = LanguageModel::load(locale, supplement.iter(), &word_roots, Box::new(speller));
-        if !model.speller.available() {
-            return Err(format!("no {script} speller: refusing to freeze a partial verdict"));
-        }
+        require_speller(&model, script)?;
         models.insert(script, model);
     }
     Ok(models)
@@ -584,9 +596,29 @@ fn independent_population(root: &Path, rows: &[Row], known: &HashMap<String, Has
     Ok((kept, dropped))
 }
 
+/// The end of a comparison: every part the same, or how many differ.
+fn none_differ(differences: usize, what: &str) -> Result<(), String> {
+    if differences == 0 { Ok(()) } else { Err(format!("{differences} {what}")) }
+}
+
 fn report_line(differences: &mut usize, name: &str, equal: bool) {
     println!("{name}: {}", if equal { "same" } else { "DIFFERS" });
     *differences += usize::from(!equal);
+}
+
+/// An opened set of the history: its report names its receipt, its receipt names its files, and both name the same source
+/// and type counts.
+fn history_holds(folder: &Path, report: &Value) -> Result<bool, String> {
+    let receipt = read_json(&folder.join("receipt.json"))?;
+    let described = &report["independent_test"];
+    let counts: BTreeMap<String, Value> = report["corpus_test"]["counts"].as_object().ok_or("counts")?.iter().filter(|(name, _)| name.ends_with("negative_types") || name.ends_with("positive_types")).map(|(name, value)| (name.clone(), value.clone())).collect();
+    Ok(described["receipt_sha256"].as_str() == Some(&checksum(&folder.join("receipt.json"))?) && receipt["tokens_sha256"].as_str() == Some(&checksum(&folder.join("tokens.jsonl.gz"))?) && receipt["evidence_sha256"].as_str() == Some(&checksum(&folder.join("known-evidence.json.gz"))?) && described["source"] == receipt["source"] && json!(counts) == receipt["types"])
+}
+
+/// The active independent set: its receipt names this set, the types and the seen ones counted again, and its files.
+fn independent_set_holds(directory: &Path, recorded_set: &Value, types: &Value, dropped: &Value) -> Result<bool, String> {
+    let active = directory.join("independent");
+    Ok(recorded_set["set"].as_str() == Some(SET_NAME) && recorded_set["schema_version"].as_i64().is_some() && types == &recorded_set["types"] && dropped == &recorded_set["excluded_as_seen"] && recorded_set["tokens_sha256"].as_str() == Some(&checksum(&active.join("tokens.jsonl.gz"))?) && recorded_set["evidence_sha256"].as_str() == Some(&checksum(&active.join("known-evidence.json.gz"))?) && recorded_set["snapshot_tokens_sha256"].as_str() == Some(&checksum(&directory.join("tokens.jsonl.gz"))?))
 }
 
 /// Everything rebuilt from the frozen sources and compared with the frozen files. A digest of the code in a receipt written
@@ -614,11 +646,7 @@ pub fn verify(root: &Path) -> Result<(), String> {
     report_line(&mut differences, "web lexicon receipt", read_json(&directory.join("web-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("web-lexicon-ru.json.gz"))?));
     report_line(&mut differences, "prose lexicon receipt", read_json(&directory.join("prose-lexicon-receipt.json"))?["forms_sha256"].as_str() == Some(&checksum(&directory.join("prose-lexicon-ru.json.gz"))?));
     for (set, report_path) in HISTORY {
-        let (folder, report) = (directory.join(set), read_json(&directory.join(report_path))?);
-        let receipt = read_json(&folder.join("receipt.json"))?;
-        let described = &report["independent_test"];
-        let counts: BTreeMap<String, Value> = report["corpus_test"]["counts"].as_object().ok_or("counts")?.iter().filter(|(name, _)| name.ends_with("negative_types") || name.ends_with("positive_types")).map(|(name, value)| (name.clone(), value.clone())).collect();
-        report_line(&mut differences, set, described["receipt_sha256"].as_str() == Some(&checksum(&folder.join("receipt.json"))?) && receipt["tokens_sha256"].as_str() == Some(&checksum(&folder.join("tokens.jsonl.gz"))?) && receipt["evidence_sha256"].as_str() == Some(&checksum(&folder.join("known-evidence.json.gz"))?) && described["source"] == receipt["source"] && json!(counts) == receipt["types"]);
+        report_line(&mut differences, set, history_holds(&directory.join(set), &read_json(&directory.join(report_path))?)?);
     }
     let active = directory.join("independent");
     let active_rows = read_set_rows(&active.join("tokens.jsonl.gz"))?;
@@ -640,13 +668,11 @@ pub fn verify(root: &Path) -> Result<(), String> {
     let minimum = (read_json(&directory.join("config.json"))?["minimum_length"].as_u64().ok_or("minimum_length")?).to::<usize>();
     let (kept, dropped) = independent_population(root, &active_rows, &known_active, minimum)?;
     let recorded_set = read_json(&active.join("receipt.json"))?;
-    report_line(&mut differences, "independent set", recorded_set["set"].as_str() == Some(SET_NAME) && recorded_set["schema_version"].as_i64().is_some() && json!(type_counts(&kept)) == recorded_set["types"] && json!(dropped) == recorded_set["excluded_as_seen"] && recorded_set["tokens_sha256"].as_str() == Some(&checksum(&active.join("tokens.jsonl.gz"))?) && recorded_set["evidence_sha256"].as_str() == Some(&checksum(&active.join("known-evidence.json.gz"))?) && recorded_set["snapshot_tokens_sha256"].as_str() == Some(&checksum(&directory.join("tokens.jsonl.gz"))?));
+    report_line(&mut differences, "independent set", independent_set_holds(&directory, &recorded_set, &json!(type_counts(&kept)), &json!(dropped))?);
     let report = read_json(&directory.join("report.json"))?;
     let outcome = ortho::independent_outcome(root, &kept, &known_active)?;
     report_line(&mut differences, "independent test report", outcome == report["corpus_test"]);
-    if differences != 0 {
-        return Err(format!("{differences} inputs of the orthotactic model differ from the frozen files"));
-    }
+    none_differ(differences, "inputs of the orthotactic model differ from the frozen files")?;
     println!("the inputs of the orthotactic model reproduce");
     Ok(())
 }
@@ -722,7 +748,8 @@ pub fn wikitext_sentences(content: &str) -> Vec<String> {
             let is_space = |character: char| pystr::isspace(character.encode_utf8(&mut [0; 4]));
             if index > 0 && is_space(characters[index]) && ".!?…".contains(characters[index - 1]) {
                 let mut end = index;
-                while end < characters.len() && is_space(characters[end]) {
+                // The line is stripped: the spaces after a stop end before it does.
+                while characters.get(end).is_some_and(|next| is_space(*next)) {
                     end += 1;
                 }
                 if characters.get(end).is_some_and(|next| "—–«\"([".contains(*next) || next.is_ascii_uppercase() || ('А'..='Я').contains(next) || *next == 'Ё') {
@@ -806,9 +833,7 @@ fn sql_rows(path: &Path, table: &str, wanted: &[&str], mut each: impl FnMut(&[Sq
             declaring = true;
         } else if declaring && line.first().is_some_and(u8::is_ascii_whitespace) && line.contains(&b'`') && String::from_utf8_lossy(&line).trim_start().starts_with('`') {
             let text = String::from_utf8_lossy(&line);
-            if let Some(name) = text.trim_start().strip_prefix('`').and_then(|rest| rest.split('`').next()) {
-                columns.push(name.to_owned());
-            }
+            columns.push(text.trim_start().strip_prefix('`').and_then(|rest| rest.split('`').next()).expect("a line that starts with a backtick names its column").to_owned());
         } else if line.starts_with(&start) {
             declaring = false;
             if places.is_empty() {
@@ -852,9 +877,13 @@ fn xml_text(raw: &str) -> String {
 }
 
 /// `articles`: (page id, revision id, wikitext) of the wanted pages of a pages-articles dump.
-fn articles(path: &Path, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, String)) -> Result<(), String> {
-    use std::io::BufRead;
-    let mut reader = std::io::BufReader::with_capacity(1 << 20, bzip2_rs::DecoderReader::new(std::io::BufReader::new(std::fs::File::open(path).map_err(|error| error.to_string())?)));
+fn articles(path: &Path, wanted: &HashSet<i64>, each: impl FnMut(i64, i64, String)) -> Result<(), String> {
+    let reader = std::io::BufReader::with_capacity(1 << 20, bzip2_rs::DecoderReader::new(std::io::BufReader::new(std::fs::File::open(path).map_err(|error| error.to_string())?)));
+    article_pages(reader, wanted, each)
+}
+
+/// The pages of the XML of a dump, line by line: the identifiers of a page and of its revision, then its text.
+fn article_pages(mut reader: impl std::io::BufRead, wanted: &HashSet<i64>, mut each: impl FnMut(i64, i64, String)) -> Result<(), String> {
     let mut line = String::new();
     let (mut page, mut revision): (Option<i64>, Option<i64>) = (None, None);
     let mut in_revision = false;
@@ -1059,10 +1088,7 @@ pub fn verify_pinned_lexicon_sources(root: &Path, web: Option<(&Path, &str)>, pr
             report_line(&mut differences, name, summary[name] == receipt[name]);
         }
     }
-    if differences != 0 {
-        return Err(format!("{differences} lexicon checks differ"));
-    }
-    Ok(())
+    none_differ(differences, "lexicon checks differ")
 }
 
 /// One downloaded file of an independent set.
@@ -1109,10 +1135,9 @@ fn set_rows(root: &Path, sources: &[SetSource], directory: &Path, excluded: &[St
                     continue;
                 }
                 let Some(script) = label(raw, &source.locale, &lists)? else { continue };
+                // A token with a script has a letter, and so a key.
                 let keys = to_keys(raw)?;
-                if !keys.is_empty() {
-                    *counts.entry((script.to_owned(), keys)).or_default().entry(shape_of(raw, position).to_owned()).or_insert(0) += 1;
-                }
+                *counts.entry((script.to_owned(), keys)).or_default().entry(shape_of(raw, position).to_owned()).or_insert(0) += 1;
             }
         }
     }
@@ -1190,4 +1215,147 @@ pub fn check_rows_within(root: &Path, description: &Path, directory: &Path, only
         }
     }
     Ok((within, rows.len()))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-train-ortho-inputs-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    #[test]
+    fn a_phrase_family_falls_in_every_split_by_its_name() {
+        let splits: BTreeSet<&str> = (0..2000).map(|index| phrase_split(&format!("tatoeba:{index}"))).collect();
+        assert_eq!(splits, BTreeSet::from(["train", "development", "calibration", "test", "reserve"]));
+        let halves: BTreeSet<&str> = (0..200).map(|index| split_of(&format!("tatoeba:{index}"))).collect();
+        assert_eq!(halves, BTreeSet::from(["train", "test"]));
+    }
+
+    #[test]
+    fn a_token_has_a_script_and_a_case_shape() {
+        assert_eq!(script_of("слово"), Some("ru"));
+        assert_eq!(script_of("word"), Some("en"));
+        assert_eq!(script_of("смесьmix"), None);
+        assert_eq!(script_of("42"), None);
+        assert_eq!(shape_of("NASA", 3), "upper");
+        assert_eq!(shape_of("Word", 0), "initial");
+        assert_eq!(shape_of("Word", 2), "inner");
+        assert_eq!(shape_of("word", 0), "lower");
+    }
+
+    #[test]
+    fn a_word_list_is_read_only_as_it_was_reviewed() {
+        let folder = scratch("lexicon");
+        let text = "\\data\\\nngram 1=5\n\n\\1-grams:\n\n5 слово\nnospace\n3 <s>\nx word\n4 a\n7 Word\n\\2-grams:\n1 a b\n";
+        std::fs::write(folder.join("list.lm"), text).expect("a file");
+        let pin = hex(&Sha256::digest(text.as_bytes()));
+        let words = read_lexicon(&folder, "list.lm", &pin).expect("a list");
+        assert_eq!(words, BTreeMap::from([("word".to_owned(), 7), ("слово".to_owned(), 5)]));
+        assert!(read_lexicon(&folder, "list.lm", "0").unwrap_err().contains("checksum mismatch"));
+        assert!(read_lexicon(&folder, "gone.lm", &pin).is_err());
+    }
+
+    #[test]
+    fn a_value_of_a_dump_reads_as_what_it_is() {
+        assert_eq!(SqlValue::Null.number(), 0);
+        assert_eq!(SqlValue::Number(1).text(), "");
+        assert_eq!(sql_field(b"abc,", 0), (SqlValue::Text(b"abc".to_vec()), 3));
+        assert_eq!(sql_field(b"NULL)", 0), (SqlValue::Null, 4));
+        assert_eq!(sql_field(b"-7,", 0), (SqlValue::Number(-7), 2));
+    }
+
+    #[test]
+    fn a_snapshot_row_is_read_whole_or_refused() {
+        let phrases = parse_phrases("1\teng\tA phrase.\t2026\n2\tdeu\tEin Satz.\t2026\n3\trus\tФраза.\t2026").expect("phrases");
+        assert_eq!(phrases.iter().map(|phrase| phrase.identifier).collect::<Vec<_>>(), [1, 3]);
+        for (raw, words) in [("1\teng\tA phrase.\n", "invalid CC0 TSV row"), ("x\teng\tA phrase.\t2026\n", "invalid CC0 source ID"), ("0\teng\tA phrase.\t2026\n", "nonpositive"), ("1\teng\tA.\t1\n1\trus\tБ.\t1\n", "duplicate")] {
+            let said = parse_phrases(raw).map(|_| ()).unwrap_err();
+            assert!(said.contains(words), "{words}: {said}");
+        }
+    }
+
+    #[test]
+    fn a_comparison_ends_in_how_many_parts_differ() {
+        none_differ(0, "parts differ").expect("the same");
+        assert_eq!(none_differ(2, "parts differ").unwrap_err(), "2 parts differ");
+        let deaf = LanguageModel::load("en_US", std::iter::empty::<&str>(), &[], LanguageModel::disabled_speller());
+        assert!(require_speller(&deaf, "en").unwrap_err().contains("no en speller"));
+    }
+
+    #[test]
+    fn an_opened_set_and_the_active_one_are_held_to_their_receipts() {
+        let directory = scratch("sets");
+        let folder = directory.join("history");
+        std::fs::create_dir_all(directory.join("independent")).expect("a folder");
+        std::fs::create_dir_all(&folder).expect("a folder");
+        for path in [folder.join("tokens.jsonl.gz"), folder.join("known-evidence.json.gz"), directory.join("tokens.jsonl.gz"), directory.join("independent/tokens.jsonl.gz"), directory.join("independent/known-evidence.json.gz")] {
+            std::fs::write(&path, path.display().to_string()).expect("a file");
+        }
+        let sum = |path: &Path| checksum(path).expect("a digest");
+        let types = json!({"ru:negative_types": 1, "en:positive_types": 2});
+        let receipt = json!({"tokens_sha256": sum(&folder.join("tokens.jsonl.gz")), "evidence_sha256": sum(&folder.join("known-evidence.json.gz")), "source": "a source", "types": types});
+        let holds = |receipt: &Value, edit: &dyn Fn(&mut Value)| {
+            std::fs::write(folder.join("receipt.json"), serde_json::to_vec(receipt).expect("json")).expect("a receipt");
+            let mut report = json!({"independent_test": {"receipt_sha256": sum(&folder.join("receipt.json")), "source": "a source"}, "corpus_test": {"counts": {"ru:negative_types": 1, "en:positive_types": 2, "rows": 7}}});
+            edit(&mut report);
+            history_holds(&folder, &report).expect("compared")
+        };
+        assert!(holds(&receipt, &|_| ()));
+        assert!(!holds(&receipt, &|report| report["independent_test"]["receipt_sha256"] = json!("0")));
+        assert!(!holds(&receipt, &|report| report["independent_test"]["source"] = json!("another")));
+        assert!(!holds(&receipt, &|report| report["corpus_test"]["counts"]["ru:negative_types"] = json!(9)));
+        for field in ["tokens_sha256", "evidence_sha256"] {
+            let mut moved = receipt.clone();
+            moved[field] = json!("0");
+            assert!(!holds(&moved, &|_| ()), "{field}");
+        }
+        let (kept, dropped) = (json!({"ru:negative_types": 3}), json!({"en:positive_types": 1}));
+        let active = directory.join("independent");
+        let recorded = json!({"set": SET_NAME, "schema_version": 2, "types": kept, "excluded_as_seen": dropped, "tokens_sha256": sum(&active.join("tokens.jsonl.gz")), "evidence_sha256": sum(&active.join("known-evidence.json.gz")), "snapshot_tokens_sha256": sum(&directory.join("tokens.jsonl.gz"))});
+        assert!(independent_set_holds(&directory, &recorded, &kept, &dropped).expect("compared"));
+        for (field, value) in [("set", json!("another")), ("schema_version", json!("two")), ("types", json!({})), ("excluded_as_seen", json!({})), ("tokens_sha256", json!("0")), ("evidence_sha256", json!("0")), ("snapshot_tokens_sha256", json!("0"))] {
+            let mut moved = recorded.clone();
+            moved[field] = value;
+            assert!(!independent_set_holds(&directory, &moved, &kept, &dropped).expect("compared"), "{field}");
+        }
+    }
+
+    #[test]
+    fn a_dump_of_a_table_is_read_by_its_declared_columns_over_every_insert() {
+        let path = scratch("sql").join("page.sql.gz");
+        let text = "CREATE TABLE `page` (\n  `page_id` int,\n  KEY `idx` (`page_id`),\n  KEY plain (page_id),\n  `page_title` varchar\n) ENGINE=InnoDB;\nINSERT INTO `page` VALUES (1,'a'),(2,'b');\nINSERT INTO `page` VALUES (3,'c');\n";
+        std::fs::write(&path, gz_write(text.as_bytes()).expect("packed")).expect("a file");
+        let mut rows = Vec::new();
+        sql_rows(&path, "page", &["page_title", "page_id"], |row| rows.push((row[1].number(), row[0].text()))).expect("rows");
+        assert_eq!(rows, [(1, "a".to_owned()), (2, "b".to_owned()), (3, "c".to_owned())]);
+    }
+
+    #[test]
+    fn the_pages_of_a_dump_are_read_with_their_revision_and_only_when_wanted() {
+        let xml = "<mediawiki>\n<page>\n<title>Без номера</title>\n<revision>\n<id>5</id>\n<text>не та\nстраница</text>\n<text>одна</text>\n<text/>\n</revision>\n</page>\n<page>\n<id>1</id>\n<title>Нужная</title>\n<revision>\n<timestamp>x</timestamp>\n<id>10</id>\n<text>первая\nвторая</text>\n<text/>\n<text>одна строка</text>\n</revision>\n</page>\n<page>\n<id>2</id>\n<revision>\n<id>20</id>\n<text>чужая\nстраница</text>\n<text bytes=\"0\" />\n<text>одна</text>\n</revision>\n</page>\n</mediawiki>\n";
+        let mut pages = Vec::new();
+        article_pages(xml.as_bytes(), &HashSet::from([1]), |page, revision, text| pages.push((page, revision, text))).expect("pages");
+        assert_eq!(pages, [(1, 10, "первая\nвторая".to_owned()), (1, 10, String::new()), (1, 10, "одна строка".to_owned())]);
+    }
+
+    #[test]
+    fn a_word_of_prose_is_what_its_letters_say() {
+        assert_eq!(prose_token("«-кот-»"), "кот");
+        assert_eq!(prose_token("_кот"), "_кот");
+        assert!(!russian_form(""));
+        assert_eq!(wikitext_sentences("One. Two"), ["One.", "Two"]);
+    }
+
+    #[test]
+    fn a_word_list_gives_the_keys_of_its_own_script_up_to_a_length() {
+        let mut counts = BTreeMap::new();
+        let words = BTreeMap::from([("привет".to_owned(), 1000_i128), ("word".to_owned(), 5), ("я".repeat(40), 3)]);
+        weigh_words("ru", words, &mut counts).expect("rows");
+        assert_eq!(counts, BTreeMap::from([(("ru".to_owned(), "ghbdtn".to_owned()), 10)]));
+    }
 }

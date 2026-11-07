@@ -906,3 +906,153 @@ fn a_new_base_and_its_technical_corpus_have_their_own_refusals() {
     }
     refused(&run(base("inventory").arg("--corpus").arg(&empty).arg("--output").arg(chain.folder.join("i2.json"))), "prefix row without a text");
 }
+
+#[test]
+fn a_corpus_without_rows_or_aliases_is_no_origin_of_a_merge() {
+    let chain = &*CHAIN;
+    // A base needs documents to sample.
+    let sources = chain.folder.join("sources");
+    refused(&run(base("freeze").arg("--source-root").arg(&sources).arg("--output").arg(chain.folder.join("b0")).args(["--namespace", "small:base", "--max-documents", "0"])), "must be positive");
+    let merge = |base_copy: &Path, words: &str| refused(&run(base("merge").arg("--base").arg(base_copy).arg("--technical").arg(&chain.technical).arg("--output").arg(chain.folder.join("merge-refused"))), words);
+    // Every split empty.
+    let empty = chain.folder.join("merge-empty");
+    copy_of(&chain.reconciled, &empty);
+    let manifest_path = empty.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path).expect("a manifest")).expect("json");
+    for split in ["train", "development", "calibration", "test", "quarantine"] {
+        let packed = gz(b"");
+        std::fs::write(empty.join(format!("{split}.jsonl.gz")), &packed).expect("a split");
+        manifest["splits"][split] = json!({"path": format!("{split}.jsonl.gz"), "sha256": digest(&packed), "content_sha256": digest(b""), "rows": 0});
+    }
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
+    merge(&empty, "empty source corpus");
+    // A base whose closure names no alias.
+    let bare = chain.folder.join("merge-bare");
+    copy_of(&chain.reconciled, &bare);
+    let closure = bare.join("physical-family-closure.json");
+    let mut value: Value = serde_json::from_slice(&std::fs::read(&closure).expect("a sidecar")).expect("json");
+    value["alias_sha256_to_closure_sha256"] = json!({});
+    let bytes = serde_json::to_vec(&value).expect("json");
+    std::fs::write(&closure, &bytes).expect("a sidecar");
+    edited(&bare.join("manifest.json"), &|manifest| manifest["reconciliation"]["closure_sha256"] = json!(digest(&bytes)), &|| merge(&bare, "empty base physical alias sidecar"));
+}
+
+/// The rows of a split file.
+fn rows_of(path: &Path) -> Vec<Value> {
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut flate2::read::MultiGzDecoder::new(std::fs::File::open(path).expect("a split")), &mut text).expect("text");
+    text.lines().map(|line| serde_json::from_str(line).expect("a row")).collect()
+}
+
+/// A row more in a split of a corpus, its manifest following.
+fn append_row(folder: &Path, split: &str, row: &Value) {
+    let path = folder.join(format!("{split}.jsonl.gz"));
+    let mut raw = Vec::new();
+    std::io::Read::read_to_end(&mut flate2::read::MultiGzDecoder::new(std::fs::File::open(&path).expect("a split")), &mut raw).expect("bytes");
+    raw.extend_from_slice(serde_json::to_string(row).expect("json").as_bytes());
+    raw.push(b'\n');
+    let packed = gz(&raw);
+    std::fs::write(&path, &packed).expect("a split");
+    let manifest_path = folder.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&manifest_path).expect("a manifest")).expect("json");
+    let rows = manifest["splits"][split]["rows"].as_u64().expect("a count") + 1;
+    manifest["splits"][split] = json!({"path": format!("{split}.jsonl.gz"), "sha256": digest(&packed), "content_sha256": digest(&raw), "rows": rows});
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
+}
+
+#[test]
+fn a_fitting_extension_takes_out_what_a_test_saw_and_what_its_base_splits_two_ways() {
+    let chain = &*CHAIN;
+    let sid = chain.folder.join("contest-sid");
+    deb_source(&sid, "https://deb.debian.org/debian/dists/sid/main/Contents-amd64.gz", "https://deb.debian.org/debian/dists/sid/InRelease", "main/Contents-amd64.gz", "ct", true);
+    let over = chain.folder.join("contest-over");
+    done(&run(holdout(chain, "small-contest", &over).arg("--sid-directory").arg(&sid).args(["--treebank", "UD_Russian-GSD"])));
+    let tatoeba = chain.folder.join("contest-tatoeba");
+    tatoeba_source(&tatoeba);
+    let first = chain.folder.join("contest-first");
+    done(&run(&mut fitting(chain, "small-contest-fit", &first, &over, &tatoeba)));
+    let added: Vec<Value> = rows_of(&first.join("train.jsonl.gz")).into_iter().filter(|row| row["source"].as_str().is_some_and(|source| source.starts_with("Tatoeba"))).collect();
+    assert!(added.len() > 2, "{}", added.len());
+    // A base whose train and development both hold a word of the first extension.
+    let contested = chain.folder.join("contest-base");
+    copy_of(&over, &contested);
+    let word = added[0]["original"].as_str().expect("a word").to_owned();
+    for split in ["train", "development"] {
+        let mut template = rows_of(&contested.join(format!("{split}.jsonl.gz")))[0].clone();
+        template["original"] = json!(word);
+        template["lemma"] = json!(word);
+        template["identifier"] = json!(format!("contest:{split}"));
+        append_row(&contested, split, &template);
+    }
+    // A test read before, of a row, a document and a family the first extension added.
+    let text = |row: &Value, field: &str| row[field].as_str().expect("a field").to_owned();
+    let membership = json!({"row_ids_sha256": [digest(text(&added[1], "identifier").as_bytes())], "document_ids_sha256": [digest(text(&added[2], "document").as_bytes())], "family_ids_sha256": [text(&added[added.len() - 1], "family")]});
+    let ledger = ledger_of(&chain.folder.join("contest-ledger"), &membership);
+    let report = chain.folder.join("contest-second.report.json");
+    let mut second = trainer();
+    second.arg("fitting").arg("--tree").arg(tree()).arg("--base").arg(&contested).arg("--ud-origin").arg(&chain.reconciled).arg("--technical-origin").arg(&chain.technical).arg("--prefix-inventory").arg(&chain.prefix).arg("--ledger").arg(&ledger).args(["--namespace", "small-contest-fit", "--tatoeba-language", "rus", "--tatoeba-language", "eng"]).arg("--tatoeba-directory").arg(&tatoeba).arg("--output").arg(chain.folder.join("contest-second")).arg("--report").arg(&report);
+    done(&run(&mut second));
+    let reasons: Value = serde_json::from_slice(&std::fs::read(&report).expect("a report")).expect("json");
+    for reason in ["base-split-conflict", "prior-accessed-test-row", "prior-accessed-test-document", "prior-accessed-test-family"] {
+        assert!(reasons["fitting"]["quarantine_reasons"].get(reason).is_some(), "{reason}: {}", reasons["fitting"]["quarantine_reasons"]);
+    }
+    // A base whose test or quarantine is not the file its manifest names.
+    for split in ["test", "quarantine"] {
+        let changed = chain.folder.join(format!("contest-{split}"));
+        copy_of(&over, &changed);
+        edited(&changed.join("manifest.json"), &|manifest| manifest["splits"][split]["sha256"] = json!("0"), &|| {
+            refused(&run(&mut fitting(chain, "small-contest-fit", &chain.folder.join(format!("contest-{split}-out")), &changed, &tatoeba)), &format!("base split checksum mismatch: {split}"));
+        });
+    }
+}
+
+#[test]
+fn a_reconciliation_writes_its_report_alone_and_refuses_a_membership_rebuilt_otherwise() {
+    let chain = &*CHAIN;
+    let sources = chain.folder.join("sources");
+    let reconcile = |corpus: &Path, report: &Path| run(base("reconcile").arg("--corpus").arg(corpus).arg("--source-root").arg(&sources).arg("--report").arg(report));
+    let alone = chain.folder.join("reconcile-alone.json");
+    done(&reconcile(&chain.base, &alone));
+    assert!(alone.is_file());
+    refused(&reconcile(&chain.base, Path::new("/")), "");
+    let copy = chain.folder.join("reconcile-membership");
+    copy_of(&chain.base, &copy);
+    let path = copy.join("test-membership.json");
+    let mut membership: Value = serde_json::from_slice(&std::fs::read(&path).expect("a membership")).expect("json");
+    membership["scope"] = json!("another scope");
+    let bytes = serde_json::to_vec(&membership).expect("json");
+    std::fs::write(&path, &bytes).expect("a membership");
+    edited(&copy.join("manifest.json"), &|manifest| manifest["test_membership_sha256"] = json!(digest(&bytes)), &|| refused(&reconcile(&copy, &chain.folder.join("reconcile-membership.json")), "reconstructed test membership differs"));
+}
+
+#[test]
+fn a_merge_refuses_a_technical_test_whose_documents_or_rows_are_not_its_own() {
+    let chain = &*CHAIN;
+    let technical = chain.folder.join("merge-membership");
+    copy_of(&chain.technical, &technical);
+    let merge = |words: &str| refused(&run(base("merge").arg("--base").arg(&chain.reconciled).arg("--technical").arg(&technical).arg("--output").arg(chain.folder.join("merge-membership-out"))), words);
+    let path = technical.join("test-membership.json");
+    let original = std::fs::read(&path).expect("a membership");
+    let good: Value = serde_json::from_slice(&original).expect("json");
+    let pinned = |edit: &dyn Fn(&mut Value), words: &str| {
+        let mut value = good.clone();
+        edit(&mut value);
+        let bytes = serde_json::to_vec(&value).expect("json");
+        std::fs::write(&path, &bytes).expect("a membership");
+        edited(&technical.join("manifest.json"), &|manifest| manifest["test_membership_sha256"] = json!(digest(&bytes)), &|| merge(words));
+        std::fs::write(&path, &original).expect("a membership");
+    };
+    pinned(&|value| value["document_ids_sha256"] = json!(["a".repeat(64)]), "test document membership mismatch");
+    let base_membership: Value = serde_json::from_slice(&std::fs::read(chain.reconciled.join("test-membership.json")).expect("a membership")).expect("json");
+    pinned(&|value| value["row_ids_sha256"][0] = base_membership["row_ids_sha256"][0].clone(), "origin test membership overlap");
+    // A technical corpus whose test is empty: its sidecar still names test families.
+    let packed = gz(b"");
+    std::fs::write(technical.join("test.jsonl.gz"), &packed).expect("a split");
+    edited(&technical.join("manifest.json"), &|manifest| manifest["splits"]["test"] = json!({"path": "test.jsonl.gz", "sha256": digest(&packed), "content_sha256": digest(b""), "rows": 0}), &|| {
+        pinned(&|value| {
+            for field in ["row_ids_sha256", "family_ids_sha256", "document_ids_sha256"] {
+                value[field] = json!([]);
+            }
+        }, "test family membership mismatch");
+    });
+}

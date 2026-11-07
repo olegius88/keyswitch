@@ -129,7 +129,6 @@ fn binary_evidence(value: Option<&Value>, familywise: bool) -> Option<bool> {
             && bound.get("comparisons").and_then(Value::as_i64) == Some(comparisons)
             && equals_float(bound.get("per_comparison_confidence"), confidence)
             && equals_float(bound.get("z_score"), z)
-            && upper.is_finite()
             && (upper - expected).abs() <= RATE_BOUND_TOLERANCE
             && limits.get("maximum_false_positive_rate_upper_bound").and_then(Value::as_f64).is_some_and(|limit| expected <= limit),
     )
@@ -251,7 +250,7 @@ fn runtime_parameters_match(model: &LinearNgramModel, manifest: &Value, config: 
             let selection_logits = exact(selection.get("logits"), &DIRECTIONS)?;
             for (direction_index, direction) in DIRECTIONS.iter().enumerate() {
                 let (Some(logit), Some(confidence)) = (logits.get(*direction).and_then(Value::as_f64), confidences.get(*direction).and_then(Value::as_f64)) else { return Some(false) };
-                if !logit.is_finite() || !confidence.is_finite() || selection_logits.get(*direction).and_then(Value::as_f64) != Some(logit) || logit != model.threshold_logits[index][direction_index] || confidence != model.thresholds[index][direction_index] {
+                if selection_logits.get(*direction).and_then(Value::as_f64) != Some(logit) || logit != model.threshold_logits[index][direction_index] || confidence != model.thresholds[index][direction_index] {
                     return Some(false);
                 }
             }
@@ -266,7 +265,7 @@ fn runtime_parameters_match(model: &LinearNgramModel, manifest: &Value, config: 
         let quality_veto = exact(quality.get("veto"), &["passed", "selection", "sealed_test", "maximum_false_negative_rate"])?;
         let quality_selection = exact(quality_veto.get("selection"), &["passed", "raw_logit", "positive_samples", "vetoed_positive_samples", "false_negative_rate"])?;
         let raw = veto_selection.get("raw_logit").and_then(Value::as_f64)?;
-        Some(raw.is_finite() && quality_selection.get("raw_logit").and_then(Value::as_f64) == Some(raw) && raw == model.veto_threshold)
+        Some(quality_selection.get("raw_logit").and_then(Value::as_f64) == Some(raw) && raw == model.veto_threshold)
     };
     walk().unwrap_or(false)
 }
@@ -396,7 +395,7 @@ pub fn verify_provenance(model: &LinearNgramModel, manifest: &Value, inputs: &Pr
         check("embedded_manifest", model.metadata() == Value::Object(without_artifact), "embedded metadata equals the signed training manifest"),
         check("build_provenance_sha256", calculated == recorded, format!("calculated={calculated}, manifest={recorded}")),
         check("model_version", model.model_version == version && version == expected_version, format!("model={}, sidecar={version}, expected={expected_version}", model.model_version)),
-        check("feature_schema", model.dimension == config.dimension.to::<i64>() && model.fnv_seed == config.feature_hash_seed, format!("dimension={}, fnv_seed={}", model.dimension, model.fnv_seed)),
+        check("feature_schema", (model.dimension, model.fnv_seed) == (config.dimension.to::<i64>(), config.feature_hash_seed), format!("dimension={}, fnv_seed={}", model.dimension, model.fnv_seed)),
         check("membership_schema", model.membership_seed == config.membership_hash_seed, format!("membership_seed={}, expected={}", model.membership_seed, config.membership_hash_seed)),
         check("calibration_scope", scope_ok, manifest["calibration_scope"].as_str().unwrap_or("").to_owned()),
     ];
@@ -530,23 +529,60 @@ fn internal_evidence<'a>(model: &LinearNgramModel, manifest: &Value, config: &Fi
     let (overall, typos) = (pipeline::by_trigger(&test_metrics), pipeline::by_trigger(&typo_metrics));
     let context: Map<String, Value> = fit::STRESS_PROFILES.iter().map(|profile| (profile.0.to_owned(), json!({"overall": overall, "typos": typos}))).collect();
     let exclusions = hex(&Sha256::digest(whole.sealed_test_exclusion_signatures.join("\n").as_bytes()));
+    let recomputed = Recomputed {
+        selection_gate: &selection_gate,
+        overall: &overall,
+        typos: &typos,
+        context: &Value::Object(context),
+        selection_veto: &selection_veto,
+        test_veto: &test_veto,
+        audit: &audit.payload(),
+        safety_metrics: &pipeline::by_trigger(&safety_metrics),
+        quality: &quality,
+        counts: &pipeline::sealed_counts(prepared, whole),
+        quarantine_sha256: &whole.variant_quarantine.sha256,
+        sealed_quarantine_sha256: &whole.sealed_variant_quarantine.sha256,
+        exclusions_sha256: &exclusions,
+    };
+    let checks = internal_checks(manifest, &recomputed);
+    Ok(InternalEvidence { test_rows, test_metrics, typo_metrics, safety_rows, safety_metrics, selection_gate, checks })
+}
+
+/// What the runtime recomputed of the sealed sections, to be held against the manifest that signed them.
+struct Recomputed<'a> {
+    selection_gate: &'a Value,
+    overall: &'a Value,
+    typos: &'a Value,
+    context: &'a Value,
+    selection_veto: &'a Veto,
+    test_veto: &'a Veto,
+    audit: &'a Value,
+    safety_metrics: &'a Value,
+    quality: &'a Value,
+    counts: &'a Value,
+    quarantine_sha256: &'a str,
+    sealed_quarantine_sha256: &'a str,
+    exclusions_sha256: &'a str,
+}
+
+/// Each recomputed record against the signed one.
+fn internal_checks(manifest: &Value, recomputed: &Recomputed<'_>) -> Vec<Check> {
     let manifest_veto = &manifest["veto"];
     let manifest_safety = &manifest["safety"];
-    let veto_shape = manifest_veto.as_object().is_some_and(|object| object.len() == 2 && object.contains_key("selection") && object.contains_key("sealed_test"));
-    let safety_shape = manifest_safety.as_object().is_some_and(|object| object.len() == 2 && object.contains_key("guard_audit") && object.contains_key("raw_model_diagnostics"));
-    let checks = vec![
-        check("runtime_threshold_selection", selection_gate == manifest["threshold_selection_gate_breakdown"], "runtime threshold split exactly reproduces signed evidence"),
-        check("sealed_test", overall == manifest["sealed_test"], "runtime test predictions exactly reproduce signed metrics"),
-        check("sealed_test_typos", typos == manifest["sealed_test_typos"], "runtime typo slice exactly reproduces signed metrics"),
-        check("sealed_test_context_stress", Value::Object(context) == manifest["sealed_test_context_stress"], "runtime context profiles exactly reproduce signed metrics"),
-        check("veto_selection", veto_shape && selection_veto.payload() == manifest_veto["selection"], "runtime calibration split exactly reproduces selected veto"),
-        check("veto_sealed_test", veto_shape && test_veto.payload() == manifest_veto["sealed_test"], "runtime test logits exactly reproduce signed veto evidence"),
-        check("safety_guard_audit", safety_shape && canonical(&audit.payload()) == canonical(&manifest_safety["guard_audit"]), "production static guards exactly reproduce signed safety audit"),
-        check("safety_raw_model_diagnostics", safety_shape && pipeline::by_trigger(&safety_metrics) == manifest_safety["raw_model_diagnostics"], "runtime raw safety predictions exactly reproduce diagnostics"),
-        check("quality_gate_breakdown", quality == manifest["quality_gate_breakdown"] && manifest["quality_gates_passed"] == quality["passed"], "recomputed inputs exactly reproduce the complete quality gate"),
-        check("sealed_dataset_metadata", pipeline::sealed_counts(prepared, whole) == manifest["counts"] && manifest["variant_quarantine_sha256"].as_str() == Some(whole.variant_quarantine.sha256.as_str()) && manifest["sealed_variant_quarantine_sha256"].as_str() == Some(whole.sealed_variant_quarantine.sha256.as_str()) && manifest["sealed_test_exclusion_signatures_sha256"].as_str() == Some(exclusions.as_str()), "reconstructed sealed counts and quarantine hashes match"),
-    ];
-    Ok(InternalEvidence { test_rows, test_metrics, typo_metrics, safety_rows, safety_metrics, selection_gate, checks })
+    let veto_shape = exact(Some(manifest_veto), &["selection", "sealed_test"]).is_some();
+    let safety_shape = exact(Some(manifest_safety), &["guard_audit", "raw_model_diagnostics"]).is_some();
+    vec![
+        check("runtime_threshold_selection", recomputed.selection_gate == &manifest["threshold_selection_gate_breakdown"], "runtime threshold split exactly reproduces signed evidence"),
+        check("sealed_test", recomputed.overall == &manifest["sealed_test"], "runtime test predictions exactly reproduce signed metrics"),
+        check("sealed_test_typos", recomputed.typos == &manifest["sealed_test_typos"], "runtime typo slice exactly reproduces signed metrics"),
+        check("sealed_test_context_stress", recomputed.context == &manifest["sealed_test_context_stress"], "runtime context profiles exactly reproduce signed metrics"),
+        check("veto_selection", veto_shape && recomputed.selection_veto.payload() == manifest_veto["selection"], "runtime calibration split exactly reproduces selected veto"),
+        check("veto_sealed_test", veto_shape && recomputed.test_veto.payload() == manifest_veto["sealed_test"], "runtime test logits exactly reproduce signed veto evidence"),
+        check("safety_guard_audit", safety_shape && canonical(recomputed.audit) == canonical(&manifest_safety["guard_audit"]), "production static guards exactly reproduce signed safety audit"),
+        check("safety_raw_model_diagnostics", safety_shape && recomputed.safety_metrics == &manifest_safety["raw_model_diagnostics"], "runtime raw safety predictions exactly reproduce diagnostics"),
+        check("quality_gate_breakdown", recomputed.quality == &manifest["quality_gate_breakdown"] && manifest["quality_gates_passed"] == recomputed.quality["passed"], "recomputed inputs exactly reproduce the complete quality gate"),
+        check("sealed_dataset_metadata", recomputed.counts == &manifest["counts"] && manifest["variant_quarantine_sha256"].as_str() == Some(recomputed.quarantine_sha256) && manifest["sealed_variant_quarantine_sha256"].as_str() == Some(recomputed.sealed_quarantine_sha256) && manifest["sealed_test_exclusion_signatures_sha256"].as_str() == Some(recomputed.exclusions_sha256), "reconstructed sealed counts and quarantine hashes match"),
+    ]
 }
 
 /// `PredictionComparison`.
@@ -680,7 +716,7 @@ impl LanguageScorer for FixedContext {
     }
 
     fn context_score(&self, previous: &str, _word: &str) -> f64 {
-        assert!(previous == SOURCE_SENTINEL || previous == TARGET_SENTINEL, "production context scorer received an unknown sentinel");
+        assert!([SOURCE_SENTINEL, TARGET_SENTINEL].contains(&previous), "production context scorer received an unknown sentinel");
         if previous == SOURCE_SENTINEL { self.profile.source_context } else { self.profile.target_context }
     }
 
@@ -1018,7 +1054,7 @@ fn safety_policy(detector: &LanguageDetector, examples: &[LexicalExample], prote
         }
         policy.expected_guard_samples += 1;
         let collision_matches = example.variant_kind != "lexical_collision" || matches!(decision.reason.as_str(), "обе раскладки дают допустимое слово" | "исходное слово допустимо");
-        if decision.should_convert || evaluated || !guard_matches || !collision_matches {
+        if [decision.should_convert, evaluated, !guard_matches, !collision_matches].contains(&true) {
             policy.guard_failure_samples += 1;
         }
         *policy.reason_counts.entry(decision.reason.clone()).or_default() += 1;
@@ -1107,7 +1143,7 @@ fn latency_report(artifact: &Path, model: &LinearNgramModel, examples: &[Lexical
     let mut deterministic = true;
     for (example, earlier) in sample.iter().zip(&first) {
         let again = predict(model, example)?;
-        deterministic &= again.logit.to_bits() == earlier.logit.to_bits() && again.probability.to_bits() == earlier.probability.to_bits() && again.coverage.to_bits() == earlier.coverage.to_bits() && again.should_switch == earlier.should_switch;
+        deterministic &= (again.logit.to_bits(), again.probability.to_bits(), again.coverage.to_bits(), again.should_switch) == (earlier.logit.to_bits(), earlier.probability.to_bits(), earlier.coverage.to_bits(), earlier.should_switch);
     }
     let bytes = std::fs::metadata(artifact).map_err(|error| format!("{}: {error}", artifact.display()))?.len();
     let summary = |samples: &[f64]| -> Result<Value, String> { Ok(json!({"median": py_round_ndigits(median(samples), LATENCY_DECIMALS), "p95": py_round_ndigits(percentile(samples, 0.95)?, LATENCY_DECIMALS), "samples": samples.len()})) };
@@ -1162,6 +1198,63 @@ fn external_provenance_gates(policy: &Value, stable: bool, lexical: &ExternalCor
     })
 }
 
+/// A row whose context names the group it does not belong to: the source for a conversion, the target otherwise.
+fn misleading_context(example: &LexicalExample) -> bool {
+    example.context_group.is_some() && example.context_group == Some(if example.label { example.source_group } else { example.target_group })
+}
+
+/// The `safety` strict gate: the production policy's counts add up, and its failures stay within the budget.
+fn safety_gate(safety: &SafetyPolicy, maximum_failures: i64) -> bool {
+    let false_positives: i64 = safety.per_trigger.values().map(|matrix| matrix.false_positive).sum();
+    let bypasses = safety.expected_guard_samples - safety.expected_guarded_samples;
+    safety.samples > 0
+        && safety.protected_samples > 0
+        && safety.lexical_collision_samples > 0
+        && safety.protected_samples + safety.lexical_collision_samples == safety.samples
+        && safety.pre_model_guarded_samples + safety.model_evaluated_samples == safety.samples
+        && safety.expected_guard_samples > 0
+        && safety.expected_guard_samples == safety.samples
+        && 0 <= safety.expected_guarded_samples
+        && safety.expected_guarded_samples <= safety.expected_guard_samples
+        && false_positives.max(bypasses) <= safety.guard_failure_samples
+        && safety.guard_failure_samples <= false_positives + bypasses
+        && safety.guard_failure_samples <= maximum_failures
+        && safety.reason_counts.values().sum::<i64>() == safety.samples
+        && safety.per_trigger.len() == TRIGGERS.len()
+        && safety.per_trigger.values().all(|matrix| matrix.true_positive + matrix.false_negative == 0 && matrix.true_negative + matrix.false_positive > 0)
+        && safety.per_trigger.values().map(|matrix| matrix.true_negative + matrix.false_positive).sum::<i64>() == safety.samples
+}
+
+/// The `fallback_regression` strict gate: the ensemble introduces no false positive the fallback does not make.
+fn fallback_gate(comparison: &Comparison) -> bool {
+    comparison.introduced == 0 && comparison.ensemble.false_positive <= comparison.fallback.false_positive
+}
+
+/// The `hunspell_hard_guard_regression` strict gate: a word its own dictionary knows never reaches the model nor converts.
+fn hard_guard_gate(comparison: &Comparison) -> bool {
+    comparison.samples > 0 && comparison.model_evaluated == 0 && comparison.negative_model_evaluated == 0 && comparison.ensemble.false_positive == 0 && comparison.introduced == 0
+}
+
+/// The `unknown_typo_model_evaluated` strict gate: every row of the holdout, each trigger and both labels, reached the model.
+fn unknown_reaches_model(comparison: &Comparison, expected: i64) -> bool {
+    comparison.samples == expected && comparison.model_evaluated == comparison.samples && comparison.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() == comparison.samples
+}
+
+/// The `unknown_typo_false_positives` strict gate.
+fn unknown_false_positive_gate(comparison: &Comparison) -> bool {
+    comparison.ensemble.false_positive <= comparison.fallback.false_positive && comparison.ensemble.specificity() >= comparison.fallback.specificity()
+}
+
+/// The `unknown_typo_raw_model_integrity` strict gate: the raw model saw both labels under every trigger.
+fn both_labels_everywhere(metrics: &BTreeMap<&'static str, Confusion>) -> bool {
+    metrics.values().all(|matrix| matrix.true_positive + matrix.false_negative > 0 && matrix.true_negative + matrix.false_positive > 0)
+}
+
+/// The dictionaries the models opened are the ones the snapshots read before and after.
+fn handles_stable(before: &[Snapshot; 2], snapshots: &[Snapshot; 2], models: &[Arc<LanguageModel>; 2]) -> bool {
+    before == snapshots && (0..2).all(|group| models[group].speller.available() && models[group].speller.source() == snapshots[group].provenance.dictionary.path)
+}
+
 fn slice_passes(config: &FitConfig, metrics: &Confusion, minimum_recall: f64, maximum_fpr: f64) -> bool {
     let positive = metrics.true_positive + metrics.false_negative;
     let negative = metrics.true_negative + metrics.false_positive;
@@ -1184,19 +1277,22 @@ fn pretty(value: &Value) -> String {
     ks_text::json_dumps(value, &ks_text::JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(2)), sort_keys: true, ..ks_text::JsonOptions::default() })
 }
 
+/// A frozen dictionary and the one of the same name the system has installed, if it has one.
+fn dictionary_entry(digest: &str, system: &Path) -> Result<Value, String> {
+    if system.is_file() {
+        let installed = seal::sha256_file(system)?;
+        Ok(json!({"frozen_sha256": digest, "system_sha256": installed, "matches_system": installed == digest}))
+    } else {
+        Ok(json!({"frozen_sha256": digest, "system_sha256": null, "matches_system": null}))
+    }
+}
+
 fn environment_section(root: &Path) -> Result<Value, String> {
     let frozen = root.join("model/intent_v1/sources/hunspell");
     let mut dictionaries = Map::new();
     for name in ["en_US.aff", "en_US.dic", "ru_RU.aff", "ru_RU.dic"] {
         let digest = seal::sha256_file(&frozen.join(name))?;
-        let system = Path::new("/usr/share/hunspell").join(name);
-        let entry = if system.is_file() {
-            let installed = seal::sha256_file(&system)?;
-            json!({"frozen_sha256": digest, "system_sha256": installed, "matches_system": installed == digest})
-        } else {
-            json!({"frozen_sha256": digest, "system_sha256": null, "matches_system": null})
-        };
-        dictionaries.insert(name.to_owned(), entry);
+        dictionaries.insert(name.to_owned(), dictionary_entry(&digest, &Path::new("/usr/share/hunspell").join(name))?);
     }
     Ok(json!({"schema_version": 1, "probe": probe::measure(), "hunspell_dictionaries": dictionaries, "hunspell_scope": "the evaluation reads the frozen dictionaries; the system ones are reported only so that a drift between them is visible"}))
 }
@@ -1231,12 +1327,6 @@ enum Stop {
 impl From<String> for Stop {
     fn from(error: String) -> Stop {
         Stop::Failed(error)
-    }
-}
-
-impl From<&str> for Stop {
-    fn from(error: &str) -> Stop {
-        Stop::Failed(error.to_owned())
     }
 }
 
@@ -1282,7 +1372,7 @@ fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
     let protected = resources.protected_tokens();
     let latency = latency_report(options.artifact, &model, whole.split(Split::Test), options.latency_sample)?;
     let snapshots: [Snapshot; 2] = [external::snapshot_of_model(&models[0], LOCALES[0])?, external::snapshot_of_model(&models[1], LOCALES[1])?];
-    let stable = before == snapshots && (0..2).all(|group| models[group].speller.available() && models[group].speller.source() == snapshots[group].provenance.dictionary.path);
+    let stable = handles_stable(&before, &snapshots, &models);
     let index = external::build_sealed_signature_index(&base_sealed)?;
     let scorers: Vec<(i64, Arc<dyn LanguageScorer>)> = vec![(0, models[0].clone()), (1, models[1].clone())];
     let detector = LanguageDetector::new(scorers, Some(model.clone()), protected.clone()).map_err(load_error)?;
@@ -1296,13 +1386,13 @@ fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
         ("direction_1_to_0", slice(&|example| example.target_group == 0)),
         ("context_none", slice(&|example| example.context_group.is_none())),
         ("context_present", slice(&|example| example.context_group.is_some())),
-        ("context_misleading", slice(&|example| example.context_group.is_some() && example.context_group == Some(if example.label { example.source_group } else { example.target_group }))),
+        ("context_misleading", slice(&misleading_context)),
     ];
     let slice_metrics: BTreeMap<&str, BTreeMap<&'static str, Confusion>> = slices.iter().map(|(name, selected)| (*name, prediction_metrics(selected.iter()))).collect();
     let veto = veto_from(rows, model.veto_threshold)?;
     let comparison = compare_with_fallback(&detector, whole.split(Split::Test), options.comparison_sample, workers)?;
     let onboard = external::onboard_words(&words, dataset_config.minimum_word_length);
-    let minimum = (policy["minimum_words_per_group"].as_u64().ok_or("minimum_words_per_group")?).to::<usize>();
+    let minimum = (policy["minimum_words_per_group"].as_u64().ok_or_else(|| "minimum_words_per_group".to_owned())?).to::<usize>();
     let references = [&*models[0], &*models[1]];
     let lexical = external::build_lexical_disjoint_corpus(&onboard, minimum, &snapshots)?;
     let development = external::build_unknown_typo_disjoint_corpus(&onboard, &index.signatures, minimum, &snapshots, &references, &protected, external::DEVELOPMENT_RANK_NAMESPACE, external::DEVELOPMENT_CHOICE_NAMESPACE)?;
@@ -1320,10 +1410,8 @@ fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
     let source_known_comparison = compare_with_fallback(&detector, &source_known, 0, workers)?;
     let context = production_context(&model, whole.split(Split::Test), &holdout.examples, &whole.safety, &source_known, &models, &protected, &config, workers)?;
     let context_gate = production_context_gate(&config, &context);
-    let load_p95 = latency["load_ms"]["p95"].as_f64().ok_or("load_ms.p95")?;
-    let inference_p95 = latency["inference_ms"]["p95"].as_f64().ok_or("inference_ms.p95")?;
-    let safety_false_positives: i64 = safety.per_trigger.values().map(|matrix| matrix.false_positive).sum();
-    let bypasses = safety.expected_guard_samples - safety.expected_guarded_samples;
+    let load_p95 = latency["load_ms"]["p95"].as_f64().ok_or_else(|| "load_ms.p95".to_owned())?;
+    let inference_p95 = latency["inference_ms"]["p95"].as_f64().ok_or_else(|| "inference_ms.p95".to_owned())?;
     let expected_unknown = external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() * (holdout.words_by_group[0] + holdout.words_by_group[1]).to::<i64>() * TRIGGERS.len().to::<i64>();
     let mut neutral_metrics = BTreeMap::new();
     for trigger in TRIGGERS {
@@ -1340,22 +1428,24 @@ fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
     gate("runtime_threshold_selection_evidence", true);
     gate("sealed_test", TRIGGERS.iter().all(|trigger| slice_passes(&config, &evidence.test_metrics[trigger.as_str()], if *trigger == CorrectionTrigger::Pause { config.test_pause_recall } else { config.test_recall }, per_trigger_fpr(*trigger))));
     gate("sealed_test_context_stress", context_stress["passed"] == json!(true));
-    gate("safety", safety.samples > 0 && safety.protected_samples > 0 && safety.lexical_collision_samples > 0 && safety.protected_samples + safety.lexical_collision_samples == safety.samples && safety.pre_model_guarded_samples + safety.model_evaluated_samples == safety.samples && safety.expected_guard_samples > 0 && safety.expected_guard_samples == safety.samples && 0 <= safety.expected_guarded_samples && safety.expected_guarded_samples <= safety.expected_guard_samples && safety_false_positives.max(bypasses) <= safety.guard_failure_samples && safety.guard_failure_samples <= safety_false_positives + bypasses && safety.guard_failure_samples <= config.safety_max_failures && safety.reason_counts.values().sum::<i64>() == safety.samples && safety.per_trigger.len() == TRIGGERS.len() && safety.per_trigger.values().all(|matrix| matrix.true_positive + matrix.false_negative == 0 && matrix.true_negative + matrix.false_positive > 0) && safety.per_trigger.values().map(|matrix| matrix.true_negative + matrix.false_positive).sum::<i64>() == safety.samples);
+    gate("safety", safety_gate(&safety, config.safety_max_failures));
     gate("typo_unknown_recall", TRIGGERS.iter().all(|trigger| slice_passes(&config, &typo_unknown[trigger.as_str()], if *trigger == CorrectionTrigger::Pause { config.test_pause_typo_recall } else { config.test_typo_recall }, per_trigger_fpr(*trigger))));
     gate("veto", veto.false_negative_rate <= config.veto_max_fnr);
-    gate("fallback_regression", comparison.introduced == 0 && comparison.ensemble.false_positive <= comparison.fallback.false_positive);
-    gate("hunspell_hard_guard_regression", source_known_comparison.samples > 0 && source_known_comparison.model_evaluated == 0 && source_known_comparison.negative_model_evaluated == 0 && source_known_comparison.ensemble.false_positive == 0 && source_known_comparison.introduced == 0);
+    gate("fallback_regression", fallback_gate(&comparison));
+    gate("hunspell_hard_guard_regression", hard_guard_gate(&source_known_comparison));
     gate("lexical_disjoint_recall", lexical_comparison.ensemble.recall() + RECALL_TOLERANCE >= lexical_comparison.fallback.recall());
-    gate("unknown_typo_model_evaluated", unknown_comparison.samples == expected_unknown && unknown_comparison.model_evaluated == unknown_comparison.samples && unknown_comparison.negative_model_evaluated * external::PAIRED_ROWS_PER_TRIGGER.to::<i64>() == unknown_comparison.samples);
-    gate("unknown_typo_false_positives", unknown_comparison.ensemble.false_positive <= unknown_comparison.fallback.false_positive && unknown_comparison.ensemble.specificity() >= unknown_comparison.fallback.specificity());
+    gate("unknown_typo_model_evaluated", unknown_reaches_model(&unknown_comparison, expected_unknown));
+    gate("unknown_typo_false_positives", unknown_false_positive_gate(&unknown_comparison));
     gate("unknown_typo_recall", unknown_comparison.ensemble.recall() + RECALL_TOLERANCE >= unknown_comparison.fallback.recall());
-    gate("unknown_typo_raw_model_integrity", unknown_metrics.values().all(|matrix| matrix.true_positive + matrix.false_negative > 0 && matrix.true_negative + matrix.false_positive > 0));
+    gate("unknown_typo_raw_model_integrity", both_labels_everywhere(&unknown_metrics));
     gate("production_context_ensemble", context_gate["passed"] == json!(true));
     gate("artifact_size", latency["artifact_bytes"].as_u64().is_some_and(|bytes| bytes.to::<usize>() <= lang::KSLM_MAX_CONTAINER_BYTES));
     gate("load_latency", load_p95 <= LOAD_P95_MAX_MS);
     gate("inference_latency", inference_p95 <= INFERENCE_P95_MAX_MS);
     gate("deterministic_inference", latency["deterministic_predictions"] == json!(true));
-    let strict_passed = gates.len() == STRICT_GATES.len() && STRICT_GATES.iter().all(|name| gates.get(*name) == Some(&json!(true)));
+    // The external gates and the gates above are the strict gates, each once.
+    assert_eq!(gates.len(), STRICT_GATES.len(), "every strict gate is computed once");
+    let strict_passed = STRICT_GATES.iter().all(|name| gates.get(*name) == Some(&json!(true)));
     let (overall, typos) = (pipeline::by_trigger(&evidence.test_metrics), pipeline::by_trigger(&evidence.typo_metrics));
     let context_profiles: Map<String, Value> = fit::STRESS_PROFILES.iter().map(|profile| (profile.0.to_owned(), json!({"overall": overall, "typos": typos}))).collect();
     let hunspell_policy: Map<String, Value> = LOCALES.iter().map(|locale| { let pinned = &policy["hunspell"][*locale]; ((*locale).to_owned(), json!({"dictionary_sha256": pinned["dictionary_sha256"], "dictionary_bytes": pinned["dictionary_bytes"], "affix_sha256": pinned["affix_sha256"], "affix_bytes": pinned["affix_bytes"]})) }).collect();
@@ -1853,6 +1943,260 @@ mod tests {
         assert!(cache.context_score("the", "word").is_finite());
         assert_eq!(cache.score("word").known, cache.score("word").known);
         let _ = cache.best_single_deletion("wordd");
+    }
+
+    fn policy() -> SafetyPolicy {
+        let per_trigger: BTreeMap<&'static str, Confusion> = TRIGGERS.iter().map(|trigger| (trigger.as_str(), Confusion { true_negative: 2, ..Confusion::default() })).collect();
+        let half = i64::try_from(TRIGGERS.len()).expect("a few triggers");
+        let samples = 2 * half;
+        SafetyPolicy { per_trigger, samples, protected_samples: half, lexical_collision_samples: half, pre_model_guarded_samples: samples, expected_guard_samples: samples, expected_guarded_samples: samples, model_evaluated_samples: 0, guard_failure_samples: 0, reason_counts: BTreeMap::from([("guarded".to_owned(), samples)]) }
+    }
+
+    #[test]
+    fn the_safety_gate_reads_each_count_of_the_production_policy() {
+        assert!(safety_gate(&policy(), 0));
+        assert!(!safety_gate(&policy(), -1));
+        let space = CorrectionTrigger::Space.as_str();
+        let edits: [&dyn Fn(&mut SafetyPolicy); 16] = [
+            &|policy| policy.samples = 0,
+            &|policy| policy.protected_samples = 0,
+            &|policy| policy.lexical_collision_samples = 0,
+            &|policy| policy.protected_samples += 1,
+            &|policy| policy.model_evaluated_samples += 1,
+            &|policy| policy.expected_guard_samples = 0,
+            &|policy| policy.expected_guard_samples += 1,
+            &|policy| policy.expected_guarded_samples = -1,
+            &|policy| policy.expected_guarded_samples += 1,
+            &|policy| policy.expected_guarded_samples -= 1,
+            &|policy| policy.guard_failure_samples = 1,
+            &|policy| policy.reason_counts.clear(),
+            &|policy| {
+                policy.per_trigger.remove(space);
+            },
+            &|policy| policy.per_trigger.get_mut(space).expect("a trigger").true_positive = 1,
+            &|policy| policy.per_trigger.get_mut(space).expect("a trigger").true_negative = 0,
+            &|policy| policy.per_trigger.get_mut(space).expect("a trigger").true_negative += 1,
+        ];
+        for (index, edit) in edits.iter().enumerate() {
+            let mut changed = policy();
+            edit(&mut changed);
+            assert!(!safety_gate(&changed, 0), "{index}");
+        }
+    }
+
+    #[test]
+    fn the_gates_over_a_comparison_read_each_count() {
+        let both = Confusion { true_positive: 2, true_negative: 2, ..Confusion::default() };
+        let clean = Comparison { samples: 4, model_evaluated: 4, negative_model_evaluated: 2, fallback: both, ensemble: both, ..Comparison::default() };
+        assert!(fallback_gate(&clean) && unknown_false_positive_gate(&clean) && unknown_reaches_model(&clean, 4));
+        let noisy = Comparison { ensemble: Confusion { false_positive: 1, ..both }, ..clean };
+        assert!(!fallback_gate(&Comparison { introduced: 1, ..clean }));
+        assert!(!fallback_gate(&noisy));
+        assert!(!unknown_false_positive_gate(&noisy));
+        let fewer_negatives = Comparison { fallback: Confusion { false_positive: 1, ..both }, ensemble: Confusion { false_positive: 1, true_negative: 1, ..both }, ..clean };
+        assert!(!unknown_false_positive_gate(&fewer_negatives));
+        assert!(!unknown_reaches_model(&clean, 5));
+        assert!(!unknown_reaches_model(&Comparison { model_evaluated: 3, ..clean }, 4));
+        assert!(!unknown_reaches_model(&Comparison { negative_model_evaluated: 1, ..clean }, 4));
+        let guarded = Comparison { model_evaluated: 0, negative_model_evaluated: 0, ..clean };
+        assert!(hard_guard_gate(&guarded));
+        for changed in [Comparison { samples: 0, ..guarded }, Comparison { model_evaluated: 1, ..guarded }, Comparison { negative_model_evaluated: 1, ..guarded }, Comparison { ensemble: Confusion { false_positive: 1, ..both }, ..guarded }, Comparison { introduced: 1, ..guarded }] {
+            assert!(!hard_guard_gate(&changed));
+        }
+        assert!(both_labels_everywhere(&BTreeMap::from([("space", both)])));
+        assert!(!both_labels_everywhere(&BTreeMap::from([("space", Confusion { true_negative: 1, ..Confusion::default() })])));
+        assert!(!both_labels_everywhere(&BTreeMap::from([("space", Confusion { true_positive: 1, ..Confusion::default() })])));
+    }
+
+    #[test]
+    fn the_dictionaries_a_report_names_are_the_ones_the_models_hold() {
+        let (models, snapshots) = snapshots();
+        assert!(handles_stable(&snapshots, &snapshots, &models));
+        let mut earlier = snapshots.clone();
+        earlier[0].words.push("another".to_owned());
+        assert!(!handles_stable(&earlier, &snapshots, &models));
+        let deaf = Arc::new(LanguageModel::load("en_US", std::iter::empty::<&str>(), &[], LanguageModel::disabled_speller()));
+        assert!(!handles_stable(&snapshots, &snapshots, &[deaf, models[1].clone()]));
+        let elsewhere = Arc::new(LanguageModel::load("en_US", std::iter::empty::<&str>(), &[], Box::new(ks_lang::spellcheck::FnSpellChecker::new("/elsewhere/en_US.dic", |_: &str| false))));
+        assert!(!handles_stable(&snapshots, &snapshots, &[elsewhere, models[1].clone()]));
+        let frozen = root().join("model/intent_v1/sources/hunspell/en_US.aff");
+        let digest = seal::sha256_file(&frozen).expect("a digest");
+        assert_eq!(dictionary_entry(&digest, &frozen).expect("an entry")["matches_system"], json!(true));
+        assert_eq!(dictionary_entry(&digest, Path::new("/nonexistent")).expect("an entry")["system_sha256"], json!(null));
+    }
+
+    fn veto_of(value: &Value) -> Veto {
+        Veto { raw_logit: value["raw_logit"].as_f64().expect("a logit"), positive_samples: value["positive_samples"].as_i64().expect("a count"), vetoed_positive_samples: value["vetoed_positive_samples"].as_i64().expect("a count"), false_negative_rate: value["false_negative_rate"].as_f64().expect("a rate") }
+    }
+
+    #[test]
+    fn each_recomputed_record_is_held_to_the_signed_one() {
+        let manifest = manifest();
+        let (selection, test) = (veto_of(&manifest["veto"]["selection"]), veto_of(&manifest["veto"]["sealed_test"]));
+        let text = |name: &str| manifest[name].as_str().expect("a digest").to_owned();
+        let (quarantine, sealed, exclusions) = (text("variant_quarantine_sha256"), text("sealed_variant_quarantine_sha256"), text("sealed_test_exclusion_signatures_sha256"));
+        let recomputed = Recomputed {
+            selection_gate: &manifest["threshold_selection_gate_breakdown"],
+            overall: &manifest["sealed_test"],
+            typos: &manifest["sealed_test_typos"],
+            context: &manifest["sealed_test_context_stress"],
+            selection_veto: &selection,
+            test_veto: &test,
+            audit: &manifest["safety"]["guard_audit"],
+            safety_metrics: &manifest["safety"]["raw_model_diagnostics"],
+            quality: &manifest["quality_gate_breakdown"],
+            counts: &manifest["counts"],
+            quarantine_sha256: &quarantine,
+            sealed_quarantine_sha256: &sealed,
+            exclusions_sha256: &exclusions,
+        };
+        assert!(internal_checks(&manifest, &recomputed).iter().all(|check| check.passed));
+        let failed = |edit: &dyn Fn(&mut Value)| -> Vec<String> {
+            let mut changed = manifest.clone();
+            edit(&mut changed);
+            internal_checks(&changed, &recomputed).into_iter().filter(|check| !check.passed).map(|check| check.name).collect()
+        };
+        assert_eq!(failed(&|value| value["veto"]["extra"] = json!(1)), ["veto_selection", "veto_sealed_test"]);
+        assert_eq!(failed(&|value| value["safety"]["extra"] = json!(1)), ["safety_guard_audit", "safety_raw_model_diagnostics"]);
+        assert_eq!(failed(&|value| value["quality_gate_breakdown"]["extra"] = json!(1)), ["quality_gate_breakdown"]);
+        for field in ["counts", "variant_quarantine_sha256", "sealed_variant_quarantine_sha256", "sealed_test_exclusion_signatures_sha256"] {
+            assert_eq!(failed(&|value| value[field] = json!("other")), ["sealed_dataset_metadata"], "{field}");
+        }
+    }
+
+    #[test]
+    fn the_production_context_needs_negatives_it_can_guard_and_a_row_in_each_corpus() {
+        let (models, _) = snapshots();
+        let protected = ks_lang::Resources::new(root().join("resources")).protected_tokens();
+        let model = Arc::new(LinearNgramModel::load(&root().join("resources/models/layout_intent_v1.ksm")).expect("the model"));
+        let config = config();
+        let positive = example(CorrectionTrigger::Space, true);
+        let guarded = LexicalExample { safety: true, ..example(CorrectionTrigger::Space, false) };
+        let known = LexicalExample { original: "hello".to_owned(), alternative: "руддщ".to_owned(), ..example(CorrectionTrigger::Space, false) };
+        let refused = |sealed: &[LexicalExample], safety: &[LexicalExample], source_known: &[LexicalExample]| production_context(&model, sealed, &[], safety, source_known, &models, &protected, &config, 1).map(|_| ()).unwrap_err();
+        assert!(refused(&[], &[LexicalExample { safety: true, ..positive.clone() }], &[]).contains("safety negatives"));
+        assert!(refused(&[], std::slice::from_ref(&guarded), std::slice::from_ref(&positive)).contains("source-known negatives"));
+        assert!(refused(&[], std::slice::from_ref(&guarded), std::slice::from_ref(&known)).contains("must not be empty"));
+    }
+
+    #[test]
+    fn a_model_file_that_is_another_model_stops_the_latency_measure() {
+        let quantized = fit::Quantized { dimension: 8, scale: 1.0, values: vec![0; 8], support: vec![0], maximum_absolute_error: 0.0 };
+        let selection = Selection { logits: [0.5, 0.5], metrics: Confusion::default(), typo_metrics: Confusion::default(), margin: 0.0 };
+        let selections: Selections = TRIGGERS.iter().map(|trigger| (trigger.as_str(), (*trigger, selection))).collect();
+        let platt = fit::Platt { slope: 1.0, intercept: 0.0, sample_count: 2, positive_count: 1 };
+        let veto = Veto { raw_logit: -1.0, positive_samples: 1, vetoed_positive_samples: 0, false_negative_rate: 0.0 };
+        let metadata = json!({});
+        let file = seal::ModelFile { version: "intent-v1-other", quantized: &quantized, fingerprints: &BTreeSet::new(), selections: &selections, veto: &veto, bias: 0.0, calibration: &[platt, platt], fnv_seed: 1, membership_seed: 2, metadata: &metadata };
+        let path = std::env::temp_dir().join(format!("ks-train-latency-{}.ksm", std::process::id()));
+        std::fs::write(&path, seal::encode_model(&file).expect("a model")).expect("a file");
+        let model = LinearNgramModel::load(&root().join("resources/models/layout_intent_v1.ksm")).expect("the model");
+        assert!(latency_report(&path, &model, &[], 1).unwrap_err().contains("checksum changed"));
+    }
+
+    #[test]
+    fn a_check_set_passes_whole_and_once() {
+        let pass = check("a", true, "");
+        assert!(checks_pass(std::slice::from_ref(&pass), 1));
+        assert!(!checks_pass(&[], 1));
+        assert!(!checks_pass(&[pass.clone(), pass], 2));
+        assert!(!checks_pass(&[check("a", false, "")], 1));
+    }
+
+    #[test]
+    fn the_thresholds_of_a_model_are_its_signed_ones_under_one_margin() {
+        let manifest = manifest();
+        let config = config();
+        let model = LinearNgramModel::load(&root().join("resources/models/layout_intent_v1.ksm")).expect("the model");
+        for margin in [-1.0, config.margin_cap + 1.0] {
+            let mut wide = manifest.clone();
+            for trigger in TRIGGER_NAMES {
+                wide["thresholds"][trigger]["global_logit_margin"] = json!(margin);
+            }
+            assert!(!runtime_parameters_match(&model, &wide, &config), "{margin}");
+        }
+        let mut moved = manifest.clone();
+        let logit = moved["thresholds"]["space"]["logits"]["0>1"].as_f64().expect("a logit") + 1.0;
+        moved["thresholds"]["space"]["logits"]["0>1"] = json!(logit);
+        moved["threshold_selection_gate_breakdown"]["per_trigger"]["space"]["logits"]["0>1"] = json!(logit);
+        assert!(!runtime_parameters_match(&model, &moved, &config));
+        // The counts of a budget are whole numbers, and each is held to the gates it names.
+        let item = &manifest["threshold_selection_gate_breakdown"]["per_trigger"]["space"];
+        let maximum = config.selection_max_false_positives;
+        let count = |name: &str| item["false_positive_budget"]["actual"][name].as_i64().expect("a count");
+        for name in ["overall_false_positives", "typo_false_positives"] {
+            let mut more = item.clone();
+            more["false_positive_budget"]["actual"][name] = json!(count(name) + 1);
+            assert_eq!(selection_trigger_evidence(Some(&more), maximum), Some(false), "{name}");
+        }
+        let below = count("overall_false_positives") - 1;
+        let mut tight = item.clone();
+        tight["false_positive_budget"]["maximum_false_positives_per_trigger"] = json!(below);
+        assert_eq!(selection_trigger_evidence(Some(&tight), below), Some(false));
+    }
+
+    #[test]
+    fn a_trigger_of_one_label_has_no_support_for_a_gate_of_both() {
+        let config = config();
+        let examples: Vec<LexicalExample> = TRIGGERS
+            .iter()
+            .flat_map(|trigger| if *trigger == CorrectionTrigger::Space { vec![example(*trigger, false)] } else if *trigger == CorrectionTrigger::Enter { vec![example(*trigger, true)] } else { vec![example(*trigger, true), example(*trigger, false)] })
+            .collect();
+        let rows: Vec<PolicyRow<'_>> = examples.iter().map(|item| row(item, item.label, item.label)).collect();
+        let references: Vec<&PolicyRow<'_>> = rows.iter().collect();
+        let corpus = corpus_evaluation(&references);
+        let gate = context_profile_corpus_gate(&config, &PROFILES[0], "sealed_test", &corpus, &corpus_evaluation(&references));
+        assert_eq!(gate["per_trigger"]["space"]["checks"]["label_support"], json!(false));
+        assert_eq!(gate["per_trigger"]["enter"]["checks"]["false_positive_policy"], json!(false));
+        // Directions that are not the two, and profiles without the neutral one to compare with.
+        let single = |profile: &Profile| -> BTreeMap<String, Vec<f64>> { [("0_to_1".to_owned(), vec![profile.expected_delta()]), ("1_to_0".to_owned(), vec![profile.expected_delta()])].into_iter().collect() };
+        let corpora = || -> BTreeMap<&'static str, CorpusEvaluation<'_>> { CORPORA.iter().map(|name| (*name, corpus_evaluation(&references))).collect() };
+        let neutral = PROFILES.iter().find(|profile| profile.name == "neutral").expect("a neutral profile");
+        let other = PROFILES.iter().find(|profile| profile.name != "neutral").expect("another profile");
+        let mut renamed = single(other);
+        let values = renamed.remove("0_to_1").expect("a direction");
+        renamed.insert("x".to_owned(), values);
+        let parts = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: *neutral, observed: single(neutral), corpora: corpora() }, ProfileEvaluation { profile: *other, observed: renamed, corpora: corpora() }], unique_predictions: 1, cache_hits: 1 };
+        assert_eq!(production_context_gate(&config, &parts)["profiles"][other.name]["reachable_extrema_exact"], json!(false));
+        let alone = ContextEvaluation { profiles: vec![ProfileEvaluation { profile: *other, observed: single(other), corpora: corpora() }], unique_predictions: 0, cache_hits: 0 };
+        assert_eq!(production_context_gate(&config, &alone)["profiles"][other.name]["passed"], json!(false));
+        // A slice whose negatives convert too often, however precise it is.
+        let precise = Confusion { true_positive: 1_000_000, false_positive: 1, true_negative: 10, false_negative: 0 };
+        assert!(!slice_passes(&FitConfig { test_specificity: 0.99, test_precision: 0.5, ..config }, &precise, 0.5, 1.0));
+        // A context that names the other group.
+        let named = LexicalExample { context_group: Some(0), ..example(CorrectionTrigger::Space, true) };
+        assert!(misleading_context(&named));
+        assert!(!misleading_context(&LexicalExample { label: false, ..named }));
+        assert!(!misleading_context(&example(CorrectionTrigger::Space, true)));
+    }
+
+    #[test]
+    fn an_unknown_typo_corpus_is_the_pinned_one_and_shares_no_signature_with_the_other() {
+        let (models, snapshots) = snapshots();
+        let references = [&*models[0], &*models[1]];
+        let protected = ks_lang::Resources::new(root().join("resources")).protected_tokens();
+        let onboard: [std::collections::HashSet<String>; 2] = [std::collections::HashSet::new(), std::collections::HashSet::new()];
+        let minimum = 4;
+        let lexical = external::build_lexical_disjoint_corpus(&onboard, minimum, &snapshots).expect("a corpus");
+        let development = external::build_unknown_typo_disjoint_corpus(&onboard, &BTreeSet::new(), minimum, &snapshots, &references, &protected, external::DEVELOPMENT_RANK_NAMESPACE, external::DEVELOPMENT_CHOICE_NAMESPACE).expect("a corpus");
+        let signatures = external::unknown_typo_physical_signatures(&development).expect("signatures");
+        let holdout = external::build_unknown_typo_disjoint_corpus(&onboard, &signatures, minimum, &snapshots, &references, &protected, external::HOLDOUT_RANK_NAMESPACE, external::HOLDOUT_CHOICE_NAMESPACE).expect("a corpus");
+        let index = SealedSignatureIndex { signatures: BTreeSet::new(), sha256: development.exclusion_signature_sha256.clone(), split_lexical_signature_count: 0, safety_lexical_signature_count: 0, protected_exact_signature_count: 0 };
+        let mut policy = crate::corpus::read_json(&root().join("model/intent_v1/config.json")).expect("the config")["external_evaluation"].clone();
+        policy["minimum_words_per_group"] = json!(minimum);
+        policy["lexical_disjoint_corpus_sha256"] = json!(lexical.corpus_sha256);
+        policy["unknown_typo_development_corpus_sha256"] = json!(development.corpus_sha256);
+        policy["unknown_typo_holdout_corpus_sha256"] = json!(holdout.corpus_sha256);
+        assert_eq!(external_provenance_gates(&policy, true, &lexical, &index, &development, &holdout)["unknown_typo_holdout_disjointness"], json!(true));
+        for (pin, gate) in [("unknown_typo_development_corpus_sha256", "unknown_typo_development_provenance"), ("unknown_typo_holdout_corpus_sha256", "unknown_typo_holdout_provenance")] {
+            let mut other = policy.clone();
+            other[pin] = json!("0".repeat(64));
+            assert_eq!(external_provenance_gates(&other, true, &lexical, &index, &development, &holdout)[gate], json!(false), "{gate}");
+        }
+        let mut overlapping = development.clone();
+        overlapping.exclusion_signature_count = signatures.len();
+        overlapping.exclusion_signature_sha256 = dataset::signature_set_fingerprint(signatures.iter().map(String::as_str));
+        assert_eq!(external_provenance_gates(&policy, true, &lexical, &index, &development, &overlapping)["unknown_typo_holdout_disjointness"], json!(false));
     }
 
     #[test]

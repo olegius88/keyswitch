@@ -1003,4 +1003,101 @@ mod tests {
         assert_eq!(quarantine_reason(&one, &both), Some("cross_language"));
         assert_eq!(quarantine_reason(&one, &single), None);
     }
+
+    fn word(text: &str, group: i64) -> LexiconWord {
+        let signature = physical_signature(text, group);
+        LexiconWord { word: text.to_owned(), group, frequency: 10, split: stable_split(&signature), physical_signature: signature }
+    }
+
+    /// A word of English and one of Russian typed on the keys of its deletion, both in the sealed test: their typos meet
+    /// across the languages, and the quarantine holds where they meet.
+    fn colliding() -> (PreparedLexicon, String) {
+        let letters = ['b', 'c', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'r', 's', 't', 'v', 'w'];
+        for first in letters {
+            for second in letters {
+                let signature = format!("a{first}e{second}io");
+                let deletion = typo_variants(&signature, 3).into_iter().find(|variant| variant.1 == "deletion").expect("a deletion").0;
+                if stable_split(&signature) == Split::Test && stable_split(&deletion) == Split::Test {
+                    let russian = translate(&deletion, "us", "ru");
+                    return (prepare_lexicon(vec![word(&signature, 0), word(&russian, 1)], 3), deletion);
+                }
+            }
+        }
+        panic!("no pair of words in the test split");
+    }
+
+    fn shape() -> DatasetConfig {
+        DatasetConfig { minimum_word_length: 3, maximum_word_length: 24, typo_augmentations: 3 }
+    }
+
+    fn with_occurrences(mut bundle: DatasetBundle, occurrences: Vec<QuarantinedOccurrence>) -> DatasetBundle {
+        bundle.variant_quarantine = VariantQuarantine { sha256: quarantine_fingerprint(&occurrences), occurrences };
+        bundle
+    }
+
+    #[test]
+    fn typos_that_meet_across_the_languages_are_quarantined_and_held_to_their_evidence() {
+        let (prepared, meeting) = colliding();
+        let bundle = build_dataset(&prepared, &shape(), &Split::ALL);
+        let occurrences = bundle.variant_quarantine.occurrences.clone();
+        assert!(occurrences.iter().any(|item| item.physical_signature == meeting), "{occurrences:?}");
+        assert!(bundle.split(Split::Test).iter().all(|row| row_physical_signature(row).ok().as_deref() != Some(meeting.as_str())));
+        assert_no_split_leakage(&bundle, &Split::ALL).expect("it holds");
+        assert!(!dataset_fingerprint(&bundle).is_empty());
+        let refused = |changed: &DatasetBundle, splits: &[Split], words: &str| {
+            let said = assert_no_split_leakage(changed, splits).unwrap_err();
+            assert!(said.contains(words), "{words}: {said}");
+        };
+        let mut twice = occurrences.clone();
+        twice.push(occurrences[0].clone());
+        refused(&with_occurrences(bundle.clone(), twice), &Split::ALL, "duplicate occurrence records");
+        refused(&bundle, &[Split::Train], "outside its phase");
+        let mut two_reasons = occurrences.clone();
+        two_reasons.push(QuarantinedOccurrence { reason: if occurrences[0].reason == "cross_split" { "cross_language" } else { "cross_split" }, ..occurrences[0].clone() });
+        refused(&with_occurrences(bundle.clone(), two_reasons), &Split::ALL, "evidence is invalid");
+        let mut unowned = occurrences.clone();
+        unowned.push(QuarantinedOccurrence { physical_signature: "zzzzz".to_owned(), base_signature: "zzzzz".to_owned(), split: "test", group: 0, variant_kind: "identity", reason: "cross_split" });
+        refused(&with_occurrences(bundle.clone(), unowned), &Split::ALL, "evidence is invalid");
+        let renamed: Vec<QuarantinedOccurrence> = occurrences.iter().map(|item| QuarantinedOccurrence { reason: if item.reason == "cross_split" { "cross_language" } else { "cross_split" }, ..item.clone() }).collect();
+        refused(&with_occurrences(bundle.clone(), renamed), &Split::ALL, "evidence is invalid");
+        // The same records in the quarantine of the candidate and in that of the sealed test.
+        let mut both = bundle.clone();
+        both.sealed_variant_quarantine = bundle.variant_quarantine.clone();
+        refused(&both, &Split::ALL, "duplicate occurrence record");
+        // A row of what was quarantined.
+        let item = occurrences.iter().find(|item| item.variant_kind != "identity").expect("a typo of the English word");
+        let mut emitted = bundle.clone();
+        let row = LexicalExample { original: item.physical_signature.clone(), alternative: translate(&item.physical_signature, "us", "ru"), source_group: item.group, target_group: 1 - item.group, trigger: CorrectionTrigger::Space, label: false, weight: 1.0, base_signature: item.base_signature.clone(), variant_kind: item.variant_kind.to_owned(), source_known: false, target_known: false, context_delta: 0.0, context_group: None, frequency: 1, protected: false, safety: false };
+        emitted.by_split[Split::Test.index()].push(row);
+        refused(&emitted, &Split::ALL, "were emitted as rows");
+        // A word of the train split whose signature is quarantined is no word of the scorer.
+        let mut train = PreparedLexicon { words_by_split: vec![Vec::new(); Split::ALL.len()], collisions: Vec::new() };
+        train.words_by_split[Split::Train.index()].push(LexiconWord { split: Split::Train, ..word(&meeting, 0) });
+        assert_eq!(train_only_scorer_provenance(&train, &bundle.variant_quarantine)["excluded_quarantined_identities"], json!(1));
+        // A safety row of no kind the quarantine knows adds nothing to it.
+        let mut odd = bundle.clone();
+        odd.safety.push(LexicalExample { safety: true, ..emitted.by_split[Split::Test.index()].last().expect("a row").clone() });
+        check_quarantine(&odd, &odd.variant_quarantine, "candidate", &Split::ALL).expect("it holds");
+    }
+
+    #[test]
+    fn small_parts_of_a_dataset_refuse_what_they_cannot_hold() {
+        let empty = LexiconWord { word: "x".to_owned(), group: 0, frequency: 1, physical_signature: String::new(), split: Split::Train };
+        assert!(prepare_lexicon(vec![empty], 1).words_by_split.iter().all(Vec::is_empty));
+        let variants = typo_variants("aaa", 3);
+        assert!(variants.iter().all(|(variant, kind)| *kind == "identity" || variant != "aaa"), "{variants:?}");
+        assert_eq!(normalise_lexical_word("кто-то", 1), "кто-то");
+        assert!(load_onboard_unigrams(b"\\1-grams:\n5 123\n", 0, 0, 16).is_empty());
+        assert!(bounded_string(&json!("x".repeat(300)), "field").unwrap_err().contains("bounded text"));
+        let blank = LexicalExample { original: String::new(), alternative: String::new(), source_group: 0, target_group: 1, trigger: CorrectionTrigger::Space, label: false, weight: 1.0, base_signature: "b".to_owned(), variant_kind: "identity".to_owned(), source_known: false, target_known: false, context_delta: 0.0, context_group: None, frequency: 1, protected: false, safety: false };
+        assert!(row_physical_signature(&blank).unwrap_err().contains("neither rendered side"));
+        // A sealed row whose base is that of a safety row goes, whatever its keys.
+        let guarded = LexicalExample { original: "git".to_owned(), alternative: "пше".to_owned(), base_signature: "hard:git".to_owned(), variant_kind: "protected".to_owned(), protected: true, safety: true, ..blank.clone() };
+        let presealed = DatasetBundle { by_split: vec![Vec::new(); Split::ALL.len()], safety: vec![guarded], ..DatasetBundle::default() };
+        let mut sealed = DatasetBundle { by_split: vec![Vec::new(); Split::ALL.len()], ..DatasetBundle::default() };
+        sealed.by_split[Split::Test.index()].push(LexicalExample { original: "hello".to_owned(), alternative: "руддщ".to_owned(), base_signature: "hard:git".to_owned(), ..blank });
+        let merged = merge_sealed_test_dataset(presealed, sealed).expect("merged");
+        assert_eq!(merged.sealed_test_exclusion_signatures, ["hello"]);
+        assert_ne!(dataset_fingerprint(&merged), dataset_fingerprint(&DatasetBundle { sealed_test_exclusion_signatures: Vec::new(), ..merged.clone() }));
+    }
 }

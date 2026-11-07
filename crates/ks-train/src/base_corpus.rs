@@ -312,9 +312,8 @@ fn reconcile_rows(sentences: &[Sentence], rows: &[CorpusRow], historical: &HashS
             values_by_id.insert(identifier, values);
         }
     }
-    if values_by_id.len() != by_id.len() {
-        return Err("source alias inventory does not cover original rows".to_owned());
-    }
+    // `partition` refused repeated identifiers: each token of a sentence is one row.
+    assert_eq!(values_by_id.len(), by_id.len(), "source alias inventory does not cover original rows");
     fn matching_roots<'a>(union: &mut Union, forms: impl IntoIterator<Item = &'a str>, roots: &mut BTreeSet<String>) {
         for form in forms {
             for alias in expanded_aliases(form) {
@@ -395,27 +394,26 @@ fn reconcile_rows(sentences: &[Sentence], rows: &[CorpusRow], historical: &HashS
             retained.entry(row.split.clone()).or_default().insert(union.find(&format!("family:{}", old.family)));
         }
     }
+    // A closure of rows in two splits is in `conflicts`, and a test closure seen before is in `contaminated`: their rows all
+    // went to quarantine above, so what remains can share neither.
     let empty = BTreeSet::new();
     for (index, left) in ACTIVE_SPLITS.iter().enumerate() {
         for right in &ACTIVE_SPLITS[index + 1..] {
-            if retained.get(*left).unwrap_or(&empty).intersection(retained.get(*right).unwrap_or(&empty)).next().is_some() {
-                return Err("remaining partitions share physical closure".to_owned());
-            }
+            assert!(retained.get(*left).unwrap_or(&empty).is_disjoint(retained.get(*right).unwrap_or(&empty)), "remaining partitions share physical closure");
         }
     }
     let retained_test = retained.get("test").unwrap_or(&empty);
-    if retained_test.intersection(&seen_roots).next().is_some() {
-        return Err("remaining test shares previously exposed physical closure".to_owned());
-    }
+    assert!(retained_test.is_disjoint(&seen_roots), "remaining test shares previously exposed physical closure");
     let names: Vec<String> = union.parents.keys().cloned().collect();
     let mut components: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut aliases: BTreeMap<String, String> = BTreeMap::new();
     for name in names {
         let component = hex_digest(&union.find(&name));
+        // The union holds families and aliases, each under its prefix.
         if let Some(family) = name.strip_prefix("family:") {
             components.entry(component).or_default().push(family.to_owned());
-        } else if let Some(alias) = name.strip_prefix("alias:") {
-            aliases.insert(alias.to_owned(), component);
+        } else {
+            aliases.insert(name.strip_prefix("alias:").expect("a family or an alias").to_owned(), component);
         }
     }
     for families in components.values_mut() {
@@ -583,13 +581,13 @@ struct Partitioned {
 }
 
 /// `partition_commands`: package edges join whole alias families before any exclusion or cap.
-fn partition_commands(commands: Vec<Command>, reserved: &BTreeSet<String>) -> Result<Partitioned, String> {
+fn partition_commands(commands: Vec<Command>, reserved: &BTreeSet<String>) -> Partitioned {
     let mut records = commands;
     records.sort_by(|a, b| a.name.cmp(&b.name));
+    // `read_commands` names each command once, from rows that name at least one package.
     let unique: BTreeSet<&str> = records.iter().map(|item| item.name.as_str()).collect();
-    if unique.len() != records.len() || records.iter().any(|item| item.owners.is_empty()) {
-        return Err("commands must have unique names and nonempty package owners".to_owned());
-    }
+    assert_eq!(unique.len(), records.len(), "commands must have unique names");
+    assert!(records.iter().all(|item| !item.owners.is_empty()), "commands must have nonempty package owners");
     let aliases: BTreeMap<String, BTreeSet<String>> = records.iter().map(|item| (item.name.clone(), command_aliases(item))).collect();
     let mut family_union = Union::default();
     for item in &records {
@@ -654,9 +652,9 @@ fn partition_commands(commands: Vec<Command>, reserved: &BTreeSet<String>) -> Re
         }
     }
     let reserved_overlap: usize = split_aliases.values().map(|values| values.iter().filter(|alias| reserved.contains(**alias)).count()).sum();
-    if alias_overlap != 0 || package_overlap != 0 || reserved_overlap != 0 {
-        return Err("technical corpus partition leakage".to_owned());
-    }
+    // An alias joins its commands into one family and a package its families into one document, the split is the document's,
+    // and a family with a reserved alias is quarantined whole: no split can share an alias or a package, or hold a reserved one.
+    assert_eq!((alias_overlap, package_overlap, reserved_overlap), (0, 0, 0), "technical corpus partition leakage");
     let mut component_sizes: HashMap<&String, usize> = HashMap::new();
     for document in documents.values() {
         *component_sizes.entry(document).or_default() += 1;
@@ -669,7 +667,7 @@ fn partition_commands(commands: Vec<Command>, reserved: &BTreeSet<String>) -> Re
     }
     let summary = json!({"mode": "joint-package-and-physical-family-component-hash", "split_probabilities": {"train": 0.7, "development": 0.1, "calibration": 0.1, "test": 0.1}, "commands": records.len(), "families": members.len(), "package_components": component_sizes.len(), "largest_component_commands": component_sizes.values().copied().max().unwrap_or(0), "reserved_families": blocked.len(), "family_cap": COMMANDS_PER_ALIAS_FAMILY, "rows_by_split": rows_by_split, "documents_by_split": per_split(&|row| row.document.clone()), "families_by_split": per_split(&|row| row.family.clone()), "quarantine_reasons": reason_counts, "alias_split_overlap": alias_overlap, "package_split_overlap": package_overlap, "reserved_alias_overlap": reserved_overlap});
     drop(by_name);
-    Ok(Partitioned { rows, commands: records, aliases, summary })
+    Partitioned { rows, commands: records, aliases, summary }
 }
 
 /// `all_internal_edits`.
@@ -768,7 +766,7 @@ pub fn freeze_technical(root: &Path, source_directory: &Path, ud_corpus: &Path, 
     }
     reserved.extend(historical_matches.iter().cloned());
     let reservations = json!({"ud_aliases_reserved": ud_aliases.len(), "candidate_ud_alias_matches": candidate_ud_matches, "historical_forms": forms.len(), "candidate_historical_alias_matches": historical_matches.len(), "ud_scope": "all sidecar aliases including quarantine; no UD split text opened", "historical_scope": "existing exposed_families plus declared historical context literals and short words; all their internal edits"});
-    let result = partition_commands(records, &reserved)?;
+    let result = partition_commands(records, &reserved);
     let metadata = json!({"source": source_metadata, "reservations": reservations});
     let mut report = json!({"namespace": TECHNICAL_NAMESPACE, "partitioning": result.summary, "reservations": reservations, "provenance": provenance, "test_scored": false, "old_ud_split_text_read": false});
     if let Some(output) = output {
@@ -809,10 +807,9 @@ fn write_technical(root: &Path, partitioned: &Partitioned, output: &Path, proven
         if active.is_empty() {
             continue;
         }
+        // The split of a command is that of its family's document.
         let splits: BTreeSet<&str> = active.iter().map(|row| row.split.as_str()).collect();
-        if splits.len() != 1 {
-            return Err("family spans multiple active splits".to_owned());
-        }
+        assert_eq!(splits.len(), 1, "family spans multiple active splits");
         let aliases: BTreeSet<&String> = rows.iter().flat_map(|row| partitioned.aliases[&row.original].iter()).collect();
         let document_ids: BTreeSet<String> = active.iter().map(|row| hex_digest(&row.document)).collect();
         family_records.insert(family.to_owned(), json!({"split": active[0].split, "aliases_sha256": aliases, "document_ids_sha256": document_ids}));
@@ -1024,6 +1021,11 @@ fn verify_aliases(base: &Origin, extension: &Origin) -> Result<(Value, BTreeMap<
     Ok((audit, BTreeMap::from([(base_path.clone(), checksum(&base_path)?), (extension_path.clone(), checksum(&extension_path)?)])))
 }
 
+/// A file verified before is still what was verified; something else that writes it meanwhile stops the merge.
+fn unchanged(same: bool, what: &str) -> Result<(), String> {
+    if same { Ok(()) } else { Err(what.to_owned()) }
+}
+
 /// `merge_context_action_corpora`: byte-exact gzip members of both origins, test JSON never parsed.
 pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, output: &Path) -> Result<Value, String> {
     if output.exists() {
@@ -1063,14 +1065,10 @@ pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, out
         for origin in [&base, &extension] {
             let path = origin.directory.join(&name);
             let current = inspect_gzip(&path, Some(&mut raw))?;
-            if current != origin.files[split] {
-                return Err("source changed during corpus composition".to_owned());
-            }
+            unchanged(current == origin.files[split], "source changed during corpus composition")?;
             let mut member = Vec::new();
             std::fs::File::open(&path).and_then(|mut file| file.read_to_end(&mut member)).map_err(|error| error.to_string())?;
-            if hex(&Sha256::digest(&member)) != current.sha256 {
-                return Err("copied source bytes differ from verified source".to_owned());
-            }
+            unchanged(hex(&Sha256::digest(&member)) == current.sha256, "copied source bytes differ from verified source")?;
             joined.extend_from_slice(&member);
             rows += current.rows;
             bytes += current.raw_bytes;
@@ -1078,20 +1076,15 @@ pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, out
         std::fs::write(&destination, &joined).map_err(|error| error.to_string())?;
         let combined = inspect_gzip(&destination, None)?;
         let digest = hex(&raw.finalize());
-        if combined.content_sha256 != digest || combined.rows != rows || combined.raw_bytes != bytes {
-            return Err("combined gzip stream differs from source streams".to_owned());
-        }
+        unchanged((&combined.content_sha256, combined.rows, combined.raw_bytes) == (&digest, rows, bytes), "combined gzip stream differs from source streams")?;
         files.insert(split.to_owned(), json!({"path": name, "sha256": checksum(&destination)?, "content_sha256": digest, "rows": rows, "raw_bytes": bytes, "gzip_members_from": ["base", "technical"]}));
     }
-    if membership["row_ids_sha256"].as_array().map_or(0, Vec::len).to::<u64>() != files["test"]["rows"].as_u64().unwrap_or(0) {
-        return Err("combined test membership row count mismatch".to_owned());
-    }
+    // Each origin's membership names as many rows as its test holds, and both were copied whole.
+    assert_eq!(membership["row_ids_sha256"].as_array().map_or(0, Vec::len).to::<u64>(), files["test"]["rows"].as_u64().unwrap_or(0), "combined test membership row count mismatch");
     let membership_path = output.join("test-membership.json");
     write_json(&membership_path, &Value::Object(membership))?;
     for (path, expected) in &pins {
-        if &checksum(path)? != expected {
-            return Err("source or generator changed while merging corpora".to_owned());
-        }
+        unchanged(&checksum(path)? == expected, "source or generator changed while merging corpora")?;
     }
     let rows_by_split: Map<String, Value> = ALL_SPLITS.iter().map(|split| ((*split).to_owned(), files[*split]["rows"].clone())).collect();
     let provenance: Map<String, Value> = pins.iter().map(|(path, value)| (path.display().to_string(), json!(value))).collect();
@@ -1145,4 +1138,139 @@ pub fn prefix_inventory(root: &Path, corpus: &Path, output: &Path) -> Result<Val
     let result = json!({"schema_version": 1, "kind": "actual-prefix-model-input-exposure", "test_json_opened": false, "model_scoring": false, "scope": "expanded physical aliases of every typed word and whole-word family in the prefix-v1 train, development and calibration splits, the inputs of prefix-v2 training; the prefix test split was not opened", "scopes": {"text": "typed word form", "family": "whole-word physical family"}, "aliases_sha256": aliases, "aliases_by_split": by_split, "aliases_by_scope": by_scope, "counts": counts, "provenance": provenance});
     write_json(output, &result)?;
     Ok(json!({"output": output.display().to_string(), "counts": result["counts"]}))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use crate::physical::physical;
+
+    fn root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("the repository")
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-train-base-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    /// Sentences of a treebank, each in a document of its own.
+    fn sentences(name: &str, sentences: &[&[&str]]) -> Vec<Sentence> {
+        let mut text = String::new();
+        for (index, words) in sentences.iter().enumerate() {
+            text.push_str(&format!("# newdoc id = d{index}\n# sent_id = s{index}\n# text = {}\n", words.join(" ")));
+            for (place, word) in words.iter().enumerate() {
+                text.push_str(&format!("{}\t{word}\t{}\tNOUN\t_\t_\t0\troot\t_\t_\n", place + 1, word.to_lowercase()));
+            }
+            text.push('\n');
+        }
+        let path = scratch(name).join("small-ud-test.conllu");
+        std::fs::write(&path, text).expect("a file");
+        read_conllu(&path, "UD_Small").expect("sentences")
+    }
+
+    fn corpus_row(original: &str, group: Option<i64>, document: &str) -> CorpusRow {
+        CorpusRow { identifier: format!("id:{document}"), original: original.to_owned(), group, before: String::new(), after: String::new(), family: format!("family:{document}"), document: document.to_owned(), spacing: " ".to_owned(), literal_tail: String::new(), layout_representable: true, split: "test".to_owned(), quarantine_reasons: Vec::new(), lemma: original.to_owned(), language: "en".to_owned(), source: "S".to_owned(), source_file: "f".to_owned(), source_sentence: "s".to_owned(), source_token: "1".to_owned(), space_before: String::new(), upos: "X".to_owned(), features: "_".to_owned(), misc: "_".to_owned(), alignment: "exact-text-comment".to_owned() }
+    }
+
+    #[test]
+    fn a_partition_names_each_row_once_and_keeps_whole_documents_apart() {
+        let path = scratch("twice").join("small-ud-test.conllu");
+        std::fs::write(&path, "# sent_id = s\n# text = слово слово\n1\tслово\t_\tNOUN\t_\t_\t0\troot\t_\t_\n1\tслово\t_\tNOUN\t_\t_\t0\troot\t_\t_\n").expect("a file");
+        let twice = read_conllu(&path, "UD_Small").expect("sentences");
+        assert!(partition(&twice, "n", &HashSet::new()).map(|_| ()).unwrap_err().contains("duplicate source row"));
+        let (rows, summary) = partition(&[], "n", &HashSet::new()).expect("a partition");
+        assert!(rows.is_empty() && summary["mode"] == json!("whole-document-lexeme-components"));
+        let words: Vec<String> = (0..20).map(|document| format!("слово{document}")).collect();
+        let lists: Vec<[&str; 1]> = words.iter().map(|word| [word.as_str()]).collect();
+        let lines: Vec<&[&str]> = lists.iter().map(|list| &list[..]).collect();
+        let read = sentences("apart", &lines);
+        let exposed: HashSet<String> = words.iter().map(|word| physical(word)).collect();
+        let (rows, summary) = partition(&read, "n", &exposed).expect("a partition");
+        assert_eq!(summary["mode"], json!("whole-document-lexeme-components"));
+        assert!(rows.iter().any(|row| row.quarantine_reasons.iter().any(|reason| reason == "family-previously-exposed")));
+        let mut first = rows[0].clone();
+        first.lemma = String::new();
+        assert!(!row_aliases(&first).is_empty());
+    }
+
+    #[test]
+    fn a_base_needs_documents_and_sentences_to_sample() {
+        let output = scratch("bounds").join("base");
+        for (documents, sentences) in [(0, 1), (1, 0)] {
+            assert!(freeze_base(&root(), Path::new("/nonexistent"), &output, "n", &[], documents, sentences).unwrap_err().contains("must be positive"));
+        }
+        assert!(!output.exists());
+        unchanged(true, "moved").expect("the same");
+        assert_eq!(unchanged(false, "moved").unwrap_err(), "moved");
+    }
+
+    #[test]
+    fn a_test_row_counts_only_where_its_keys_can_be_typed() {
+        let rows = [corpus_row("word", Some(0), "a"), corpus_row("123", Some(0), "b"), corpus_row("naïve", Some(0), "c"), corpus_row("слово", Some(1), "d"), corpus_row("mixed", None, "e")];
+        let counts = sequence_document_counts(&rows);
+        assert_eq!(counts["unsupported_selected_by_group"]["0"], json!(2));
+        assert_eq!(counts["screenable_documents_by_group"]["1"], json!(1));
+        // A row of no layout group is typed as it is, without a wrong layout to restore.
+        assert_eq!(counts["screenable_documents_by_group"]["None"], json!(1));
+    }
+
+    #[test]
+    fn a_reconciliation_closes_the_families_over_every_layout_and_what_a_fit_saw() {
+        let read = sentences("closure", &[&["Слово"], &["слово"], &["мирный"], &["naïve"], &["тест"], &["кот", "спит"], &["café"]]);
+        let (mut rows, _) = partition(&read, "n", &HashSet::new()).expect("a partition");
+        for row in &mut rows {
+            let split = match row.original.as_str() {
+                "слово" | "тест" => "test",
+                "мирный" => "development",
+                _ => "train",
+            };
+            split.clone_into(&mut row.split);
+            row.quarantine_reasons.clear();
+            if row.original == "naïve" {
+                row.layout_representable = true;
+            }
+            if row.original == "кот" {
+                " тест".clone_into(&mut row.after);
+            }
+        }
+        let historical = HashSet::from(["мирный".to_owned()]);
+        let reconciled = reconcile_rows(&read, &rows, &historical).expect("reconciled");
+        let reasons: BTreeSet<&str> = reconciled.rows.iter().flat_map(|row| row.quarantine_reasons.iter().map(String::as_str)).collect();
+        for reason in ["shift-closure-crosses-original-splits", "shift-closure-historical-exposure", "shift-closure-prior-fit-exposure", "unsupported-exact-physical-glyph"] {
+            assert!(reasons.contains(reason), "{reason}: {reasons:?}");
+        }
+        assert!(reconciled.summary["test_contaminated_rows"].as_i64().is_some_and(|count| count > 0));
+        // Its derivative: a test split that changed is written anew.
+        let directory = scratch("derivative");
+        std::fs::write(directory.join("generator-source.rs"), b"// the freezer").expect("a file");
+        let mut summary = reconciled.summary.clone();
+        summary.insert("parent_manifest_sha256".to_owned(), json!("0"));
+        let result = Reconciled { rows: reconciled.rows, sidecar: reconciled.sidecar, summary };
+        let manifest = json!({"splits": {"test": {"content_sha256": "0"}}, "generator_source": "generator-source.rs", "test_membership_sha256": "0"});
+        let output = directory.join("derivative");
+        write_derivative(&root(), &directory, &output, &result, &manifest, "n").expect("written");
+        assert!(output.join("test.jsonl.gz").is_file());
+    }
+
+    #[test]
+    fn a_technical_family_keeps_two_commands_and_none_with_a_reserved_alias() {
+        let mut names = Vec::new();
+        for length in [4_u32, 5] {
+            for bits in 0..(1_u32 << length) {
+                names.push((0..length).map(|place| if (bits >> place) & 1 == 1 { 'b' } else { 'a' }).collect::<String>());
+            }
+        }
+        names.push("tool".to_owned());
+        let commands: Vec<Command> = names.iter().map(|name| Command { name: name.clone(), paths: vec![format!("usr/bin/{name}")], owners: vec![format!("utils/{name}")] }).collect();
+        let reserved = command_aliases(commands.last().expect("a command"));
+        let partitioned = partition_commands(commands, &reserved);
+        let reasons: BTreeSet<&str> = partitioned.rows.iter().flat_map(|row| row.quarantine_reasons.iter().map(String::as_str)).collect();
+        assert_eq!(reasons, BTreeSet::from(["fixed-hash-family-cap", "reserved-physical-alias"]));
+        let output = scratch("technical").join("technical");
+        let manifest = write_technical(&root(), &partitioned, &output, &BTreeMap::new(), &json!({})).expect("written");
+        assert!(manifest["splits"]["quarantine"]["rows"].as_u64().is_some_and(|rows| rows > 0));
+    }
 }

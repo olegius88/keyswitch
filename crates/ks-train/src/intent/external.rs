@@ -324,10 +324,9 @@ pub fn build_unknown_typo_disjoint_corpus<S: ::std::hash::BuildHasher>(onboard: 
             }
         }
     }
+    // A variant in `excluded` was passed over before it could be used.
     let selected_sealed_overlap_count = used.intersection(excluded).count();
-    if selected_sealed_overlap_count != 0 {
-        return Err("unknown-typo corpus contains a sealed physical signature after filtering".to_owned());
-    }
+    assert_eq!(selected_sealed_overlap_count, 0, "unknown-typo corpus contains a sealed physical signature after filtering");
     let corpus_sha256 = dataset::external_corpus_fingerprint(&examples);
     Ok(ExternalCorpus { examples, words_by_group: counts, dictionary_sources: [snapshots[0].provenance.dictionary.path.clone(), snapshots[1].provenance.dictionary.path.clone()], minimum_words_per_group, rejected_sealed_overlaps_by_group: rejected, exclusion_signature_count: excluded.len(), exclusion_signature_sha256: signature_set_fingerprint(excluded.iter().map(String::as_str)), selected_sealed_overlap_count, corpus_sha256, rank_namespace: rank_namespace.to_owned(), choice_namespace: choice_namespace.to_owned(), dictionary_provenance: [snapshots[0].provenance.clone(), snapshots[1].provenance.clone()] })
 }
@@ -389,15 +388,19 @@ pub fn model_blind_corpora(root: &Path, models: &[&LanguageModel; 2], protected:
     let combined_exclusions: BTreeSet<String> = sealed_index.signatures.union(&development_signatures).cloned().collect();
     let holdout = build_unknown_typo_disjoint_corpus(&onboard, &combined_exclusions, minimum, &snapshots, models, protected, HOLDOUT_RANK_NAMESPACE, HOLDOUT_CHOICE_NAMESPACE)?;
     let holdout_signatures = unknown_typo_physical_signatures(&holdout)?;
-    if development_signatures.intersection(&holdout_signatures).next().is_some() || sealed_index.signatures.intersection(&holdout_signatures).next().is_some() {
-        return Err("preseal holdout overlaps a previously exposed domain".to_owned());
-    }
+    // The holdout was built without every signature of the sealed index and of the development corpus.
+    assert!(development_signatures.is_disjoint(&holdout_signatures), "preseal holdout overlaps the development domain");
+    assert!(sealed_index.signatures.is_disjoint(&holdout_signatures), "preseal holdout overlaps the sealed domain");
     let frozen_development = if verify_frozen_source {
         let raw = dataset::read_frozen(root, &config["hard_negative_development"]["source"])?;
         let frozen = dataset::decode_hard_negative_corpus(&raw, &config, &dataset_config, protected)?;
-        if frozen.expanded_corpus_sha256 != development.corpus_sha256 || frozen.physical_signatures_sha256 != signature_set_fingerprint(development_signatures.iter().map(String::as_str)) || frozen.signature_count.to::<usize>() != development_signatures.len() || frozen.words_by_group[&0].to::<usize>() != development.words_by_group[0] || frozen.words_by_group[&1].to::<usize>() != development.words_by_group[1] {
+        if frozen.expanded_corpus_sha256 != development.corpus_sha256 {
             return Err("frozen hard-negative source differs from model-blind development".to_owned());
         }
+        // The decoding proved each of these of the rows it expanded, and the rows are the development corpus's.
+        assert_eq!(frozen.physical_signatures_sha256, signature_set_fingerprint(development_signatures.iter().map(String::as_str)), "the frozen signatures are those of its rows");
+        assert_eq!(frozen.signature_count.to::<usize>(), development_signatures.len(), "the frozen count is that of its rows");
+        assert_eq!([frozen.words_by_group[&0].to::<usize>(), frozen.words_by_group[&1].to::<usize>()], development.words_by_group, "the frozen groups are those of its rows");
         Some(frozen)
     } else {
         None

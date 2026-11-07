@@ -390,7 +390,7 @@ fn tatoeba_tokens(text: &str) -> Vec<String> {
             }
             tokens.push(collected(&characters[position..end]));
             position = end;
-        } else if character == '_' || (!ucd::re_w(character) && !char_is_space(character)) {
+        } else if character == '_' || !char_is_space(character) {
             tokens.push(character.to_string());
             position += 1;
         } else {
@@ -431,6 +431,11 @@ fn read_tatoeba(path: &Path, source: &str, language: &str, namespace: &str, excl
     let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let mut text = String::new();
     bzip2_rs::DecoderReader::new(std::io::BufReader::new(file)).read_to_string(&mut text).map_err(|error| format!("{name}: {error}"))?;
+    tatoeba_rows(&text, &name, source, language, namespace, excluded)
+}
+
+/// The sentences of the text of an export: an identifier, a language and a text on each line.
+fn tatoeba_rows(text: &str, name: &str, source: &str, language: &str, namespace: &str, excluded: &HashSet<String>) -> Result<Vec<Sentence>, String> {
     let mut sentences = Vec::new();
     for raw in text.split('\n') {
         let line = raw.trim_end_matches(['\r', '\n']);
@@ -455,7 +460,7 @@ fn read_tatoeba(path: &Path, source: &str, language: &str, namespace: &str, excl
         if draw(&format!("{namespace}:tatoeba:{identifier}")) % PER_MILLE_SCALE >= TATOEBA_SAMPLE_PER_MILLE {
             continue;
         }
-        sentences.push(tatoeba_sentence(identifier, language, &joined, source, &name));
+        sentences.push(tatoeba_sentence(identifier, language, &joined, source, name));
     }
     Ok(sentences)
 }
@@ -618,6 +623,68 @@ fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).display().to_string()
 }
 
+/// The physical forms of what was shown, and the forms as they were written.
+#[derive(Default)]
+struct Exposed {
+    physical: HashSet<String>,
+    forms: HashSet<String>,
+}
+
+impl Exposed {
+    fn insert(&mut self, form: &str) {
+        self.physical.insert(physical(form));
+        self.forms.insert(form.to_owned());
+    }
+}
+
+/// A text, each of its words, and with `expand` the internal typos of each word.
+fn add(text: &str, expand: bool, exposed: &mut Exposed) {
+    exposed.insert(text);
+    for token in words_of(text) {
+        exposed.insert(token);
+        if expand {
+            let letters: Vec<char> = token.chars().collect();
+            if (TYPO_SOURCE_MIN_CHARACTERS..=TYPO_SOURCE_MAX_CHARACTERS).contains(&letters.len()) {
+                for index in 1..letters.len() - 1 {
+                    let mut deleted = letters.clone();
+                    deleted.remove(index);
+                    exposed.insert(&collected(&deleted));
+                    let mut doubled = letters.clone();
+                    doubled.insert(index, letters[index]);
+                    exposed.insert(&collected(&doubled));
+                }
+                for index in 1..letters.len() - TRANSPOSE_TAIL_MARGIN_CHARACTERS {
+                    let mut swapped = letters.clone();
+                    swapped.swap(index, index + 1);
+                    exposed.insert(&collected(&swapped));
+                }
+            }
+        }
+    }
+}
+
+/// The texts of a record of exposure: its strings, the second item of a key that is a JSON list, and what the fields of
+/// text or nesting hold.
+fn walk(value: &Value, expand: bool, exposed: &mut Exposed) {
+    match value {
+        Value::String(text) => add(text, expand, exposed),
+        Value::Array(items) => items.iter().for_each(|child| walk(child, expand, exposed)),
+        Value::Object(table) => {
+            for (key, child) in table {
+                if key.starts_with('[') {
+                    if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(key)
+                        && let Some(text) = parts.get(1).and_then(Value::as_str) {
+                            add(text, expand, exposed);
+                        }
+                } else if matches!(key.as_str(), "word" | "original" | "alternative" | "text" | "before" | "after" | "expected") || child.is_array() || child.is_object() {
+                    walk(child, expand, exposed);
+                }
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
 /// `exposed_families`: the physical forms of everything the repository has shown a model before, and the forms as written.
 pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(HashSet<String>, BTreeMap<String, String>, HashSet<String>), String> {
     let mut paths = vec![root.join("model/context_v1/scenarios.json")];
@@ -629,60 +696,6 @@ pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(H
     paths.extend_from_slice(additional);
     let mut exposed = Exposed::default();
     let mut provenance = BTreeMap::new();
-    #[derive(Default)]
-    struct Exposed {
-        physical: HashSet<String>,
-        forms: HashSet<String>,
-    }
-    impl Exposed {
-        fn insert(&mut self, form: &str) {
-            self.physical.insert(physical(form));
-            self.forms.insert(form.to_owned());
-        }
-    }
-    fn add(text: &str, expand: bool, exposed: &mut Exposed) {
-        exposed.insert(text);
-        for token in words_of(text) {
-            exposed.insert(token);
-            if expand {
-                let letters: Vec<char> = token.chars().collect();
-                if (TYPO_SOURCE_MIN_CHARACTERS..=TYPO_SOURCE_MAX_CHARACTERS).contains(&letters.len()) {
-                    for index in 1..letters.len() - 1 {
-                        let mut deleted = letters.clone();
-                        deleted.remove(index);
-                        exposed.insert(&collected(&deleted));
-                        let mut doubled = letters.clone();
-                        doubled.insert(index, letters[index]);
-                        exposed.insert(&collected(&doubled));
-                    }
-                    for index in 1..letters.len() - TRANSPOSE_TAIL_MARGIN_CHARACTERS {
-                        let mut swapped = letters.clone();
-                        swapped.swap(index, index + 1);
-                        exposed.insert(&collected(&swapped));
-                    }
-                }
-            }
-        }
-    }
-    fn walk(value: &Value, expand: bool, exposed: &mut Exposed) {
-        match value {
-            Value::String(text) => add(text, expand, exposed),
-            Value::Array(items) => items.iter().for_each(|child| walk(child, expand, exposed)),
-            Value::Object(table) => {
-                for (key, child) in table {
-                    if key.starts_with('[') {
-                        if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(key)
-                            && let Some(text) = parts.get(1).and_then(Value::as_str) {
-                                add(text, expand, exposed);
-                            }
-                    } else if matches!(key.as_str(), "word" | "original" | "alternative" | "text" | "before" | "after" | "expected") || child.is_array() || child.is_object() {
-                        walk(child, expand, exposed);
-                    }
-                }
-            }
-            Value::Null | Value::Bool(_) | Value::Number(_) => {}
-        }
-    }
     let mut done: BTreeSet<PathBuf> = BTreeSet::new();
     for path in paths {
         if !done.insert(path.clone()) {
@@ -1351,7 +1364,7 @@ fn begin_output(base: &Path, output: &Path, generator: &str) -> Result<Value, St
     let parent = output.parent().map(Path::to_path_buf).unwrap_or_default();
     std::fs::create_dir_all(&parent).map_err(|error| error.to_string())?;
     let resolved = parent.canonicalize().map_err(|error| error.to_string())?.join(output.file_name().ok_or("an output without a name")?);
-    if resolved == resolved_base || resolved.starts_with(&resolved_base) {
+    if resolved.starts_with(&resolved_base) {
         return Err("derivative must not be inside the base corpus".to_owned());
     }
     let manifest = read_json(&base.join("manifest.json"))?;
@@ -1554,6 +1567,11 @@ pub fn freeze_holdout(request: &FreezeRequest<'_>, source_root: &Path, treebanks
     Ok(json!({"ud": report["ud"], "technical": report["technical"], "prior_access_overlap": report["prior_access_overlap"], "written": request.output.is_some()}))
 }
 
+/// A file checked when the freeze began is still what was checked; something else that wrote it meanwhile stops the freeze.
+fn unchanged(same: bool, what: &str) -> Result<(), String> {
+    if same { Ok(()) } else { Err(what.to_owned()) }
+}
+
 /// `fitting_split`: which fitting split a new family belongs to, deterministically.
 fn fitting_split(namespace: &str, family: &str) -> &'static str {
     let bucket = draw(&format!("{namespace}:fitting:{family}")) % SPLIT_BUCKET_COUNT;
@@ -1595,9 +1613,7 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
         }
     }
     let membership = read_json(&request.base.join("test-membership.json"))?;
-    if read_json(&request.base.join("manifest.json"))?["test_membership_sha256"] != json!(checksum(&request.base.join("test-membership.json"))?) {
-        return Err("base test membership differs from its manifest".to_owned());
-    }
+    unchanged(read_json(&request.base.join("manifest.json"))?["test_membership_sha256"] == json!(checksum(&request.base.join("test-membership.json"))?), "base test membership differs from its manifest")?;
     let base_test_families: HashSet<String> = string_items(&membership["family_ids_sha256"]).into_iter().collect();
     let base_test_rows: HashSet<String> = string_items(&membership["row_ids_sha256"]).into_iter().collect();
     let base_test_documents: HashSet<String> = string_items(&membership["document_ids_sha256"]).into_iter().collect();
@@ -1621,9 +1637,9 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
     for (family, hashes) in &families.hashes_by_family {
         // Being in the base corpus is what this extension is for; being in anyone's test is not.
         let mut reasons: Vec<String> = alias_reasons(hashes, &families.physical_by_family[family], family, &exclusions).into_iter().filter(|reason| reason != "family-in-base-corpus").collect();
-        if (base_test_families.contains(family) || ledger_families.contains(family) || meets(hashes, &test_aliases)) && !reasons.iter().any(|reason| reason == "prior-accessed-test-family") {
-            reasons.push("prior-accessed-test-family".to_owned());
-        }
+        let in_test = base_test_families.contains(family) || ledger_families.contains(family) || meets(hashes, &test_aliases);
+        // The memberships are read again here: a sealed test that claimed the family since the exclusions were loaded marks it too.
+        mark_test_family(&mut reasons, in_test);
         // A word the base fits follows its split; one the base fits in two splits cannot be fitted in one and measured in another.
         let splits: BTreeSet<&String> = hashes.iter().filter_map(|alias| alias_splits.get(alias)).collect();
         if meets(hashes, &contested) || splits.len() > 1 {
@@ -1638,9 +1654,8 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
     let mut split_counts: BTreeMap<String, i64> = BTreeMap::new();
     for mut row in rows {
         let mut reasons = reasons_by_family.get(row.family.as_str()).cloned().unwrap_or_default();
-        if row.alignment != "exact-text-comment" {
-            reasons.push(row.alignment.clone());
-        }
+        // A Tatoeba sentence is its tokens with single spaces between them: it aligns with them exactly.
+        assert_eq!(row.alignment, "exact-text-comment", "a Tatoeba sentence aligns with its tokens");
         // The row and document digests can tell whether a sealed test has seen this row; a family identifier cannot.
         if test_rows.contains(&hex_digest(&row.identifier)) {
             reasons.push("prior-accessed-test-row".to_owned());
@@ -1696,4 +1711,183 @@ pub fn freeze_fitting(request: &FreezeRequest<'_>) -> Result<Value, String> {
         std::fs::write(path, ks_text::json_dumps(&report, &options) + "\n").map_err(|error| error.to_string())?;
     }
     Ok(json!({"written": true, "manifest_sha256": report["manifest_sha256"], "added_by_split": metadata["fitting"]["added_by_split"], "added_rows": metadata["fitting"]["added_rows"], "quarantine_reasons": metadata["fitting"]["quarantine_reasons"]}))
+}
+
+/// A family some test holds carries the reason once, whether the exclusions or the memberships read again found it.
+fn mark_test_family(reasons: &mut Vec<String>, in_test: bool) {
+    if in_test && !reasons.iter().any(|reason| reason == "prior-accessed-test-family") {
+        reasons.push("prior-accessed-test-family".to_owned());
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn token(identifier: &str, form: &str, misc: &str) -> SurfaceToken {
+        SurfaceToken { identifier: identifier.to_owned(), form: form.to_owned(), lemmas: vec![form.to_owned()], upos: "X".to_owned(), features: "_".to_owned(), misc: misc.to_owned() }
+    }
+
+    fn sentence(text: Option<&str>, tokens: Vec<SurfaceToken>) -> Sentence {
+        Sentence { identifier: "s".to_owned(), document: "d".to_owned(), source: "S".to_owned(), filename: "f".to_owned(), text: text.map(str::to_owned), tokens }
+    }
+
+    fn columns(line: &str) -> Vec<String> {
+        line.split('\t').map(str::to_owned).collect()
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-train-freeze-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    fn nothing_excluded() -> Exclusions {
+        Exclusions { base_aliases: HashSet::new(), prior_test_aliases: HashSet::new(), prefix_aliases: HashSet::new(), prior_test_families: HashSet::new(), exposed_physical: HashSet::new(), historical_aliases: HashSet::new(), lexicon: HashSet::new(), provenance: BTreeMap::new() }
+    }
+
+    #[test]
+    fn an_escaped_space_of_a_treebank_is_read_back() {
+        assert_eq!(unescape_space(r"\s\t\n\r\p\\\x\"), " \t\n\r|\\\\x\\");
+    }
+
+    #[test]
+    fn a_treebank_is_read_to_its_last_sentence_and_a_word_without_a_lemma_is_its_own() {
+        let tokens = surface_tokens(&[columns("1\tслово\t_\tNOUN\t_\t_\t0\troot\t_\t_")]).expect("tokens");
+        assert_eq!(tokens[0].lemmas, ["слово"]);
+        let path = scratch("conllu").join("small-ud-test.conllu");
+        std::fs::write(&path, "# sent_id = a\n1\tслово\t_\tNOUN\t_\t_\t0\troot\t_\t_\n1\tслово\t_\tNOUN\t_\t_\t0\troot\t_\t_").expect("a file");
+        let read = read_conllu(&path, "UD_Small").expect("sentences");
+        assert_eq!(read.len(), 1);
+        assert!(family_rows(&read).map(|_| ()).unwrap_err().contains("duplicate row identifiers"));
+    }
+
+    #[test]
+    fn a_text_is_aligned_or_rebuilt_from_the_spaces_its_tokens_declare() {
+        let exact = sentence(Some("one two"), vec![token("1", "one", "_"), token("2", "two", "_")]);
+        assert_eq!(aligned_text(&exact).2, "exact-text-comment");
+        let trailing = sentence(Some("one two three"), vec![token("1", "one", "_"), token("2", "two", "_")]);
+        assert_eq!(aligned_text(&trailing).2, "text-alignment-conflict");
+        let short = sentence(Some("one"), vec![token("1", "one", "_"), token("2", "two", "_")]);
+        assert_eq!(aligned_text(&short).2, "text-alignment-conflict");
+        let rebuilt = sentence(None, vec![token("1", "one", "SpacesBefore=\\s"), token("2", "two", "SpaceAfter=No"), token("3", "three", "_")]);
+        let (text, _, how) = aligned_text(&rebuilt);
+        assert_eq!((text.iter().collect::<String>().as_str(), how), (" one twothree", "misc-reconstructed-no-text"));
+        // A literal tail is cut where the window ends.
+        let marks = "!".repeat(70);
+        let shouted = sentence(Some(&format!("word {marks}")), vec![token("1", "word", "_"), token("2", &marks, "_")]);
+        assert_eq!(sentence_rows(&shouted, &mut Union::default())[0].literal_tail.chars().count(), CORPUS_LITERAL_TAIL_MAX_CHARACTERS);
+    }
+
+    #[test]
+    fn a_token_has_the_language_of_its_letters() {
+        assert_eq!(token_language("слово"), ("ru", Some(1), true));
+        assert_eq!(token_language("word"), ("en", Some(0), true));
+        assert_eq!(token_language("смесьmix"), ("mixed", None, false));
+        assert_eq!(token_language("42"), ("und", None, false));
+        assert_eq!(token_language("wörd"), ("en", Some(0), false));
+    }
+
+    #[test]
+    fn a_tatoeba_sentence_comes_apart_as_its_pattern_says() {
+        assert_eq!(tatoeba_tokens("don't re-enter_ now, ok"), ["don't", "re-enter", "_", "now", ",", "ok"]);
+        assert_eq!(tatoeba_tokens("a- b re-enter"), ["a", "-", "b", "re-enter"]);
+        assert!(tatoeba_rows("1\trus", "rus_sentences.tsv", "Tatoeba-rus", "rus", "n", &HashSet::new()).map(|_| ()).unwrap_err().contains("must be id, language, text"));
+    }
+
+    #[test]
+    fn a_word_in_letters_of_the_other_script_is_a_typo_no_writer_makes() {
+        assert!(lookalike_typo(&sentence(None, vec![token("1", "Cлово", "_")])));
+        assert!(lookalike_typo(&sentence(None, vec![token("1", "bс", "_")])));
+        assert!(lookalike_typo(&sentence(None, vec![token("1", "word", "_"), token("2", "с", "_"), token("3", "word", "_")])));
+        assert!(lookalike_typo(&sentence(None, vec![token("1", "слово", "_"), token("2", "c", "_"), token("3", "слово", "_")])));
+        assert!(!lookalike_typo(&sentence(None, vec![token("1", "Ёж", "_"), token("2", "42", "_")])));
+    }
+
+    #[test]
+    fn a_path_names_a_command_and_an_owner_a_package() {
+        assert_eq!(command_of_path("usr/sbin/tool"), Some("tool"));
+        assert_eq!(command_of_path("usr/lib/tool"), None);
+        for good in ["utils/pkg", "universe/utils/pkg+1.0", "utils/1pkg"] {
+            assert!(package_section(good), "{good}");
+        }
+        for bad in ["pkg", "a/b/c/d", "utils/Pkg", "utils//pkg", "utils/+pkg"] {
+            assert!(!package_section(bad), "{bad}");
+        }
+    }
+
+    fn header(name: &[u8], size: &[u8], kind: u8, prefix: &[u8], magic: bool) -> Vec<u8> {
+        let mut header = vec![0_u8; 512];
+        header[..name.len()].copy_from_slice(name);
+        header[124..124 + size.len()].copy_from_slice(size);
+        header[156] = kind;
+        if magic {
+            header[257..263].copy_from_slice(b"ustar\0");
+        }
+        header[345..345 + prefix.len()].copy_from_slice(prefix);
+        header
+    }
+
+    #[test]
+    fn an_archive_lists_its_plain_files_with_their_folders() {
+        let mut bytes = header(b"name", b"00000000003\0", 0, b"folder", true);
+        bytes.extend_from_slice(b"abc");
+        bytes.resize(1024, 0);
+        bytes.extend(header(b"dir", b"00000000000\0", b'5', b"", false));
+        bytes.extend(header(b"plain", b"00000000001\0", b'0', b"ignored", false));
+        bytes.push(b'x');
+        let entries = tar_entries(&bytes);
+        assert_eq!(entries, vec![("folder/name".to_owned(), &b"abc"[..]), ("plain".to_owned(), &b"x"[..])]);
+    }
+
+    #[test]
+    fn a_package_index_of_rpm_reads_only_whole_file_entries() {
+        let text = "<metadata><package type=\"rpm\"><name>p</name><file</file>></package><package type=\"rpm\"><name>q</name><file</package></metadata>";
+        let path = scratch("rpm").join("primary.xml.zst");
+        std::fs::write(&path, ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest)).expect("a file");
+        assert!(read_fedora_commands(&path).expect("commands").is_empty());
+    }
+
+    #[test]
+    fn a_family_of_many_commands_keeps_two_and_each_reason_is_named() {
+        let mut names = Vec::new();
+        for length in [4_u32, 5] {
+            for bits in 0..(1_u32 << length) {
+                names.push((0..length).map(|place| if (bits >> place) & 1 == 1 { 'b' } else { 'a' }).collect::<String>());
+            }
+        }
+        let commands: Vec<Command> = names.iter().map(|name| Command { name: name.clone(), paths: vec![format!("usr/bin/{name}")], owners: vec![format!("utils/{name}")] }).collect();
+        let (rows, _) = technical_holdout_rows(&commands, &nothing_excluded(), "n", "Debian-sid", "Contents-amd64.gz", "debian-package-component:");
+        assert!(rows.iter().any(|row| row.quarantine_reasons.iter().any(|reason| reason == "fixed-hash-family-cap")));
+        let hashes = BTreeSet::from(["alias".to_owned()]);
+        let mut known = nothing_excluded();
+        known.prior_test_families.insert("family".to_owned());
+        known.prefix_aliases.insert("alias".to_owned());
+        assert_eq!(alias_reasons(&hashes, &BTreeSet::new(), "family", &known), ["prior-accessed-test-family", "prefix-curriculum-prior-exposure"]);
+        // A family a test claimed after the exclusions were read gets the reason at the end; one that has it keeps one.
+        let mut reasons = vec!["prefix-curriculum-prior-exposure".to_owned()];
+        mark_test_family(&mut reasons, true);
+        assert_eq!(reasons, ["prefix-curriculum-prior-exposure", "prior-accessed-test-family"]);
+        mark_test_family(&mut reasons, true);
+        mark_test_family(&mut reasons, false);
+        assert_eq!(reasons.len(), 2);
+        let mut free = Vec::new();
+        mark_test_family(&mut free, false);
+        assert!(free.is_empty());
+    }
+
+    #[test]
+    fn an_exposure_record_gives_its_texts_and_nothing_else() {
+        let mut exposed = Exposed::default();
+        walk(&json!({"[x": "a", "[1]": "b", "[\"c\", \"word\"]": 1, "count": 3, "flag": true, "nothing": null, "kept": "no", "list": [7, false]}), false, &mut exposed);
+        assert_eq!(exposed.forms, HashSet::from(["word".to_owned()]));
+        assert_eq!(string_items(&json!({"a": 1, "b": 2})), ["a", "b"]);
+        assert!(string_items(&json!(1)).is_empty());
+        unchanged(true, "moved").expect("the same");
+        assert_eq!(unchanged(false, "moved").unwrap_err(), "moved");
+        let mut row = sentence_rows(&sentence(Some("слово"), vec![token("1", "слово", "_")]), &mut Union::default()).remove(0);
+        row.lemma = String::new();
+        assert!(!row_aliases(&row).is_empty());
+    }
 }
