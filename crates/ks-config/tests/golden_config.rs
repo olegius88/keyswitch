@@ -41,12 +41,26 @@ fn hex(bytes: &[u8]) -> String {
 fn jt(value: &Value) -> String {
     json_dumps(value, &JsonOptions { ensure_ascii: false, ..JsonOptions::default() })
 }
-fn tempdir(tag: &str) -> PathBuf {
+/// The folder of one golden case, removed when the case is done: a run makes tens of thousands of them, and kept they
+/// filled the temporary folder.
+struct Scratch(PathBuf);
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+impl std::ops::Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+fn tempdir(tag: &str) -> Scratch {
     static N: AtomicUsize = AtomicUsize::new(0);
     let d = std::env::temp_dir().join(format!("ks-golden-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
-    d
+    Scratch(d)
 }
 fn file_hex(path: &Path) -> Value {
     std::fs::read(path).map_or(Value::Null, |b| Value::String(hex(&as_python_file(&b))))
