@@ -245,3 +245,28 @@ fn thresholds_that_let_everything_through_count_as_false_conversions() {
     let report = read(&output.join("report.json"));
     assert!(report["corpus_test"]["counts"].as_object().expect("counts").keys().any(|name| name.ends_with("false_types")), "{report}");
 }
+
+/// Lower case left unscored and every threshold low enough to let the rest through: a token of the unscored shape never
+/// converts, and false conversions over the maximum fail a promotion whose other floors hold.
+#[test]
+fn an_unscored_shape_never_converts_and_false_conversions_over_the_maximum_fail() {
+    let tree = thinned("ortho-unscored");
+    let output = scratch("ortho-unscored-out").join("model");
+    let path = tree.join("model/ortho_v1/config.json");
+    let mut config = read(&path);
+    config["unscored_shapes"] = json!(["lower"]);
+    for direction in ["en", "ru"] {
+        config["thresholds_nats"][direction] = json!(-100_000.0);
+    }
+    config["promotion"]["minimum_test_negatives"] = json!(0);
+    config["promotion"]["maximum_test_false_conversions"] = json!(0);
+    config["promotion"]["minimum_recall"] = json!(0.0);
+    write_json(&path, &config);
+    let fit = run(ortho(&tree).arg("--fit").arg("--output").arg(&output));
+    assert!(fit.status.success(), "{}", said(&fit));
+    let tested = run(ortho(&tree).arg("--test").arg("--output").arg(&output));
+    assert!(said(&tested).contains("promotion passed: false"), "{}", said(&tested));
+    let report = read(&output.join("report.json"));
+    let counts = report["corpus_test"]["counts"].as_object().expect("counts");
+    assert!(counts.iter().any(|(name, count)| name.ends_with("false_types") && count.as_i64() > Some(0)), "{report}");
+}

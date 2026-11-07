@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Output;
-use support::{scratch, trainer};
+use support::{chat_messages, corpus, recipe, scratch, small_tree, trainer};
 
 fn said(output: &Output) -> String {
     format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr))
@@ -271,4 +271,52 @@ fn every_command_on_a_tree_that_is_not_there_says_why_it_stops() {
         }
     }
     assert!(unexpected.is_empty(), "{}", unexpected.join("\n"));
+}
+
+#[test]
+fn a_comparison_without_an_output_is_only_printed() {
+    let tree = small_tree("compare-tree", &recipe());
+    let folder = scratch("compare");
+    let (data, ledger) = (folder.join("corpus"), folder.join("ledger"));
+    corpus(&data);
+    std::fs::create_dir_all(&ledger).expect("a folder");
+    let installed = format!("installed={}", tree.join("resources/models/context_policy_v1.json").display());
+    let compared = trainer().arg("compare").arg("--tree").arg(&tree).arg("--corpus").arg(&data).arg("--ledger").arg(&ledger).arg("--artifact").arg(installed).args(["--jobs", "2"]).output().expect("the trainer starts");
+    let answer = done(&compared);
+    assert!(answer.contains(" installed (context-v3-"), "{answer}");
+    assert_eq!(std::fs::read_dir(&folder).expect("the folder").count(), 2, "nothing is written beside the corpus and the ledger");
+}
+
+#[test]
+fn a_chat_test_run_by_hand_says_its_floors() {
+    let tree = small_tree("devchat-by-hand-tree", &recipe());
+    let folder = scratch("devchat-by-hand");
+    let directory = folder.join("messages");
+    // Each message turns from one layout to the other and back, so that every way of typing it has rows.
+    chat_messages(&tree, &directory, &["запусти git status и покажи вывод", "сделай commit и push в main!", "привет как дела сегодня"], 1);
+    let (ledger, sequences, output, candidate) = (folder.join("ledger"), folder.join("sequences"), folder.join("chat.json"), folder.join("candidate.json"));
+    for made in [&ledger, &sequences] {
+        std::fs::create_dir_all(made).expect("a folder");
+    }
+    std::fs::copy(tree.join("resources/models/context_policy_v1.json"), &candidate).expect("a copy");
+    let run = trainer()
+        .arg("devchat")
+        .arg("--tree")
+        .arg(&tree)
+        .args(["--split", "dev"])
+        .arg("--directory")
+        .arg(&directory)
+        .arg("--candidate")
+        .arg(&candidate)
+        .arg("--output")
+        .arg(&output)
+        .arg("--ledger")
+        .arg(&ledger)
+        .arg("--sequences-ledger")
+        .arg(&sequences)
+        .args(["--jobs", "1"])
+        .output()
+        .expect("the trainer starts");
+    let answer = done(&run);
+    assert!(answer.contains("\"floors\"") && answer.contains("\"messages\"") && output.is_file(), "{answer}");
 }
