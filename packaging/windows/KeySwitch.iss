@@ -97,6 +97,9 @@ const
   ForcedExitWaitMilliseconds = 5000;
   // Windows releases the files of a process a moment after its handles.
   FileReleaseMilliseconds = 500;
+  // A killed program's file can stay in use a little longer than its mutex: the uninstaller waits up to ten seconds for it.
+  ExeReleaseTries = 40;
+  ExeReleasePollMilliseconds = 250;
   PollMilliseconds = 100;
 
 function IsKeySwitchAutoUpdate: Boolean;
@@ -146,11 +149,29 @@ begin
   Result := '';
 end;
 
+// Right after the program is killed its file can still be in use; an uninstaller that tried to delete it then left
+// KeySwitch.exe and its folder behind. The file is deleted here, as soon as Windows lets go of it.
+procedure DeleteKeySwitchExe;
+var
+  Exe: String;
+  Tries: Integer;
+begin
+  Exe := ExpandConstant('{app}\KeySwitch.exe');
+  Tries := 0;
+  while FileExists(Exe) and not DeleteFile(Exe) and (Tries < ExeReleaseTries) do
+  begin
+    Log('KeySwitch.exe is still in use, waiting for it');
+    Sleep(ExeReleasePollMilliseconds);
+    Tries := Tries + 1;
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
     StopKeySwitch(0);
+    DeleteKeySwitchExe;
     RegDeleteValue(
       HKEY_CURRENT_USER,
       'Software\Microsoft\Windows\CurrentVersion\Run',

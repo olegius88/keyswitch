@@ -168,12 +168,16 @@ jobs:
           New-ItemProperty -Path $runKey -Name "KeySwitch" -Value "`"$app`" --hidden" -PropertyType String -Force | Out-Null
           $uninstaller = Get-ChildItem -Path $root -Filter "unins*.exe" | Select-Object -First 1
           if (-not $uninstaller) { throw "the installed uninstaller is missing" }
-          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -PassThru
+          $uninstallLog = Join-Path $env:RUNNER_TEMP "keyswitch-uninstall.log"
+          $uninstall = Start-Process -FilePath $uninstaller.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$uninstallLog`"" -PassThru
           $null = $uninstall.Handle
           if (-not $uninstall.WaitForExit(120000)) { $uninstall.Kill(); throw "the uninstaller did not finish in two minutes" }
           # The uninstaller hands over to a copy of itself in the temporary folder (_iu*.tmp): it has finished when that copy has gone.
           $deadline = (Get-Date).AddMinutes(2)
           while ((Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+          Write-Host "::group::the uninstaller's log"
+          if (Test-Path $uninstallLog) { Get-Content $uninstallLog } else { Write-Host "the uninstaller wrote no log" }
+          Write-Host "::endgroup::"
           if (Get-Process -Name "_iu*" -ErrorAction SilentlyContinue) { throw "the uninstaller's copy did not finish in two minutes" }
           if ($uninstall.ExitCode -ne 0) { throw "the uninstaller exited with $($uninstall.ExitCode)" }
           if (Test-Path $app) { throw "the uninstaller left KeySwitch.exe behind" }
