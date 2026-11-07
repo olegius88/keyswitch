@@ -9,6 +9,7 @@ ks-cast.workspace = true
 ks-text.workspace = true
 ks-backend.workspace = true
 ks-config.workspace = true
+ks-hunspell.workspace = true
 ks-lang.workspace = true
 ks-context.workspace = true
 ks-engine.workspace = true

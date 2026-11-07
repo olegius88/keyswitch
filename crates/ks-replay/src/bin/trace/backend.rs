@@ -620,3 +620,269 @@ impl FieldReader for TraceReader {
         self.tape.lock().unwrap_or_else(PoisonError::into_inner).status.clone()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ks_backend::KeyDisposition;
+    use ks_context::{AfterOrigin, BeforeOrigin};
+
+    fn tape(calls: &Value) -> Arc<Mutex<Tape>> {
+        let mut tape = Tape::new(Arc::new(AtomicU64::new(0)), "available".to_owned());
+        tape.load(calls.as_array().expect("calls"));
+        Arc::new(Mutex::new(tape))
+    }
+
+    fn backend(calls: &Value, capabilities: Capabilities) -> TraceBackend {
+        TraceBackend { tape: tape(calls), capabilities }
+    }
+
+    fn noted(tape: &Arc<Mutex<Tape>>) -> Option<String> {
+        tape.lock().expect("not poisoned").difference.clone().map(|(cause, _)| cause)
+    }
+
+    fn key(name: &str) -> KeyEvent {
+        KeyEvent { pressed: true, key_name: name.to_owned(), character: name.to_owned(), characters: vec![name.to_owned(), name.to_owned()], ..KeyEvent::default() }
+    }
+
+    fn all() -> Capabilities {
+        Capabilities {
+            take_unseen_input: true,
+            take_input_delay: true,
+            take_hook_gap: true,
+            input_anchor: true,
+            restore_window: true,
+            keep_window_inactive: true,
+            selection: true,
+            erases_any_length: true,
+            swallows_hotkeys: true,
+        }
+    }
+
+    #[test]
+    fn the_first_difference_is_the_one_kept() {
+        let tape = tape(&json!([]));
+        let mut held = tape.lock().expect("not poisoned");
+        held.note("first".to_owned(), String::new());
+        held.note("second".to_owned(), String::new());
+        assert_eq!(held.difference.as_ref().map(|(cause, _)| cause.as_str()), Some("first"));
+    }
+
+    #[test]
+    fn a_pure_read_that_changed_unread_is_a_difference_and_only_the_first_counts() {
+        let calls = json!([
+            {"o": "b", "m": "focused_window", "r": {"window": 1}},
+            {"o": "b", "m": "focused_window", "r": {"window": 2}, "c": 12.5},
+            {"o": "b", "m": "focused_window", "r": {"window": 3}},
+        ]);
+        let tape = tape(&calls);
+        assert_eq!(tape.lock().expect("not poisoned").leftover(), None);
+        assert_eq!(noted(&tape).as_deref(), Some("focused_window changed and the Rust engine did not read it"));
+        assert_eq!(f64::from_bits(tape.lock().expect("not poisoned").clock.load(Ordering::Relaxed)), 12.5, "a fake moved the clock");
+        // A call of another kind behind the reads stops the engine there.
+        let tape = self::tape(&json!([{"o": "b", "m": "focused_window", "r": 1}, {"o": "b", "m": "focused_window", "r": 2}, {"o": "b", "m": "stop", "a": []}]));
+        assert!(TraceBackend { tape: tape.clone(), capabilities: all() }.call("stop", json!([])).is_none());
+    }
+
+    #[test]
+    fn the_calls_left_over_name_the_first_one() {
+        let tape = tape(&json!([{"o": "r", "m": "diagnostics"}, {"o": "b", "m": "stop", "a": []}]));
+        assert_eq!(tape.lock().expect("not poisoned").leftover().as_deref(), Some("stop []"));
+    }
+
+    #[test]
+    fn a_read_the_python_never_made_is_answered_from_later_or_is_a_difference() {
+        let tape = tape(&json!([]));
+        assert!(tape.lock().expect("not poisoned").take("b", "current_group", json!([])).is_none());
+        assert_eq!(noted(&tape).as_deref(), Some("current_group read where the Python never read it"));
+        // Once a difference is found, nothing more is answered.
+        assert!(tape.lock().expect("not poisoned").take("b", "stop", json!([])).is_none());
+        let tape = self::tape(&json!([]));
+        tape.lock().expect("not poisoned").look_ahead(&[json!({"o": "b", "m": "current_group", "r": 1}), json!({"o": "b", "m": "current_group", "r": 0})]);
+        assert_eq!(tape.lock().expect("not poisoned").take("b", "current_group", json!([])), Some(json!({"r": 1})));
+        assert_eq!(noted(&tape), None);
+    }
+
+    #[test]
+    fn a_call_is_checked_for_its_name_its_origin_and_its_arguments() {
+        let cases = [
+            (json!([]), "extra call switch_group"),
+            (json!([{"o": "b", "m": "stop", "a": []}]), "call stop expected, switch_group made"),
+            (json!([{"o": "m", "m": "switch_group", "a": [1]}]), "call switch_group expected, switch_group made"),
+            (json!([{"o": "b", "m": "switch_group", "a": [0]}]), "arguments of switch_group"),
+        ];
+        for (calls, cause) in cases {
+            let tape = tape(&calls);
+            assert!(tape.lock().expect("not poisoned").take("b", "switch_group", json!([1])).is_none());
+            assert_eq!(noted(&tape).as_deref(), Some(cause));
+        }
+    }
+
+    #[test]
+    fn the_next_call_past_the_reads_is_found() {
+        let tape = tape(&json!([{"o": "b", "m": "focused_window"}, {"o": "r", "m": "diagnostics"}, {"o": "b", "m": "restore_window"}]));
+        assert!(tape.lock().expect("not poisoned").next_is("restore_window"));
+        assert!(!tape.lock().expect("not poisoned").next_is("input_anchor"));
+    }
+
+    #[test]
+    fn a_selection_error_names_its_reason_or_the_failure() {
+        let refused = selection_error_of(&json!({"x": {"reason": "no_selection", "message": "m"}}));
+        assert!(matches!(refused, Some(SelectionError::Refused(_))));
+        for error in [json!({"message": "m"}), json!({"reason": "no such reason", "message": "m"})] {
+            assert!(matches!(selection_error_of(&json!({"x": error})), Some(SelectionError::Failed(_))));
+        }
+        assert!(selection_error_of(&json!({"r": 1})).is_none());
+    }
+
+    #[test]
+    fn each_call_of_the_backend_answers_from_the_trace_raises_its_error_or_gives_up() {
+        let failed = json!({"type": "BackendError", "message": "gone"});
+        // Nothing recorded: every call is a difference, answered with the port's default.
+        let none = backend(&json!([]), all());
+        let listener: KeyListener = Arc::new(|_event| {});
+        assert!(none.start(listener.clone()).is_ok());
+        none.tape.lock().expect("not poisoned").difference = None;
+        none.set_key_filter(None);
+        none.hold_input();
+        assert!(none.try_hold_input().is_ok());
+        assert_eq!(none.release_input().ok(), Some(0));
+        none.stop();
+        none.close();
+        assert!(none.switch_group(1).is_ok());
+        assert_eq!(none.active_application(), "");
+        assert!(none.focused_window().is_none());
+        assert_eq!(none.probe().current_group, BackendProbe::default().current_group);
+        assert_eq!(none.take_unseen_input().ok(), Some(None));
+        assert!(none.take_input_delay().is_none());
+        assert!(none.take_hook_gap().is_none());
+        let selected = SelectedText { text: "a".to_owned(), source: "clipboard".to_owned() };
+        assert!(matches!(none.read_selection("app", 1), Err(SelectionError::Refused(_))));
+        assert_eq!(none.replace_selection(&selected, "b", None).ok(), Some(false));
+        assert!(none.input_anchor().is_none());
+        assert!(!none.restore_window(Some(1)));
+        assert!(!none.keep_window_inactive(1));
+        assert!(none.erases_any_length() && none.swallows_hotkeys() && none.supports_selection());
+        // Each recorded with the answer the Python got.
+        let filter: KeyFilter = Arc::new(|_event| KeyDisposition::Pass);
+        let calls = json!([
+            {"o": "b", "m": "start", "a": [{"$callable": "enqueue"}]},
+            {"o": "b", "m": "start", "a": [{"$callable": "enqueue"}], "x": failed},
+            {"o": "b", "m": "set_key_filter", "a": [{"$callable": "consumes_key"}]},
+            {"o": "b", "m": "set_key_filter", "a": [null]},
+            {"o": "b", "m": "hold_input", "a": []},
+            {"o": "b", "m": "stop", "a": []},
+            {"o": "b", "m": "close", "a": []},
+            {"o": "b", "m": "probe", "a": [], "r": {"available": true, "session_type": "x11", "current_group": 1}},
+            {"o": "b", "m": "take_unseen_input", "a": [], "r": 3},
+            {"o": "b", "m": "take_unseen_input", "a": [], "x": failed},
+            {"o": "b", "m": "take_input_delay", "a": [], "r": {"keys": 2}},
+            {"o": "b", "m": "input_anchor", "a": [], "r": {"x": 5, "y": 6, "window": 7}},
+            {"o": "b", "m": "restore_window", "a": [1], "r": true},
+            {"o": "b", "m": "keep_window_inactive", "a": [1], "r": true},
+        ]);
+        let recorded = backend(&calls, all());
+        assert!(recorded.start(listener.clone()).is_ok());
+        assert!(recorded.start(listener).is_err());
+        recorded.set_key_filter(Some(filter));
+        recorded.set_key_filter(None);
+        recorded.hold_input();
+        recorded.stop();
+        recorded.close();
+        let probe = recorded.probe();
+        assert!(probe.available && probe.session_type == "x11" && probe.current_group == 1);
+        assert_eq!(recorded.take_unseen_input().ok(), Some(Some(3)));
+        assert!(recorded.take_unseen_input().is_err());
+        assert_eq!(recorded.take_input_delay().map(|report| report.keys), Some(2));
+        assert_eq!(recorded.input_anchor().map(|anchor| (anchor.x, anchor.y, anchor.window)), Some((5, 6, Some(7))));
+        assert!(recorded.restore_window(Some(1)));
+        assert!(recorded.keep_window_inactive(1));
+        assert_eq!(noted(&recorded.tape), None);
+        assert_eq!(recorded.tape.lock().expect("not poisoned").leftover(), None);
+    }
+
+    #[test]
+    fn a_call_the_port_cannot_fail_is_a_difference_when_the_python_raised() {
+        let failed = json!({"type": "BackendError", "message": "gone"});
+        for method in ["hold_input", "stop", "close", "active_application", "focused_window"] {
+            let recorded = backend(&json!([{"o": "b", "m": method, "a": [], "x": failed, "r": {"window": 1}}]), all());
+            match method {
+                "hold_input" => recorded.hold_input(),
+                "stop" => recorded.stop(),
+                "close" => recorded.close(),
+                "active_application" => assert_eq!(recorded.active_application(), ""),
+                _ => assert!(recorded.focused_window().is_some()),
+            }
+            assert_eq!(noted(&recorded.tape), Some(format!("{method} cannot fail in the port")));
+        }
+    }
+
+    #[test]
+    fn a_capability_the_backend_lacks_is_asked_only_when_the_python_asked_it() {
+        let lacking = Capabilities::default();
+        let asked = |method: &str, answer: Value| backend(&json!([{"o": "b", "m": method, "a": [], "r": answer}]), lacking);
+        let anchor = asked("input_anchor", json!({"x": 1}));
+        assert_eq!(anchor.input_anchor().map(|anchor| (anchor.x, anchor.y, anchor.window)), Some((1, 0, None)));
+        let restore = backend(&json!([{"o": "b", "m": "restore_window", "a": [null], "r": true}]), lacking);
+        assert!(restore.restore_window(None));
+        let inactive = backend(&json!([{"o": "b", "m": "keep_window_inactive", "a": [2], "r": false}]), lacking);
+        assert!(!inactive.keep_window_inactive(2));
+        let unseen = asked("take_unseen_input", Value::Null);
+        assert_eq!(unseen.take_unseen_input().ok(), Some(None));
+        let quiet = backend(&json!([]), lacking);
+        assert!(quiet.input_anchor().is_none() && !quiet.restore_window(None) && !quiet.keep_window_inactive(1));
+        assert_eq!(noted(&quiet.tape), None);
+    }
+
+    #[test]
+    fn what_the_fake_backend_did_during_a_call_reaches_the_engine() {
+        let mut bundle = ks_replay::harness::Bundle::load(None);
+        let session = bundle.session("app", 0, Vec::new());
+        let pressed = key_value(&key("a"));
+        let calls = json!([
+            {"o": "b", "m": "stop", "a": [], "d": [
+                {"enqueue": pressed}, {"put": pressed}, {"consumes": pressed, "r": "no such answer"}, {"other": 1},
+            ]},
+        ]);
+        let recorded = backend(&calls, all());
+        recorded.tape.lock().expect("not poisoned").shared = Arc::downgrade(&session.core.shared);
+        recorded.stop();
+        assert_eq!(noted(&recorded.tape).as_deref(), Some("consumes_key during a call"));
+        assert!(session.core.shared.qsize() >= 1, "the key put on the queue");
+        bundle.give_back(session);
+        bundle.clean();
+    }
+
+    #[test]
+    fn the_field_reader_answers_from_the_trace() {
+        let reader = TraceReader { tape: tape(&json!([
+            {"o": "r", "m": "read", "a": ["app", 1], "x": {"message": "broken"}},
+        ])) };
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(noted(&reader.tape).as_deref(), Some("reader raises in the Python"));
+        assert_eq!(reader.status(), "available");
+        for (name, role) in [("text", FieldRole::Text), ("code", FieldRole::Code), ("search", FieldRole::Search), ("terminal", FieldRole::Terminal), ("password", FieldRole::Password), ("other", FieldRole::Unknown)] {
+            assert_eq!(role_from(name), role);
+        }
+    }
+
+    #[test]
+    fn the_answering_model_asks_the_trace_or_supports_nothing() {
+        let tables = Arc::new(TermTables::load(&ks_replay::harness::reference_tree().join("resources/models")).expect("the term tables"));
+        let calls = json!([
+            {"o": "m", "m": "predict", "a": null, "r": {"action": "keep", "probabilities": [0.5, 0.5], "supported": true}},
+        ]);
+        let tape = tape(&calls);
+        let model = answering_model(tape.clone(), &json!({"version": "v", "answers_letters": true}), tables);
+        let answer = model.answer.clone().expect("an answer");
+        let mut evidence = ContextEvidence::new("ghbdtn", "привет", 0, FieldContext::new("app", "1"));
+        evidence.after_origin = AfterOrigin::Field;
+        evidence.before_origin = BeforeOrigin::PlannedPreviousReading;
+        // The arguments differ from the recorded ones: a difference, and nothing supported.
+        let first = answer(&evidence);
+        assert!(!first.supported);
+        assert!(noted(&tape).is_some_and(|cause| cause.starts_with("arguments of predict")));
+        assert!(model.answers_letters);
+    }
+}

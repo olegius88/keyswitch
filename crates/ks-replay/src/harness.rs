@@ -12,6 +12,7 @@ use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::detector::ProtectedTokens;
 use ks_lang::early_switch::PrefixIndex;
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
+use ks_lang::resources::SpellerFactory;
 use ks_lang::{LanguageModel, Resources};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -573,16 +574,33 @@ impl Session {
     }
 }
 
-/// `reference_models(False)`: the pinned onboard lexicons plus the packaged supplements, without a spell checker.
-fn reference_models(resources: &Arc<Resources>) -> Vec<Arc<LanguageModel>> {
-    ["en_US", "ru_RU"]
+/// The locales of a replay, in the order of their layouts.
+const LOCALES: [&str; 2] = ["en_US", "ru_RU"];
+
+/// Whether `spellers` gives every locale of a replay a speller that works; the error names the first locale without one.
+pub fn spellers_ready(spellers: &SpellerFactory) -> Result<(), String> {
+    match LOCALES.iter().find(|locale| !spellers(locale).available()) {
+        Some(locale) => Err(format!("no Hunspell speller for {locale}: the library or its {locale} dictionary is not installed")),
+        None => Ok(()),
+    }
+}
+
+/// `reference_models(spelling)`: the pinned onboard lexicons plus the packaged supplements, without a spell checker or with
+/// the one `spellers` gives each locale. A speller asked for and not there is an error: the replay would otherwise read as
+/// one without it.
+fn reference_models(resources: &Arc<Resources>, spellers: Option<&SpellerFactory>) -> Result<Vec<Arc<LanguageModel>>, String> {
+    if let Some(spellers) = spellers {
+        spellers_ready(spellers)?;
+    }
+    Ok(LOCALES
         .iter()
         .map(|locale| {
             let words = resources.supplement_words(locale).expect("the packaged supplement");
             let roots = vec![reference_tree().join("model/intent_v1/sources")];
-            Arc::new(LanguageModel::load(locale, words.iter(), &roots, LanguageModel::disabled_speller()))
+            let speller = spellers.map_or_else(LanguageModel::disabled_speller, |spellers| spellers(locale));
+            Arc::new(LanguageModel::load(locale, words.iter(), &roots, speller))
         })
-        .collect()
+        .collect())
 }
 
 /// What the Python's patches hand every engine of a replay: one set of models, one context policy going from engine to
@@ -602,9 +620,21 @@ pub struct Bundle {
 }
 
 impl Bundle {
+    #[must_use]
     pub fn load(debug_log: Option<&Path>) -> Bundle {
+        Self::open(debug_log, None).expect("the models load without a speller")
+    }
+
+    /// `Bundle::load` with the speller the installed program spell-checks with: `ks_hunspell::hunspell_speller` over its
+    /// data folder, as the program starts. An error names the locale that has no speller.
+    #[must_use = "a replay asked to spell-check stops when it cannot"]
+    pub fn with_speller(debug_log: Option<&Path>, spellers: &SpellerFactory) -> Result<Bundle, String> {
+        Self::open(debug_log, Some(spellers))
+    }
+
+    fn open(debug_log: Option<&Path>, spellers: Option<&SpellerFactory>) -> Result<Bundle, String> {
         let resources = Resources::new(reference_tree().join("resources"));
-        let models = reference_models(&resources);
+        let models = reference_models(&resources, spellers)?;
         let (intent_model, intent_model_status) = resources.intent_model();
         let known = EngineCore::known_of(&models);
         let context_policy = ContextPolicy::new(&resources, None, known, Some(Arc::new(|| 0.0)));
@@ -622,7 +652,7 @@ impl Bundle {
             logsetup::install_handler(&handler);
             logsetup::set_root_level(logsetup::Level::Info);
         }
-        Bundle {
+        Ok(Bundle {
             protected_tokens: resources.protected_tokens(),
             boundary_model: resources.boundary_policy(),
             intent_model,
@@ -634,7 +664,13 @@ impl Bundle {
             resources,
             root,
             debug,
-        }
+        })
+    }
+
+    /// The language models every engine of this replay shares.
+    #[must_use]
+    pub fn models(&self) -> &[Arc<LanguageModel>] {
+        &self.models
     }
 
     /// `Field(app, group, text)`: a new engine and a new clock over the shared models.

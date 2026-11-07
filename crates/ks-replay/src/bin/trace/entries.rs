@@ -484,3 +484,189 @@ pub(crate) fn queue_step(core: &mut EngineCore, name: &str, args: &Args<'_>, rec
         _ => Outcome::Unknown(format!("queue.{name}")),
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use super::super::backend::key_value;
+    use ks_backend::KeyEvent;
+    use ks_config::config::SettingsStore;
+    use ks_config::learning::LearningStore;
+    use ks_replay::harness::Bundle;
+    use serde_json::Map;
+    use std::path::PathBuf;
+
+    fn engine(bundle: &mut Bundle) -> KeySwitchEngine {
+        KeySwitchEngine::of(bundle.session("app", 0, Vec::new()).core)
+    }
+
+    fn key(name: &str) -> Value {
+        key_value(&KeyEvent { pressed: true, keycode: 42, key_name: name.to_owned(), character: name.to_owned(), characters: vec![name.to_owned(), name.to_owned()], ..KeyEvent::default() })
+    }
+
+    fn calling(engine: &KeySwitchEngine, name: &str, positional: &[Value], named: &Value, recorded: &Value) -> Outcome {
+        call(engine, name, &Args { positional, named: named.as_object() }, recorded)
+    }
+
+    fn unknown(outcome: &Outcome) -> Option<&str> {
+        match outcome {
+            Outcome::Unknown(what) => Some(what),
+            Outcome::Done { .. } | Outcome::Query => None,
+        }
+    }
+
+    fn failed(outcome: &Outcome) -> bool {
+        matches!(outcome, Outcome::Done { error: Some(_), .. })
+    }
+
+    fn returned(outcome: &Outcome) -> Option<&Value> {
+        match outcome {
+            Outcome::Done { returned, .. } => returned.as_ref(),
+            Outcome::Query | Outcome::Unknown(_) => None,
+        }
+    }
+
+    fn plan(revisit: &Value) -> Value {
+        json!({"$dc": "CorrectionPlan", "revisit": revisit, "strokes": [key("a")], "boundary": key(" "), "source_group": 0, "target_group": 1,
+               "original": "a", "replacement": "ф", "confidence": 0.9, "application": "app", "automatic": true, "mode": "automatic",
+               "context_field": "", "trailing": [], "head": [], "sign_replayed": false, "typed": "a", "kept_tail": 0, "replaced_strokes": [], "replaced": []})
+    }
+
+    fn rule(pattern: &str, matching: &str) -> Value {
+        json!({"pattern": pattern, "source_group": 0, "target_group": 1, "action": "convert", "match": matching, "case_sensitive": false})
+    }
+
+    fn with(positional: &[Value]) -> Args<'_> {
+        Args { positional, named: None }
+    }
+
+    fn folder(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-trace-entries-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    #[test]
+    fn an_entry_whose_arguments_it_cannot_read_is_one_nothing_here_runs() {
+        let mut bundle = Bundle::load(None);
+        let engine = engine(&mut bundle);
+        let nothing = Value::Null;
+        for name in [
+            "_handle", "enqueue", "consumes_key", "_commit_word", "_execute_correction", "_fix_double_capitals", "_read_insertion",
+            "_ambiguous_key_is_boundary", "_log_input_edit", "_is_boundary", "_show_learning_prompt", "_maybe_execute_pending",
+            "add_learning_rule", "no such entry",
+        ] {
+            let outcome = calling(&engine, name, &[json!(1)], &nothing, &nothing);
+            assert!(unknown(&outcome).is_some(), "{name}");
+        }
+        // A plan of another kind, or one with a decision to revisit, is one a test made the engine's own way.
+        for other in [json!({"$dc": "Other"}), plan(&json!({"decision": 1}))] {
+            assert!(unknown(&calling(&engine, "_execute_correction", &[other], &nothing, &nothing)).is_some());
+        }
+        assert!(matches!(calling(&engine, "_pause_delay", &[], &nothing, &nothing), Outcome::Query));
+        assert!(returned(&calling(&engine, "subscribe", &[], &nothing, &nothing)).is_none());
+        // An engine its worker holds answers nothing here.
+        let core = engine.core().take();
+        assert_eq!(unknown(&calling(&engine, "_handle", &[key("a")], &nothing, &nothing)), Some("the worker holds the engine"));
+        *engine.core() = core;
+        bundle.clean();
+    }
+
+    #[test]
+    fn the_entries_the_recorded_tests_did_not_make_reach_the_engine() {
+        let mut bundle = Bundle::load(None);
+        let engine = engine(&mut bundle);
+        let nothing = Value::Null;
+        let named = |name: &str, value: Value| Value::Object(Map::from_iter([(name.to_owned(), value)]));
+        let answer = calling(&engine, "_ambiguous_key_is_boundary", &[key(",")], &nothing, &nothing);
+        assert_eq!(returned(&answer), Some(&json!(false)));
+        {
+            // A word typed in a layout the detector has no model of cannot be decided.
+            let mut guard = engine.core();
+            let core = guard.as_mut().expect("the engine");
+            core.boundary_model = None;
+            core.strokes = ["g", "h", "b"].iter().map(|name| Arc::new(key_from(&key(name)).expect("a key"))).collect();
+            core.source_group = 7;
+        }
+        assert!(failed(&calling(&engine, "_ambiguous_key_is_boundary", &[key(",")], &nothing, &nothing)));
+        assert!(!failed(&calling(&engine, "_log_input_edit", &[key("BackSpace"), json!("app")], &nothing, &nothing)));
+        for command in ["layout", "case", "transliterate"] {
+            assert!(!failed(&calling(&engine, "_run_selection_command", &[json!(command)], &nothing, &nothing)));
+        }
+        for name in ["_retry_field_wait", "_report_input_delay"] {
+            assert!(!failed(&calling(&engine, name, &[], &nothing, &nothing)));
+        }
+        assert!(!failed(&calling(&engine, "_schedule_undo_hotkey", &[], &named("trigger_keycode", json!(30)), &nothing)));
+        let _ = calling(&engine, "_maybe_execute_pending", &[key("a")], &nothing, &nothing);
+        let prompt = json!({"$dc": "LearningPrompt", "source_group": 0, "target_group": 1, "original": "ghbdtn", "replacement": "привет", "application": "app", "action": "keep"});
+        assert!(!failed(&calling(&engine, "_show_learning_prompt", &[prompt], &nothing, &nothing)));
+        // A plan the engine fixes as the recording did not: the engine's own answer is compared.
+        let fixed = calling(&engine, "_fix_double_capitals", &[plan(&Value::Null), key(" ")], &nothing, &json!("no plan"));
+        assert!(returned(&fixed).is_some_and(|value| value["original"] == "a"));
+        // A rule that cannot work is refused.
+        assert!(failed(&calling(&engine, "add_learning_rule", &[rule(" ", "exact")], &nothing, &nothing)));
+        assert!(!failed(&calling(&engine, "stop", &[], &nothing, &nothing)));
+        bundle.clean();
+    }
+
+    #[test]
+    fn the_stores_answer_each_step_or_say_they_could_not_write() {
+        let mut bundle = Bundle::load(None);
+        let mut session = bundle.session("app", 0, Vec::new());
+        let core = &mut session.core;
+        let nothing = Value::Null;
+        // Settings.
+        assert!(!failed(&settings_step(core, "reset", &with(&[]))));
+        assert_eq!(returned(&settings_step(core, "restore_default", &with(&[json!("no.such.setting")]))), Some(&json!(false)));
+        assert!(unknown(&settings_step(core, "rename", &with(&[]))).is_some());
+        // A settings file under a file: nothing can be written there.
+        let settings_folder = folder("settings");
+        let blocking = settings_folder.join("a file");
+        std::fs::write(&blocking, b"").expect("a file");
+        core.settings = Arc::new(SettingsStore::new(Some(blocking.join("settings.json"))));
+        core.settings.set("detection.confidence", json!(3.5), false).expect("in memory");
+        assert!(failed(&settings_step(core, "restore_default", &with(&[json!("detection.confidence")]))));
+        // History.
+        assert!(!failed(&history_step(core, "clear", &with(&[]))));
+        let entry = json!({"$dc": "HistoryEntry", "timestamp": "2026-11-07T10:00:00", "original": "ghbdtn", "replacement": "привет", "application": "app", "confidence": 0.9});
+        assert!(!failed(&history_step(core, "append", &with(&[entry]))));
+        assert!(unknown(&history_step(core, "append", &with(&[json!({"original": "x"})]))).is_some());
+        assert!(unknown(&history_step(core, "rotate", &with(&[]))).is_some());
+        // Personal words.
+        assert!(!failed(&personal_step(core, "add", &with(&[json!("слово")]))));
+        assert!(returned(&personal_step(core, "keep", &with(&[json!("слово")]))).is_some());
+        assert!(!failed(&personal_step(core, "clear", &with(&[]))));
+        assert!(unknown(&personal_step(core, "forget", &with(&[]))).is_some());
+        // Rules, in a store that writes and in one that cannot.
+        let written = learning_step(core, "add_rule", &with(&[rule("ghb", "prefix")]));
+        assert_eq!(returned(&written).map(|value| value["match"].clone()), Some(json!("prefix")));
+        let replaced = learning_step(core, "replace_rule", &with(&[rule("ghb", "prefix"), rule("hb", "contains")]));
+        assert_eq!(returned(&replaced).map(|value| value["match"].clone()), Some(json!("contains")));
+        assert_eq!(returned(&learning_step(core, "remove_rule", &with(&[rule("hb", "contains")]))), Some(&json!(true)));
+        for (name, positional) in [("add_rule", vec![json!(1)]), ("replace_rule", vec![json!(1), json!(1)]), ("remove_rule", vec![json!(1)]), ("forget", vec![])] {
+            assert!(unknown(&learning_step(core, name, &with(&positional))).is_some(), "{name}");
+        }
+        assert!(failed(&learning_step(core, "add_rule", &with(&[rule(" ", "exact")]))));
+        let learning_folder = folder("learning").join("learning.json");
+        std::fs::create_dir_all(&learning_folder).expect("a folder in place of the file");
+        core.learning = Arc::new(LearningStore::new(Some(learning_folder), None).expect("a store over an unreadable file"));
+        assert!(failed(&learning_step(core, "add_rule", &with(&[rule("ghb", "exact")]))));
+        assert!(failed(&learning_step(core, "replace_rule", &with(&[rule("ghb", "exact"), rule("ghbd", "exact")]))));
+        assert!(failed(&learning_step(core, "remove_rule", &with(&[rule("ghbd", "exact")]))));
+        assert!(failed(&learning_step(core, "clear", &with(&[]))));
+        // The queue.
+        let recorded = json!({"$key": [1]});
+        for item in [recorded.clone(), json!({"$dc": "Other"}), json!(1)] {
+            assert!(unknown(&queue_step(core, "put", &with(&[item]), &nothing)).is_some());
+        }
+        assert!(returned(&queue_step(core, "get", &with(&[]), &key("a"))).is_some(), "an empty queue where the Python took a key");
+        assert!(!failed(&queue_step(core, "put", &with(&[Value::Null]), &nothing)));
+        assert!(returned(&queue_step(core, "get", &with(&[]), &json!({"$dc": "_LayoutSelection", "group": 1}))).is_some(), "the stop where the Python took a selection");
+        assert!(unknown(&queue_step(core, "clear", &with(&[]), &nothing)).is_some());
+        let _ = std::fs::remove_dir_all(settings_folder);
+        bundle.give_back(session);
+        bundle.clean();
+    }
+}
