@@ -386,6 +386,8 @@ fn project(name: &str) -> Project {
     let trainer_stub = root.join("target/train/ks-train");
     executable(&trainer_stub, "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
     executable(&bin.join("cargo"), "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_CARGO\" ]\n");
+    std::fs::create_dir_all(root.join("target/parity")).unwrap();
+    executable(&root.join("target/parity/field-gate"), "#!/bin/sh\ncase \"$*\" in\n  *--speller*) [ \"$KS_FAIL_GATE\" != speller ] ;;\n  *) [ \"$KS_FAIL_GATE\" != plain ] ;;\nesac\n");
     executable(&bin.join("dbus-run-session"), "#!/bin/sh\nshift\nexec \"$@\"\n");
     executable(&bin.join("bash"), "#!/bin/sh\nexit 0\n");
     executable(&bin.join("dpkg"), "#!/bin/sh\necho amd64\n");
@@ -471,7 +473,13 @@ fn the_release_command() {
     };
     failing("KS_FAIL_CARGO", "test", "the tests of the engine");
     failing("KS_FAIL_CARGO", "build", "the trainer failed");
-    failing("KS_FAIL_CARGO", "run", "the owner's typing");
+    failing("KS_FAIL_GATE", "plain", "the owner's typing against");
+    // With the reports of the last release replayed with Hunspell, that gate runs too.
+    let tree = project("release-check-speller");
+    let mut spelled: Vec<&str> = whole_arguments.to_vec();
+    spelled.extend(["--field-released-speller", "."]);
+    let answer = Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&tree.root).args(&spelled).env("PATH", &tree.path).env("KS_FAIL_GATE", "speller").output().unwrap();
+    refused(&answer, "with Hunspell");
     failing("KS_FAIL_STEP", "gates", "the evidence");
     failing("KS_FAIL_STEP", "retired", "rejected or retired");
     failing("KS_FAIL_STEP", "engine", "the boundary regressions");

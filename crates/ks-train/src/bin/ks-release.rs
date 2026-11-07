@@ -4,7 +4,7 @@
 //! and it refuses to run without them.
 //!
 //!     ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main]
-//!                [--field-root <tree>] [--field-released <folder>] [--message-file <file>]
+//!                [--field-root <tree>] [--field-released <folder>] [--field-released-speller <folder>] [--message-file <file>]
 //!
 //! With --candidate the tag is vX.Y.Z-rcN and the release a pre-release: the update check of an installed program does not
 //! see it, and the APT repository stays as it is. Without it the tag replaces the published version for everybody.
@@ -42,6 +42,8 @@ struct Options {
     branch: String,
     field_root: Option<PathBuf>,
     field_released: Option<PathBuf>,
+    /// The last release's reports replayed with the Hunspell dictionaries, as the installed program runs.
+    field_released_speller: Option<PathBuf>,
     message_file: Option<PathBuf>,
     poll_seconds: u64,
     timeout_seconds: u64,
@@ -225,7 +227,13 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     run(root, "the prefix replay", "dbus-run-session", &["--", &trainer, "engine", "prefix", "--tree", &tree, "--refresh-runtime"])?;
     if let (Some(field_root), Some(released)) = (&options.field_root, &options.field_released) {
         let (field_root, released) = (field_root.to_string_lossy().into_owned(), released.to_string_lossy().into_owned());
-        run(root, "the owner's typing against the last release", "cargo", &["run", "--profile", "parity", "--bin", "field-gate", "--", "--root", &field_root, "--released", &released])?;
+        // The gate runs the replay beside it: both are built, so neither is left from an older tree.
+        run(root, "the replay tools", "cargo", &["build", "--profile", "parity", "-p", "ks-replay", "--bins"])?;
+        let gate = root.join("target/parity/field-gate").to_string_lossy().into_owned();
+        run(root, "the owner's typing against the last release", &gate, &["--root", &field_root, "--released", &released])?;
+        if let Some(spelled) = &options.field_released_speller {
+            run(root, "the owner's typing with Hunspell against the last release", &gate, &["--root", &field_root, "--released", &spelled.to_string_lossy(), "--speller"])?;
+        }
     } else {
         return Err(fail("--field-root and --field-released name the owner's typing and the last release's reports; a release does not skip them"));
     }
@@ -344,7 +352,7 @@ fn main() {
     let value = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|place| arguments.get(place + 1)).cloned();
     let flag = |name: &str| arguments.iter().any(|argument| argument == name);
     let Some(version) = value("--version") else {
-        eprintln!("usage: ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main] [--field-root <tree>] [--field-released <folder>] [--message-file <file>]");
+        eprintln!("usage: ks-release --version X.Y.Z [--candidate N] [--dry-run] [--skip-checks] [--skip-ci] [--remote origin] [--branch main] [--field-root <tree>] [--field-released <folder>] [--field-released-speller <folder>] [--message-file <file>]");
         std::process::exit(2);
     };
     let candidate = match value("--candidate").map(|candidate| candidate.parse::<u32>()).transpose() {
@@ -364,6 +372,7 @@ fn main() {
         branch: value("--branch").unwrap_or_else(|| "main".to_owned()),
         field_root: value("--field-root").map(PathBuf::from),
         field_released: value("--field-released").map(PathBuf::from),
+        field_released_speller: value("--field-released-speller").map(PathBuf::from),
         message_file: value("--message-file").map(PathBuf::from),
         poll_seconds: value("--poll-seconds").and_then(|seconds| seconds.parse().ok()).unwrap_or(CI_POLL_SECONDS),
         timeout_seconds: value("--timeout-seconds").and_then(|seconds| seconds.parse().ok()).unwrap_or(CI_TIMEOUT_SECONDS),
