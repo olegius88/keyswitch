@@ -272,10 +272,10 @@ fn ask_for_permission(backend: &MacBackend) {
     let _ = backend.request_permission();
 }
 
-/// Asks again once a second on the main queue, which `AppKit`'s run loop serves. macOS keeps the process's answer of
-/// `AXIsProcessTrusted` and drops it only when the main run loop delivers the distributed notification
-/// `com.apple.accessibility.api`, posted when the list of permitted programs changes: asked from a main thread that
-/// sleeps instead, the answer stays "no" after the grant until the program is started again.
+/// Asks again once a second on the main queue, which `AppKit`'s run loop serves. As measured on macOS 13, the process
+/// keeps its answer of `AXIsProcessTrusted` and asks the system again only after the main run loop has delivered the
+/// distributed notification `com.apple.accessibility.api`, which comes when the switch is turned on: asked from a main
+/// thread that sleeps instead, the answer stays "no" after the grant until the program is started again.
 fn wait_for_permission(no_engine: bool) {
     run_on_main_after(MACOS_PERMISSION_POLL_SECONDS, Box::new(move || match with_app(|app| app.permission.permission_granted()) {
         Some(true) => carry_on(no_engine),
