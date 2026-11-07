@@ -365,15 +365,16 @@ mod scenario {
         Ok(())
     }
 
-    /// Pause has no key on a Mac: the conversion hotkey is Control+Option+K there.
+    /// Pause has no key on a Mac: the conversion hotkey is Control+Option+K there. The word is one no correction at a pause
+    /// would touch, so only the hotkey converts it.
     fn conversion(driver: &Driver) -> Result<(), String> {
         driver.put_text("")?;
         driver.select(0)?;
-        driver.type_keys("the ghbdtn", false)?;
+        driver.type_keys("the hello", false)?;
         let typed = driver.value();
         driver.chord('k', &[CONTROL, OPTION])?;
         let converted = driver.wait_change(&typed);
-        driver.check("conversion hotkey", converted == "the привет" && driver.group() == 1, &format!("{typed:?} became {converted:?}"));
+        driver.check("conversion hotkey", converted == "the руддщ" && driver.group() == 1, &format!("{typed:?} became {converted:?}"));
         Ok(())
     }
 
