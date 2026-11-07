@@ -1,7 +1,7 @@
 # KeySwitch
 
-This repository also includes [LogCourier](apps/logcourier/README.md), a separate
-Windows/Linux tray application that sends selected log files to a private Telegram
+This repository also includes [LogCourier](crates/logcourier/README.md), a separate
+Windows/Linux application that sends selected log files to a private Telegram
 group. Its UI accepts your bot token and group ID. Uploading is opt-in and disabled
 by default; it is not built into the KeySwitch input engine.
 
