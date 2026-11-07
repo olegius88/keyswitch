@@ -546,3 +546,29 @@ pub fn historical_curriculum(tools: &Tools, detector: &LanguageDetector, models:
     }
     Ok(result)
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_language_around_a_word_is_that_of_the_last_letter_before_it() {
+        assert_eq!(context_group_of("ok, всё"), Some(1));
+        assert_eq!(context_group_of("всё, ok "), Some(0));
+        assert_eq!(context_group_of("ЁЖ"), Some(1));
+        assert_eq!(context_group_of("1, 2"), None);
+    }
+
+    #[test]
+    fn each_trigger_ends_a_word_as_the_engine_sees_it_end() {
+        assert_eq!(boundaries("tab"), ["", "\t"]);
+        assert_eq!(boundaries("enter"), ["", "\n"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported historical action trigger")]
+    fn a_trigger_of_no_boundary_stops_the_curriculum() {
+        let _ = boundaries("click");
+    }
+}

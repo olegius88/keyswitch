@@ -202,11 +202,10 @@ fn build(root: &Path, resources: &Arc<Resources>, config: &Value) -> Result<(BTr
             }
         }
     }
-    for left in SPLITS {
-        for right in SPLITS {
-            if left != right && groups[left].intersection(&groups[right]).next().is_some() {
-                return Err("physical prefix families overlap".to_owned());
-            }
+    // `split_for` gives each family one split: no family is in two.
+    for (index, left) in SPLITS.iter().enumerate() {
+        for right in &SPLITS[index + 1..] {
+            assert!(groups[left].is_disjoint(&groups[right]), "physical prefix families overlap");
         }
     }
     Ok((content, counts, groups))
@@ -248,4 +247,22 @@ pub fn command(root: &Path, resources: &Arc<Resources>, output: Option<&Path>) -
     }
     let receipt = json!({"schema_version": 1, "provenance": provenance, "sha256": digests, "rows": counts, "families": families, "family_overlap": 0, "profiles": PROFILES, "scope": config["evidence_scope"]});
     std::fs::write(output.join("corpus.json"), crate::artifact::canonical(&receipt)).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn words(text: &str) -> Vec<(usize, String)> {
+        word_matches(&text.chars().collect::<Vec<char>>())
+    }
+
+    #[test]
+    fn a_word_runs_to_the_end_of_its_text_through_its_apostrophes_and_dashes() {
+        assert_eq!(words("rock'n'roll"), [(0, "rock'n'roll".to_owned())]);
+        assert_eq!(words("кто-то, it's_x don'"), [(0, "кто-то".to_owned()), (8, "it's".to_owned()), (13, "x".to_owned()), (15, "don".to_owned())]);
+        assert_eq!(words("plain"), [(0, "plain".to_owned())]);
+        assert!(words("_ - '").is_empty());
+    }
 }

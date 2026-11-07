@@ -454,7 +454,8 @@ fn columns_of(inputs: &FitInputs, vocabulary: &mut Vocabulary, profile: &str, sp
         columns.weights.push(weight);
         columns.importance.push(weight * if label == 0 { keep_importance } else { 1.0 });
     }
-    assert!(columns.importance.iter().all(|value| value.is_finite() && *value > 0.0), "invalid training target or importance");
+    assert!(columns.importance.iter().all(|value| value.is_finite()), "invalid training target or importance");
+    assert!(columns.importance.iter().all(|value| *value > 0.0), "invalid training target or importance");
     assert!(columns.values.iter().all(|value| value.is_finite()), "non-finite feature");
     columns
 }
@@ -565,13 +566,7 @@ pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dy
     let first = inputs.lexical_models(&inputs.profiles[0]).clone();
     // The engine's orthotactic model binds its dictionaries once, to the first profile's lexicons, for every replay.
     let known = ks_engine::engine::EngineCore::known_of(&first);
-    let shared = match OrthoModel::load(&artifact_path(tools.resources.resource_dir()), Some(tools.resources.packaged_identifier()), known, Some(tools.resources.clone())) {
-        Ok(model) => {
-            let version = model.version.clone();
-            (Some(Arc::new(model)), version)
-        }
-        Err(error) => (None, format!("unavailable: {}", error.name)),
-    };
+    let shared = shared_ortho(OrthoModel::load(&artifact_path(tools.resources.resource_dir()), Some(tools.resources.packaged_identifier()), known, Some(tools.resources.clone())));
     let budgets = &options["span_maximum_families"];
     let mut vocabulary = Vocabulary::default();
     let mut columns = HashMap::new();
@@ -617,6 +612,17 @@ pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dy
         }
     }
     Ok(FeatureSet { names: vocabulary.names, columns, chains, spans, captured: Value::Object(captured_report), capitals: capitals_report, english: english_report, tail: tail_report })
+}
+
+/// The orthotactic model every replay shares and its version, or none and why it did not load.
+fn shared_ortho(loaded: Result<OrthoModel, ks_lang::LoadError>) -> (Option<Arc<OrthoModel>>, String) {
+    match loaded {
+        Ok(model) => {
+            let version = model.version.clone();
+            (Some(Arc::new(model)), version)
+        }
+        Err(error) => (None, format!("unavailable: {}", error.name)),
+    }
 }
 
 /// `trainable_prefixes`: the feature prefixes a fit onto a frozen base with heads can move, or None for any other fit.
@@ -1092,15 +1098,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
         })
         .collect();
     if let Some(model) = &base {
-        for name in model.weights.names() {
-            let values = model.weights.get(name).expect("a name of the table");
-            let same = mapping.get(name).is_some_and(|row| row.as_slice() == values.as_slice());
-            if !same {
-                return Err("a weight of the frozen base moved".to_owned());
-            }
-            // Equal, and now the very values of the base: a zero step may leave -0.0 as 0.0.
-            mapping.insert(name.to_owned(), values.to_vec());
-        }
+        frozen_weights_kept(model, &mut mapping)?;
     }
     let band = &options["threshold_selection"];
     let candidates: Vec<f64> = match &base {
@@ -1108,18 +1106,19 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
         None => options["threshold_candidates"].as_array().ok_or("threshold_candidates")?.iter().filter_map(Value::as_f64).collect(),
     };
     let table: Vec<(String, &[f64], &[u8])> = calibration_predictions.iter().map(|(name, values, labels)| (name.clone(), values.as_slice(), labels.as_slice())).collect();
-    let (threshold, mut calibration_report, passed) = choose_threshold(&table, &candidates, &ThresholdOptions {
+    let threshold_options = ThresholdOptions {
         minimum_net_benefit: gates.int("minimum_calibration_net_benefit"),
         minimum_recall: gates.float("minimum_calibration_conversion_recall"),
-        minimum_threshold: match (&base, &best_selection) {
-            (Some(model), _) => model.conversion_threshold,
-            (None, Some(selection)) => selection.threshold,
-            (None, None) => 0.0,
+        // Without a frozen base a fit stopped above unless an epoch settled.
+        minimum_threshold: match &base {
+            Some(model) => model.conversion_threshold,
+            None => best_selection.as_ref().expect("a fit without a frozen base settles an epoch").threshold,
         },
         net_benefit_tolerance: band.float("net_benefit_tolerance"),
         maximum_threshold: band.float("maximum_threshold"),
         authored_floor: band.float("authored_floor"),
-    })?;
+    };
+    let (threshold, mut calibration_report, passed) = choose_threshold(&table, &candidates, &threshold_options)?;
     let calibration_parts: Vec<&Columns> = profiles.iter().map(|profile| features.part(profile, CALIBRATION)).collect();
     calibration_report["outside_lone_word"] = outside_lone_word(&calibration_predictions, &calibration_parts, &features.names, threshold);
     let weight_table: Map<String, Value> = mapping.iter().map(|(name, row)| (name.clone(), json!(row))).collect();
@@ -1130,20 +1129,14 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     let payload = json!({"actions": actions, "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": weights_value, "weights_sha256": weight_hash, "version": version, "conversion_threshold": threshold});
     write_all(&output.join(ARTIFACT), &crate::artifact::artifact_bytes(&payload))?;
     ContextModel::load_artifact(&output.join(ARTIFACT), &models_dir).map_err(|error| format!("the artifact written does not load: {}", error.name))?;
-    if provenance(root, request.recipe)? != before_provenance || checksum(&corpus.join("manifest.json"))? != corpus_hash {
-        return Err("training inputs changed while fitting; candidate cannot be sealed".to_owned());
-    }
+    inputs_unchanged(root, request.recipe, corpus, &before_provenance, &corpus_hash)?;
     let mut development_record = json!({"selected_epoch": best_epoch, "loss": best_loss, "history": history, "selection": best_selection.as_ref().map_or(Value::Null, selection_value)});
     if base.is_some() && !heads.is_empty() {
         development_record["kept_selected_epoch"] = json!(kept_epoch);
         development_record["kept_loss"] = json!(kept_loss);
     }
-    for (slot, (_, label, _, _, _)) in own_checks.iter().enumerate() {
-        if own_best[slot].1 != 0 {
-            development_record[format!("{label}_selected_epoch")] = json!(own_best[slot].1);
-            development_record[format!("{label}_loss")] = json!(own_best[slot].2);
-        }
-    }
+    let own_labels: Vec<&str> = own_checks.iter().map(|check| check.1).collect();
+    record_own_epochs(&mut development_record, &own_labels, &own_best);
     let by_profile = |make: &dyn Fn(&str) -> Option<Value>| -> Value {
         let mut table = Map::new();
         for profile in &profiles {
@@ -1215,10 +1208,9 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     if alone_evidence(&options).is_some() {
         seal["lone_word_curriculum"] = by_profile(&|profile| Some(per_split("lone_word", profile)));
     }
-    if let Some(table) = features.tail.as_object() {
-        for (key, value) in table {
-            seal[key.as_str()] = value.clone();
-        }
+    // `build_features_of_splits` reports the tail as a table by curriculum, built or not.
+    for (key, value) in features.tail.as_object().expect("the tail's reports by curriculum") {
+        seal[key.as_str()] = value.clone();
     }
     write_all(&output.join(SEAL), &readable(&seal))?;
     println!("{}: {version}; threshold={threshold}; test not read", seal["stage"].as_str().unwrap_or(""));
@@ -1236,4 +1228,225 @@ fn development_thresholds(options: &Value) -> Result<Vec<f64>, String> {
         return Err("no threshold candidate lies inside the serving band".to_owned());
     }
     Ok(candidates)
+}
+
+/// Every weight of a frozen base is the base's own after the epochs; equal, it is written back as the very value of the
+/// base: a zero step may leave -0.0 as 0.0.
+fn frozen_weights_kept(model: &ContextModel, mapping: &mut BTreeMap<String, Vec<f64>>) -> Result<(), String> {
+    for name in model.weights.names() {
+        let values = model.weights.get(name).expect("a name of the table");
+        let same = mapping.get(name).is_some_and(|row| row.as_slice() == values.as_slice());
+        if !same {
+            return Err("a weight of the frozen base moved".to_owned());
+        }
+        mapping.insert(name.to_owned(), values.to_vec());
+    }
+    Ok(())
+}
+
+/// The inputs a fit read at its start are the ones it seals: neither a pinned file nor the corpus changed meanwhile.
+fn inputs_unchanged(root: &Path, recipe: &Path, corpus: &Path, pinned: &BTreeMap<String, String>, corpus_hash: &str) -> Result<(), String> {
+    if provenance(root, recipe)? != *pinned || checksum(&corpus.join("manifest.json"))? != corpus_hash {
+        return Err("training inputs changed while fitting; candidate cannot be sealed".to_owned());
+    }
+    Ok(())
+}
+
+/// The epoch each head of its own epoch kept and its loss; a head no epoch improved on records none.
+fn record_own_epochs(record: &mut Value, labels: &[&str], best: &[(Vec<f64>, usize, f64)]) {
+    for (label, (_, epoch, loss)) in labels.iter().zip(best) {
+        if *epoch != 0 {
+            record[format!("{label}_selected_epoch")] = json!(epoch);
+            record[format!("{label}_loss")] = json!(loss);
+        }
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn folder(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("ks-train-fit-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn models_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/models")
+    }
+
+    /// An action model of these features, written as a fit writes one, and the spec a recipe names it by.
+    fn model_of(place: &Path, name: &str, features: &[(&str, [f64; ACTIONS])]) -> Value {
+        let table: Map<String, Value> = features.iter().map(|(feature, row)| ((*feature).to_owned(), json!(row))).collect();
+        let weights = Value::Object(table);
+        let hash = hex(&Sha256::digest(json_dumps(&weights, &JsonOptions { ensure_ascii: false, sort_keys: true, separators: Some((",".to_owned(), ":".to_owned())), ..JsonOptions::default() }).as_bytes()));
+        let actions: Vec<&str> = ACTION_NAMES.iter().map(|action| action.as_str()).collect();
+        let payload = json!({"actions": actions, "feature_version": CONTEXT_ACTION_FEATURE_VERSION, "weights": weights, "weights_sha256": hash, "version": format!("context-v3-{}", hash.get(..12).unwrap()), "conversion_threshold": 0.99});
+        let path = place.join(name);
+        std::fs::write(&path, crate::artifact::artifact_bytes(&payload)).unwrap();
+        json!({"artifact": path, "sha256": checksum(&path).unwrap()})
+    }
+
+    fn model(place: &Path, name: &str, features: &[&str]) -> Value {
+        let rows: Vec<(&str, [f64; ACTIONS])> = features.iter().map(|feature| (*feature, [0.5, -0.5, 0.25, -0.25])).collect();
+        model_of(place, name, &rows)
+    }
+
+    fn kept(name: &str) -> String {
+        format!("{KEPT_FEATURE_PREFIX}{name}")
+    }
+
+    fn head(label: &str, name: &str) -> String {
+        format!("{}{name}", head_prefix(label).unwrap())
+    }
+
+    #[test]
+    fn the_refused_aliases_need_a_ledger_only_when_the_corpus_was_frozen_refusing_more() {
+        let corpus = folder("aliases");
+        std::fs::write(corpus.join("test-membership.json"), r#"{"alias_sha256": ["a", "b"]}"#).unwrap();
+        let missing = corpus.join("no-ledger");
+        for (manifest, refused) in [("{}", Some(2)), (r#"{"metadata": {}}"#, Some(2)), (r#"{"metadata": {"refused_test_aliases": 2}}"#, Some(2)), (r#"{"metadata": {"refused_test_aliases": 3}}"#, None)] {
+            std::fs::write(corpus.join("manifest.json"), manifest).unwrap();
+            let answer = refused_aliases(&corpus, &missing);
+            match refused {
+                Some(count) => assert_eq!(answer.unwrap().len(), count, "{manifest}"),
+                None => assert!(answer.unwrap_err().contains("the test ledger"), "{manifest}"),
+            }
+        }
+        // A ledger of tests read before adds what each of its records says they read.
+        let ledger = folder("aliases-ledger");
+        std::fs::write(ledger.join("one.access.json"), r#"{"test_membership": {"alias_sha256": ["c"]}}"#).unwrap();
+        std::fs::write(ledger.join("two.access.json"), r#"{"test_membership": {}}"#).unwrap();
+        std::fs::write(ledger.join("notes.txt"), "{").unwrap();
+        assert_eq!(refused_aliases(&corpus, &ledger).unwrap().len(), 3);
+        std::fs::write(ledger.join("three.access.json"), "{").unwrap();
+        assert!(refused_aliases(&corpus, &ledger).is_err());
+    }
+
+    #[test]
+    fn a_base_is_what_its_kind_allows() {
+        let place = folder("bases");
+        let root = Path::new("/");
+        let plain = model(&place, "plain.json", &["bias", "other"]);
+        let with_kept = model(&place, "kept.json", &["bias", &kept("x")]);
+        let with_letter = model(&place, "letter.json", &["bias", &kept("x"), &head("letter", "x")]);
+        let named = |options: &Value, key: &str| named_base(root, &models_dir(), options, key);
+        let refusal = |options: &Value, key: &str| named(options, key).err().unwrap_or_default();
+        // A warm base starts a fit from a model without heads of its own.
+        assert!(named(&json!({"warm_base": plain}), "warm_base").unwrap().is_some());
+        assert!(refusal(&json!({"warm_base": with_kept}), "warm_base").contains("without kept-neighbour weights or heads"));
+        assert!(named(&json!({"warm_base": null}), "warm_base").unwrap().is_none());
+        assert!(named(&json!({}), "frozen_base").unwrap().is_none());
+        // A frozen base has fitted onto it the heads it lacks, and carries those it has.
+        let mut frozen = with_letter.clone();
+        frozen["heads"] = json!({"term": {"maximum_features": 5}});
+        frozen["carried"] = json!({"letter": {}});
+        assert!(named(&json!({"frozen_base": frozen}), "frozen_base").unwrap().is_some());
+        frozen["heads"] = json!({"letter": {"maximum_features": 5}});
+        assert!(refusal(&json!({"frozen_base": frozen}), "frozen_base").contains("frozen with it"));
+        frozen["heads"] = json!({});
+        frozen["carried"] = json!({"term": {}});
+        assert!(refusal(&json!({"frozen_base": frozen}), "frozen_base").contains("no weights for"));
+        // What a fit with heads may move: the heads, and the kept-neighbour question unless the base carries it.
+        let with_heads = |base: &Value| {
+            let mut spec = base.clone();
+            spec["heads"] = json!({"term": {"maximum_features": 5}});
+            json!({"frozen_base": spec})
+        };
+        let term = head_prefix("term").unwrap().to_owned();
+        assert_eq!(trainable_prefixes(root, &models_dir(), &with_heads(&with_kept)).unwrap(), Some(BTreeSet::from([term.clone()])));
+        assert_eq!(trainable_prefixes(root, &models_dir(), &with_heads(&plain)).unwrap(), Some(BTreeSet::from([term, KEPT_FEATURE_PREFIX.to_owned()])));
+        assert_eq!(trainable_prefixes(root, &models_dir(), &json!({"frozen_base": plain})).unwrap(), None);
+        // The lone-word frames are labelled by the base itself unless the recipe names a model for them.
+        let mut alone = plain.clone();
+        alone["heads"] = json!({"alone": {"maximum_features": 5}});
+        assert_eq!(labelling_base(root, &models_dir(), &json!({"frozen_base": alone})).unwrap().unwrap().weights.len(), 2);
+        alone["labels"] = with_kept;
+        assert!(labelling_base(root, &models_dir(), &json!({"frozen_base": alone})).unwrap().unwrap().weights.get(&kept("x")).is_some());
+        assert!(labelling_base(root, &models_dir(), &json!({"frozen_base": plain})).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_operating_points_of_an_epoch_lie_inside_the_serving_band() {
+        let options = |candidates: Value| json!({"threshold_selection": {"maximum_threshold": 0.9}, "threshold_candidates": candidates});
+        assert_eq!(development_thresholds(&options(json!([0.5, 0.9, 0.95, "x"]))).unwrap(), vec![0.5, 0.9]);
+        assert!(development_thresholds(&options(json!([0.95]))).unwrap_err().contains("serving band"));
+        assert!(development_thresholds(&options(json!(null))).is_err());
+    }
+
+    #[test]
+    fn an_unsupported_row_neither_keeps_nor_converts() {
+        let rows = [0.7, 0.1, 0.1, 0.1, 0.1, 0.7, 0.1, 0.1, 0.1, 0.1, 0.7, 0.1, 0.1, 0.7, 0.1, 0.1];
+        let masked = apply_support_mask(&rows, &[false, false, false, true]);
+        assert_eq!(masked, [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.1, 0.1, 0.7, 0.1, 0.1, 0.7, 0.1, 0.1]);
+    }
+
+    #[test]
+    fn calibration_outside_the_lone_word_class_may_hold_no_conversion_target() {
+        let names = vec!["plain".to_owned(), format!("{ALONE_FEATURE_PREFIX}word")];
+        let part = Columns { ids: vec![0, 1, 0], values: vec![1.0, 1.0, 1.0], counts: vec![1, 2], labels: vec![0, 1], importance: vec![1.0, 1.0], weights: vec![1.0, 1.0] };
+        let predictions = vec![("portable".to_owned(), vec![0.1, 0.7, 0.1, 0.1, 0.1, 0.7, 0.1, 0.1], vec![0, 1])];
+        let report = outside_lone_word(&predictions, &[&part], &names, 0.5);
+        assert_eq!((report["rows"].clone(), report["false_conversions"].clone(), report["convert_rows"].clone(), report["conversion_recall"].clone()), (json!(1), json!(1), json!(0), json!(0.0)));
+    }
+
+    #[test]
+    fn a_frozen_weight_holds_to_the_bit_or_the_fit_stops() {
+        let place = folder("frozen-weights");
+        let spec = model_of(&place, "base.json", &[("a", [0.5, -0.0, 0.25, 1.0]), ("b", [1.0, 2.0, 3.0, 4.0])]);
+        let base = ContextModel::load_artifact(Path::new(spec["artifact"].as_str().unwrap()), &models_dir()).unwrap();
+        let mut mapping: BTreeMap<String, Vec<f64>> = BTreeMap::from([("a".to_owned(), vec![0.5, 0.0, 0.25, 1.0]), ("b".to_owned(), vec![1.0, 2.0, 3.0, 4.0]), ("c".to_owned(), vec![0.0; ACTIONS])]);
+        frozen_weights_kept(&base, &mut mapping).unwrap();
+        assert!(mapping["a"][1].is_sign_negative());
+        mapping.insert("b".to_owned(), vec![1.0, 2.0, 3.0, 4.000_000_001]);
+        assert!(frozen_weights_kept(&base, &mut mapping).unwrap_err().contains("moved"));
+        mapping.remove("b");
+        assert!(frozen_weights_kept(&base, &mut mapping).unwrap_err().contains("moved"));
+    }
+
+    #[test]
+    fn a_fit_whose_inputs_changed_while_it_ran_is_not_sealed() {
+        let root = folder("unchanged");
+        let write = |name: &str, text: &str| {
+            let path = root.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        for name in ["ks-text", "ks-backend", "ks-config", "ks-lang", "ks-context", "ks-engine", "ks-replay", "ks-train", "ks-hunspell"] {
+            write(&format!("crates/{name}/src/lib.rs"), name);
+        }
+        for name in [
+            "Cargo.lock", "resources/models/model.json", "model/context_v1/scenarios.json", "model/context_v1/captured/manifest.json", "model/context_v3/captured/manifest.json",
+            "model/context_v3/baseline-context-v1.json", "model/intent_v1/config.json", "model/intent_v1/sources/en_US.lm", "model/intent_v1/sources/ru_RU.lm", "resources/protected_tokens.txt",
+            "resources/identifiers.json", "resources/lexicon-supplement-ru_RU.json", "recipe.json", "corpus/manifest.json",
+        ] {
+            write(name, name);
+        }
+        let (recipe, corpus) = (root.join("recipe.json"), root.join("corpus"));
+        let pinned = provenance(&root, &recipe).unwrap();
+        let hash = checksum(&corpus.join("manifest.json")).unwrap();
+        inputs_unchanged(&root, &recipe, &corpus, &pinned, &hash).unwrap();
+        write("recipe.json", "{}");
+        assert!(inputs_unchanged(&root, &recipe, &corpus, &pinned, &hash).unwrap_err().contains("changed while fitting"));
+        write("recipe.json", "recipe.json");
+        write("corpus/manifest.json", "{}");
+        assert!(inputs_unchanged(&root, &recipe, &corpus, &pinned, &hash).unwrap_err().contains("changed while fitting"));
+    }
+
+    #[test]
+    fn a_replay_runs_without_an_orthotactic_model_that_did_not_load() {
+        let (model, version) = shared_ortho(Err(ks_lang::LoadError::value("gone")));
+        assert!(model.is_none());
+        assert_eq!(version, "unavailable: ValueError");
+    }
+
+    #[test]
+    fn a_head_no_epoch_improved_on_records_no_epoch() {
+        let mut record = json!({});
+        record_own_epochs(&mut record, &["term", "first"], &[(Vec::new(), 0, f64::INFINITY), (Vec::new(), 2, 0.5)]);
+        assert_eq!(record, json!({"first_selected_epoch": 2, "first_loss": 0.5}));
+    }
 }
