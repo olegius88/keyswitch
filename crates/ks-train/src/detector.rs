@@ -131,9 +131,9 @@ fn table_order(model: &LanguageModel, locale: &str) -> Vec<(String, i64)> {
     }
     for word in locale_fallbacks(locale) {
         let word = LanguageModel::normalize(word);
-        if let Some(frequency) = model.frequencies.get(&word)
-            && seen.insert(word.clone())
-        {
+        // `LanguageModel::load` puts every fallback word of its locale in the table.
+        let frequency = model.frequencies.get(&word).expect("a fallback word is in its model's table");
+        if seen.insert(word.clone()) {
             ordered.push((word, frequency));
         }
     }
@@ -143,7 +143,8 @@ fn table_order(model: &LanguageModel, locale: &str) -> Vec<(String, i64)> {
 }
 
 /// `hunspell_words`: a deterministic broad-word sample from the active dictionary.
-fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
+#[must_use]
+pub fn hunspell_words(source: &str, sample: usize) -> Vec<String> {
     let dictionary = Path::new(source);
     let Ok(affix) = std::fs::read(dictionary.with_extension("aff")) else { return Vec::new() };
     let header = String::from_utf8_lossy(&affix);
@@ -210,7 +211,40 @@ pub fn command(resources: &Arc<Resources>, sample: usize, dictionary_sample: usi
     if !strict {
         return Ok(0);
     }
+    Ok(i32::from(!gate_holds(&directions, &dictionary_directions, models.len(), curated_failures.is_empty())))
+}
+
+/// The strict gate: every direction precise, specific and recalled, a dictionary direction for every model, and no
+/// authored case failed.
+fn gate_holds(directions: &[Metrics], dictionary_directions: &[Metrics], models: usize, curated_held: bool) -> bool {
     let holds = |metrics: &Metrics, recall: f64| metrics.precision() >= GATE_MIN_PRECISION && metrics.specificity() >= GATE_MIN_SPECIFICITY && metrics.recall() >= recall;
-    let passed = directions.iter().all(|metrics| holds(metrics, GATE_MIN_RECALL)) && dictionary_directions.len() == models.len() && dictionary_directions.iter().all(|metrics| holds(metrics, GATE_MIN_DICTIONARY_RECALL)) && curated_failures.is_empty();
-    Ok(i32::from(!passed))
+    directions.iter().all(|metrics| holds(metrics, GATE_MIN_RECALL)) && dictionary_directions.len() == models && dictionary_directions.iter().all(|metrics| holds(metrics, GATE_MIN_DICTIONARY_RECALL)) && curated_held
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn metrics(true_positive: i64, false_negative: i64, true_negative: i64, false_positive: i64) -> Metrics {
+        Metrics { language: "x".to_owned(), samples: 1, true_positive, false_negative, true_negative, false_positive }
+    }
+
+    #[test]
+    fn a_direction_with_nothing_to_count_is_not_held_against_the_detector() {
+        let empty = Metrics::default();
+        assert!([empty.precision(), empty.recall(), empty.specificity()].iter().all(|value| (value - 1.0).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn the_strict_gate_holds_only_when_every_part_of_it_does() {
+        let good = || metrics(1000, 0, 1000, 0);
+        assert!(gate_holds(&[good(), good()], &[good(), good()], 2, true));
+        for direction in [metrics(1, 0, 1000, 1), metrics(10_000, 0, 1, 1), metrics(1000, 1000, 1000, 0)] {
+            assert!(!gate_holds(&[good(), direction], &[good(), good()], 2, true));
+        }
+        assert!(!gate_holds(&[good(), good()], &[good()], 2, true));
+        assert!(!gate_holds(&[good(), good()], &[good(), metrics(1000, 1000, 1000, 0)], 2, true));
+        assert!(!gate_holds(&[good(), good()], &[good(), good()], 2, false));
+    }
 }

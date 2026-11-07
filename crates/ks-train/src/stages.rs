@@ -128,3 +128,23 @@ impl Stages for Writer {
         self.write(name, lines.into_iter());
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floats_are_written_as_python_hexes_them() {
+        assert_eq!(hex_of(f64::NAN), "nan");
+        assert_eq!(hex_of(f64::INFINITY), "inf");
+        assert_eq!(hex_of(f64::NEG_INFINITY), "-inf");
+        assert_eq!(hex_of(0.0), "0x0.0p+0");
+        assert_eq!(hex_of(-0.0), "-0x0.0p+0");
+        assert_eq!(hex_of(1.0), "0x1.0000000000000p+0");
+        assert_eq!(hex_of(-0.5), "-0x1.0000000000000p-1");
+        assert_eq!(hex_of(5e-324), "0x0.0000000000001p-1022");
+        assert_eq!(optional_hex(None), Value::Null);
+        assert_eq!(optional_hex(Some(2.0)), json!("0x1.0000000000000p+1"));
+    }
+}

@@ -76,9 +76,11 @@ fn trimmed_window(row: &CorpusRow) -> (String, String, usize, usize) {
 /// `sequence_plan`.
 pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
     let declared = row.group.filter(|group| *group == 0 || *group == 1);
-    assert!(!initially_wrong || declared.is_some(), "mixed or unclassified focus has no unique wrong layout");
     let focus_letter = declared.and_then(|group| row.original.chars().position(|character| script_group(character) == Some(group)));
-    assert!(!initially_wrong || focus_letter.is_some(), "wrong intervention requires a focus letter in the declared group");
+    if initially_wrong {
+        assert!(declared.is_some(), "mixed or unclassified focus has no unique wrong layout");
+        assert!(focus_letter.is_some(), "wrong intervention requires a focus letter in the declared group");
+    }
     let (before, after, left, right) = trimmed_window(row);
     let mut intended = format!("{before}{}", row.original).chars().find_map(script_group).or(row.group).filter(|group| *group != 0).unwrap_or(0);
     let mut keys: Vec<PhysicalKey> = Vec::new();
@@ -176,9 +178,7 @@ fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (Counts, V
         counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count().to::<i64>());
         counts.add_by("final_layout_mismatches", i64::from(!outcome.final_layout_matches));
         let mut case = json!({"identifier": plan.identifier, "document": plan.document, "group": plan.group, "initially_wrong": plan.initially_wrong, "expected": plan.expected, "trimmed_left": plan.trimmed_left, "trimmed_right": plan.trimmed_right});
-        if let (Some(table), Value::Object(outcome)) = (case.as_object_mut(), outcome.value()) {
-            table.extend(outcome);
-        }
+        case.as_object_mut().expect("a case is an object").extend(outcome.fields());
         results.push(case);
     }
     (counts, results)
@@ -206,7 +206,7 @@ pub struct Pairs {
 }
 
 /// `score_sequences`: every pair replayed in both settings modes; acceptance needs every gate in every mode and profile.
-pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Value, String> {
+pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Map<String, Value>, String> {
     let selected = select_rows(rows);
     let mut plans = Vec::new();
     for row in &selected {
@@ -311,7 +311,11 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
         profiles.insert(profile.to_owned(), block);
     }
     let _ = root;
-    Ok(json!({"selection": selection, "profiles": profiles, "promotion_passed": all_passed}))
+    let mut result = Map::new();
+    result.insert("selection".to_owned(), selection);
+    result.insert("profiles".to_owned(), Value::Object(profiles));
+    result.insert("promotion_passed".to_owned(), json!(all_passed));
+    Ok(result)
 }
 
 fn hash_list(value: &Value, name: &str) -> Result<Vec<String>, String> {
@@ -531,6 +535,14 @@ pub struct EvaluationRequest<'a> {
     pub unsealed: bool,
 }
 
+/// The inputs of a replay are still the ones its identity named before it started.
+pub fn unchanged_since(request: &EvaluationRequest<'_>, identity: &Identity) -> Result<(), String> {
+    if evaluation_identity(request)?.value != identity.value {
+        return Err("evaluation inputs changed during sequence replay".to_owned());
+    }
+    Ok(())
+}
+
 /// `evaluate`: the report of a development diagnostic, or of the sealed test, read once.
 pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     let split = request.split;
@@ -568,12 +580,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
         std::fs::write(request.output, crate::artifact::canonical(report)).map_err(|error| error.to_string())
     };
     match scored {
-        Ok(Value::Object(table)) => {
-            if let Some(object) = report.as_object_mut() {
-                object.extend(table);
-            }
-        }
-        Ok(_) => return Err("a scored report is an object".to_owned()),
+        Ok(table) => report.as_object_mut().expect("a report is an object").extend(table),
         Err(error) => {
             report["execution_error"] = json!(error);
             report["promotion_passed"] = json!(false);
@@ -584,8 +591,8 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
             return Err(error);
         }
     }
-    if !request.unsealed && evaluation_identity(request)?.value != identity.value {
-        return Err("evaluation inputs changed during sequence replay".to_owned());
+    if !request.unsealed {
+        unchanged_since(request, &identity)?;
     }
     if split == "test" {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
@@ -595,4 +602,22 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     }
     write_report(&report)?;
     Ok(report)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replay_that_failed_to_run_fails_its_gate_whichever_pair_it_was() {
+        let documents = BTreeMap::from([("0".to_owned(), 40), ("1".to_owned(), 40)]);
+        let clean = zeroed_counts();
+        let mut failed = zeroed_counts();
+        failed.add_by("execution_errors", 1);
+        assert_eq!(profile_gates(&clean, &clean, &documents)["execution_succeeded"], json!(true));
+        for (candidate, baseline) in [(&failed, &clean), (&clean, &failed)] {
+            assert_eq!(profile_gates(candidate, baseline, &documents)["execution_succeeded"], json!(false));
+        }
+    }
 }
