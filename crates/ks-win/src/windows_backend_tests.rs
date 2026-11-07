@@ -92,6 +92,8 @@ struct FakeState {
     translation: HashMap<(u32, i64), String>,
     anchor: Option<ScreenAnchor>,
     activated_windows: Vec<i64>,
+    /// The layouts of windows not in front; one not here has the layout of the window in front.
+    window_layouts: HashMap<i64, i64>,
     /// When set, an activated window comes to the front after this many more looks at the front; when not, it stays
     /// where it was, as a test before these needs.
     foreground_after_activation: Option<usize>,
@@ -158,6 +160,7 @@ impl FakeWindowsAPI {
                 translation: HashMap::new(),
                 anchor: Some(ScreenAnchor { x: 11, y: 22, window: Some(WINDOWS_FAKE_HWND) }),
                 activated_windows: Vec::new(),
+                window_layouts: HashMap::new(),
                 foreground_after_activation: None,
                 pending_foreground: None,
                 activation_refused: false,
@@ -228,6 +231,11 @@ impl WindowsAPI for FakeWindowsAPI {
 
     fn foreground_layout(&self) -> i64 {
         self.state().current_layout
+    }
+
+    fn window_layout(&self, window: i64) -> i64 {
+        let state = self.state();
+        state.window_layouts.get(&window).copied().unwrap_or(state.current_layout)
     }
 
     fn request_layout(&self, layout: i64) -> bool {
@@ -1358,6 +1366,38 @@ fn the_shell_taskbar_is_no_window_the_user_worked_in() {
     subject.switch_group(0).unwrap();
     assert_eq!(api.state().activated_windows, [WINDOWS_FAKE_HWND]);
     assert_eq!(api.requests(), [RUSSIAN_HKL, ENGLISH_HKL]);
+}
+
+#[test]
+fn while_the_taskbar_is_in_front_the_layout_told_is_the_work_windows() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let subject = backend(&api);
+    let events = collected();
+    subject.set_listener(Some(collecting(&events)));
+    {
+        let mut state = api.state();
+        state.window_owners.insert(TASKBAR_HWND, EXPLORER_PROCESS_ID);
+        state.window_classes.insert(TASKBAR_HWND, SHELL_TRAY_WINDOW_CLASSES[0].to_owned());
+        state.foreground = TASKBAR_HWND;
+    }
+    // Before a window was worked in, the taskbar's own layout is told.
+    assert_eq!(subject.current_group().unwrap(), 0);
+    api.state().foreground = WINDOWS_FAKE_HWND;
+    let _ = subject.focused_window();
+    {
+        let mut state = api.state();
+        state.window_layouts.insert(WINDOWS_FAKE_HWND, RUSSIAN_HKL);
+        state.foreground = TASKBAR_HWND;
+    }
+    // The taskbar keeps English; the window the user typed in has Russian, and the engine and the keys are told so.
+    assert_eq!(subject.current_group().unwrap(), 1);
+    assert!(!subject.handle_native(native(true, VK_A, SCAN_CODE_A, false, 1)));
+    assert_eq!(events.lock().unwrap().last().map(|event| event.group), Some(1));
+    // KeySwitch's own window in front tells its own layout: the engine leaves it out by itself.
+    let own = api.state().process_id;
+    api.state().window_owners.insert(KEYSWITCH_WINDOW_HWND, own);
+    api.state().foreground = KEYSWITCH_WINDOW_HWND;
+    assert_eq!(subject.current_group().unwrap(), 0);
 }
 
 #[test]

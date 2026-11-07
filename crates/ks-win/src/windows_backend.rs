@@ -137,6 +137,8 @@ pub type HookReady = Box<dyn FnOnce() + Send>;
 pub trait WindowsAPI: Send + Sync {
     fn loaded_layouts(&self) -> Result<Vec<i64>, WindowsBackendError>;
     fn foreground_layout(&self) -> i64;
+    /// The layout of `window`, in front or not: the one of the thread its keys go to.
+    fn window_layout(&self, window: i64) -> i64;
     fn request_layout(&self, layout: i64) -> bool;
     fn translate_key(&self, virtual_key: u32, scan_code: u32, state: u32, layout: i64) -> String;
     /// `SendInput`: how many events it took. Never called on the hook's thread.
@@ -802,7 +804,17 @@ impl Inner {
         self.listener.set(None);
     }
 
+    /// The layout group the engine and the keys are told of: the one of the window in front, or, while the shell's
+    /// taskbar or the flyout of its hidden icons is there, the one of the window the user worked in last. A click on the
+    /// tray icon brings the taskbar to the front, and where each window keeps its own layout, the taskbar's is not the
+    /// one the user types with: the tray menu would offer the switch the user's window does not need. KeySwitch's own
+    /// windows need no such care: the engine leaves their layout out by itself, except in its test field, which is typed
+    /// in with its own.
     fn current_group(&self) -> Result<i32, WindowsBackendError> {
+        let work_window = self.work_window.load(Ordering::Acquire);
+        if work_window != 0 && self.is_shell_tray_window(self.api.foreground_window()) {
+            return self.group_for_layout(self.api.window_layout(work_window));
+        }
         self.group_for_layout(self.api.foreground_layout())
     }
 
@@ -819,13 +831,16 @@ impl Inner {
         self.switch_group_inner(group).map(drop)
     }
 
-    /// Whether the user works in `window`: a window of another program than this one, and not the shell's taskbar or
-    /// the flyout of its hidden icons, which a click on the tray icon brings to the front.
+    /// Whether `window` is the shell's taskbar or the flyout of its hidden icons, which a click on the tray icon brings to
+    /// the front.
+    fn is_shell_tray_window(&self, window: i64) -> bool {
+        self.api.selection_api().is_some_and(|api| SHELL_TRAY_WINDOW_CLASSES.contains(&api.window_class(window).as_str()))
+    }
+
+    /// Whether the user works in `window`: a window of another program than this one, and not the shell's tray.
     fn is_work_window(&self, window: i64) -> bool {
         let process_id = self.api.window_process_id(window);
-        process_id != 0
-            && process_id != self.api.current_process_id()
-            && self.api.selection_api().is_none_or(|api| !SHELL_TRAY_WINDOW_CLASSES.contains(&api.window_class(window).as_str()))
+        process_id != 0 && process_id != self.api.current_process_id() && !self.is_shell_tray_window(window)
     }
 
     fn note_work_window(&self, window: i64) {

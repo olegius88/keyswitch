@@ -77,6 +77,15 @@ mod scenario {
     const SWITCH_LINE: &str = "Переключить на ";
     const MENU_LINE_CHARACTERS: usize = 128;
 
+    /// The group of a keyboard layout by its language: 0 English, 1 Russian, -1 another.
+    fn group_of_layout(layout: i64) -> i32 {
+        match layout.bits::<u64>().low::<u32>() & 0xffff {
+            ENGLISH => 0,
+            RUSSIAN => 1,
+            _ => -1,
+        }
+    }
+
     /// A key as a person's: no mark of this program on it.
     fn user(pressed: bool) -> NativeInput {
         NativeInput { synthetic: false, ..NativeInput::new(pressed) }
@@ -159,12 +168,7 @@ mod scenario {
 
         fn group(&self) -> i32 {
             // SAFETY: the layout of this thread, which owns the edit control.
-            let language = ((unsafe { GetKeyboardLayout(0) }).to::<usize>()).low::<u32>() & 0xffff;
-            match language {
-                ENGLISH => 0,
-                RUSSIAN => 1,
-                _ => -1,
-            }
+            group_of_layout(((unsafe { GetKeyboardLayout(0) }).to::<isize>()).to::<i64>())
         }
 
         /// Runs this thread's messages until the condition holds or the time is out.
@@ -531,11 +535,39 @@ mod scenario {
         if sent.to::<usize>() == inputs.len() { Ok(()) } else { Err(format!("SendInput took {sent} of the two button events")) }
     }
 
+    /// What is in front when the shell tells the program of the click on its icon.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Front {
+        /// The field typed in.
+        Field,
+        /// The taskbar, which a click on the icon brings to the front a moment before.
+        TaskbarClicked,
+        /// The taskbar, long enough for the engine to have looked at what is in front.
+        TaskbarAWhile,
+    }
+
+    fn taskbar() -> Result<HWND, String> {
+        let class = wide(SHELL_TRAY_WINDOW_CLASSES[0]);
+        // SAFETY: the class name is NUL-terminated and lives through the call.
+        let taskbar = unsafe { FindWindowExW(std::ptr::null_mut(), std::ptr::null_mut(), class.as_ptr(), std::ptr::null()) };
+        if taskbar.is_null() { Err("the runner has no taskbar".to_owned()) } else { Ok(taskbar) }
+    }
+
+    fn bring_taskbar_forward(editor: &Editor) -> Result<HWND, String> {
+        let taskbar = taskbar()?;
+        editor.api.activate_window((taskbar.to::<isize>()).to::<i64>());
+        // SAFETY: takes nothing.
+        if editor.pump_until(STANDARD, |_| unsafe { GetForegroundWindow() } == taskbar) {
+            Ok(taskbar)
+        } else {
+            Err("the taskbar did not come to the front".to_owned())
+        }
+    }
+
     /// The layout chosen in the tray menu goes to the window the user typed in, although the menu has taken the front from
     /// it, and that window has the front back afterwards. The program's settings window gets the message the shell sends
-    /// for a click on the icon, after the taskbar has taken the front when `through_taskbar`, as a click on the icon does;
-    /// the line of the menu is clicked as a person clicks it.
-    fn tray_switch(editor: &Editor, process: u32, group: i32, through_taskbar: bool) -> Result<(), String> {
+    /// for a click on the icon, with `front` in front; the line of the menu is clicked as a person clicks it.
+    fn tray_switch(editor: &Editor, process: u32, group: i32, front: Front) -> Result<(), String> {
         let wanted = if group == 0 { "(EN)" } else { "(RU)" };
         let window = *windows_of(process, SETTINGS_WINDOW_CLASS).first().ok_or("the program has no settings window")?;
         // The engine follows the layout of the window in front at its next wake.
@@ -543,14 +575,15 @@ mod scenario {
         // The shell lets the program of a clicked icon take the front, and so does this.
         // SAFETY: takes the process id by value.
         unsafe { AllowSetForegroundWindow(process) };
-        if through_taskbar {
-            let class = wide(SHELL_TRAY_WINDOW_CLASSES[0]);
-            // SAFETY: the class name is NUL-terminated and lives through the call.
-            let taskbar = unsafe { FindWindowExW(std::ptr::null_mut(), std::ptr::null_mut(), class.as_ptr(), std::ptr::null()) };
-            if taskbar.is_null() {
-                return Err("the runner has no taskbar".to_owned());
+        if front != Front::Field {
+            bring_taskbar_forward(editor)?;
+        }
+        if front == Front::TaskbarAWhile {
+            editor.pump(PROGRAM_SETTLES);
+            let taskbar_group = group_of_layout(editor.api.foreground_layout());
+            if taskbar_group != group {
+                return Err(format!("the taskbar has the layout {taskbar_group}, not the one the menu is to offer"));
             }
-            editor.api.activate_window((taskbar.to::<isize>()).to::<i64>());
         }
         // SAFETY: the message is the icon's callback, which carries the mouse message in its lParam.
         if unsafe { PostMessageW(window, WM_TRAY, 1, WM_RBUTTONUP.to::<LPARAM>()) } == 0 {
@@ -610,6 +643,19 @@ mod scenario {
         Ok(())
     }
 
+    /// With a layout for each window the taskbar keeps one of its own. The field gets the other one, and the taskbar stays in
+    /// front long enough for the engine to look: the program still tells the engine the field's layout, so the menu offers
+    /// the field's other layout, which is the taskbar's.
+    fn tray_switch_past_the_taskbar(editor: &Editor, process: u32) -> Result<(), String> {
+        bring_taskbar_forward(editor)?;
+        let taskbar_group = group_of_layout(editor.api.foreground_layout());
+        if taskbar_group < 0 {
+            return Err("the taskbar's layout is neither English nor Russian".to_owned());
+        }
+        editor.prepare(1 - taskbar_group)?;
+        tray_switch(editor, process, taskbar_group, Front::TaskbarAWhile)
+    }
+
     /// The tray switch with one layout shared by every window, as Windows has it by default, and with a layout for each
     /// window, where only the window that takes the request changes. The setting of the runner is put back afterwards.
     fn tray_switches(editor: &Editor, process: u32) -> Result<(), String> {
@@ -618,10 +664,12 @@ mod scenario {
             for per_window in [false, true] {
                 set_layout_per_window(per_window)?;
                 editor.prepare(0)?;
-                tray_switch(editor, process, 1, false)?;
-                tray_switch(editor, process, 0, true)?;
+                tray_switch(editor, process, 1, Front::Field)?;
+                tray_switch(editor, process, 0, Front::TaskbarClicked)?;
                 println!("WINDOWS_TRAY_SWITCH_{}_E2E_OK", if per_window { "PER_WINDOW" } else { "SHARED" });
             }
+            tray_switch_past_the_taskbar(editor, process)?;
+            println!("WINDOWS_TRAY_SWITCH_PAST_THE_TASKBAR_E2E_OK");
             Ok(())
         })();
         set_layout_per_window(before)?;
