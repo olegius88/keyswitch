@@ -68,7 +68,12 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   KeySwitch itself converted the word at a pause in typing less than 1.5 seconds
   before the press and nothing was typed since, the first `Pause` changes
   nothing: it asked for that very conversion. A second press converts the word
-  back;
+  back. A Mac keyboard has no `Pause`, so on macOS the manual conversion and the
+  double press that offers a rule default to `Control+Option+K`;
+- layout switching with a lone tap of a modifier, as in Punto Switcher and
+  Caramba: the left or right `Shift` or `Ctrl`, pressed and released with no
+  other key, switches the layout (see
+  [Which keys switch the layout](#which-keys-switch-the-layout));
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
@@ -124,6 +129,30 @@ works the same way. On X11 these actions have already reached the application,
 so use Space, idle correction or Pause before submitting or changing fields.
 See the [EN/RU input maturity matrix](docs/input-maturity.md) for regression
 scenarios and platform limitations.
+
+## Which keys switch the layout
+
+The system switches the layout with its own shortcut: on Windows `Win+Space` and
+`Ctrl+Shift` (or `Alt+Shift` where that is chosen in the input language
+settings), on Linux the desktop's shortcut (`Super+Space` in GNOME; in XFCE and
+KDE whatever the keyboard layout settings say), on macOS `Control+Space` or the
+`Fn`/🌐 key. KeySwitch adds three ways to them:
+
+- `Pause` with nothing to convert only switches the layout (`Control+Option+K` on
+  macOS);
+- the «Переключить на …» (switch to …) item of the tray menu;
+- the setting «Переключать раскладку одной клавишей» (switch the layout with a
+  single key) on the «Горячие клавиши» (hotkeys) page: the left or right `Shift`
+  or `Ctrl`, pressed and released with no other key, switches the layout EN ⇄
+  RU. It is off by default. `Shift` with a letter, a click or a turn of the
+  wheel with the key held, `Ctrl+C` and a hold longer than half a second switch
+  nothing, and the key itself reaches the program as usual. The first word after
+  such a switch stays as typed, as after any manual switch. Leave it off where
+  the system already switches the layout on this key. It does not work together
+  with Sticky Keys. With «Ввод от других программ» (input from other programs)
+  on, a tap that comes from a remote computer switches the layout too. On
+  Wayland KeySwitch notices a touchpad scroll by the touch: a scroll whose
+  fingers were down before the key does not end the tap.
 
 ## Install on Windows
 
@@ -190,7 +219,9 @@ On its first start KeySwitch asks for the Accessibility permission: without it t
 program cannot see the keyboard. It shows the system prompt itself, opens the
 settings pane where the switch lives and carries on without a restart once the
 permission is given. KeySwitch appears in the menu bar; the settings window is the
-same as on Windows.
+same as on Windows. The manual conversion of a word and the double press that
+offers a rule are on `Control+Option+K`: a Mac has no `Pause` key. A setting that
+still holds `Pause` takes this shortcut once; another key you chose stays.
 
 macOS has no automatic updates yet: download a new version from the
 [releases page](https://github.com/olegius88/keyswitch/releases).
