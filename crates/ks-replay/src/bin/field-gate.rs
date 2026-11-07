@@ -3,7 +3,9 @@
 //! and the output names files and counts, never a word.
 //!
 //!     field-gate --root <tree with the private data> --released <folder of reports> [--manifest <file>]
-//!                [--replay <ks-replay binary>] [--jobs N] [--record <file>]
+//!                [--replay <ks-replay binary>] [--jobs N] [--record <file>] [--speller]
+//!
+//! `--speller` replays the candidate with the Hunspell dictionaries the installed program uses (`ks-replay --speller`).
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 
@@ -215,6 +217,11 @@ fn main() {
         PathBuf::from,
     );
     let jobs: usize = option(&arguments, "--jobs").and_then(|text| text.parse().ok()).unwrap_or(4);
+    let speller = arguments.iter().any(|argument| argument == "--speller");
+    if speller && let Err(error) = ks_replay::harness::spellers_ready(&ks_hunspell::hunspell_speller(ks_config::history::data_dir())) {
+        fail(format!("--speller: {error}"));
+    }
+    let speller = speller.then_some("--speller");
     let text = std::fs::read_to_string(&manifest_path).unwrap_or_else(|_| fail(format!("no field manifest at {}: the batteries are not on this machine", manifest_path.display())));
     let manifest: Value = serde_json::from_str(&text).unwrap_or_else(|_| fail("the manifest is no JSON"));
     let batteries: Vec<(String, PathBuf)> = manifest["batteries"].as_object().map_or_else(Vec::new, |table| {
@@ -230,7 +237,7 @@ fn main() {
         for _ in 0..jobs.max(1) {
             scope.spawn(|| {
                 while let Some((name, battery)) = batteries.get(next.fetch_add(1, Ordering::SeqCst)) {
-                    let status = Command::new(&replay).arg(battery).arg(scratch.join(format!("{name}.json"))).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
+                    let status = Command::new(&replay).arg(battery).arg(scratch.join(format!("{name}.json"))).args(speller).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
                     if !status.is_ok_and(|status| status.success()) {
                         failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(name.clone());
                     }
@@ -357,5 +364,20 @@ mod tests {
         let result = compare(&released, &candidate, &Verdicts::new());
         assert_eq!((result.released_right, result.candidate_right, result.broken.len(), result.fixed.len()), (2, 1, 1, 0));
         assert_eq!((&result.broken[0]["candidate"], &result.broken[0]["waits"]), (&json!("cl"), &json!(true)));
+    }
+
+    #[test]
+    fn a_model_converting_an_owner_labelled_word_from_its_other_reading_overrules_the_owner() {
+        let other = json!({"verdict": "convert", "typed": "привет", "by": "llm", "date": "2026-10-16", "reason_code": "garbage-in-prompt", "reason": "a reason"});
+        assert!(owner_overruled(&owned(), &other), "converting from the other reading ends as the typed one, not as labelled");
+    }
+
+    #[test]
+    fn a_verdict_counts_where_the_candidate_alone_reads_it_otherwise_than_its_own_label() {
+        let released = battery(vec![row(0, "привет")]);
+        let candidate = battery(vec![Row { intended: "ghbdtn".to_owned(), ..row(0, "привет") }]);
+        let verdicts = Verdicts::from([(("pc".to_owned(), 0, TIME.to_owned()), verdict("convert", "llm"))]);
+        let result = compare(&released, &candidate, &verdicts);
+        assert_eq!((result.released_right, result.candidate_right, result.verdicts_used), (1, 1, 1));
     }
 }

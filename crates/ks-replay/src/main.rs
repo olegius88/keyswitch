@@ -1,8 +1,9 @@
 //! The field replay gate: every stream of a battery typed through the engine over a model editor, every word written to
 //! the report, and the report compared row by row with the reference the Python engine left.
 //!
-//!     ks-replay <battery.jsonl> <report.json> [--limit N] [--compare <reference.json>]
+//!     ks-replay <battery.jsonl> <report.json> [--limit N] [--compare <reference.json>] [--speller]
 //!
+//! `--speller` spell-checks with the Hunspell dictionaries the installed program uses; without them the replay stops.
 //! `FIELD_DEBUG=1` writes the engine's technical log to `<report>.log`, to be set beside the Python's at the first
 //! difference. The clock is one and fake: the engine's and the observed text's alike, as `time.monotonic` is patched on the
 //! module both read it from.
@@ -104,12 +105,12 @@ struct Field {
     session: Session,
 }
 
+/// Whether two texts of one length are typed by the same keys (the only caller compares two slices of `kept` characters).
 fn same_keys(shown: &[char], typed: &[char]) -> bool {
-    shown.len() == typed.len()
-        && shown.iter().zip(typed).all(|(a, b)| {
-            let first = key_of_char(*a);
-            first.is_some() && first == key_of_char(*b)
-        })
+    shown.iter().zip(typed).all(|(a, b)| {
+        let first = key_of_char(*a);
+        first.is_some() && first == key_of_char(*b)
+    })
 }
 
 /// The log's edits between the previous word and the stream's first word: the letters of the first word the reopened word
@@ -251,7 +252,7 @@ fn keys_of(item: &Value) -> Vec<&'static PhysicalKey> {
         .collect()
 }
 
-fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
+fn replay(battery: &Path, report: &Path, limit: Option<usize>, speller: bool) {
     let content = std::fs::read_to_string(battery).expect("the battery is readable");
     let mut streams: Vec<Value> = content.lines().filter(|line| !line.is_empty()).map(|line| serde_json::from_str(line).expect("a line of the battery")).collect();
     if let Some(limit) = limit.filter(|limit| *limit != 0) {
@@ -259,7 +260,18 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
     }
     drop(content);
     let debug_log = (std::env::var("FIELD_DEBUG").as_deref() == Ok("1")).then(|| PathBuf::from(format!("{}.log", report.display())));
-    let mut bundle = Bundle::load(debug_log.as_deref());
+    let mut bundle = if speller {
+        // The speller the program starts with: Hunspell over the dictionary folders of its data folder and the system's.
+        match Bundle::with_speller(debug_log.as_deref(), &ks_hunspell::hunspell_speller(ks_config::history::data_dir())) {
+            Ok(bundle) => bundle,
+            Err(error) => {
+                eprintln!("ks-replay --speller: {error}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        Bundle::load(debug_log.as_deref())
+    };
     let mut counts = Counts::default();
     let mut errors: Vec<Value> = Vec::new();
     // Every word as the tree typed it: stream, the item's place in it and time, the reading the keys gave, the other reading,
@@ -281,7 +293,8 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
         let opening_previous = mapping(opening.get("previous"));
         let previous = opening_previous.get("t").and_then(Value::as_str);
         let logged_before: Option<i64> = decision.map(|decision| decision.get("before").filter(|value| ks_config::pycompat::truthy(value)).map_or(0, int_of));
-        let adjacent = field.as_ref().is_some_and(|field| field.app == app && field.last_t.is_some() && field.last_t.as_deref() == previous);
+        // A field lives from the stream that made it, which sets its last time before the next stream: that time is there.
+        let adjacent = field.as_ref().is_some_and(|field| field.app == app && field.last_t.as_deref() == previous);
         let mode = if logged_before == Some(0) || (logged_before.is_none() && !adjacent) {
             "fresh"
         } else if adjacent {
@@ -591,7 +604,9 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>) {
             if truthy(item.get("excluded")) {
                 continue;
             }
-            if early_words.iter().any(|prefix| !prefix.is_empty() && typed_reading.starts_with(prefix)) {
+            // An early plan holds at least three keys the replay typed, each of them a key of `KEYS` with a character in
+            // both layouts: its word is never empty.
+            if early_words.iter().any(|prefix| typed_reading.starts_with(prefix)) {
                 let shown_now = window(&text, start, length);
                 let intended_now = reading(item, "intended_group");
                 counts.add("early:word");
@@ -706,10 +721,11 @@ fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let option = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|index| arguments.get(index + 1)).cloned();
     let (Some(battery), Some(report)) = (arguments.first(), arguments.get(1)) else {
-        eprintln!("ks-replay <battery.jsonl> <report.json> [--limit N] [--compare <reference.json>]");
+        eprintln!("ks-replay <battery.jsonl> <report.json> [--limit N] [--compare <reference.json>] [--speller]");
         std::process::exit(2);
     };
-    replay(Path::new(battery), Path::new(report), option("--limit").and_then(|limit| limit.parse().ok()));
+    let speller = arguments.iter().any(|argument| argument == "--speller");
+    replay(Path::new(battery), Path::new(report), option("--limit").and_then(|limit| limit.parse().ok()), speller);
     if let Some(reference) = option("--compare")
         && !compare(Path::new(report), Path::new(&reference))
     {

@@ -1043,6 +1043,7 @@ dependencies = [
  "ks-config",
  "ks-context",
  "ks-engine",
+ "ks-hunspell",
  "ks-lang",
  "ks-text",
  "serde_json",

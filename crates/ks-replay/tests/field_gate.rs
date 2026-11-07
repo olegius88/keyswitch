@@ -154,3 +154,63 @@ fn the_replay_program_beside_it_is_the_one_it_runs_by_default() {
     let default = Command::new(env!("CARGO_BIN_EXE_field-gate")).arg("--root").arg(&gate.root).arg("--released").arg(&gate.released).arg("--manifest").arg(&gate.manifest).output().expect("it runs");
     assert!(default.status.code() == Some(2) || default.status.code() == Some(0), "{}", said(&default));
 }
+
+#[test]
+fn a_verdict_converts_a_word_or_takes_it_out() {
+    let gate = gate();
+    gate.rows(&[row(0, "ghbdtn")], &[row(0, "привет")]);
+    let key = format!("pc|0|{TIME}|x");
+    let verdict = |name: &str| json!({&key: {"verdict": name, "typed": "ghbdtn", "by": "llm", "date": "2026-10-16", "reason_code": "russian-typo", "reason": "because"}});
+    gate.verdicts(&verdict("convert"));
+    stops(&gate.run(), 0, "fixed=1");
+    gate.verdicts(&verdict("ambiguous"));
+    stops(&gate.run(), 0, "excluded=1");
+    gate.verdicts(&verdict("partial"));
+    stops(&gate.run(), 0, "excluded=1");
+    gate.verdicts(&verdict("keep"));
+    stops(&gate.run(), 1, "broken=1");
+}
+
+#[test]
+fn without_a_scratch_folder_nothing_is_replayed() {
+    let gate = gate();
+    gate.rows(&[row(0, "привет")], &[row(0, "привет")]);
+    let file = gate.root.join("a file");
+    std::fs::write(&file, b"").expect("a file");
+    stops(&gate.command().env("TMPDIR", &file).output().expect("it runs"), 2, "no scratch folder");
+}
+
+/// A folder of files named as the Hunspell library that are no libraries: a process started with it on its library path
+/// finds no Hunspell, as on a machine without it.
+fn no_hunspell(root: &std::path::Path) -> PathBuf {
+    let folder = root.join("no-hunspell");
+    std::fs::create_dir_all(&folder).expect("a folder");
+    for name in ["libhunspell-1.7.so.0", "libhunspell-1.7.so", "libhunspell.so.0", "libhunspell.so"] {
+        std::fs::write(folder.join(name), b"no library").expect("a file");
+    }
+    folder
+}
+
+#[test]
+fn the_speller_is_asked_of_the_replay_and_has_to_be_there() {
+    let gate = gate();
+    gate.rows(&[row(0, "привет")], &[row(0, "привет")]);
+    let asked = gate.root.join("asked.txt");
+    std::fs::write(&gate.replay, format!("#!/bin/sh\necho \"$@\" >> {}\nname=$(basename \"$2\")\ncp {}/\"$name\" \"$2\"\n", asked.display(), gate.root.join("answers").display())).expect("a stub");
+    stops(&gate.run(), 0, "passed");
+    let plain = std::fs::read_to_string(&asked).expect("the arguments");
+    assert!(!plain.contains("--speller"), "{plain}");
+    std::fs::remove_file(&asked).expect("the file goes");
+    let spelling = gate.command().arg("--speller").output().expect("it runs");
+    let ready = ks_replay::harness::spellers_ready(&ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+    if ready.is_ok() {
+        stops(&spelling, 0, "passed");
+        let asked = std::fs::read_to_string(&asked).expect("the arguments");
+        assert!(asked.trim_end().ends_with("--speller"), "{asked}");
+    } else {
+        stops(&spelling, 2, "--speller: no Hunspell speller");
+    }
+    // Where there is no Hunspell, the gate says so before it replays anything.
+    let missing = gate.command().arg("--speller").env("LD_LIBRARY_PATH", no_hunspell(&gate.root)).output().expect("it runs");
+    stops(&missing, 2, "--speller: no Hunspell speller for en_US");
+}
