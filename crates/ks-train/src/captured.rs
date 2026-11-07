@@ -60,7 +60,8 @@ pub fn captured_sources(manifest: &Path) -> Result<Vec<CapturedSource>, String> 
             return Err(format!("captured questions changed: {}", path.display()));
         }
         let weight = source["weight"].as_f64().ok_or("a source without a weight")?;
-        if !weight.is_finite() || weight <= 0.0 {
+        // A number serde_json reads is finite: it refuses one out of a double's range, and JSON writes no NaN.
+        if weight <= 0.0 {
             return Err(format!("invalid weight or balance for {}", path.display()));
         }
         sources.push(CapturedSource { path, weight, balanced: source.get("balance").and_then(Value::as_bool).unwrap_or(true), columns: columns.clone() });

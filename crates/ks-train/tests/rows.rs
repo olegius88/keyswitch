@@ -139,3 +139,11 @@ fn a_selection_takes_a_share_of_each_language_and_of_each_family() {
     assert!(select_rows(&rows, 2).len() <= 2);
     assert!(select_rows(&rows, 0).is_empty());
 }
+
+#[test]
+fn a_one_letter_word_before_is_no_phrase_typed_in_the_other_layout() {
+    let rows = loaded("rows-letter", &[row("train", 0, 1, &["это", "я", "дом"], 2)]);
+    let frames = action_rows(&TOOLS, &rows);
+    assert!(!frames.is_empty());
+    assert!(!frames.iter().any(|frame| frame.identifier.contains(":stranded-previous")));
+}

@@ -212,11 +212,27 @@ mod tests {
     }
 
     #[test]
+    fn a_glyph_no_layout_types_has_no_physical_reading() {
+        let mut aliases = BTreeSet::new();
+        physical_aliases("д«", &mut aliases);
+        // Only the literal: no reading of keys holds the glyph.
+        assert_eq!(aliases.len(), 1);
+        let mut readings = BTreeSet::new();
+        physical_aliases("д[", &mut readings);
+        assert!(readings.len() > 1);
+    }
+
+    #[test]
     fn repr_as_python_writes_it() {
         assert_eq!(py_repr("a"), "'a'");
         assert_eq!(py_repr("it's"), "\"it's\"");
         assert_eq!(py_repr("\n"), "'\\n'");
         assert_eq!(py_repr("а\u{a0}б"), "'а\\xa0б'");
         assert_eq!(py_repr("\u{2028}"), "'\\u2028'");
+        assert_eq!(py_repr("a\\b\r\t"), "'a\\\\b\\r\\t'");
+        assert_eq!(py_repr("it's \"x\""), "'it\\'s \"x\"'");
+        assert_eq!(py_repr("\u{1}\u{7f}"), "'\\x01\\x7f'");
+        assert_eq!(py_repr("\u{e0001}"), "'\\U000e0001'");
+        assert_eq!(py_repr("я"), "'я'");
     }
 }

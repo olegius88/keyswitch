@@ -423,7 +423,9 @@ pub fn action_rows(tools: &Tools, rows: &[CorpusRow]) -> Vec<ActionRow> {
             result.push(frame(format!("{}:mixed:wrong", row.identifier), &alternate, 1 - group, mixed_field, Convert, "mixed_language_layout_intervention"));
         }
         let other = &natural[(1 - group).to::<usize>()];
-        if !other.is_empty() && group == 0 && capital_citation(tools, &row.original, &alternate) && tools.plausible_reading(&alternate, 1 - group) {
+        // A capital citation's reading is one Russian prose knows (`plausible_reading(alternate, 1)`): with group 0 that is
+        // the reading of the other layout.
+        if !other.is_empty() && group == 0 && capital_citation(tools, &row.original, &alternate) {
             let chosen = &other[variant_choice(&row.identifier, "mixed-natural", other.len())];
             result.push(frame(format!("{}:mixed-capital", row.identifier), &row.original, group, public_field(application, chosen, ""), Keep, "mixed_language_insertion"));
         }
@@ -475,5 +477,15 @@ mod tests {
         assert_eq!(word_at_start("  x"), None);
         assert_eq!(word_at_start("да-нет ну"), Some("да-нет"));
         assert_eq!(joined_spans("a b-c-d e- f-g").len(), 2);
+        assert_eq!(words_of("Ёж и ёлка"), ["Ёж", "и", "ёлка"]);
+    }
+
+    #[test]
+    fn frames_are_ordered_by_the_hash_of_their_names() {
+        let frame = |name: &str| ActionRow::new(name, "дом", 1, public_field("Code", "", ""), "space", ContextAction::Keep, "test", " ");
+        let mut rows = vec![frame("a"), frame("b"), frame("c"), frame("d")];
+        training_order(&mut rows);
+        let hashes: Vec<[u8; 32]> = rows.iter().map(|row| sha256(&row.identifier)).collect();
+        assert!(hashes.windows(2).all(|pair| pair[0] <= pair[1]));
     }
 }

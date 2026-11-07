@@ -148,17 +148,23 @@ pub fn reference_models(root: &Path, resources: &Resources, spelling: bool) -> R
             if spelling { Box::new(ks_hunspell::HunspellDictionary::new(locale, &data_dir)) } else { LanguageModel::disabled_speller() };
         let model = LanguageModel::load(locale, words_iter(&words), &[directory], speller);
         if spelling {
-            let dictionary = PathBuf::from(model.speller.source());
-            if !model.speller.available()
-                || Value::String(checksum(&dictionary)?) != dictionaries[locale]["dictionary_sha256"]
-                || Value::String(checksum(&dictionary.with_extension("aff"))?) != dictionaries[locale]["affix_sha256"]
-            {
-                return Err("reference morphology unavailable or changed".to_owned());
-            }
+            pinned_morphology(model.speller.as_ref(), &dictionaries[locale])?;
         }
         models.push(Arc::new(model));
     }
     Ok(models)
+}
+
+/// The reference morphology of a locale as the config pins it: a dictionary is open, and both of its files are those pinned.
+fn pinned_morphology(speller: &dyn ks_lang::SpellChecker, pins: &Value) -> Result<(), String> {
+    let dictionary = PathBuf::from(speller.source());
+    if !speller.available()
+        || Value::String(checksum(&dictionary)?) != pins["dictionary_sha256"]
+        || Value::String(checksum(&dictionary.with_extension("aff"))?) != pins["affix_sha256"]
+    {
+        return Err("reference morphology unavailable or changed".to_owned());
+    }
+    Ok(())
 }
 
 fn words_iter(words: &WordList) -> impl Iterator<Item = &str> {
@@ -218,5 +224,71 @@ impl Options for Value {
             table.iter().map(|(length, count)| (length.parse().expect("a length"), count.as_u64().expect("a count").to::<usize>())).collect();
         budgets.sort_unstable();
         budgets
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn the_reference_morphology_is_the_pinned_one_or_none() {
+        let folder = std::env::temp_dir().join(format!("ks-tools-morphology-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let dictionary = folder.join("xx.dic");
+        std::fs::write(&dictionary, b"1\nword\n").expect("a file");
+        std::fs::write(folder.join("xx.aff"), b"SET UTF-8\n").expect("a file");
+        let speller = ks_lang::FnSpellChecker::new(dictionary.to_string_lossy(), |_: &str| true);
+        let pins = json!({"dictionary_sha256": checksum(&dictionary).expect("a checksum"), "affix_sha256": checksum(&folder.join("xx.aff")).expect("a checksum")});
+        assert_eq!(pinned_morphology(&speller, &pins), Ok(()));
+        for name in ["dictionary_sha256", "affix_sha256"] {
+            let mut other = pins.clone();
+            other[name] = json!("0");
+            assert!(pinned_morphology(&speller, &other).expect_err(name).contains("unavailable or changed"));
+        }
+        assert!(pinned_morphology(&ks_lang::DisabledSpellChecker, &pins).is_err());
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn options_are_read_as_the_trainer_reads_them() {
+        let options = json!({"whole": 3, "half": 2.5, "flag": true, "held_out": ["Да", "NO"], "budgets": {"10": 2, "3": 1}});
+        assert_eq!(options.int("whole"), 3);
+        assert_eq!(options.int("half"), 2);
+        assert!((options.float("half") - 2.5).abs() < 1e-12);
+        assert_eq!(options.int_or("missing", 7), 7);
+        assert_eq!(options.int_or("whole", 7), 3);
+        assert!((options.float_or("missing", 1.5) - 1.5).abs() < 1e-12);
+        assert!((options.float_or("half", 1.5) - 2.5).abs() < 1e-12);
+        assert!(options.is_true("flag") && !options.is_true("missing"));
+        assert_eq!(options.held_out(), HashSet::from(["да".to_owned(), "no".to_owned()]));
+        assert!(json!({}).held_out().is_empty());
+        assert_eq!(options.budgets("budgets"), [(3, 1), (10, 2)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "the recipe has no missing")]
+    fn a_missing_number_stops_the_fit() {
+        let _ = json!({}).int("missing");
+    }
+
+    #[test]
+    #[should_panic(expected = "the recipe has no missing")]
+    fn a_missing_fraction_stops_the_fit() {
+        let _ = json!({}).float("missing");
+    }
+
+    #[test]
+    #[should_panic(expected = "is no number")]
+    fn a_number_written_as_text_stops_the_fit() {
+        let _ = json!({"name": "x"}).int("name");
+    }
+
+    #[test]
+    #[should_panic(expected = "the recipe has no missing")]
+    fn missing_budgets_stop_the_fit() {
+        let _ = json!({}).budgets("missing");
     }
 }

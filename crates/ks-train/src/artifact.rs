@@ -39,3 +39,19 @@ pub fn artifact_bytes(payload: &Value) -> Vec<u8> {
     lines.push("}".to_owned());
     (lines.join("\n") + "\n").into_bytes()
 }
+
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn an_artifact_writes_one_feature_to_a_line() {
+        let bytes = artifact_bytes(&json!({"version": "v", "weights": {"b": [1, 2], "a": [0.5]}, "actions": ["keep"]}));
+        let text = String::from_utf8(bytes).expect("text");
+        assert_eq!(text, "{\n \"actions\": [\"keep\"],\n \"version\": \"v\",\n \"weights\": {\n  \"a\": [0.5],\n  \"b\": [1,2]\n }\n}\n");
+        assert_eq!(canonical(&json!({"b": 1, "a": "я"})), b"{\"a\":\"\xd1\x8f\",\"b\":1}\n".to_vec());
+    }
+}

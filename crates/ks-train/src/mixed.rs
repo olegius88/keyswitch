@@ -113,7 +113,6 @@ fn plan(tokens: &[&str], mode: &str, choice: u64) -> Option<(i64, Vec<Step>)> {
                 intended[*index - 1] == 1
                     && intended[*index] == 1
                     && script(token) == Some(1)
-                    && token.chars().any(is_alpha)
                     && (mode == SLIP_MODE || trusted.contains(&pystr::casefold(token).as_str()))
                     && (mode != LETTER_SLIP_BACK_MODE || index + 1 < tokens.len())
             })
@@ -311,8 +310,9 @@ impl Keys {
         self.serial += 1;
         let ru = us_to_ru(us);
         let character = if group == 0 { us.to_owned() } else { ru.clone() };
-        let shift = !us.is_empty() && (pystr::isupper(us) || "~!@#$%^&*()_+{}|:\"<>?".contains(us));
-        let name = if !character.is_empty() && pystr::isspace(&character) { "space".to_owned() } else { us.to_owned() };
+        // Every key types one character (`keys_for` gives one key per character), so `us` and its reading are never empty.
+        let shift = pystr::isupper(us) || "~!@#$%^&*()_+{}|:\"<>?".contains(us);
+        let name = if pystr::isspace(&character) { "space".to_owned() } else { us.to_owned() };
         KeyEvent { pressed: true, keycode: self.serial, key_name: name, character, characters: vec![us.to_owned(), ru], group, state: if shift { SHIFT_MASK } else { 0 }, timestamp: i64::from(self.serial), ..KeyEvent::default() }
     }
 }
@@ -352,29 +352,32 @@ struct Spy {
     fields: Vec<&'static str>,
 }
 
+/// The evidence's columns a captured row may hold, by name: `fields_of` names only these.
+const EVIDENCE_COLUMNS: [(&str, fn(&ContextEvidence) -> Value); 17] = [
+    ("original", |item| json!(item.original)),
+    ("alternative", |item| json!(item.alternative)),
+    ("source_group", |item| json!(item.source_group)),
+    ("trigger", |item| json!(item.trigger)),
+    ("baseline_convert", |item| json!(item.baseline_convert)),
+    ("source_known", |item| json!(item.source_known)),
+    ("target_known", |item| json!(item.target_known)),
+    ("score_delta", |item| json!(item.score_delta)),
+    ("literal_tail", |item| json!(item.literal_tail)),
+    ("boundary_text", |item| json!(item.boundary_text)),
+    ("after_origin", |item| json!(item.after_origin.as_str())),
+    ("before_origin", |item| json!(item.before_origin.as_str())),
+    ("source_typo", |item| json!(item.source_typo)),
+    ("target_typo", |item| json!(item.target_typo)),
+    ("source_opening", |item| json!(item.source_opening)),
+    ("target_opening", |item| json!(item.target_opening)),
+    ("inside", |item| json!(item.inside)),
+];
+
 fn captured_row(item: &ContextEvidence, label: &str, fields: &[&'static str]) -> Value {
     let mut row = Vec::new();
     for name in fields {
-        row.push(match *name {
-            "original" => json!(item.original),
-            "alternative" => json!(item.alternative),
-            "source_group" => json!(item.source_group),
-            "trigger" => json!(item.trigger),
-            "baseline_convert" => json!(item.baseline_convert),
-            "source_known" => json!(item.source_known),
-            "target_known" => json!(item.target_known),
-            "score_delta" => json!(item.score_delta),
-            "literal_tail" => json!(item.literal_tail),
-            "boundary_text" => json!(item.boundary_text),
-            "after_origin" => json!(item.after_origin.as_str()),
-            "before_origin" => json!(item.before_origin.as_str()),
-            "source_typo" => json!(item.source_typo),
-            "target_typo" => json!(item.target_typo),
-            "source_opening" => json!(item.source_opening),
-            "target_opening" => json!(item.target_opening),
-            "inside" => json!(item.inside),
-            _ => panic!("no field {name}"),
-        });
+        let (_, value) = EVIDENCE_COLUMNS.iter().find(|column| column.0 == *name).expect("a column of the evidence");
+        row.push(value(item));
     }
     row.extend([json!(item.field.before), json!(item.field.after), json!(item.field.role.as_str()), json!(label)]);
     Value::Array(row)
@@ -822,18 +825,11 @@ fn fields_of(schema: i64) -> Option<Vec<&'static str>> {
 
 /// `CAPTURED_QUESTIONS`: the classes a capture recipe may keep alone, by the head that answers them.
 fn captured_question(name: &str, row: &[Value], fields: &[&'static str], tables: &ks_context::context_model::TermTables) -> Result<bool, String> {
-    let at = |field: &str| -> &str {
-        let place = fields.iter().position(|name| *name == field);
-        let index = match (place, field) {
-            (Some(place), _) => place,
-            (None, "before") => fields.len(),
-            (None, "after") => fields.len() + 1,
-            _ => panic!("no field {field}"),
-        };
-        row[index].as_str().unwrap_or("")
-    };
+    // The text before and after the word follow the fields; each other name asked for is a field of both schemas.
+    let at = |field: &str| -> &str { row[fields.iter().position(|name| *name == field).expect("a field of the schema")].as_str().unwrap_or("") };
+    let (before, after) = (row[fields.len()].as_str().unwrap_or(""), row[fields.len() + 1].as_str().unwrap_or(""));
     let origin = crate::captured::after_origin_of(at("after_origin"));
-    let (original, alternative, before, after, trigger) = (at("original"), at("alternative"), at("before"), at("after"), at("trigger"));
+    let (original, alternative, trigger) = (at("original"), at("alternative"), at("trigger"));
     let left_field = !fields.contains(&"before_origin") || at("before_origin") == BeforeOrigin::Field.as_str();
     Ok(match name {
         "variable" => features::variable_question(original, alternative, before, trigger),
@@ -1041,6 +1037,56 @@ fn table_value(table: &Table) -> Value {
     Value::Object(map)
 }
 
+/// `evaluate`'s reading of the chosen texts, the three pairs typing them and the floors on what they typed: the results,
+/// the discordance and the floors, or what stopped it by its kind alone, never with a word of what it was reading.
+fn typed_floors(request: &DevchatRequest<'_>, files: &[(PathBuf, PathBuf, String)], chosen: &[Member]) -> Result<[Value; 3], &'static str> {
+    // The texts are read only after the claim; a member's text is its hash in the members file.
+    let wanted: HashSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();
+    let mut found: HashMap<String, String> = HashMap::new();
+    for (messages, _, _) in files {
+        for line in gz_lines(messages).map_err(|_| "ReadError")? {
+            let row: Value = serde_json::from_str(&line).map_err(|_| "ReadError")?;
+            let text = row["text"].as_str().unwrap_or("").to_owned();
+            let key = hex_digest(&text);
+            if wanted.contains(key.as_str()) {
+                found.insert(key, text);
+            }
+        }
+    }
+    if found.len() != wanted.len() {
+        // `Refusal("the messages file lacks members the draw chose")`.
+        return Err("Refusal");
+    }
+    let texts: Vec<String> = chosen.iter().map(|member| found[&member.text].clone()).collect();
+    let bench = Bench::new(request.resource_dir).map_err(|_| "TypingError")?;
+    let candidate_rows = typed_rows(&bench, request.candidate, &texts, request.workers).map_err(|_| "TypingError")?;
+    let released_rows = typed_rows(&bench, request.released, &texts, request.workers).map_err(|_| "TypingError")?;
+    let baseline_rows = typed_rows(&bench, request.baseline, &texts, request.workers).map_err(|_| "TypingError")?;
+    let tables = [counts(&candidate_rows, chosen), counts(&released_rows, chosen), counts(&baseline_rows, chosen)];
+    if tables.iter().any(|table| TYPING_MODES.iter().any(|mode| !table.contains_key(*mode))) {
+        // A mode no chosen message is typed in has no count to compare: the floors of the Python raise a KeyError.
+        return Err("KeyError");
+    }
+    let theirs: HashMap<(usize, &str), Option<bool>> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
+    let mut paired: BTreeMap<&str, (i64, i64)> = TYPING_MODES.iter().map(|mode| (*mode, (0, 0))).collect();
+    for (index, mode, outcome) in &candidate_rows {
+        let other = theirs[&(*index, mode.as_str())];
+        let entry = paired.get_mut(mode.as_str()).expect("a mode");
+        entry.0 += i64::from(*outcome == Some(true) && other != Some(true));
+        entry.1 += i64::from(*outcome != Some(true) && other == Some(true));
+    }
+    let (candidate_table, released_table, baseline_table) = (&tables[0], &tables[1], &tables[2]);
+    let restored = |table: &Table| RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>();
+    let floors = json!({
+        "every_message_typed": true,
+        "f1_better_than_baseline": net(candidate_table) >= net(baseline_table) + DEVCHAT_MIN_NET_MARGIN && corruptions(candidate_table) <= corruptions(baseline_table),
+        "f3_not_worse_than_released": RESTORING_MODES.iter().all(|mode| loss_chance(paired[mode].1, paired[mode].0) >= DEVCHAT_SIGNIFICANCE) && restored(candidate_table) >= restored(released_table) && corruptions(candidate_table) <= corruptions(released_table),
+    });
+    let results = json!({"candidate": table_value(candidate_table), "released": table_value(released_table), "baseline": table_value(baseline_table)});
+    let paired_value: Map<String, Value> = paired.iter().map(|(mode, (gains, losses))| ((*mode).to_owned(), json!({"gains": gains, "losses": losses}))).collect();
+    Ok([results, Value::Object(paired_value), floors])
+}
+
 pub struct DevchatRequest<'a> {
     pub root: &'a Path,
     pub resource_dir: &'a Path,
@@ -1068,6 +1114,38 @@ fn private_record(path: &Path, value: &Value, exclusive: bool) -> Result<(), Str
     let mut file = options.open(path).map_err(|error| error.to_string())?;
     let format = JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(ks_text::Indent::Spaces(1)), ..JsonOptions::default() };
     file.write_all((json_dumps(value, &format) + "\n").as_bytes()).map_err(|error| error.to_string())
+}
+
+fn read_anything(access: &Value) -> bool {
+    access["test_membership"]["messages"].as_array().is_some_and(|items| !items.is_empty())
+}
+
+/// `claim`: a read of the test recorded before any of its text is opened. The ledger is read again under its lock, so
+/// that of two reads that race only one claims: a read that repeats the candidate's or overlaps an earlier one is refused.
+fn claim(ledger: &Path, identity: &Value, candidate: &str) -> Result<String, String> {
+    let key = hex(&Sha256::digest(json_dumps(&identity["test_membership"], &JsonOptions { sort_keys: true, ..JsonOptions::default() }).as_bytes()));
+    std::fs::create_dir_all(ledger).map_err(|error| error.to_string())?;
+    let lock = ledger.join(".access-lock");
+    std::fs::OpenOptions::new().write(true).create_new(true).open(&lock).map_err(|_| "the dev-chat test ledger is locked; no test was read".to_owned())?;
+    let claimed = claim_locked(ledger, identity, candidate, &key);
+    let _ = std::fs::remove_file(&lock);
+    claimed.map(|()| key)
+}
+
+/// The part of `claim` that runs while the lock is held.
+fn claim_locked(ledger: &Path, identity: &Value, candidate: &str, key: &str) -> Result<(), String> {
+    for (_, prior) in ledger_records(ledger, ".access.json")? {
+        if prior["pairs"]["candidate"]["sha256"].as_str() == Some(candidate) && read_anything(&prior) {
+            return Err("this candidate read the dev-chat test already".to_owned());
+        }
+        for field in ["messages", "questions"] {
+            let earlier: HashSet<String> = string_list(&prior["test_membership"][field]).into_iter().collect();
+            if string_list(&identity["test_membership"][field]).iter().any(|entry| earlier.contains(entry)) {
+                return Err("the draw overlaps messages or questions an earlier read took".to_owned());
+            }
+        }
+    }
+    private_record(&ledger.join(format!("{key}.access.json")), identity, true)
 }
 
 fn ledger_records(ledger: &Path, suffix: &str) -> Result<Vec<(PathBuf, Value)>, String> {
@@ -1124,7 +1202,6 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     pins.insert("model/context_v3/devchat-test-batches.json".to_owned(), crate::corpus::checksum(&request.root.join("model/context_v3/devchat-test-batches.json"))?);
     let pins = serde_json::to_value(pins).map_err(|error| error.to_string())?;
     let accesses = ledger_records(request.ledger, ".access.json")?;
-    let read_anything = |access: &Value| access["test_membership"]["messages"].as_array().is_some_and(|items| !items.is_empty());
     if split == "test" {
         for (path, prior) in &accesses {
             if prior["pairs"]["candidate"]["sha256"].as_str() == Some(candidate.as_str()) && read_anything(prior) {
@@ -1189,73 +1266,23 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let batches: Vec<&String> = files.iter().map(|entry| &entry.2).collect();
     let identity = json!({"protocol": "devchat-messages-v1", "split": split, "messages_sha256": if batches.len() == 1 { json!(batches[0]) } else { json!(batches) }, "seed": DEVCHAT_SEED, "russian_share": MIXED_EVALUATE_RUSSIAN_SHARE, "pairs": pairs, "bench": BENCH, "test_membership": membership});
     let key = if split == "test" {
-        let key = hex(&Sha256::digest(json_dumps(&identity["test_membership"], &JsonOptions { sort_keys: true, ..JsonOptions::default() }).as_bytes()));
-        std::fs::create_dir_all(request.ledger).map_err(|error| error.to_string())?;
-        let lock = request.ledger.join(".access-lock");
-        std::fs::OpenOptions::new().write(true).create_new(true).open(&lock).map_err(|_| "the dev-chat test ledger is locked; no test was read".to_owned())?;
-        let mut claimed = Ok(());
-        for (_, prior) in &accesses {
-            if prior["pairs"]["candidate"]["sha256"].as_str() == Some(candidate.as_str()) && read_anything(prior) {
-                claimed = Err("this candidate read the dev-chat test already".to_owned());
-            }
-            for field in ["messages", "questions"] {
-                let earlier: HashSet<String> = string_list(&prior["test_membership"][field]).into_iter().collect();
-                if string_list(&identity["test_membership"][field]).iter().any(|entry| earlier.contains(entry)) {
-                    claimed = Err("the draw overlaps messages or questions an earlier read took".to_owned());
-                }
-            }
-        }
-        if claimed.is_ok() {
-            claimed = private_record(&request.ledger.join(format!("{key}.access.json")), &identity, true);
-        }
-        let _ = std::fs::remove_file(&lock);
-        claimed?;
-        key
+        claim(request.ledger, &identity, &candidate)?
     } else {
         candidate.clone()
     };
     let mut result = json!({"split": split, "access": key, "messages": chosen.len(), "pairs": pairs, "bench": BENCH});
-    // The texts are read only after the claim; a member's text is its hash in the members file.
-    let wanted: HashSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();
-    let mut found: HashMap<String, String> = HashMap::new();
-    for (messages, _, _) in &files {
-        for line in gz_lines(messages)? {
-            let row: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
-            let text = row["text"].as_str().unwrap_or("").to_owned();
-            let key = hex_digest(&text);
-            if wanted.contains(key.as_str()) {
-                found.insert(key, text);
-            }
+    // Whatever stops the read after the claim is recorded as its kind alone, so that no read of the test goes unrecorded.
+    match typed_floors(request, &files, &chosen) {
+        Ok([results, discordance, floors]) => {
+            result["results"] = results;
+            result["discordance"] = discordance;
+            result["floors"] = floors;
+        }
+        Err(kind) => {
+            result["error"] = json!(kind);
+            result["floors"] = json!({"every_message_typed": false});
         }
     }
-    if found.len() != wanted.len() {
-        return Err("the messages file lacks members the draw chose".to_owned());
-    }
-    let texts: Vec<String> = chosen.iter().map(|member| found[&member.text].clone()).collect();
-    let bench = Bench::new(request.resource_dir)?;
-    let candidate_rows = typed_rows(&bench, request.candidate, &texts, request.workers)?;
-    let released_rows = typed_rows(&bench, request.released, &texts, request.workers)?;
-    let baseline_rows = typed_rows(&bench, request.baseline, &texts, request.workers)?;
-    let tables = [counts(&candidate_rows, &chosen), counts(&released_rows, &chosen), counts(&baseline_rows, &chosen)];
-    let theirs: HashMap<(usize, &str), Option<bool>> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
-    let mut paired: BTreeMap<&str, (i64, i64)> = TYPING_MODES.iter().map(|mode| (*mode, (0, 0))).collect();
-    for (index, mode, outcome) in &candidate_rows {
-        let other = theirs[&(*index, mode.as_str())];
-        let entry = paired.get_mut(mode.as_str()).expect("a mode");
-        entry.0 += i64::from(*outcome == Some(true) && other != Some(true));
-        entry.1 += i64::from(*outcome != Some(true) && other == Some(true));
-    }
-    let (candidate_table, released_table, baseline_table) = (&tables[0], &tables[1], &tables[2]);
-    let restored = |table: &Table| RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>();
-    let floors = json!({
-        "every_message_typed": true,
-        "f1_better_than_baseline": net(candidate_table) >= net(baseline_table) + DEVCHAT_MIN_NET_MARGIN && corruptions(candidate_table) <= corruptions(baseline_table),
-        "f3_not_worse_than_released": RESTORING_MODES.iter().all(|mode| loss_chance(paired[mode].1, paired[mode].0) >= DEVCHAT_SIGNIFICANCE) && restored(candidate_table) >= restored(released_table) && corruptions(candidate_table) <= corruptions(released_table),
-    });
-    result["results"] = json!({"candidate": table_value(candidate_table), "released": table_value(released_table), "baseline": table_value(baseline_table)});
-    let paired_value: Map<String, Value> = paired.iter().map(|(mode, (gains, losses))| ((*mode).to_owned(), json!({"gains": gains, "losses": losses}))).collect();
-    result["discordance"] = Value::Object(paired_value);
-    result["floors"] = floors;
     if split == "dev" {
         result["runtime"] = pins;
         private_record(&development, &result, false)?;
@@ -1264,4 +1291,242 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     }
     private_record(request.output, &result, false)?;
     Ok(result)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn kinds(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_letters_beside_a_key_are_the_letters_of_its_row() {
+        assert_eq!(neighbours('s'), ['a', 'd']);
+        assert_eq!(neighbours('q'), ['w']);
+        assert_eq!(neighbours('S'), ['A', 'D']);
+        // A sign beside a letter is no neighbour, and a key of signs has none.
+        assert_eq!(neighbours('p'), ['o']);
+        assert!(neighbours(']').is_empty());
+        assert_eq!(neighbours('ъ'), ['х']);
+        assert!(neighbours('1').is_empty());
+        assert!(neighbours('ё').is_empty());
+    }
+
+    #[test]
+    fn a_typo_is_of_the_kind_drawn_and_falls_back_where_it_cannot_be() {
+        // Too few letters: the token as it is.
+        assert_eq!(typo("12", "seed", &kinds(&["missed"]), 1), "12");
+        assert_eq!(typo("дом", "seed", &kinds(&["doubled"]), 4), "дом");
+        // A letter left out only of a word long enough.
+        assert_eq!(pystr::len(&typo("слово", "seed", &kinds(&["missed"]), 1)), 4);
+        // Three letters are too few to lose one: a neighbour stands in instead.
+        let three = typo("дом", "seed", &kinds(&["missed"]), 1);
+        assert_eq!(pystr::len(&three), 3);
+        assert_ne!(three, "дом");
+        // A swap needs a letter after the letter drawn; otherwise a neighbour stands in.
+        assert_eq!(typo("a1", "seed", &kinds(&["swapped"]), 1), "s1");
+        assert_eq!(typo("a", "seed", &kinds(&["swapped"]), 1), "s");
+        let swaps: BTreeSet<String> = (0..32).map(|seed| typo("ab", &seed.to_string(), &kinds(&["swapped"]), 1)).collect();
+        assert!(swaps.contains("ba") && swaps.len() > 1, "{swaps:?}");
+        assert_eq!(pystr::len(&typo("дом", "seed", &kinds(&["doubled"]), 1)), 4);
+        // An extra letter is a neighbour; a key with no neighbours doubles instead.
+        assert_eq!(typo("a", "seed", &kinds(&["extra"]), 1), "as");
+        assert_eq!(typo("ё", "seed", &kinds(&["extra"]), 1), "ёё");
+        assert_eq!(typo("ё", "seed", &kinds(&["neighbour"]), 1), "ёё");
+        assert_eq!(typo("a", "seed", &kinds(&["neighbour"]), 1), "s");
+    }
+
+    #[test]
+    fn typos_fall_on_the_words_their_rate_draws() {
+        let all = kinds(&["doubled"]);
+        assert_eq!(with_typos("один два", 0.0, "seed", &all, 1), "один два");
+        let every = with_typos("один два", 1.0, "seed", &all, 1);
+        assert_eq!(pystr::len(&every), pystr::len("один два") + 2);
+    }
+
+    #[test]
+    fn a_plan_needs_a_word_of_a_layout_and_a_change_to_make() {
+        assert!(plan(&["123", "456"], "correct", 0).is_none());
+        // No word of the layout a slip lands in.
+        assert!(plan(&["hello", "world"], SLIP_MODE, 0).is_none());
+        // No one-letter word to slip on, or none with a word after it.
+        assert!(plan(&["привет", "мир"], LETTER_SLIP_MODE, 0).is_none());
+        assert!(plan(&["привет", "и"], LETTER_SLIP_BACK_MODE, 0).is_none());
+        let (start, steps) = plan(&["привет", "и", "мир"], LETTER_SLIP_BACK_MODE, 0).expect("a plan");
+        assert_eq!(start, 1);
+        assert_eq!(steps[1], ("и".to_owned(), 1, Some(0), true));
+        assert_eq!(steps[2], ("мир".to_owned(), 1, Some(1), false));
+        // A layout to forget needs a change to it.
+        assert!(plan(&["привет", "мир"], "forget_en", 0).is_none());
+        let (start, _) = plan(&["42", "привет"], "start_wrong", 0).expect("a plan");
+        assert_eq!(start, 0);
+    }
+
+    #[test]
+    fn a_gap_is_cut_only_inside_a_word_of_letters() {
+        assert!(edit_point("да нет ok 1234").is_none());
+        let (start, length, group) = edit_point("про длинные слова").expect("a gap");
+        assert!(length >= 1 && start > 0 && group == 1);
+    }
+
+    #[test]
+    fn a_loss_is_as_likely_as_the_binomial_says() {
+        assert!((loss_chance(0, 0) - 1.0).abs() < 1e-12);
+        assert!((loss_chance(1, 0) - 0.5).abs() < 1e-12);
+        assert!((loss_chance(5, 0) - 1.0 / 32.0).abs() < 1e-12);
+        assert!((loss_chance(0, 3) - 1.0).abs() < 1e-12);
+    }
+
+    fn repository() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// A fresh folder of this test program.
+    fn folder_of(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("ks-mixed-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("a folder");
+        folder
+    }
+
+    fn gz_file(path: &Path, lines: &[String]) {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        for line in lines {
+            encoder.write_all(line.as_bytes()).expect("in memory");
+            encoder.write_all(b"\n").expect("in memory");
+        }
+        std::fs::write(path, encoder.finish().expect("in memory")).expect("a file");
+    }
+
+    fn ledger_of(name: &str, records: &[Value]) -> PathBuf {
+        let folder = folder_of(&format!("claim-{name}"));
+        for (index, record) in records.iter().enumerate() {
+            std::fs::write(folder.join(format!("{index}.access.json")), record.to_string()).expect("a record");
+        }
+        folder
+    }
+
+    fn earlier(candidate: &str, messages: &[&str], questions: &[&str]) -> Value {
+        json!({"pairs": {"candidate": {"sha256": candidate}}, "test_membership": {"messages": messages, "questions": questions}})
+    }
+
+    #[test]
+    fn a_claim_reads_the_ledger_again_under_its_lock() {
+        let identity = earlier("mine", &["m1", "m2"], &["q1", "q2"]);
+        let refused = |name: &str, records: &[Value], words: &str| {
+            let ledger = ledger_of(name, records);
+            let said = claim(&ledger, &identity, "mine").expect_err(words);
+            assert!(said.contains(words), "{words}: {said}");
+            assert!(!ledger.join(".access-lock").exists());
+            assert_eq!(ledger_records(&ledger, ".access.json").expect("the ledger").len(), records.len());
+            let _ = std::fs::remove_dir_all(&ledger);
+        };
+        // Records no earlier look at the ledger saw: a read of this candidate, one that took a message, one a question.
+        refused("repeat", &[earlier("mine", &["m9"], &["q9"])], "this candidate read the dev-chat test already");
+        refused("messages", &[earlier("other", &[], &[]), earlier("other", &["m2"], &["q9"])], "the draw overlaps");
+        refused("questions", &[earlier("other", &["m9"], &["q1"])], "the draw overlaps");
+        let broken = ledger_of("broken", &[]);
+        std::fs::write(broken.join("0.access.json"), b"not json").expect("a record");
+        assert!(claim(&broken, &identity, "mine").is_err());
+        assert!(!broken.join(".access-lock").exists());
+        // Somebody else holds the lock, and it stays theirs.
+        let locked = ledger_of("locked", &[]);
+        std::fs::write(locked.join(".access-lock"), b"").expect("a lock");
+        assert!(claim(&locked, &identity, "mine").expect_err("locked").contains("is locked"));
+        assert!(locked.join(".access-lock").exists());
+        // A record of this candidate that read nothing, and a read of other messages: the claim is written.
+        let clean = ledger_of("clean", &[earlier("mine", &[], &[]), earlier("other", &["m9"], &["q9"])]);
+        let key = claim(&clean, &identity, "mine").expect("claimed");
+        assert!(clean.join(format!("{key}.access.json")).is_file());
+        assert!(!clean.join(".access-lock").exists());
+        assert!(claim(&clean, &identity, "mine").expect_err("claimed once").contains("read the dev-chat test already"));
+        for folder in [broken, locked, clean] {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
+
+    #[test]
+    fn a_pool_above_gives_only_lines_of_its_kind_and_mix() {
+        let folder = folder_of("above");
+        let messages = folder.join("messages.jsonl.gz");
+        gz_file(&messages, &[json!({"kind": "comment", "text": "привет мир", "mix": "mixed", "qid": 1}).to_string()]);
+        let pool = [
+            json!({"kind": "note", "text": "строка сверху", "mix": "russian", "qid": 5}),
+            json!({"kind": "other", "text": "другой вид", "mix": "russian", "qid": 6}),
+            json!({"kind": "note", "text": "другая смесь", "mix": "mixed", "qid": 7}),
+        ];
+        gz_file(&folder.join("above.jsonl.gz"), &pool.iter().map(Value::to_string).collect::<Vec<_>>());
+        let code = folder.join("code.txt.gz");
+        gz_file(&code, &["let x = 1;".to_owned()]);
+        let recipe = json!({"seed": "s", "lines_above": {"messages": "above.jsonl.gz", "kinds": ["note"], "mix": "russian", "seed": "a", "count": 5}});
+        assert_eq!(lines_above(&messages, &recipe).expect("the pool"), ["строка сверху"]);
+        let (above, code_lines) = recipe_lines_above(&messages, &recipe, Some(&code)).expect("the pool");
+        assert_eq!(above, [("строка сверху".to_owned(), 5)]);
+        // Code stands above a message only in a recipe that puts lines above it.
+        assert_eq!(code_lines, 0);
+        let mut drawn = recipe.clone();
+        drawn["prefix_rate"] = json!(0.5);
+        assert_eq!(recipe_lines_above(&messages, &drawn, Some(&code)).expect("the pool").1, 1);
+        assert_eq!(recipe_lines_above(&messages, &json!({}), None).expect("no pool"), (Vec::new(), 0));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn a_reader_reports_the_field_and_is_always_there() {
+        let reader = Reader { backend: Arc::new(Backend::new("Telegram", 0, "ab".chars().collect())), after: true };
+        assert_eq!(reader.status(), "available");
+        assert_eq!(reader.read("Telegram", 0).expect("a field").source, "uia");
+    }
+
+    #[test]
+    fn a_bench_without_its_orthotactic_model_says_why() {
+        let real = repository().join("resources");
+        let resources = folder_of("no-ortho");
+        for entry in std::fs::read_dir(&real).expect("the resources").flatten() {
+            if entry.file_name() != "models" {
+                std::os::unix::fs::symlink(entry.path(), resources.join(entry.file_name())).expect("a link");
+            }
+        }
+        std::fs::create_dir_all(resources.join("models")).expect("a folder");
+        for entry in std::fs::read_dir(real.join("models")).expect("the models").flatten() {
+            if entry.file_name() != "ortho_v1.json" {
+                std::os::unix::fs::symlink(entry.path(), resources.join("models").join(entry.file_name())).expect("a link");
+            }
+        }
+        let bench = Bench::new(&resources).expect("a bench");
+        assert!(bench.shared.1.starts_with("unavailable"), "{}", bench.shared.1);
+        let _ = std::fs::remove_dir_all(resources);
+    }
+
+    #[test]
+    fn a_question_is_captured_only_of_a_word_that_was_typed() {
+        let root = repository();
+        let bench = Bench::new(&root.join("resources")).expect("a bench");
+        let typist = bench.typist(&root.join("resources/models/context_policy_v1.json"), 0, fields_of(2).expect("the fields"), true).expect("a typist");
+        let answer = typist.policy.as_ref().and_then(|policy| policy.model.as_ref()).and_then(|model| model.answer.clone()).expect("the spy");
+        let mut field = FieldContext::new("Telegram", "1");
+        "привет ".clone_into(&mut field.before);
+        let asked = |original: &str, alternative: &str, inside: bool| {
+            let mut item = ContextEvidence::new(original, alternative, 0, field.clone());
+            item.inside = inside;
+            item
+        };
+        typist.spy.lock().expect("the spy").typed.push(("ghbdtn".to_owned(), 0, 1));
+        // No word, and a word typed in the layout that was not meant.
+        let _ = answer(&asked("", "", false));
+        assert!(typist.spy.lock().expect("the spy").rows.is_empty());
+        let _ = answer(&asked("ghbdtn", "привет", false));
+        let rows = std::mem::take(&mut typist.spy.lock().expect("the spy").rows);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].as_array().and_then(|row| row.last()).and_then(Value::as_str), Some("convert"));
+        // While a word is edited only the questions about its inside are kept.
+        typist.spy.lock().expect("the spy").edit = true;
+        let _ = answer(&asked("ghbdtn", "привет", false));
+        let _ = answer(&asked("ghbdtn", "привет", true));
+        assert_eq!(typist.spy.lock().expect("the spy").rows.len(), 1);
+        let _ = std::fs::remove_dir_all(&typist.folder);
+    }
 }
