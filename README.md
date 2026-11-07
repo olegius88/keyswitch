@@ -227,11 +227,23 @@ KeySwitch появится в строке меню; окно настроек �
 Текущая проверенная среда: Ubuntu 26.04.1 LTS, XFCE, X11, системные раскладки
 `us,ru`.
 
+Программа собирается из исходников. Нужны Rust, который ставится через
+[rustup](https://rustup.rs), компилятор C и файлы разработки GTK 4 и
+libadwaita:
+
 ```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev
 git clone https://github.com/olegius88/keyswitch.git
 cd keyswitch
 ./run.sh
 ```
+
+`run.sh` собирает программу и запускает её, передавая ей свои аргументы;
+ресурсы и списки слов программа берёт из дерева исходников. Если для сборки
+чего-то не хватает, скрипт называет пакет, который нужно поставить. Что
+программе нужно при работе, перечислено в разделе
+[Системные зависимости](#системные-зависимости).
 
 В открывшемся окне есть тестовое поле. Выберите EN, наберите `test `, затем
 `ghbdtn` и остановитесь: по умолчанию примерно через 0,7 секунды выполняется
@@ -322,15 +334,15 @@ APT — сам системный пакет приложение в фоне н
 
 ## Установка из исходников
 
-Нужны Rust и файлы разработки GTK 4:
+Нужны Rust, компилятор C и файлы разработки GTK 4 и libadwaita:
 
 ```bash
-sudo apt install libgtk-4-dev libadwaita-1-dev
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev
 ./packaging/build-rust-deb.sh dist
 sudo apt install ./dist/keyswitch_*.deb
 ```
 
-Сборка без установки: `cargo run --release -p ks-linux`. Без пакета программе нужно сказать, где лежат списки слов: `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
+Сборка без установки — `./run.sh` (см. [Быстрый запуск в Ubuntu](#быстрый-запуск-в-ubuntu)): он выполняет `cargo run --release -p ks-linux` и говорит программе, где лежат ресурсы и списки слов: `KEYSWITCH_RESOURCES=resources`, `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
 
 ## Wayland
 
@@ -366,10 +378,10 @@ sudo keyswitch --enable-wayland-input
 набираемое слово. **Это значит, что любая программа этого пользователя сможет
 читать все нажатия, включая пароли, и печатать сама** — так же, как любая
 программа в X11 и Windows. Выключить: `sudo keyswitch --disable-wayland-input`
-— правило удаляется, права на устройства снимаются сразу. При установке из
-исходников (`./install.sh`) команда та же, с путём к запускателю, который
-печатает установщик. На экране блокировки и при переключении на другой сеанс
-KeySwitch отпускает клавиатуры (`LockedHint` и `Active` из systemd-logind).
+— правило удаляется, права на устройства снимаются сразу. При запуске из
+исходников (`./run.sh`) команда та же, только с путём к собранной программе:
+`sudo target/release/keyswitch --enable-wayland-input`. На экране блокировки
+и при переключении на другой сеанс KeySwitch отпускает клавиатуры (`LockedHint` и `Active` из systemd-logind).
 
 Если основной процесс KeySwitch завис, процесс перехвата ждёт его ответа не
 дольше 0,25 секунды, затем пропускает клавиши сам и сообщает о них, чтобы ни
@@ -378,13 +390,13 @@ KeySwitch отпускает клавиатуры (`LockedHint` и `Active` из
 
 ## Системные зависимости
 
-На стандартной установке текущей Ubuntu необходимые компоненты уже могут быть
-установлены. Если проверка установщика сообщит об их отсутствии:
+Пакет DEB ставит их сам. Запуску из исходников (`./run.sh`) нужны те же
+компоненты; на стандартной установке текущей Ubuntu они уже могут быть
+установлены:
 
 ```bash
-sudo apt install at-spi2-core libgtk-4-1 libadwaita-1-0 \
-  libwayland-client0 libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
-  hunspell-en-us hunspell-ru onboard-data
+sudo apt install at-spi2-core curl libgtk-4-1 libadwaita-1-0 libxkbcommon0 \
+  libhunspell-1.7-0 hunspell-en-us hunspell-ru
 ```
 
 Активную пару XKB можно проверить командой:

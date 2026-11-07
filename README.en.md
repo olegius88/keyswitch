@@ -200,11 +200,23 @@ macOS has no automatic updates yet: download a new version from the
 The currently verified environment is Ubuntu 26.04.1 LTS with XFCE, X11 and
 the `us,ru` system layouts.
 
+The program is built from source. It needs Rust, installed with
+[rustup](https://rustup.rs), a C compiler and the GTK 4 and libadwaita
+development files:
+
 ```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev
 git clone https://github.com/olegius88/keyswitch.git
 cd keyswitch
 ./run.sh
 ```
+
+`run.sh` builds the program and starts it, passing its own arguments on; the
+program takes its resources and word lists from the source tree. When
+something the build needs is missing, the script names the package to install.
+What the program needs while it runs is listed under
+[System dependencies](#system-dependencies).
 
 The application window includes a test field. Select EN, type `test `, then
 `ghbdtn` and stop: the default idle check runs after about 0.7 seconds to
@@ -295,15 +307,15 @@ background.
 
 ## Install from source
 
-You need Rust and the GTK 4 development files:
+You need Rust, a C compiler and the GTK 4 and libadwaita development files:
 
 ```bash
-sudo apt install libgtk-4-dev libadwaita-1-dev
+sudo apt install build-essential libgtk-4-dev libadwaita-1-dev
 ./packaging/build-rust-deb.sh dist
 sudo apt install ./dist/keyswitch_*.deb
 ```
 
-To build without installing: `cargo run --release -p ks-linux`. Without the package the program has to be told where the word lists are: `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
+To build without installing, use `./run.sh` (see [Quick start on Ubuntu](#quick-start-on-ubuntu)): it runs `cargo run --release -p ks-linux` and tells the program where its resources and word lists are: `KEYSWITCH_RESOURCES=resources`, `KEYSWITCH_MODEL_PATH=model/intent_v1/sources`.
 
 ## Wayland
 
@@ -339,10 +351,11 @@ to `/dev/uinput`, keyboards, mice and touchpads (the `uaccess` tag), with no
 word being typed. **This means any program of that user can read every key,
 passwords included, and type keys of its own** — as any program can on X11 and
 Windows. To take it back: `sudo keyswitch --disable-wayland-input` removes the
-rule and the access to the devices at once. A source installation
-(`./install.sh`) uses the same command with the launcher path the installer
-prints. KeySwitch lets the keyboards go on the lock screen and when another
-session takes the seat (`LockedHint` and `Active` of systemd-logind).
+rule and the access to the devices at once. When KeySwitch runs from source
+(`./run.sh`), the command is the same with the path of the built program:
+`sudo target/release/keyswitch --enable-wayland-input`. KeySwitch lets the
+keyboards go on the lock screen and when another session takes the seat
+(`LockedHint` and `Active` of systemd-logind).
 
 If the main KeySwitch process hangs, the input process waits at most 0.25
 seconds for its answer, then lets keys through on its own and reports them so
@@ -351,13 +364,13 @@ kernel releases its grab.
 
 ## System dependencies
 
-The required components may already be present on a standard current Ubuntu
-installation. If the installer reports missing dependencies, install them with:
+The Debian package installs them itself. A run from source (`./run.sh`) needs
+the same components; a standard current Ubuntu installation may already have
+them:
 
 ```bash
-sudo apt install at-spi2-core libgtk-4-1 libadwaita-1-0 \
-  libwayland-client0 libx11-6 libxtst6 libxkbcommon0 libhunspell-1.7-0 \
-  hunspell-en-us hunspell-ru onboard-data
+sudo apt install at-spi2-core curl libgtk-4-1 libadwaita-1-0 libxkbcommon0 \
+  libhunspell-1.7-0 hunspell-en-us hunspell-ru
 ```
 
 Check the active XKB layout pair with:
