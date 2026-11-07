@@ -100,10 +100,12 @@ fn choose(session: &mut Session, key: &str) {
 }
 
 /// A field in EN with `key` as the layout switch key. The early switch is off: the keys come in bursts here, and a word
-/// switched while it is typed would take the layout on its own.
+/// switched while it is typed would take the layout on its own. The technical log is on, so that every record of a tap
+/// is written.
 fn session(bundle: &mut Bundle, key: &str) -> Session {
     let mut session = bundle.session("firefox", 0, Vec::new());
     session.core.settings.set("detection.early_switch", json!(false), false).expect("in memory");
+    session.core.settings.set("diagnostics.technical_logging", json!(true), false).expect("in memory");
     choose(&mut session, key);
     session
 }
