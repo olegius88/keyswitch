@@ -14,6 +14,7 @@ pub const KEYBOARD_LISTENER_START_TIMEOUT_SECONDS: f64 = 5.0;
 pub const KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS: f64 = 2.0;
 /// The tap's run loop is run in slices of this length, so a stop request is seen within one.
 pub const EVENT_TAP_RUN_LOOP_SLICE_SECONDS: f64 = 0.2;
+/// How often the program asks again, while it waits, whether the user has granted the permission.
 pub const MACOS_PERMISSION_POLL_SECONDS: f64 = 1.0;
 /// How long a caller waits for the main thread to answer, and the shorter wait of the tap's own callback.
 pub const MACOS_MAIN_THREAD_WAIT_SECONDS: f64 = 0.25;
@@ -136,6 +137,8 @@ pub const NULL_WINDOW_ID: u32 = 0;
 /// be mistaken for the focus.
 pub const NORMAL_WINDOW_LAYER: i32 = 0;
 pub const AX_SUCCESS: i32 = 0;
+/// `DISPATCH_TIME_NOW` of dispatch/time.h: a delay given to `dispatch_time` counts from now.
+pub const DISPATCH_TIME_NOW: u64 = 0;
 /// `AXValue` wrapping a `CFRange`, from AXValue.h.
 pub const AX_VALUE_TYPE_CF_RANGE: u32 = 4;
 /// `NSApplication` presents no dock icon and no menu bar of its own.

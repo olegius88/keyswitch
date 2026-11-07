@@ -23,7 +23,7 @@ use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS};
 use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, resource_dir};
 use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
-use crate::macos_native::{NativeAccessibility, run_on_main};
+use crate::macos_native::{NativeAccessibility, run_on_main, run_on_main_after};
 use crate::macos_objc::{Id, beep, notify};
 use crate::macos_system::MacAutostartManager;
 use crate::macos_tray_native::StatusItem;
@@ -42,6 +42,8 @@ pub struct Services {
 
 struct App {
     services: Arc<Services>,
+    permission: Arc<MacBackend>,
+    awaiting_permission: bool,
     tray: Option<StatusItem>,
     autostart: MacAutostartManager,
     closing: bool,
@@ -91,7 +93,8 @@ pub fn install_platform() {
     logsetup::set_platform_description("macOS");
 }
 
-fn tray_state(services: &Services) -> TrayState {
+fn tray_state(app: &App) -> TrayState {
+    let services = &app.services;
     let snapshot = services.engine.snapshot();
     TrayState {
         group: snapshot.current_group,
@@ -99,12 +102,13 @@ fn tray_state(services: &Services) -> TrayState {
         sound_enabled: setting_bool(&services.settings, "general.sound", false),
         notifications_enabled: setting_bool(&services.settings, "general.notifications", true),
         indicator_style: normalize_indicator_style(&services.settings.get("appearance.indicator_style").unwrap_or_else(|| Value::String("letters".into()))),
+        awaiting_permission: app.awaiting_permission,
     }
 }
 
 fn sync_tray() {
     with_app(|app| {
-        let state = tray_state(&app.services);
+        let state = tray_state(app);
         if let Some(tray) = &app.tray {
             tray.update(state);
         }
@@ -138,7 +142,7 @@ fn sync_indicator() {
     let shown = with_app(|app| {
         let requested = setting_bool(&app.services.settings, "appearance.show_indicator", true);
         if requested && app.tray.is_none() {
-            match StatusItem::start(Arc::new(tray_action), tray_state(&app.services)) {
+            match StatusItem::start(Arc::new(tray_action), tray_state(app)) {
                 Ok(tray) => app.tray = Some(tray),
                 Err(error) => logsetup::error(LOGGER, &error),
             }
@@ -193,6 +197,9 @@ fn tray_action(action: TrayAction) {
             TrayAction::ToggleEngine => toggle(&services, "enabled", true),
             TrayAction::ToggleSound => toggle(&services, "general.sound", false),
             TrayAction::ToggleNotifications => toggle(&services, "general.notifications", true),
+            TrayAction::OpenPermissionSettings => {
+                let _ = with_app(|app| app.permission.open_permission_settings());
+            }
             TrayAction::QuitApplication => quit(),
         }
         sync_tray();
@@ -258,19 +265,46 @@ fn attach_engine(services: &Arc<Services>) {
 }
 
 /// Without the permission the program would look alive and correct nothing, which is the hardest kind of fault to report:
-/// it asks and waits, and carries on without a relaunch once the user grants it.
-fn ensure_permission(backend: &MacBackend) {
-    if backend.permission_granted() {
-        return;
-    }
+/// it asks, says in the menu bar that it waits, and carries on without a relaunch once the user grants it.
+fn ask_for_permission(backend: &MacBackend) {
     logsetup::warning(LOGGER, PERMISSION_REQUEST_MESSAGE);
     println!("{PERMISSION_REQUEST_MESSAGE}");
     let _ = backend.request_permission();
-    while !backend.permission_granted() {
-        std::thread::sleep(std::time::Duration::from_secs_f64(MACOS_PERMISSION_POLL_SECONDS));
-    }
+}
+
+/// Asks again once a second on the main queue, which `AppKit`'s run loop serves. macOS keeps the process's answer of
+/// `AXIsProcessTrusted` and drops it only when the main run loop delivers the distributed notification
+/// `com.apple.accessibility.api`, posted when the list of permitted programs changes: asked from a main thread that
+/// sleeps instead, the answer stays "no" after the grant until the program is started again.
+fn wait_for_permission(no_engine: bool) {
+    run_on_main_after(MACOS_PERMISSION_POLL_SECONDS, Box::new(move || match with_app(|app| app.permission.permission_granted()) {
+        Some(true) => carry_on(no_engine),
+        Some(false) => wait_for_permission(no_engine),
+        None => {}
+    }));
+}
+
+fn carry_on(no_engine: bool) {
     logsetup::info(LOGGER, PERMISSION_GRANTED_MESSAGE);
     println!("{PERMISSION_GRANTED_MESSAGE}");
+    let engine = with_app(|app| {
+        app.awaiting_permission = false;
+        app.services.engine.clone()
+    });
+    sync_tray();
+    if let Some(engine) = engine
+        && !no_engine
+    {
+        start_engine(&engine);
+    }
+}
+
+fn start_engine(engine: &Arc<DeferredEngine>) {
+    let _ = engine.start(Arc::new(|error: &str| {
+        logsetup::error(LOGGER, error);
+        let error = error.to_owned();
+        run_on_main(Box::new(move || settings_window::show_error(&error)));
+    }));
 }
 
 /// Two copies would both correct the same word and garble it, so a second one started directly (the system stops only
@@ -312,8 +346,8 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
             return 1;
         }
     };
-    ensure_permission(&backend);
-    let input: Arc<dyn InputBackend> = backend;
+    let granted = backend.permission_granted();
+    let input: Arc<dyn InputBackend> = backend.clone();
     let resources = ks_lang::Resources::new(resource_dir());
     let build: Build = {
         let (settings, history, learning, input) = (settings.clone(), history.clone(), learning.clone(), input.clone());
@@ -329,7 +363,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
     let autostart = MacAutostartManager::new(None, None);
-    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), tray: None, autostart, closing: false }));
+    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), awaiting_permission: !granted, tray: None, autostart, closing: false }));
     settings_window::create(services.clone());
     let showing = setting_bool(&settings, "appearance.show_indicator", true);
     if showing {
@@ -342,12 +376,11 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     }));
     services.history.subscribe(Arc::new(|| run_on_main(Box::new(settings_window::refresh_history))));
     attach_engine(&services);
-    if !no_engine {
-        let _ = engine.start(Arc::new(|error: &str| {
-            logsetup::error(LOGGER, error);
-            let error = error.to_owned();
-            run_on_main(Box::new(move || settings_window::show_error(&error)));
-        }));
+    if !granted {
+        ask_for_permission(&backend);
+        wait_for_permission(no_engine);
+    } else if !no_engine {
+        start_engine(&engine);
     }
     // Without the item in the menu bar the window is the only way in, whatever the arguments.
     if !hidden || !showing {
