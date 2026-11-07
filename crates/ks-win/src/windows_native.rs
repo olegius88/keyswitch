@@ -328,6 +328,20 @@ mod win32 {
         (window, thread_id)
     }
 
+    /// The thread whose layout the keys of `window` are read in, as `input_window` finds it for the window in front:
+    /// the thread of its focused control when that is another one.
+    fn input_thread(window: HWND) -> u32 {
+        let thread_id = thread_of(window);
+        let focus = if thread_id == 0 { null_mut() } else { gui_thread_info(thread_id).map_or(null_mut(), |info| info.hwndFocus) };
+        if !focus.is_null() && focus != window {
+            let focus_thread = thread_of(focus);
+            if focus_thread != 0 && focus_thread != thread_id {
+                return focus_thread;
+            }
+        }
+        thread_id
+    }
+
     fn append_time(time: u32) {
         INPUT_TIMES.append(time);
     }
@@ -437,6 +451,15 @@ mod win32 {
 
         fn foreground_layout(&self) -> i64 {
             let (_window, thread_id) = input_window();
+            if thread_id == 0 {
+                return 0;
+            }
+            // SAFETY: GetKeyboardLayout takes a thread id by value and returns a handle or null.
+            from_handle(unsafe { GetKeyboardLayout(thread_id) })
+        }
+
+        fn window_layout(&self, window: i64) -> i64 {
+            let thread_id = input_thread(to_hwnd(window));
             if thread_id == 0 {
                 return 0;
             }

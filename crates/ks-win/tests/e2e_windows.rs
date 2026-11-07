@@ -26,13 +26,21 @@ mod scenario {
     use ks_config::config::SettingsStore;
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
-    use ks_win::constants::{VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT};
+    use ks_win::constants::{SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT, WM_TRAY};
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
     use ks_win::windows_native::NativeWindowsAPI;
     use serde_json::{Value, json};
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, LoadKeyboardLayoutW, SetFocus};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyboardLayout, INPUT, INPUT_0, INPUT_MOUSE, LoadKeyboardLayoutW, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT, SendInput,
+        SetFocus,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, FindWindowExW, GetMenuItemCount, GetMenuItemRect, GetMenuStringW, GetWindowThreadProcessId, HMENU,
+        IsWindowVisible, MF_BYPOSITION, MN_GETHMENU, MenuItemFromPoint, PostMessageW, SPI_GETTHREADLOCALINPUTSETTINGS,
+        SPI_SETTHREADLOCALINPUTSETTINGS, SPIF_SENDCHANGE, SendMessageW, SetCursorPos, SystemParametersInfoW, WM_RBUTTONUP,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GetClientRect, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, IsZoomed, MSG, MoveWindow, PM_REMOVE,
         PeekMessageW, RegisterClassW, SW_MAXIMIZE, SW_SHOW, ShowWindow, TranslateMessage, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
@@ -63,6 +71,20 @@ mod scenario {
     const PROBE_ATTEMPTS: u32 = 3;
     const SURFACE_CLOSES: u64 = 1_000;
     const PROGRAM_SETTLES: u64 = 1_500;
+    /// The class of the popup menus of Windows (`#32768`, the menu class of About Window Classes on Microsoft Learn).
+    const MENU_CLASS: &str = "#32768";
+    /// The line of the tray menu that switches the layout begins so; its end names the layout it switches to.
+    const SWITCH_LINE: &str = "Переключить на ";
+    const MENU_LINE_CHARACTERS: usize = 128;
+
+    /// The group of a keyboard layout by its language: 0 English, 1 Russian, -1 another.
+    fn group_of_layout(layout: i64) -> i32 {
+        match layout.bits::<u64>().low::<u32>() & 0xffff {
+            ENGLISH => 0,
+            RUSSIAN => 1,
+            _ => -1,
+        }
+    }
 
     /// A key as a person's: no mark of this program on it.
     fn user(pressed: bool) -> NativeInput {
@@ -146,12 +168,7 @@ mod scenario {
 
         fn group(&self) -> i32 {
             // SAFETY: the layout of this thread, which owns the edit control.
-            let language = ((unsafe { GetKeyboardLayout(0) }).to::<usize>()).low::<u32>() & 0xffff;
-            match language {
-                ENGLISH => 0,
-                RUSSIAN => 1,
-                _ => -1,
-            }
+            group_of_layout(((unsafe { GetKeyboardLayout(0) }).to::<isize>()).to::<i64>())
         }
 
         /// Runs this thread's messages until the condition holds or the time is out.
@@ -460,6 +477,205 @@ mod scenario {
         Ok(())
     }
 
+    /// The windows of `process` with `class`, top-level, in the order Windows lists them.
+    fn windows_of(process: u32, class: &str) -> Vec<HWND> {
+        let class = wide(class);
+        let mut found = Vec::new();
+        let mut after: HWND = std::ptr::null_mut();
+        loop {
+            // SAFETY: the class name is NUL-terminated and lives through the call; a null parent means top-level windows.
+            after = unsafe { FindWindowExW(std::ptr::null_mut(), after, class.as_ptr(), std::ptr::null()) };
+            if after.is_null() {
+                return found;
+            }
+            let mut owner = 0_u32;
+            // SAFETY: `owner` is a valid place for the id.
+            unsafe { GetWindowThreadProcessId(after, &raw mut owner) };
+            if owner == process {
+                found.push(after);
+            }
+        }
+    }
+
+    /// The tray menu the program shows, once it is on the screen: its menu and the line that switches the layout.
+    fn shown_menu(process: u32) -> Option<(HMENU, u32, String)> {
+        for window in windows_of(process, MENU_CLASS) {
+            // SAFETY: the window is a menu window of the program, which answers MN_GETHMENU with its menu.
+            let menu = unsafe {
+                if IsWindowVisible(window) == 0 {
+                    continue;
+                }
+                SendMessageW(window, MN_GETHMENU, 0, 0)
+            };
+            let menu: HMENU = menu.pointer_mut::<std::ffi::c_void>();
+            // SAFETY: the menu handle came from its window; a menu gone meanwhile answers -1 and empty lines.
+            let count = unsafe { GetMenuItemCount(menu) };
+            for index in 0..count.max(0).to::<u32>() {
+                let mut line = [0_u16; MENU_LINE_CHARACTERS];
+                // SAFETY: the buffer holds the number of characters given.
+                let length = unsafe { GetMenuStringW(menu, index, line.as_mut_ptr(), line.len().low::<i32>(), MF_BYPOSITION) };
+                let line = String::from_utf16_lossy(&line[..length.max(0).to::<usize>()]);
+                if line.starts_with(SWITCH_LINE) {
+                    return Some((menu, index, line));
+                }
+            }
+        }
+        None
+    }
+
+    /// A press and a release of the left button where the cursor is.
+    fn click() -> Result<(), String> {
+        let button = |flags| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: 0, dy: 0, mouseData: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 } },
+        };
+        let inputs = [button(MOUSEEVENTF_LEFTDOWN), button(MOUSEEVENTF_LEFTUP)];
+        // SAFETY: the inputs are initialised and their size is the one passed.
+        let sent = unsafe { SendInput(inputs.len().low::<u32>(), inputs.as_ptr(), size_of::<INPUT>().low::<i32>()) };
+        if sent.to::<usize>() == inputs.len() { Ok(()) } else { Err(format!("SendInput took {sent} of the two button events")) }
+    }
+
+    /// What is in front when the shell tells the program of the click on its icon.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Front {
+        /// The field typed in.
+        Field,
+        /// The taskbar, which a click on the icon brings to the front a moment before.
+        TaskbarClicked,
+        /// The taskbar, long enough for the engine to have looked at what is in front.
+        TaskbarAWhile,
+    }
+
+    fn taskbar() -> Result<HWND, String> {
+        let class = wide(SHELL_TRAY_WINDOW_CLASSES[0]);
+        // SAFETY: the class name is NUL-terminated and lives through the call.
+        let taskbar = unsafe { FindWindowExW(std::ptr::null_mut(), std::ptr::null_mut(), class.as_ptr(), std::ptr::null()) };
+        if taskbar.is_null() { Err("the runner has no taskbar".to_owned()) } else { Ok(taskbar) }
+    }
+
+    fn bring_taskbar_forward(editor: &Editor) -> Result<HWND, String> {
+        let taskbar = taskbar()?;
+        editor.api.activate_window((taskbar.to::<isize>()).to::<i64>());
+        // SAFETY: takes nothing.
+        if editor.pump_until(STANDARD, |_| unsafe { GetForegroundWindow() } == taskbar) {
+            Ok(taskbar)
+        } else {
+            Err("the taskbar did not come to the front".to_owned())
+        }
+    }
+
+    /// The layout chosen in the tray menu goes to the window the user typed in, although the menu has taken the front from
+    /// it, and that window has the front back afterwards. The program's settings window gets the message the shell sends
+    /// for a click on the icon, with `front` in front; the line of the menu is clicked as a person clicks it.
+    fn tray_switch(editor: &Editor, process: u32, group: i32, front: Front) -> Result<(), String> {
+        let wanted = if group == 0 { "(EN)" } else { "(RU)" };
+        let window = *windows_of(process, SETTINGS_WINDOW_CLASS).first().ok_or("the program has no settings window")?;
+        // The engine follows the layout of the window in front at its next wake.
+        editor.pump(PROGRAM_SETTLES);
+        // The shell lets the program of a clicked icon take the front, and so does this.
+        // SAFETY: takes the process id by value.
+        unsafe { AllowSetForegroundWindow(process) };
+        if front != Front::Field {
+            bring_taskbar_forward(editor)?;
+        }
+        if front == Front::TaskbarAWhile {
+            editor.pump(PROGRAM_SETTLES);
+            let taskbar_group = group_of_layout(editor.api.foreground_layout());
+            if taskbar_group != group {
+                return Err(format!("the taskbar has the layout {taskbar_group}, not the one the menu is to offer"));
+            }
+        }
+        // SAFETY: the message is the icon's callback, which carries the mouse message in its lParam.
+        if unsafe { PostMessageW(window, WM_TRAY, 1, WM_RBUTTONUP.to::<LPARAM>()) } == 0 {
+            return Err("the tray message could not be posted".to_owned());
+        }
+        let mut shown = None;
+        editor.pump_until(STANDARD, |_| {
+            shown = shown_menu(process);
+            shown.is_some()
+        });
+        let (menu, index, line) = shown.ok_or("the tray menu did not open")?;
+        if !line.ends_with(wanted) {
+            return Err(format!("the tray menu offers {line:?}, not the switch to {wanted}"));
+        }
+        let mut place = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: a null window lets the call find the window of the popup menu; the rectangle is ours.
+        if unsafe { GetMenuItemRect(std::ptr::null_mut(), menu, index, &raw mut place) } == 0 {
+            return Err("the place of the menu line is unknown".to_owned());
+        }
+        let point = POINT { x: i32::midpoint(place.left, place.right), y: i32::midpoint(place.top, place.bottom) };
+        // SAFETY: plain calls with values.
+        unsafe {
+            SetCursorPos(point.x, point.y);
+            if MenuItemFromPoint(std::ptr::null_mut(), menu, point).to::<i64>() != i64::from(index) {
+                return Err(format!("the cursor at {}, {} is not on the menu line", point.x, point.y));
+            }
+        }
+        click()?;
+        // SAFETY: takes nothing.
+        let switched = editor.pump_until(LONG, |editor| editor.group() == group && unsafe { GetForegroundWindow() } == editor.window);
+        if !switched {
+            // SAFETY: takes nothing.
+            let front = unsafe { GetForegroundWindow() } == editor.window;
+            return Err(format!("after {line:?} the field's layout is {}, and the field is {}in front", editor.group(), if front { "" } else { "not " }));
+        }
+        Ok(())
+    }
+
+    /// Whether each window keeps a layout of its own («Позволить выбирать метод ввода для каждого окна приложения», «Let
+    /// me use a different input method for each app window»): the per-thread scope of the input settings, against the
+    /// session's (SPI_GETTHREADLOCALINPUTSETTINGS of SystemParametersInfoW on Microsoft Learn).
+    fn layout_per_window() -> Result<bool, String> {
+        let mut local = 0;
+        // SAFETY: the call writes one BOOL into `local`.
+        if unsafe { SystemParametersInfoW(SPI_GETTHREADLOCALINPUTSETTINGS, 0, (&raw mut local).cast(), 0) } == 0 {
+            return Err("the scope of the input settings could not be read".to_owned());
+        }
+        Ok(local != 0)
+    }
+
+    fn set_layout_per_window(per_window: bool) -> Result<(), String> {
+        // SAFETY: this action takes the BOOL itself in the pointer's place; nothing is written to the profile.
+        let set = unsafe { SystemParametersInfoW(SPI_SETTHREADLOCALINPUTSETTINGS, 0, isize::from(per_window).pointer_mut::<std::ffi::c_void>(), SPIF_SENDCHANGE) };
+        if set == 0 || layout_per_window()? != per_window {
+            return Err(format!("the layout could not be made {}", if per_window { "per window" } else { "shared" }));
+        }
+        Ok(())
+    }
+
+    /// With a layout for each window the taskbar keeps one of its own. The field gets the other one, and the taskbar stays in
+    /// front long enough for the engine to look: the program still tells the engine the field's layout, so the menu offers
+    /// the field's other layout, which is the taskbar's.
+    fn tray_switch_past_the_taskbar(editor: &Editor, process: u32) -> Result<(), String> {
+        bring_taskbar_forward(editor)?;
+        let taskbar_group = group_of_layout(editor.api.foreground_layout());
+        if taskbar_group < 0 {
+            return Err("the taskbar's layout is neither English nor Russian".to_owned());
+        }
+        editor.prepare(1 - taskbar_group)?;
+        tray_switch(editor, process, taskbar_group, Front::TaskbarAWhile)
+    }
+
+    /// The tray switch with one layout shared by every window, as Windows has it by default, and with a layout for each
+    /// window, where only the window that takes the request changes. The setting of the runner is put back afterwards.
+    fn tray_switches(editor: &Editor, process: u32) -> Result<(), String> {
+        let before = layout_per_window()?;
+        let outcome = (|| {
+            for per_window in [false, true] {
+                set_layout_per_window(per_window)?;
+                editor.prepare(0)?;
+                tray_switch(editor, process, 1, Front::Field)?;
+                tray_switch(editor, process, 0, Front::TaskbarClicked)?;
+                println!("WINDOWS_TRAY_SWITCH_{}_E2E_OK", if per_window { "PER_WINDOW" } else { "SHARED" });
+            }
+            tray_switch_past_the_taskbar(editor, process)?;
+            println!("WINDOWS_TRAY_SWITCH_PAST_THE_TASKBAR_E2E_OK");
+            Ok(())
+        })();
+        set_layout_per_window(before)?;
+        outcome
+    }
+
     fn correct_before_enter(editor: &Editor) -> Result<(), String> {
         editor.prepare(0)?;
         let inputs: Vec<NativeInput> = PRIVET.iter().chain(&[SCAN_ENTER]).flat_map(|code| [true, false].map(|pressed| NativeInput { scan_code: *code, ..user(pressed) })).collect();
@@ -498,6 +714,7 @@ mod scenario {
                 return Err(format!("unexpected learned history: {:?}", tail(history_of(&root)?, 3)));
             }
             println!("WINDOWS_LEARNING_PROMPT_E2E_OK");
+            tray_switches(&editor, child.id())?;
             let _ = child.kill();
             let _ = child.wait();
             configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true))])?;

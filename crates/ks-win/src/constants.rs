@@ -13,6 +13,9 @@ pub const LAYOUT_SWITCH_POLL_SECONDS: f64 = 0.01;
 /// right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms. The deletion
 /// needs no layout and goes before the pause.
 pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
+/// How long a layout chosen in the tray menu waits for the window the user worked in to come back to the front with its
+/// keyboard focus, before it is switched wherever the front is.
+pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
 /// A modifier the Windows hook saw go down is checked against the keyboard when the next key comes this many
 /// milliseconds later or in another window: its release may have gone where the hook does not reach (a UAC prompt, the
 /// Ctrl+Alt+Del screen, an elevated window).
@@ -164,6 +167,12 @@ pub const CONSOLE_WINDOW_CLASSES: [&str; 2] = ["ConsoleWindowClass", "CASCADIA_H
 /// they replace a selection: `привет мир` typed over one came out as `привет `, and pasted it was whole. A selection
 /// hotkey pastes its result there (`WindowsBackend::pasted_selection`).
 pub const SLOW_INPUT_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+/// The shell's taskbars, on the main monitor and on the others, and the flyouts of the hidden notification icons of
+/// Windows 10 and of Windows 11 22H2 and later (`IsSystemClass` in src/modules/GrabAndMove/GrabAndMove/main.cpp of
+/// microsoft/PowerToys). A click on the tray icon brings them to the front, and what the user types in is not there: a
+/// layout chosen in the tray menu goes past them to the window the user worked in.
+pub const SHELL_TRAY_WINDOW_CLASSES: [&str; 4] =
+    ["Shell_TrayWnd", "Shell_SecondaryTrayWnd", "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland"];
 /// "The maximum length for lpszClassName is 256" (WNDCLASSW): `GetClassNameW` needs no longer buffer than this and its
 /// terminating zero.
 pub const WINDOW_CLASS_NAME_MAX_CHARACTERS: usize = 256;
@@ -212,6 +221,11 @@ pub const WM_SYSKEYDOWN: u32 = 0x0104;
 pub const WM_SYSKEYUP: u32 = 0x0105;
 pub const WM_QUIT: u32 = 0x0012;
 pub const WM_USER: u32 = 0x0400;
+/// The first message number a program keeps for its own windows (`WM_APP`, winuser.h).
+pub const WM_APP: u32 = 0x8000;
+/// What the shell sends the settings window for a mouse event on the tray icon (the icon's callback message); the live
+/// test sends it as the shell does.
+pub const WM_TRAY: u32 = WM_APP + 2;
 pub const WM_INPUTLANGCHANGEREQUEST: u32 = 0x0050;
 pub const PM_NOREMOVE: u32 = 0x0000;
 // Mouse messages; a button press invalidates the caret position. Observed only, never suppressed (see

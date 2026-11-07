@@ -439,12 +439,20 @@ jobs:
         env:
           # The reason is in packaging/coverage.sh.
           RUSTFLAGS: -Zcross-crate-inline-threshold=never
+          # The tray icon's test writes its pictures here, at every scale of the screen, for a look.
+          KS_TRAY_ICON_DIR: ${{ github.workspace }}/tray-icons
         run: cargo +nightly-2026-11-05 llvm-cov --branch ${{ matrix.packages }} --profile coverage --no-fail-fast --json --output-path "coverage-$RUNNER_OS.json"
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: coverage-${{ matrix.os }}
           path: coverage-*.json
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        with:
+          name: tray-icons-windows
+          path: tray-icons/
           retention-days: 14
 
   coverage-gate:
