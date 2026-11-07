@@ -18,6 +18,7 @@ const WORKFLOW: &str = "CI and release";
 const CI_TIMEOUT_SECONDS: u64 = 3 * 60 * 60;
 const CI_POLL_SECONDS: u64 = 60;
 const SECONDS_PER_DAY: i64 = 86_400;
+const DATE_PATTERN: &str = r"^\d{4}-\d{2}-\d{2}$";
 const ASSETS: [&str; 9] = [
     "KeySwitch-Setup-{version}-x64.exe",
     "KeySwitch-Setup-{version}-arm64.exe",
@@ -113,8 +114,20 @@ fn changelog_sections(text: &str) -> Vec<(String, Vec<String>)> {
     sections
 }
 
-/// Today in the UTC calendar.
+/// Today in the local calendar, as the Python tool dated a release (`date.today()`): the answer of `date +%F`, or the UTC
+/// date when it gives none.
 fn today() -> String {
+    let local = Command::new("date").arg("+%F").output().ok().filter(|done| done.status.success()).map(|done| String::from_utf8_lossy(&done.stdout).trim().to_owned());
+    local_date(local, utc_today())
+}
+
+/// The answer of `date` when it is a date, else the UTC date.
+fn local_date(answer: Option<String>, utc: String) -> String {
+    answer.filter(|date| regex::Regex::new(DATE_PATTERN).is_ok_and(|pattern| pattern.is_match(date))).unwrap_or(utc)
+}
+
+/// Today in the UTC calendar.
+fn utc_today() -> String {
     date_of((std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())).to::<i64>())
 }
 
@@ -136,8 +149,19 @@ fn close_changelog(root: &Path, options: &Options) -> Result<(), String> {
     let path = root.join("CHANGELOG.md");
     let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let sections = changelog_sections(&text);
-    if sections.iter().any(|(heading, _)| heading != "Unreleased" && heading.split(' ').next() == Some(options.version.as_str())) {
-        println!("    CHANGELOG.md already has a section for {}", options.version);
+    if let Some((heading, _)) = sections.iter().find(|(heading, _)| heading != "Unreleased" && heading.split(' ').next() == Some(options.version.as_str())) {
+        // A candidate closes the section on the day it is built; the release is dated by the day it is published.
+        let dated = format!("{} — {}", options.version, today());
+        if options.candidate.is_some() || *heading == dated {
+            println!("    CHANGELOG.md already has a section for {}", options.version);
+            return Ok(());
+        }
+        if options.dry_run {
+            println!("    would date the section {heading} as {dated}");
+            return Ok(());
+        }
+        std::fs::write(&path, text.replacen(&format!("## {heading}\n"), &format!("## {dated}\n"), 1)).map_err(|error| error.to_string())?;
+        println!("    dated the section {heading} as {dated}, the day of the release");
         return Ok(());
     }
     let entries = sections.iter().find(|(heading, _)| heading == "Unreleased").map_or(0, |(_, entries)| entries.len());
@@ -487,12 +511,27 @@ mod tests {
     }
 
     #[test]
-    fn a_section_already_written_is_left_alone() {
+    fn a_candidate_leaves_a_section_already_written_alone() {
         let tree = Tree::new("written");
         let text = "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- new\n";
         tree.write("CHANGELOG.md", text);
-        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        close_changelog(&tree.0, &Options { candidate: Some(2), ..options("1.3.0", false) }).unwrap();
         assert_eq!(tree.read("CHANGELOG.md"), text);
+    }
+
+    #[test]
+    fn a_release_dates_the_section_of_its_candidate_by_the_day_it_is_published() {
+        let tree = Tree::new("redated");
+        tree.write("CHANGELOG.md", "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- new\n\n## 1.2.0 — 2026-01-01\n\n- old\n");
+        close_changelog(&tree.0, &options("1.3.0", true)).unwrap();
+        assert!(tree.read("CHANGELOG.md").contains("## 1.3.0 — 2026-01-01\n"), "a dry run writes nothing");
+        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        let dated = format!("## 1.3.0 — {}\n", today());
+        let text = tree.read("CHANGELOG.md");
+        assert!(text.contains(&dated), "{text}");
+        assert!(text.contains("## 1.2.0 — 2026-01-01\n"), "{text}");
+        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        assert_eq!(tree.read("CHANGELOG.md"), text, "a section dated today stays as it is");
     }
 
     #[test]
@@ -540,7 +579,15 @@ mod tests {
         assert_eq!(date_of(0), "1970-01-01");
         assert_eq!(date_of(951_782_400), "2000-02-29");
         assert_eq!(date_of(1_700_000_000), "2023-11-14");
-        assert_eq!(today().len(), "2026-01-01".len());
+        assert!(regex::Regex::new(DATE_PATTERN).unwrap().is_match(&today()));
+        assert!(regex::Regex::new(DATE_PATTERN).unwrap().is_match(&utc_today()));
+    }
+
+    #[test]
+    fn the_local_date_is_the_answer_of_date_when_it_is_one() {
+        assert_eq!(local_date(Some("2026-11-08".to_owned()), "2026-11-07".to_owned()), "2026-11-08");
+        assert_eq!(local_date(Some("Sun Nov  8".to_owned()), "2026-11-07".to_owned()), "2026-11-07");
+        assert_eq!(local_date(None, "2026-11-07".to_owned()), "2026-11-07");
     }
 
     #[test]
