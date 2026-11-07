@@ -24,6 +24,3 @@ crates/ks-win/src/windows_registry.rs
 crates/ks-win/src/winhttp.rs
 crates/logcourier/src/gui_gtk.rs
 crates/logcourier/src/gui_win.rs
-# The tools that train and replay: measured, and next to be covered.
-crates/ks-replay/
-crates/ks-train/
