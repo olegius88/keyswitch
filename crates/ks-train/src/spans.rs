@@ -93,6 +93,26 @@ fn label(capture: &Capture, expected: &str) -> Option<ContextAction> {
     (converted == expected).then_some(ContextAction::Convert)
 }
 
+/// The answer a question about the focus is labelled with: none when it asks about other keys than the focus's, or when
+/// no answer gives the text that should stand; every question counted by what became of it.
+fn focus_answer(record: &Capture, parent_body: &[u32], expected_characters: &[char], counts: &mut Counts) -> Option<ContextAction> {
+    counts.add("focus_calls");
+    let item = &record.evidence;
+    if body(&item.original, item.source_group) != parent_body {
+        counts.add("skipped_nonparent_body");
+        return None;
+    }
+    let so_far: String = expected_characters[..record.event].iter().collect();
+    let Some(action) = label(record, &so_far) else {
+        counts.add("skipped_inexpressible");
+        return None;
+    };
+    counts.add(format!("action_{}", action.as_str()));
+    counts.add_by("tail_nonempty", i64::from(!item.literal_tail.is_empty()));
+    counts.add_by("repeated_space_before", i64::from(item.field.before.ends_with("  ")));
+    Some(action)
+}
+
 /// `build_span_curriculum`: attainable labels captured without dictionary or candidate predictions.
 pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximum_families: i64, expected_split: &str) -> SpanCurriculum {
     assert!((LAYOUT_GROUP_COUNT.to::<i64>()..=SPAN_MAXIMUM_FAMILIES).contains(&maximum_families), "span family budget");
@@ -136,20 +156,7 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
                 let focus: Vec<Capture> = records.into_iter().filter(|record| record.event > prefix_length).collect();
                 counts.add_by("no_focus_call", i64::from(focus.is_empty()));
                 for record in focus {
-                    counts.add("focus_calls");
-                    let item = &record.evidence;
-                    if body(&item.original, item.source_group) != parent_body {
-                        counts.add("skipped_nonparent_body");
-                        continue;
-                    }
-                    let so_far: String = expected_characters[..record.event].iter().collect();
-                    let Some(action) = label(&record, &so_far) else {
-                        counts.add("skipped_inexpressible");
-                        continue;
-                    };
-                    counts.add(format!("action_{}", action.as_str()));
-                    counts.add_by("tail_nonempty", i64::from(!item.literal_tail.is_empty()));
-                    counts.add_by("repeated_space_before", i64::from(item.field.before.ends_with("  ")));
+                    let Some(action) = focus_answer(&record, &parent_body, &expected_characters, &mut counts) else { continue };
                     frames.push(SpanFrame { evidence: record.evidence, action, parent_family: row.family.clone(), source_identifier: row.identifier.clone(), sequence_id: identity.clone(), sample_weight: 0.0 });
                 }
             }
@@ -170,5 +177,65 @@ pub fn build_span_curriculum(replayer: &mut Replayer, rows: &[CorpusRow], maximu
 impl SpanCurriculum {
     pub fn report(&self) -> Value {
         self.counts.as_ref().map_or(json!({}), Counts::report)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ks_backend::FieldContext;
+    use ks_context::context_model::{AfterOrigin, BeforeOrigin};
+
+    fn capture(original: &str, alternative: &str, observed: &str) -> Capture {
+        let evidence = ContextEvidence {
+            original: original.to_owned(),
+            alternative: alternative.to_owned(),
+            source_group: 0,
+            field: FieldContext::new("TestEditor", "0"),
+            trigger: "space".to_owned(),
+            baseline_convert: false,
+            source_known: false,
+            target_known: true,
+            score_delta: 0.0,
+            source_score: None,
+            target_score: None,
+            model_probability: None,
+            model_threshold: None,
+            literal_tail: String::new(),
+            ortho_score: None,
+            ortho_threshold: None,
+            boundary_text: " ".to_owned(),
+            after_origin: AfterOrigin::None,
+            before_origin: BeforeOrigin::Field,
+            source_identifier: false,
+            target_identifier: false,
+            source_typo: false,
+            target_typo: false,
+            source_opening: false,
+            target_opening: false,
+            inside: false,
+            term_counts_dropped: false,
+        };
+        Capture { evidence, observed: observed.to_owned(), event: pystr::len(observed) }
+    }
+
+    #[test]
+    fn a_focus_question_is_labelled_only_when_an_answer_gives_the_text_that_should_stand() {
+        let expected: Vec<char> = "say привет ".chars().collect();
+        let parent = body("ghbdtn", 0);
+        let mut counts = Counts::default();
+        // Typed wrong, converted right; typed as it should stand; asked about other keys.
+        assert_eq!(focus_answer(&capture("ghbdtn", "привет", "say ghbdtn "), &parent, &expected, &mut counts), Some(ContextAction::Convert));
+        assert_eq!(focus_answer(&capture("ghbdtn", "привет", "say привет "), &parent, &expected, &mut counts), Some(ContextAction::Keep));
+        assert_eq!(focus_answer(&capture("say", "ыфн", "say ghbdtn "), &parent, &expected, &mut counts), None);
+        // The text does not end with what was asked about, or no answer gives the text that should stand.
+        assert_eq!(focus_answer(&capture("ghbdtn", "привет", "say ghbdtnx"), &parent, &expected, &mut counts), None);
+        assert_eq!(focus_answer(&capture("ghbdtn", "ghbdtn", "say ghbdtn "), &parent, &expected, &mut counts), None);
+        // A question about nothing at all.
+        let mut empty = capture("", "", "say ghbdtn ");
+        empty.evidence.boundary_text = String::new();
+        assert_eq!(focus_answer(&empty, &[], &expected, &mut counts), None);
+        assert_eq!((counts.get("skipped_nonparent_body"), counts.get("skipped_inexpressible")), (1, 3));
     }
 }

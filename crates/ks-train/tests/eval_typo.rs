@@ -50,6 +50,10 @@ fn the_owner_s_words_are_measured_whatever_follows_a_stream() {
     assert_eq!(report["field"]["words"], json!(5), "{}", report["field"]);
 }
 
+fn read_value(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).expect("a report")).expect("json")
+}
+
 /// The most frequent lowercase words of at least five letters of a reference lexicon, most frequent first.
 fn frequent(path: &Path, alphabet: &dyn Fn(char) -> bool) -> Vec<String> {
     let text = std::fs::read_to_string(path).expect("a lexicon");
@@ -140,12 +144,17 @@ fn every_measurement_runs_over_texts_whose_slips_were_chosen() {
     }
     assert!(field["corrections_of_words_that_became_the_owner_s"].as_i64().expect("a count") > 0, "{field}");
     assert!(std::fs::read_to_string(out.join("clean-corrections.tsv")).expect("the corrections").lines().count() > 2);
+    // Tuned on these texts, a policy keeps the wrong corrections within the allowed share.
+    let tuned = folder.join("tuned");
+    let answer = trainer().arg("typo-evaluation").arg("synthetic").arg("--tree").arg(tree()).arg("--messages").arg(&messages).arg("--out").arg(&tuned).arg("--tune").output().expect("the trainer starts");
+    assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
+    assert!(read_value(&tuned.join("report-synthetic.json"))["tuned_policy"].is_object());
     // The count of the technical vocabulary, over lists of the words the draws chose and training texts that hold two of
     // their slips and the other reading of a clean correction, each three times: the least count that keeps every slip.
     let lists = folder.join("lists");
     std::fs::create_dir_all(&lists).expect("a folder");
     let (ru, en, clean) = (lists.join("ru.txt"), lists.join("en.txt"), lists.join("clean.tsv"));
-    std::fs::write(&ru, "ребёнок 5000\nзелёный 5000\nтвёрдый 5000\nлёгкий 5000\nчеловек 5000\nкоторый 5000\nобычно 3\nзарплата 100\n").expect("a list");
+    std::fs::write(&ru, "ребёнок 5000\nзелёный 5000\nтвёрдый 5000\nлёгкий 5000\nчеловек 5000\nкоторый 5000\nобычно 10\nзарплата 100\n").expect("a list");
     std::fs::write(&en, "window 5000\ngarden 100\n").expect("a list");
     std::fs::write(&clean, "corpus\tkind\tlocale\tqid\tword\tcorrection\toperation\ntatoeba-dev\tprose\tru_RU\t1\tприве\tпривет\tinsertion\n").expect("a list");
     let train_messages: Vec<String> = (0..3).map(|_| json!({"qid": 1, "text": "челвоек и ещё"}).to_string()).collect();
