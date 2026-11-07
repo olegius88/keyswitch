@@ -13,8 +13,8 @@
 | `packaging/keyswitch-archive-keyring.asc` | Открытый ключ репозитория; ставится conffile'ом по пути из поля `Signed-By` (`/etc/apt/keyrings/`) |
 | `packaging/site/` | Страница продукта, которую видит человек, открывший адрес репозитория: `index.html` — шаблон (адрес, suite, компонент, архитектура, путь к ключу и версия выпуска подставляются при сборке), остальные файлы (`img/`) копируются как есть |
 | `ks-train apt-build`, `ks-train apt-verify` | сборка и подпись репозитория, проверка готового дерева |
-| `tools/make-apt-signing-key.sh` | Создание ключа подписи и подсказка, какие секреты завести |
-| `.github/workflows/release.yml`, задание `apt-repository` | Публикация репозитория на Pages до создания выпуска |
+| `packaging/make-apt-signing-key.sh` | Создание ключа подписи и подсказка, какие секреты завести |
+| `.github/workflows/ci.yml`, задание `apt-repository` | Публикация репозитория на Pages до создания выпуска |
 
 Источник и ключ поставляются как conffiles, поэтому решение пользователя
 переживает обновления пакета, а `apt purge` убирает оба файла. Ключ лежит
@@ -56,15 +56,16 @@ Lintian запрещает пакетам класть файлы в `/etc/apt/s
 2. Два секрета репозитория:
 
    ```bash
-   ./tools/make-apt-signing-key.sh .t/apt-signing
+   ./packaging/make-apt-signing-key.sh .t/apt-signing
    gh secret set KEYSWITCH_APT_SIGNING_KEY < .t/apt-signing/private-key.asc
    gh secret set KEYSWITCH_APT_SIGNING_PASSPHRASE < .t/apt-signing/passphrase.txt
    cp .t/apt-signing/public-key.asc packaging/keyswitch-archive-keyring.asc
    ```
 
    Закрытая половина ключа и пароль не должны попадать в Git: каталог
-   `.t/` игнорируется, а в пакет уходит только `public-key.asc`. Сборка пакета
-   отказывается класть в него файл, в котором есть блок закрытого ключа.
+   `.t/` игнорируется, а в пакет уходит только `public-key.asc`. Проверка пакета
+   `ks-train deb-check`, которая в CI идёт сразу после сборки, не пропускает
+   файл ключа, в котором есть блок закрытого ключа.
 
 Действующий ключ: RSA-4096, отпечаток
 `39C7 0828 2A8E 4E3E 65C4 FAAB DA3D 9DDE F3E4 DE64`, создан 22.09.2026,
@@ -73,8 +74,8 @@ Lintian запрещает пакетам класть файлы в `/etc/apt/s
 ## Порядок выпуска
 
 Задание `apt-repository` зависит от сборок всех трёх платформ и выполняется до
-задания `release`: репозиторий не должен получить версию, которую выпуск не
-получил из-за красной сборки Windows или macOS. Это намеренно: пакет, который получает пользователь, уже содержит
+задания `publish`, которое создаёт выпуск: репозиторий не должен получить
+версию, которую выпуск не получил из-за красной сборки Windows или macOS. Это намеренно: пакет, который получает пользователь, уже содержит
 источник APT, поэтому репозиторий должен быть доступен раньше, чем появится
 ссылка на выпуск. Если публикация репозитория не удалась, выпуск не создаётся.
 
@@ -87,15 +88,15 @@ Lintian запрещает пакетам класть файлы в `/etc/apt/s
 
 ```bash
 GNUPGHOME=.t/apt-signing/gnupg target/train/ks-train apt-build --tree . --repository .t/apt-repo \
-  dist/keyswitch_<версия>_amd64.deb --passphrase-file .t/apt-signing/passphrase.txt
+  --package dist/keyswitch_<версия>_amd64.deb --passphrase-file .t/apt-signing/passphrase.txt
 target/train/ks-train apt-verify --tree . --repository .t/apt-repo --expect-version <версия>
 ```
 
 `verify` проверяет подписи через `gpgv` **только** открытым ключом из пакета,
 сверяет все контрольные суммы из `Release` и затем заставляет сам APT прочитать
 репозиторий по `file://` — тем же кодом, которым его читает установленная
-система. Состав пакета (conffile, источник, ключ) проверяет
-модульные проверки сборщика — в `crates/ks-train/tests`.
+система. Состав пакета (conffile, источник, ключ) проверяет команда
+`ks-train deb-check --tree . пакет.deb`, её тесты — в `crates/ks-train/tests`.
 
 ## Смена ключа
 
