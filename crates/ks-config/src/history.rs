@@ -2,7 +2,7 @@
 
 use ks_cast::To as _;
 use crate::config::home_dir;
-use crate::constants::{DEFAULT_HISTORY_LIMIT, HISTORY_CONFIDENCE_DECIMALS};
+use crate::constants::{DEFAULT_HISTORY_LIMIT, HISTORY_CONFIDENCE_DECIMALS, HISTORY_FILE_NAME};
 use crate::logsetup::utc_now;
 use crate::pycompat::create_parent;
 use crate::pycompat::{decode_text, encoded_text, json_loads, with_suffix, write_text};
@@ -175,7 +175,7 @@ impl HistoryStore {
     #[must_use]
     pub fn new(path: Option<PathBuf>, limit: i64) -> HistoryStore {
         HistoryStore {
-            path: path.unwrap_or_else(|| data_dir().join("history.jsonl")),
+            path: path.unwrap_or_else(|| data_dir().join(HISTORY_FILE_NAME)),
             limit: Mutex::new(limit.max(1)),
             lock: Mutex::new(()),
             callbacks: Mutex::new(Vec::new()),

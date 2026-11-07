@@ -9,7 +9,7 @@
 use crate::config::set_aside_unreadable;
 use crate::constants::{
     PERSONAL_WORDS_MAX, PERSONAL_WORDS_SCHEMA_VERSION, PERSONAL_WORD_COUNTS_MAX, PERSONAL_WORD_HASH_HEX_CHARACTERS,
-    PERSONAL_WORD_MIN_COUNT, PERSONAL_WORD_SALT_BYTES, USER_DATA_JSON_INDENT,
+    PERSONAL_WORDS_FILE_NAME, PERSONAL_WORD_MIN_COUNT, PERSONAL_WORD_SALT_BYTES, USER_DATA_JSON_INDENT,
 };
 use crate::history::data_dir;
 use crate::pycompat::create_parent;
@@ -141,7 +141,7 @@ impl PersonalWords {
         salt_source: Box<dyn Fn() -> String + Send + Sync>,
     ) -> PersonalWords {
         let words = PersonalWords {
-            path: path.unwrap_or_else(|| data_dir().join("personal-words.json")),
+            path: path.unwrap_or_else(|| data_dir().join(PERSONAL_WORDS_FILE_NAME)),
             persist,
             salt_source,
             state: Mutex::new(State { salt: String::new(), personal: Ordered::new(), counts: Ordered::new(), unreadable: None }),

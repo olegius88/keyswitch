@@ -3,7 +3,7 @@
 use crate::constants::{
     DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SETTINGS, EARLY_SWITCH_DEFAULT_SCHEMA_VERSION,
     HOTKEY_CONVERT_LAST, MACOS_CONVERT_HOTKEY_SCHEMA_VERSION, MACOS_HOTKEY_DEFAULTS, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
-    PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS, UNREADABLE_FILE_SUFFIX,
+    PREVIOUS_DEFAULT_PAUSE_DELAY_SECONDS, SETTINGS_FILE_NAME, UNREADABLE_FILE_SUFFIX,
     UNREADABLE_FILE_TIME_FORMAT, USER_DATA_JSON_INDENT,
 };
 use crate::logsetup::{local_time, strftime, warning};
@@ -146,7 +146,7 @@ impl SettingsStore {
     pub fn new(path: Option<PathBuf>) -> SettingsStore {
         let defaults = default_settings(None);
         let store = SettingsStore {
-            path: path.unwrap_or_else(|| config_dir().join("config.json")),
+            path: path.unwrap_or_else(|| config_dir().join(SETTINGS_FILE_NAME)),
             state: Mutex::new(Data { data: defaults.clone(), unreadable: None }),
             defaults,
             callbacks: Arc::new(Mutex::new(Vec::new())),

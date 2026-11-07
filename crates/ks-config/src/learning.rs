@@ -6,7 +6,7 @@
 
 use crate::config::set_aside_unreadable;
 use crate::constants::{
-    LEARNING_STORE_BACKUP_SUFFIX, LEARNING_STORE_SCHEMA_VERSION, LEGACY_RULE_CONFIRMATIONS_REQUIRED, MAX_WORD_STROKES,
+    LEARNING_FILE_NAME, LEARNING_STORE_BACKUP_SUFFIX, LEARNING_STORE_SCHEMA_VERSION, LEGACY_RULE_CONFIRMATIONS_REQUIRED, MAX_WORD_STROKES,
     USER_DATA_JSON_INDENT,
 };
 use crate::history::data_dir;
@@ -340,7 +340,7 @@ impl LearningStore {
     /// `LearningStore(path, legacy_confirmations=...)`; the file is read at once.
     pub fn new(path: Option<PathBuf>, legacy_confirmations: Option<i64>) -> Result<LearningStore, LearningError> {
         let store = LearningStore {
-            path: path.unwrap_or_else(|| data_dir().join("learning.json")),
+            path: path.unwrap_or_else(|| data_dir().join(LEARNING_FILE_NAME)),
             legacy_confirmations: legacy_confirmations.unwrap_or(LEGACY_RULE_CONFIRMATIONS_REQUIRED),
             state: Mutex::new(State { rules: Vec::new(), migrated: 0, unreadable: None }),
         };

@@ -26,6 +26,14 @@ pub const UNREADABLE_FILE_TIME_FORMAT: &str = "%Y%m%d-%H%M%S";
 /// otherwise (the removed `detection.learning_confirmations` defaulted to it): a counter that reached
 /// it acted as a rule and is carried over as one.
 pub const LEGACY_RULE_CONFIRMATIONS_REQUIRED: i64 = 2;
+/// The files the application keeps for the user: the settings in `config_dir()`, the rest in `data_dir()`.
+pub const SETTINGS_FILE_NAME: &str = "config.json";
+pub const HISTORY_FILE_NAME: &str = "history.jsonl";
+pub const LEARNING_FILE_NAME: &str = "learning.json";
+pub const PERSONAL_WORDS_FILE_NAME: &str = "personal-words.json";
+/// What the one-time hints remember (`ks_ui::hints`): the version that ran last and the hints already shown. It is
+/// not a setting, so a reset of the settings shows none of them again.
+pub const HINTS_FILE_NAME: &str = "hints.json";
 
 // ---- constants/log_files.py
 /// Decimal places kept when a probability, score or confidence is logged.
@@ -129,9 +137,12 @@ pub const HOTKEY_SELECTION_TRANSLITERATE: &str = "selection_transliterate";
 /// would also toggle capitals).
 pub const DEFAULT_LAYOUT_SWITCH_KEY: &str = "";
 pub const LAYOUT_SWITCH_KEYS: [&str; 4] = ["Shift_L", "Shift_R", "Control_L", "Control_R"];
+/// `general.hints`: the one-time hints about what the program can do (`ks_ui::hints`). A settings file written before
+/// it existed gains it from the defaults, as the selection hotkeys do.
+pub const HINTS_SETTING: &str = "general.hints";
 /// Settings the Python program never had. Each default leaves the engine as the Python's was, so the traces of the
 /// Python's engine hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
-pub const SETTINGS_SINCE_PYTHON: [&str; 1] = ["detection.layout_switch_key"];
+pub const SETTINGS_SINCE_PYTHON: [&str; 2] = ["detection.layout_switch_key", HINTS_SETTING];
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
@@ -165,6 +176,8 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
             "notifications": true,
             "sound": false,
             "keep_history": true,
+            // The one-time hints at the caret, the tray icon and in the settings window (HINTS_SETTING).
+            "hints": true,
         },
         "detection": {
             "layouts": ["us", "ru"],
