@@ -31,14 +31,12 @@
 
 | Компонент | Роль и статус | Документы и доказательства |
 | --- | --- | --- |
-| Layout Intent / KSLM v20 | Базовый классификатор пары токенов; рабочий `intent-v1-8bccdf50b028` | [Карточка RU](../model/intent_v1/MODEL_CARD.md), [EN](../model/intent_v1/MODEL_CARD.en.md), [runbook](intent-model-runbook.md), [cookbook](intent-model-cookbook.md) |
-| Context v1 | Рабочая четырёхклассовая политика `context-v1-789437013251` (0.35.0, схема признаков 7, без имени приложения; сценарии и вопросы движка на набранном публичном тексте), введена в 0.15.0 и переобучалась | [Устройство](context-assistant.md), [отчёт](../model/context_v1/report.json) |
+| Layout Intent / KSLM v20 | Базовый классификатор пары токенов; рабочий `intent-v1-8bccdf50b028` | [Карточка RU](../model/intent_v1/MODEL_CARD.md), [EN](../model/intent_v1/MODEL_CARD.en.md), [обучение и проверка](model-cycle.md) |
+| Context v3 | Рабочая контекстная модель действий `context-v3-48a863e75bb6`: решает, исправлять ли слово, по полю вокруг него | [Устройство](context-assistant.md), [рецепт, печати и квитанция](../model/context_v3/README.md), [цикл обучения](model-cycle.md) |
+| Prefix v2 | Рабочая модель раннего переключения на полуслове `prefix-v2-bf3dc28f8567`, обучается в паре с Context v3 | [Цикл обучения](model-cycle.md) |
 | Ortho v1 | Счётная модель орфотактики в пространстве клавиш; разрешает замену там, где детектор воздержался | [Методика и границы](../model/ortho_v1/README.md), [отчёт рабочей модели](../model/ortho_v1/report.json) |
-| Ortho v2 | Измерительный конвейер для неё; кандидат не выпущен | [Что найдено и почему](../model/ortho_v2/README.md) |
-| Prefix v1 | Отдельная модель раннего переключения на полуслове в `assist` | [Методика и ограничения](../model/prefix_v1/README.md), [отчёт](../model/prefix_v1/report.json) |
 | Boundary v2 | Рабочая модель границ завершённого токена; отделяет буквальный хвост от слова | [Методика и ограничения](../model/boundary_v2/README.md), [отчёт](../model/boundary_v2/report.json) |
-| Boundary v1 | Отклонённый предшественник; веса не устанавливаются | [Исторический эксперимент](../model/boundary_v1/README.md) |
-| Context v2 / experiment 1 | Расширенный корпус и исследовательский кандидат; отклонён, не установлен в runtime | [Результаты и replay](../model/context_v2/README.md), [источники](../model/context_v2/sources/README.md) |
+| Context v1, Context v2, Prefix v1, Ortho v2, Boundary v1 | Прежние и отклонённые модели; больше не обучаются, их файлы сверяет `ks-train archive`, а `ks-train retired <семейство> --replay` пересобирает их байт в байт | [Context v1](../model/context_v1/report.json), [Context v2](../model/context_v2/README.md), [Prefix v1](../model/prefix_v1/README.md), [Ortho v2](../model/ortho_v2/README.md), [Boundary v1](../model/boundary_v1/README.md) |
 | Правила переключения | Явные правила из окна правила (двойной Pause → Enter → OK), не дообучение весов | [Настройки и данные](../README.md#настройки-и-данные), [диагностика](troubleshooting.md) |
 
 Метрики одной строки таблицы не доказывают качество остальных. Доставка клавиш

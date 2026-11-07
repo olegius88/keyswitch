@@ -15,6 +15,27 @@ for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msv
 
 ## Модели
 
+Обучение и проверка — в `ks-train`, подробности в [цикле обучения](model-cycle.md).
+
+```bash
+cargo build --profile train -p ks-train
+K=target/train/ks-train
+$K verify --tree .                                # квитанция установленной пары, числа пересчитываются
+$K boundary --tree . --verify                     # модель границ байт в байт
+$K ortho --tree . --verify                        # орфографическая модель байт в байт
+$K ortho --tree . --inputs                        # её входные данные из замороженных источников
+$K intent --tree . --verify                       # модель намерений: файл, манифест и отчёт теста байт в байт
+$K intent --tree . --evaluate --strict --output strict.json
+$K archive --tree .                               # файлы семейств, которые больше не обучаются
+$K detector --tree . --sample 10000 --dictionary-sample 10000 --strict
+dbus-run-session -- $K engine boundary --tree . --verify
+dbus-run-session -- $K engine prefix --tree . --verify
+```
+
+Модель намерений читает только замороженные в `model/intent_v1/sources` списки слов и словари Hunspell, поэтому её проверка не зависит от установленных в системе словарей; нужна библиотека `libhunspell-1.7-0`. `detector` проверяет то, что установлено: для его чисел нужны `hunspell-en-us`, `hunspell-ru` и `onboard-data`.
+
+Строгая проверка модели намерений занимает около минуты, поэтому её отчёт не кэшируется, а считается заново.
+
 ## Покрытие тестами
 
 Каждая строка и каждое ветвление программы должны быть выполнены хотя бы одним тестом. Замер идёт на всех трёх системах, результаты складываются: код Windows считается покрытым прогоном на Windows, код Mac — на Mac.
@@ -40,34 +61,16 @@ cargo run --release -p ks-train --bin ks-train -- coverage-gate --tree . --repor
 - Windows: `cargo test --release -p ks-win --test e2e_windows` с `KS_E2E_BINARY`, путём к установленной программе. Перехватчик, затем настоящее окно: обе стороны исправления, правило через двойной Pause, Enter не утекает в поле, исправление до Enter. В CI идёт на x64, x86 и Arm.
 - macOS: `packaging/e2e-mac.command`, открыть в Терминале с разрешением «Универсальный доступ». TextEdit на переднем плане, нажатия на уровне HID: исправление, Shift, Caps Lock, отмена, команды выделения, опечатки. Результат в `e2e-mac.log`.
 
-Обучение и проверка — в `ks-train`, подробности в [цикле обучения](model-cycle.md).
-
-```bash
-cargo build --profile train -p ks-train
-K=target/train/ks-train
-$K verify --tree .                                # квитанция установленной пары, числа пересчитываются
-$K boundary --tree . --verify                     # модель границ байт в байт
-$K ortho --tree . --verify                        # орфографическая модель байт в байт
-$K ortho --tree . --inputs                        # её входные данные из замороженных источников
-$K intent --tree . --verify                       # модель намерений: файл, манифест и отчёт теста байт в байт
-$K intent --tree . --evaluate --strict --output strict.json
-$K archive --tree .                               # файлы семейств, которые больше не обучаются
-$K detector --tree . --sample 10000 --dictionary-sample 10000 --strict
-dbus-run-session -- $K engine boundary --tree . --verify
-dbus-run-session -- $K engine prefix --tree . --verify
-```
-
-Модель намерений читает только замороженные в `model/intent_v1/sources` списки слов и словари Hunspell, поэтому её проверка не зависит от установленных в системе словарей; нужна библиотека `libhunspell-1.7-0`. `detector` проверяет то, что установлено: для его чисел нужны `hunspell-en-us`, `hunspell-ru` и `onboard-data`.
-
-Строгая проверка модели намерений занимает около минуты, поэтому её отчёт не кэшируется, а считается заново.
-
 ## Набор текста владельца
 
 Перед выпуском набор владельца воспроизводится деревом последнего выпуска и проверяемым деревом: слово, которое выпущенная версия делала правильно, а новая делает неправильно, останавливает выпуск. Батареи частные и в git не входят, барьер печатает только числа.
 
 ```bash
-cargo run --profile parity --bin field-gate -- --root <дерево с набором> --released <отчёты прошлого выпуска>
+cargo build --profile parity -p ks-replay --bins
+target/parity/field-gate --root <дерево с набором> --released <отчёты прошлого выпуска> [--speller]
 ```
+
+`field-gate` запускает `ks-replay`, который лежит рядом с ним, поэтому собирать нужно оба. Без `--speller` повтор идёт без Hunspell, с ним — со словарями Hunspell, как работает установленная программа; тогда и отчёты прошлого выпуска должны быть сняты со словарями.
 
 ## Сборка
 
@@ -77,7 +80,7 @@ cargo run --profile parity --bin field-gate -- --root <дерево с набо�
 | Windows: установщик, ZIP | `packaging/build-rust.ps1 -Architecture x64` | Windows, нужны цель MSVC и Inno Setup |
 | macOS | `packaging/build-rust-macos.sh dist` | Mac, подпись через `KEYSWITCH_SIGN_IDENTITY` |
 
-Workflow [`ci.yml`](../.github/workflows/ci.yml) делает всё это на каждый коммит: тесты, повторные обучения, установку и запуск установщика Windows на каждой архитектуре, установку DEB в чистую Ubuntu, запуск приложения macOS и его нотаризацию. На теге он публикует файлы как предварительный выпуск.
+Workflow [`ci.yml`](../.github/workflows/ci.yml) делает всё это на каждый коммит: тесты, повторные обучения, установку и запуск установщика Windows на каждой архитектуре, установку DEB в чистую Ubuntu, запуск приложения macOS и его нотаризацию. На теге `vX.Y.Z-rcN` он публикует файлы как предварительный выпуск, который не видят обновления; на теге `vX.Y.Z` — как выпуск для всех и обновляет репозиторий APT. Публикация ждёт всех заданий, в том числе проверки покрытия.
 
 ## Выпуск
 
