@@ -79,6 +79,11 @@ fn run() -> Result<(), String> {
         item.set_indicator_style(&serde_json::json!(style));
     }
     item.set_indicator_style(&serde_json::json!(5));
+    // A style that changes the icon of a known layout, and nothing else.
+    item.set_layout(0);
+    for style in ["flags", "letters"] {
+        item.set_indicator_style(&serde_json::json!(style));
+    }
     for enabled in [false, false, true] {
         item.set_sound_enabled(enabled);
         item.set_notifications_enabled(enabled);
