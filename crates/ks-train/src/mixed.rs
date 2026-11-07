@@ -387,6 +387,9 @@ fn captured_row(item: &ContextEvidence, label: &str, fields: &[&'static str]) ->
 pub struct Typist {
     resources: Arc<Resources>,
     models: Vec<Arc<LanguageModel>>,
+    shared: ks_context::context_policy::SharedOrtho,
+    model_path: PathBuf,
+    capturing: bool,
     policy: Option<ContextPolicy>,
     spy: Arc<Mutex<Spy>>,
     folder: PathBuf,
@@ -398,6 +401,38 @@ pub struct Bench {
     resources: Arc<Resources>,
     models: Vec<Arc<LanguageModel>>,
     shared: ks_context::context_policy::SharedOrtho,
+}
+
+/// The context policy of a typist: the model of `model_path`, its answers watched by the spy when capturing.
+fn policy_of(resources: &Arc<Resources>, shared: &ks_context::context_policy::SharedOrtho, model_path: &Path, spy: &Arc<Mutex<Spy>>, capturing: bool) -> Result<ContextPolicy, String> {
+    let models_dir = resources.resource_dir().join("models");
+    let mut policy = ContextPolicy::with_ortho(resources, None, shared.clone(), None);
+    let load = || ContextModel::load_artifact(model_path, &models_dir).map_err(|error| format!("{}: {}", model_path.display(), error.name));
+    let mut model = load()?;
+    if capturing {
+        let inner = load()?;
+        let handle = spy.clone();
+        model.answer = Some(Arc::new(move |item: &ContextEvidence| -> ContextPrediction {
+            let result = inner.predict(item);
+            let mut state = handle.lock().unwrap_or_else(PoisonError::into_inner);
+            if state.edit {
+                if item.inside {
+                    let row = captured_row(item, "convert", &state.fields);
+                    state.rows.push(row);
+                }
+                return result;
+            }
+            let core = pystr::casefold(&item.original);
+            let hit = state.typed.iter().rev().find(|(text, group, _)| !core.is_empty() && text.contains(&core) && item.source_group == *group).map(|(_, group, intended)| group != intended);
+            if let Some(converted) = hit {
+                let row = captured_row(item, if converted { "convert" } else { "keep" }, &state.fields);
+                state.rows.push(row);
+            }
+            result
+        }));
+    }
+    policy.model = Some(model);
+    Ok(policy)
 }
 
 impl Bench {
@@ -419,37 +454,21 @@ impl Bench {
     }
 
     fn typist(&self, model_path: &Path, worker: usize, fields: Vec<&'static str>, capturing: bool) -> Result<Typist, String> {
-        let models_dir = self.resources.resource_dir().join("models");
-        let mut policy = ContextPolicy::with_ortho(&self.resources, None, self.shared.clone(), None);
-        let load = || ContextModel::load_artifact(model_path, &models_dir).map_err(|error| format!("{}: {}", model_path.display(), error.name));
         let spy = Arc::new(Mutex::new(Spy { fields, ..Spy::default() }));
-        let mut model = load()?;
-        if capturing {
-            let inner = load()?;
-            let handle = spy.clone();
-            model.answer = Some(Arc::new(move |item: &ContextEvidence| -> ContextPrediction {
-                let result = inner.predict(item);
-                let mut state = handle.lock().unwrap_or_else(PoisonError::into_inner);
-                if state.edit {
-                    if item.inside {
-                        let row = captured_row(item, "convert", &state.fields);
-                        state.rows.push(row);
-                    }
-                    return result;
-                }
-                let core = pystr::casefold(&item.original);
-                let hit = state.typed.iter().rev().find(|(text, group, _)| !core.is_empty() && text.contains(&core) && item.source_group == *group).map(|(_, group, intended)| group != intended);
-                if let Some(converted) = hit {
-                    let row = captured_row(item, if converted { "convert" } else { "keep" }, &state.fields);
-                    state.rows.push(row);
-                }
-                result
-            }));
-        }
-        policy.model = Some(model);
+        let policy = policy_of(&self.resources, &self.shared, model_path, &spy, capturing)?;
         let folder = std::env::temp_dir().join(format!("ks-mixed-{}-{worker}", std::process::id()));
         std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
-        Ok(Typist { resources: self.resources.clone(), models: self.models.clone(), policy: Some(policy), spy, folder, inverse: russian_keys() })
+        Ok(Typist {
+            resources: self.resources.clone(),
+            models: self.models.clone(),
+            shared: self.shared.clone(),
+            model_path: model_path.to_path_buf(),
+            capturing,
+            policy: Some(policy),
+            spy,
+            folder,
+            inverse: russian_keys(),
+        })
     }
 }
 
@@ -461,9 +480,12 @@ struct Session {
     settings: Arc<SettingsStore>,
 }
 
+/// What one message typed in one mode came to: what failed comes back as text, as `safe_evaluate` keeps its kind.
+type Typed<T> = Result<Option<T>, String>;
+
 impl Typist {
     /// `_session`: an engine on an editor; typing respects manual layout changes, editing does not.
-    fn session(&mut self, start: i64, editing: bool) -> Session {
+    fn session(&mut self, start: i64, editing: bool) -> Result<Session, String> {
         let settings = Arc::new(SettingsStore::new(Some(self.folder.join("settings.json"))));
         let mut changes = vec![
             ("detection.early_switch", json!(false)),
@@ -489,7 +511,7 @@ impl Typist {
         policy.stream = InputContext::with_clock(clock.read());
         policy.reader = None;
         let (intent_model, intent_model_status) = self.resources.intent_model();
-        let core = EngineCore::from_parts(EngineParts {
+        let made = EngineCore::from_parts(EngineParts {
             settings: settings.clone(),
             history: Arc::new(HistoryStore::new(Some(self.folder.join("history.jsonl")), 200)),
             backend: backend.clone(),
@@ -506,9 +528,15 @@ impl Typist {
             resource_dir: self.resources.resource_dir().to_path_buf(),
             clock: clock.read(),
             platform_reader: None,
-        })
-        .expect("an engine over the shared models");
-        Session { core, backend, keys: Keys { serial: EDITOR_REPLAY_FIRST_KEY_SERIAL }, clock, settings }
+        });
+        match made {
+            Ok(core) => Ok(Session { core, backend, keys: Keys { serial: EDITOR_REPLAY_FIRST_KEY_SERIAL }, clock, settings }),
+            Err(error) => {
+                // The engine that was not made took the policy with it: the next message is typed on a new one.
+                self.policy = Some(policy_of(&self.resources, &self.shared, &self.model_path, &self.spy, self.capturing)?);
+                Err(error.to_string())
+            }
+        }
     }
 
     fn finish(&mut self, session: Session) -> String {
@@ -517,22 +545,22 @@ impl Typist {
         session.backend.text().iter().collect()
     }
 
-    fn send(session: &mut Session, event: KeyEvent) {
+    fn send(session: &mut Session, event: KeyEvent) -> Result<(), String> {
         session.backend.type_key(&event);
-        session.core.handle_inner(Arc::new(event)).expect("a key the engine handles");
+        session.core.handle_inner(Arc::new(event)).map_err(|error| error.to_string())
     }
 
-    fn tap(session: &mut Session, event: KeyEvent) {
+    fn tap(session: &mut Session, event: KeyEvent) -> Result<(), String> {
         let released = KeyEvent { pressed: false, ..event.clone() };
-        Self::send(session, event);
-        Self::send(session, released);
+        Self::send(session, event)?;
+        Self::send(session, released)
     }
 
     /// `_type_message`: one message in one mode; the final text, or None if it cannot be typed.
-    fn type_message(&mut self, job: &Job) -> Option<String> {
+    fn type_message(&mut self, job: &Job) -> Typed<String> {
         let tokens = pystr::split(&job.text);
-        let (start, steps) = plan(&tokens, &job.mode, job.choice)?;
-        let mut session = self.session(start, false);
+        let Some((start, steps)) = plan(&tokens, &job.mode, job.choice) else { return Ok(None) };
+        let mut session = self.session(start, false)?;
         if matches!(job.mode.as_str(), SLIP_MODE | LETTER_SLIP_MODE | LETTER_SLIP_BACK_MODE) {
             // A layout the engine did not select is no switch by hand that protects the next word.
             session.settings.set("detection.respect_manual_layout", json!(false), false).expect("in memory");
@@ -547,7 +575,14 @@ impl Typist {
             session.backend.set_text(characters);
             session.backend.set_caret(caret);
         }
-        let mut failed = false;
+        let typed = self.type_steps(&mut session, &job.mode, steps);
+        // The engine pieces come back whatever happened to the message.
+        let text = self.finish(session);
+        Ok(typed?.then_some(text))
+    }
+
+    /// The tokens of a plan typed one after another: false when a token has no keys in its layout.
+    fn type_steps(&self, session: &mut Session, mode: &str, steps: Vec<Step>) -> Result<bool, String> {
         for (token, intended, selected, slipped) in steps {
             if let Some(selected) = selected.filter(|value| i64::from(session.backend.group()) != *value) {
                 session.backend.set_group(selected.to::<i32>());
@@ -555,12 +590,9 @@ impl Typist {
                     session.core.observe_group(selected, "hotkey");
                 }
             }
-            let Some(mut keys) = keys_for(&token, intended, &self.inverse) else {
-                failed = true;
-                break;
-            };
+            let Some(mut keys) = keys_for(&token, intended, &self.inverse) else { return Ok(false) };
             let mut meant = intended;
-            if job.mode == US_SIGNS_MODE && intended == 1 && token.chars().any(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4]))) {
+            if mode == US_SIGNS_MODE && intended == 1 && token.chars().any(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4]))) {
                 let signed: Vec<String> = token.chars().zip(keys.iter()).map(|(character, key)| if matches!(character, '.' | ',') { character.to_string() } else { key.clone() }).collect();
                 // The sign typed on the key of the English layout means that key's reading there: `2ю` is meant `2.`.
                 meant = if signed == keys { intended } else { 1 - intended };
@@ -573,42 +605,47 @@ impl Typist {
             for key in keys {
                 let group = session.backend.group();
                 let event = session.keys.key(&key, group);
-                Self::tap(&mut session, event);
+                Self::tap(session, event)?;
             }
         }
-        let text = self.finish(session);
-        (!failed).then_some(text)
+        Ok(true)
     }
 
     /// `_edit_message`: letters removed from inside a word are typed back after a click in the other layout.
-    fn edit_message(&mut self, job: &Job) -> Option<String> {
-        let (start, length, own) = edit_point(&job.text)?;
+    fn edit_message(&mut self, job: &Job) -> Typed<String> {
+        let Some((start, length, own)) = edit_point(&job.text) else { return Ok(None) };
         let letters: Vec<char> = job.text.chars().collect();
         let piece: String = letters[start..start + length].iter().collect();
-        let keys = keys_for(&piece, own, &self.inverse)?;
-        let mut session = self.session(1 - own, true);
+        let Some(keys) = keys_for(&piece, own, &self.inverse) else { return Ok(None) };
+        let mut session = self.session(1 - own, true)?;
         session.core.context_policy.reader = Some(Arc::new(Reader { backend: session.backend.clone(), after: true }));
         let prefix: Vec<char> = job.prefix.chars().collect();
         let caret = prefix.len() + start;
         session.backend.set_text(prefix.into_iter().chain(letters[..start].iter().copied()).chain(letters[start + length..].iter().copied()).collect());
         session.backend.set_caret(caret);
+        let edited = Self::type_back(&mut session, keys);
+        let text = self.finish(session);
+        edited.map(|()| Some(text))
+    }
+
+    /// A click into the gap, the letters typed into it and the pause after them.
+    fn type_back(session: &mut Session, keys: Vec<String>) -> Result<(), String> {
         let group = session.backend.group();
         let pointer = KeyEvent { pressed: true, keycode: 0, key_name: "Pointer".to_owned(), character: String::new(), characters: vec![String::new(), String::new()], group, state: 0, timestamp: 0, ..KeyEvent::default() };
         let released = KeyEvent { pressed: false, ..pointer.clone() };
-        session.core.handle_inner(Arc::new(pointer)).expect("a key the engine handles");
-        session.core.handle_inner(Arc::new(released)).expect("a key the engine handles");
+        session.core.handle_inner(Arc::new(pointer)).map_err(|error| error.to_string())?;
+        session.core.handle_inner(Arc::new(released)).map_err(|error| error.to_string())?;
         for key in keys {
             session.clock.advance(MIXED_EDIT_KEY_INTERVAL_SECONDS);
             let group = session.backend.group();
             let event = session.keys.key(&key, group);
-            Self::tap(&mut session, event);
+            Self::tap(session, event)?;
         }
         session.clock.advance(MIXED_EDIT_PAUSE_SECONDS);
-        session.core.maybe_correct_after_pause(None).expect("a timer of the bench");
-        Some(self.finish(session))
+        session.core.maybe_correct_after_pause(None).map_err(|error| error.to_string())
     }
 
-    /// `_capture`: the questions of one job.
+    /// `_capture`: the questions of one job. A message the engine fails on stops the capture, as it stops the Python's.
     fn capture(&mut self, job: &Job) -> Vec<Value> {
         {
             let mut state = self.spy.lock().unwrap_or_else(PoisonError::into_inner);
@@ -616,7 +653,7 @@ impl Typist {
             state.rows.clear();
             state.edit = job.mode == EDIT_MODE;
         }
-        let typed = if job.mode == EDIT_MODE { self.edit_message(job).map(|_| ()) } else { self.type_message(job).map(|_| ()) };
+        let typed = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }.expect("the engine types the message");
         let mut state = self.spy.lock().unwrap_or_else(PoisonError::into_inner);
         if job.mode != EDIT_MODE && typed.is_none() {
             state.rows.clear();
@@ -624,13 +661,15 @@ impl Typist {
         std::mem::take(&mut state.rows)
     }
 
-    /// `_evaluate`: the final text against the intended one, or None if it cannot be typed.
-    pub fn evaluate(&mut self, job: &Job) -> Option<(String, String, bool)> {
+    /// `_evaluate`: the final text against the intended one, None if it cannot be typed, or what the engine failed on.
+    pub fn evaluate(&mut self, job: &Job) -> Typed<(String, String, bool)> {
         self.spy.lock().unwrap_or_else(PoisonError::into_inner).typed.clear();
         let got = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }?;
-        let expected = format!("{}{}{}", job.prefix, job.text, if job.mode == EDIT_MODE { "" } else { " " });
-        let same = got == expected;
-        Some((expected, got, same))
+        Ok(got.map(|got| {
+            let expected = format!("{}{}{}", job.prefix, job.text, if job.mode == EDIT_MODE { "" } else { " " });
+            let same = got == expected;
+            (expected, got, same)
+        }))
     }
 }
 
@@ -921,7 +960,8 @@ pub fn evaluate(resource_dir: &Path, messages: &Path, recipe: &Value, code: Opti
     let jobs = jobs_for(messages, recipe, code)?;
     let bench = Bench::new(resource_dir)?;
     let make = |worker: usize| bench.typist(model, worker, Vec::new(), false);
-    let rows = run_jobs(&jobs, workers, &make, &|typist: &mut Typist, job: &Job| typist.evaluate(job))?;
+    // A message the engine fails on stops the run, as it stops the Python's.
+    let rows = run_jobs(&jobs, workers, &make, &|typist: &mut Typist, job: &Job| typist.evaluate(job).expect("the engine types the message"))?;
     let mut summary: BTreeMap<String, (i64, i64)> = BTreeMap::new();
     let mut listed = Vec::new();
     for (job, row) in jobs.iter().zip(rows) {
@@ -1003,8 +1043,16 @@ fn net(table: &Table) -> i64 {
     RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>() - corruptions(table)
 }
 
-/// A pair's result per message and mode: typed right, wrong, or the kind of what failed.
-type Rows = Vec<(usize, String, Option<bool>)>;
+/// `safe_evaluate`: a message in a mode typed right or wrong, not typed at all, or failed on by the engine.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Skipped,
+    Typed(bool),
+    Failed,
+}
+
+/// A pair's result per message and mode.
+type Rows = Vec<(usize, String, Outcome)>;
 
 fn typed_rows(bench: &Bench, model: &Path, texts: &[String], workers: usize) -> Result<Rows, String> {
     let mut jobs = Vec::new();
@@ -1015,18 +1063,27 @@ fn typed_rows(bench: &Bench, model: &Path, texts: &[String], workers: usize) -> 
         }
     }
     let make = |worker: usize| bench.typist(model, worker, Vec::new(), false);
-    let results = run_jobs(&jobs, workers, &make, &|typist: &mut Typist, job: &Job| typist.evaluate(job).map(|entry| entry.2))?;
+    let results = run_jobs(&jobs, workers, &make, &|typist: &mut Typist, job: &Job| match typist.evaluate(job) {
+        Ok(Some(entry)) => Outcome::Typed(entry.2),
+        Ok(None) => Outcome::Skipped,
+        // What went wrong counts by its kind alone, never with the text it held.
+        Err(_) => Outcome::Failed,
+    })?;
     Ok(jobs.iter().zip(results).map(|(job, result)| (job.index, job.mode.clone(), result)).collect())
 }
 
 fn counts(rows: &Rows, chosen: &[Member]) -> Table {
     let mut result = Table::new();
     for (index, mode, outcome) in rows {
-        let Some(right) = outcome else { continue };
+        // One the mode does not apply to counts nowhere; one a pair could not type counts as an error.
+        if *outcome == Outcome::Skipped {
+            continue;
+        }
         for name in [mode.clone(), format!("{mode}:{}", chosen[*index].mix)] {
             let entry = result.entry(name).or_insert((0, 0, 0));
             entry.0 += 1;
-            entry.1 += i64::from(*right);
+            entry.1 += i64::from(*outcome == Outcome::Typed(true));
+            entry.2 += i64::from(*outcome == Outcome::Failed);
         }
     }
     result
@@ -1067,18 +1124,20 @@ fn typed_floors(request: &DevchatRequest<'_>, files: &[(PathBuf, PathBuf, String
         // A mode no chosen message is typed in has no count to compare: the floors of the Python raise a KeyError.
         return Err("KeyError");
     }
-    let theirs: HashMap<(usize, &str), Option<bool>> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
+    let theirs: HashMap<(usize, &str), Outcome> = released_rows.iter().map(|(index, mode, outcome)| ((*index, mode.as_str()), *outcome)).collect();
     let mut paired: BTreeMap<&str, (i64, i64)> = TYPING_MODES.iter().map(|mode| (*mode, (0, 0))).collect();
+    let right = Outcome::Typed(true);
     for (index, mode, outcome) in &candidate_rows {
         let other = theirs[&(*index, mode.as_str())];
         let entry = paired.get_mut(mode.as_str()).expect("a mode");
-        entry.0 += i64::from(*outcome == Some(true) && other != Some(true));
-        entry.1 += i64::from(*outcome != Some(true) && other == Some(true));
+        entry.0 += i64::from(*outcome == right && other != right);
+        entry.1 += i64::from(*outcome != right && other == right);
     }
+    let errors: i64 = tables.iter().flat_map(|table| TYPING_MODES.iter().map(|mode| table[*mode].2)).sum();
     let (candidate_table, released_table, baseline_table) = (&tables[0], &tables[1], &tables[2]);
     let restored = |table: &Table| RESTORING_MODES.iter().map(|mode| table[*mode].1).sum::<i64>();
     let floors = json!({
-        "every_message_typed": true,
+        "every_message_typed": errors == 0,
         "f1_better_than_baseline": net(candidate_table) >= net(baseline_table) + DEVCHAT_MIN_NET_MARGIN && corruptions(candidate_table) <= corruptions(baseline_table),
         "f3_not_worse_than_released": RESTORING_MODES.iter().all(|mode| loss_chance(paired[mode].1, paired[mode].0) >= DEVCHAT_SIGNIFICANCE) && restored(candidate_table) >= restored(released_table) && corruptions(candidate_table) <= corruptions(released_table),
     });
@@ -1527,6 +1586,24 @@ mod tests {
         let _ = answer(&asked("ghbdtn", "привет", false));
         let _ = answer(&asked("ghbdtn", "привет", true));
         assert_eq!(typist.spy.lock().expect("the spy").rows.len(), 1);
+        let _ = std::fs::remove_dir_all(&typist.folder);
+    }
+
+    #[test]
+    fn a_message_the_engine_fails_on_is_an_error_and_the_next_one_is_typed() {
+        let root = repository();
+        let bench = Bench::new(&root.join("resources")).expect("a bench");
+        let mut typist = bench.typist(&root.join("resources/models/context_policy_v1.json"), 7, Vec::new(), false).expect("a typist");
+        let job = |text: &str, mode: &str| Job { index: 0, text: text.to_owned(), mode: mode.to_owned(), choice: 0, prefix: String::new() };
+        // No word to cut letters out of, and letters no key of the Russian layout types: nothing is edited.
+        assert_eq!(typist.evaluate(&job("да нет", EDIT_MODE)), Ok(None));
+        assert_eq!(typist.evaluate(&job("кіііііі", EDIT_MODE)), Ok(None));
+        // A learning file the engine refuses to read: no engine is made, to type or to edit.
+        std::fs::write(typist.folder.join("learning.json"), r#"{"rules": {"²:слово": {}}}"#).expect("a file");
+        assert!(typist.evaluate(&job("привет мир", "start_wrong")).is_err());
+        assert!(typist.evaluate(&job("привет большой мир", EDIT_MODE)).is_err());
+        std::fs::remove_file(typist.folder.join("learning.json")).expect("the file goes");
+        assert!(typist.evaluate(&job("привет мир", "start_wrong")).is_ok_and(|row| row.is_some()));
         let _ = std::fs::remove_dir_all(&typist.folder);
     }
 }
