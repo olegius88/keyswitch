@@ -21,6 +21,7 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::{log_directory, log_path, log_status, rotation_summary};
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
+use ks_ui::windows_ui_model::EARLY_SWITCH_TITLE;
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
@@ -1345,7 +1346,7 @@ impl Builder<'_> {
         ));
         behavior.add(&self.switch_row(
             "detection.early_switch",
-            "Ранняя смена раскладки",
+            EARLY_SWITCH_TITLE,
             "Менять раскладку уже по первым буквам, не дожидаясь конца слова. Включено по умолчанию: пара моделей context-v3 + prefix-v2 прошла запечатанную проверку в этом режиме без порчи правильно набранного текста. В assist с учётом контекста — обученная модель префиксов; без контекста или в off/shadow — словарный алгоритм.",
         ));
         behavior.add(&self.spin_row(

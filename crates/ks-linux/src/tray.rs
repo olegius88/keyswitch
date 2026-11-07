@@ -8,6 +8,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ks_config::indicator::{alternate_layout_action_label, alternate_layout_group, layout_icon_name, layout_label, normalize_indicator_style};
+use ks_ui::tray_model::{
+    ABOUT_LABEL, AUTO_SWITCH_LABEL, EXCLUSIONS_LABEL, HISTORY_LABEL, NOTIFICATIONS_LABEL, QUIT_LABEL, SETTINGS_LABEL, SOUND_LABEL,
+};
 use serde_json::Value as Json;
 use zbus::blocking::Connection;
 use zbus::blocking::connection::Builder;
@@ -147,14 +150,14 @@ impl MenuState {
         let (label, icon) = match item {
             MENU_LAYOUT => (layout_text(self.group), self.layout_icon.as_str()),
             MENU_SWITCH_LAYOUT => (alternate_layout_action_label(self.group), "input-keyboard-symbolic"),
-            MENU_SETTINGS => ("Настройки KeySwitch…".to_owned(), "preferences-system-symbolic"),
-            MENU_AUTOSWITCH => ("Автопереключение".to_owned(), "input-keyboard-symbolic"),
-            MENU_SOUND => ("Звуковые эффекты".to_owned(), "audio-volume-high-symbolic"),
-            MENU_NOTIFICATIONS => ("Уведомления об исправлениях".to_owned(), "preferences-system-notifications-symbolic"),
-            MENU_HISTORY => ("История исправлений…".to_owned(), "document-open-recent-symbolic"),
-            MENU_EXCEPTIONS => ("Программы-исключения…".to_owned(), "application-x-executable-symbolic"),
-            MENU_ABOUT => ("О программе…".to_owned(), "help-about-symbolic"),
-            _ => ("Выход".to_owned(), "application-exit-symbolic"),
+            MENU_SETTINGS => (SETTINGS_LABEL.to_owned(), "preferences-system-symbolic"),
+            MENU_AUTOSWITCH => (AUTO_SWITCH_LABEL.to_owned(), "input-keyboard-symbolic"),
+            MENU_SOUND => (SOUND_LABEL.to_owned(), "audio-volume-high-symbolic"),
+            MENU_NOTIFICATIONS => (NOTIFICATIONS_LABEL.to_owned(), "preferences-system-notifications-symbolic"),
+            MENU_HISTORY => (HISTORY_LABEL.to_owned(), "document-open-recent-symbolic"),
+            MENU_EXCEPTIONS => (EXCLUSIONS_LABEL.to_owned(), "application-x-executable-symbolic"),
+            MENU_ABOUT => (ABOUT_LABEL.to_owned(), "help-about-symbolic"),
+            _ => (QUIT_LABEL.to_owned(), "application-exit-symbolic"),
         };
         let mut properties = vec![("label".to_owned(), Property::Text(label)), ("icon-name".to_owned(), text(icon))];
         if item == MENU_LAYOUT {

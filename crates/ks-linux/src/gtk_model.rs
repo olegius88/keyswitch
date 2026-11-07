@@ -5,6 +5,7 @@ use ks_cast::To as _;
 use ks_backend::BackendProbe;
 use ks_engine::EngineSnapshot;
 use ks_text::russian_text::{NounForms, quantity};
+use ks_ui::windows_ui_model::{AUTOCORRECTION_PAGE_TITLE, HOTKEYS_PAGE_TITLE, SYSTEM_PAGE_TITLE};
 
 pub const GTK_WINDOW_DEFAULT_WIDTH_PIXELS: i32 = 1040;
 pub const GTK_WINDOW_DEFAULT_HEIGHT_PIXELS: i32 = 720;
@@ -55,11 +56,11 @@ pub const INDICATOR_STYLES: [&str; 2] = ["letters", "flags"];
 /// `MainWindow.NAVIGATION`: the page name, its title in the sidebar and its icon.
 pub const NAVIGATION: [(&str, &str, &str); 9] = [
     ("dashboard", "Обзор", "view-grid-symbolic"),
-    ("automation", "Автокоррекция", "preferences-system-symbolic"),
+    ("automation", AUTOCORRECTION_PAGE_TITLE, "preferences-system-symbolic"),
     ("languages", "Языки", "input-keyboard-symbolic"),
-    ("hotkeys", "Горячие клавиши", "preferences-desktop-keyboard-shortcuts-symbolic"),
+    ("hotkeys", HOTKEYS_PAGE_TITLE, "preferences-desktop-keyboard-shortcuts-symbolic"),
     ("exceptions", "Исключения", "action-unavailable-symbolic"),
-    ("system", "Внешний вид и система", "preferences-desktop-theme-symbolic"),
+    ("system", SYSTEM_PAGE_TITLE, "preferences-desktop-theme-symbolic"),
     ("updates", "Обновления", "software-update-available-symbolic"),
     ("history", "История", "document-open-recent-symbolic"),
     ("diagnostics", "О программе", "help-about-symbolic"),
