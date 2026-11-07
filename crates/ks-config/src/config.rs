@@ -431,7 +431,7 @@ mod tests {
         for payload in ["{broken", "[]"] {
             std::fs::write(&path, payload).unwrap();
             let store = SettingsStore::new(Some(path.clone()));
-            assert_eq!(store.get("schema_version"), Some(json!(8)));
+            assert_eq!(store.get("schema_version"), Some(default_settings(None)["schema_version"].clone()));
             let aside = store.unreadable().expect("moved aside");
             assert_eq!(std::fs::read_to_string(aside).unwrap(), payload);
             assert!(!path.exists());
@@ -460,7 +460,8 @@ mod tests {
         let store = SettingsStore::new(Some(path.clone()));
         assert_eq!(store.get("detection.early_switch"), Some(json!(true)));
         assert_eq!(store.get("detection.pause_delay_seconds"), Some(json!(0.7)));
-        assert_eq!(store.get("schema_version"), Some(json!(8)));
+        // Schema 8, or 9 on macOS (MACOS_CONVERT_HOTKEY_SCHEMA_VERSION).
+        assert_eq!(store.get("schema_version"), Some(default_settings(None)["schema_version"].clone()));
         let new = r#"{"schema_version": 8, "detection": {"early_switch": false, "pause_delay_seconds": 1.5}}"#;
         std::fs::write(&path, new).unwrap();
         let store = SettingsStore::new(Some(path));

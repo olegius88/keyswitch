@@ -157,7 +157,7 @@ mod tests {
         let settings = store("defaults");
         let snapshot = settings_snapshot(&settings);
         assert_eq!(snapshot["format"], "overrides-v1");
-        assert_eq!(snapshot["defaults_schema"], 8);
+        assert_eq!(snapshot["defaults_schema"], crate::config::default_settings(None)["schema_version"]);
         assert_eq!(snapshot["overrides"], json!({}));
         assert_eq!(snapshot["defaults_sha256"].as_str().unwrap().len(), 64);
     }

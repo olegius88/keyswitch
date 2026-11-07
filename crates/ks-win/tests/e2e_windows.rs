@@ -480,6 +480,11 @@ mod scenario {
     /// The layout switch key (`detection.layout_switch_key` set to Left Shift): a lone tap switches the layout of the
     /// window and back; Right Shift, and Left Shift held over a letter, switch nothing.
     fn layout_key(editor: &Editor) -> Result<(), String> {
+        // The Enter of the phase before left a second, empty line, which Home and Shift+End do not select: one Backspace
+        // takes it away first.
+        editor.activate();
+        editor.virtual_key(VK_BACK)?;
+        editor.pump(PHASE_SETTLE);
         editor.prepare(0)?;
         let shift = |virtual_key: u32, scan_code: u32, pressed: bool| NativeInput { virtual_key, scan_code, ..user(pressed) };
         for wanted in [1, 0] {
