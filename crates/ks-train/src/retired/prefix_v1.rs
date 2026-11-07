@@ -2,7 +2,7 @@
 //! its own schema and receipt; this keeps the old evidence checked, and a replay repeats the fit and the test on the
 //! frozen rows and compares candidate, seal and report byte for byte.
 use ks_cast::To as _;
-use super::read_object;
+use super::{read_object, unchanged};
 use crate::artifact::canonical;
 use crate::corpus::{checksum, read_json};
 use crate::kernel::{self, Packed};
@@ -330,15 +330,196 @@ pub fn replay(root: &Path) -> Result<Value, String> {
     let seal = read_object(&directory.join("seal.json"))?;
     let (candidate, sealed) = train(root, seal.get("provenance").unwrap_or(&Value::Null))?;
     let read = |name: &str| std::fs::read(directory.join(name)).map_err(|error| error.to_string());
-    if candidate != read("candidate.json")? {
-        return Err("prefix-v1 candidate is not reproducible".to_owned());
-    }
-    if sealed != read("seal.json")? {
-        return Err("prefix-v1 seal is not reproducible".to_owned());
-    }
-    if evaluate(root)? != read("report.json")? {
-        return Err("prefix-v1 report is not reproducible".to_owned());
-    }
+    unchanged(&candidate, &read("candidate.json")?, "prefix-v1 candidate is not reproducible")?;
+    unchanged(&sealed, &read("seal.json")?, "prefix-v1 seal is not reproducible")?;
+    unchanged(&evaluate(root)?, &read("report.json")?, "prefix-v1 report is not reproducible")?;
     result["frozen_numeric_regression"] = json!(true);
     Ok(result)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::super::testing::{Tree, refused, repository};
+    use super::*;
+
+    fn passing() -> (Value, Value) {
+        let counts = json!({"sequences": 100, "desired": 50, "converted": 40, "converted_before_end": 30, "false": 2, "technical_false": 1, "legacy_false": 2});
+        let gates = json!({"minimum_test_sequences": 10, "maximum_false_sequence_rate": 0.1, "maximum_technical_false_sequences": 1, "minimum_wrong_layout_sequence_recall": 0.5, "maximum_false_sequences_over_legacy": 1});
+        (json!({"profiles": {"portable": counts, "reference_hunspell": counts}}), gates)
+    }
+
+    #[test]
+    fn a_test_is_accepted_when_both_profiles_hold_every_gate() {
+        let (result, gates) = passing();
+        assert!(accepted(&result, &gates));
+        assert!(!accepted(&json!({}), &gates));
+        assert!(!accepted(&json!({"profiles": {"portable": result["profiles"]["portable"]}}), &gates));
+        let with_count = |name: &str, value: Value| {
+            let mut changed = result.clone();
+            changed["profiles"]["reference_hunspell"][name] = value;
+            accepted(&changed, &gates)
+        };
+        assert!(!with_count("legacy_false", json!(-1)));
+        assert!(!with_count("legacy_false", Value::Null));
+        for (name, value) in [("converted_before_end", 41), ("converted", 51), ("desired", 101), ("technical_false", 3), ("false", 60), ("legacy_false", 0)] {
+            assert!(!with_count(name, json!(value)), "{name}");
+        }
+        let mut nothing_wanted = result.clone();
+        for name in ["desired", "converted", "converted_before_end"] {
+            nothing_wanted["profiles"]["portable"][name] = json!(0);
+        }
+        assert!(!accepted(&nothing_wanted, &gates));
+        for (name, value) in [("minimum_test_sequences", 1000.0), ("maximum_false_sequence_rate", 0.01), ("maximum_technical_false_sequences", 0.0), ("minimum_wrong_layout_sequence_recall", 0.7)] {
+            let mut stricter = gates.clone();
+            stricter[name] = json!(value);
+            assert!(!accepted(&result, &stricter), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_split_is_read_only_as_its_receipt_pins_it() {
+        let tree = Tree::new("prefix-rows");
+        tree.edit("model/prefix_v1/corpus.json", |receipt| receipt["sha256"]["test"] = json!("0"));
+        refused(each_row(&tree.root, "test", |_| Ok(())), "prefix corpus checksum mismatch");
+    }
+
+    const FILES: [&str; 6] = ["corpus.json", "seal.json", "report.json", "engine-report.json", "config.json", "candidate.json"];
+
+    /// The tree's evidence back to the repository's, then changed by `edit`.
+    fn evidence(tree: &Tree, edit: impl FnOnce(&Tree)) -> Result<Value, String> {
+        for name in FILES {
+            tree.write(&format!("{DIRECTORY}/{name}"), &std::fs::read(repository().join(DIRECTORY).join(name)).expect("a file"));
+        }
+        edit(tree);
+        verify(&tree.root)
+    }
+
+    fn edit(tree: &Tree, name: &str, change: impl FnOnce(&mut Value)) {
+        tree.edit(&format!("{DIRECTORY}/{name}"), change);
+    }
+
+    /// Every variant of every engine track changed alike.
+    fn engine(tree: &Tree, change: impl Fn(&mut Map<String, Value>, &str)) {
+        edit(tree, "engine-report.json", |report| {
+            for variants in report["results"].as_object_mut().expect("tracks").values_mut() {
+                for (name, counts) in variants.as_object_mut().expect("variants") {
+                    change(counts.as_object_mut().expect("counts"), name);
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn the_receipt_the_seal_and_the_report_describe_one_candidate() {
+        let tree = Tree::new("prefix-verify");
+        assert_eq!(evidence(&tree, |_| ()).expect("the kept evidence")["accepted"], json!(true));
+        refused(evidence(&tree, |tree| edit(tree, "corpus.json", |receipt| receipt["family_overlap"] = json!(1))), "prefix corpus provenance changed");
+        refused(evidence(&tree, |tree| edit(tree, "corpus.json", |receipt| receipt["profiles"] = json!(["portable"]))), "prefix corpus provenance changed");
+        refused(evidence(&tree, |tree| edit(tree, "corpus.json", |receipt| receipt["sha256"]["train"] = json!("0"))), "prefix frozen examples changed");
+        let seal_changed = "prefix seal changed";
+        refused(evidence(&tree, |tree| edit(tree, "seal.json", |seal| drop(seal.as_object_mut().expect("a seal").remove("provenance")))), "a seal without provenance");
+        refused(evidence(&tree, |tree| edit(tree, "seal.json", |seal| seal["provenance"]["corpus"] = json!("0"))), seal_changed);
+        refused(evidence(&tree, |tree| edit(tree, "seal.json", |seal| seal["provenance"]["optimizer"] = json!("0"))), seal_changed);
+        refused(evidence(&tree, |tree| edit(tree, "config.json", |config| config["epochs"] = json!(0))), seal_changed);
+        refused(evidence(&tree, |tree| edit(tree, "seal.json", |seal| seal["candidate_sha256"] = json!("0"))), seal_changed);
+        let moved_threshold = |tree: &Tree| {
+            edit(tree, "candidate.json", |candidate| candidate["conversion_threshold"] = json!(0.5));
+            let digest = checksum(&tree.path(&format!("{DIRECTORY}/candidate.json"))).expect("a digest");
+            edit(tree, "seal.json", |seal| seal["candidate_sha256"] = json!(digest));
+        };
+        refused(evidence(&tree, moved_threshold), "prefix threshold changed after calibration");
+        let identity = "prefix test identity changed";
+        refused(evidence(&tree, |tree| edit(tree, "report.json", |report| report["candidate_sha256"] = json!("0"))), identity);
+        refused(evidence(&tree, |tree| edit(tree, "report.json", |report| report["seal_sha256"] = json!("0"))), identity);
+        refused(evidence(&tree, |tree| edit(tree, "report.json", |report| report["test"] = json!(1))), "prefix test missing");
+        let gates = "prefix model fails sequence quality gates";
+        refused(evidence(&tree, |tree| edit(tree, "report.json", |report| report["accepted"] = json!(false))), gates);
+        refused(evidence(&tree, |tree| edit(tree, "report.json", |report| report["test"]["profiles"] = json!({}))), gates);
+    }
+
+    #[test]
+    fn the_engine_evidence_holds_together_and_beats_the_shipped_model() {
+        let tree = Tree::new("prefix-engine");
+        let missing = "prefix engine quality evidence missing";
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["results"] = json!([]))), missing);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["passed"] = json!(false))), missing);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["split"] = json!("development"))), missing);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| drop(report["results"].as_object_mut().expect("tracks").remove("portable/field")))), missing);
+        let incomplete = "prefix engine selection incomplete";
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["sequence_ids"] = Value::Null)), incomplete);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["sequence_ids"].as_array_mut().expect("ids").truncate(10))), incomplete);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["sequence_ids"][1] = report["sequence_ids"][0].clone())), incomplete);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["results"]["portable/field"] = json!({"candidate": {}}))), "prefix engine baseline missing");
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["results"]["portable/field"] = json!(1))), "prefix engine baseline missing");
+        for (name, value) in [("sequences", json!(-1)), ("injections", Value::Null), ("length_mismatches", Value::Null)] {
+            refused(evidence(&tree, |tree| engine(tree, |counts, _| drop(counts.insert(name.to_owned(), value.clone())))), "invalid prefix engine counts");
+        }
+        for (name, value) in [("sequences", 287), ("desired", 0), ("desired", 289), ("early_restored", 129), ("restored", 129), ("exact", 0)] {
+            refused(evidence(&tree, |tree| engine(tree, |counts, _| drop(counts.insert(name.to_owned(), json!(value))))), "inconsistent prefix engine counts");
+        }
+        let failed = "prefix engine quality gates failed";
+        let candidate = |changes: &'static [(&'static str, i64)]| {
+            move |tree: &Tree| {
+                engine(tree, |counts, variant| {
+                    if variant == "candidate" {
+                        for (name, value) in changes {
+                            counts.insert((*name).to_owned(), json!(value));
+                        }
+                    }
+                });
+            }
+        };
+        refused(evidence(&tree, candidate(&[("length_mismatches", 1)])), failed);
+        refused(evidence(&tree, candidate(&[("changed_correct", 21), ("exact", 267)])), failed);
+        refused(evidence(&tree, candidate(&[("restored", 125), ("exact", 265)])), failed);
+        refused(evidence(&tree, candidate(&[("early_restored", 80)])), failed);
+    }
+
+    #[test]
+    fn the_runtime_history_is_the_one_the_engine_report_names() {
+        let tree = Tree::new("prefix-history");
+        assert!(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"] = Value::Null)).is_ok());
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"] = json!({}))), "invalid prefix runtime history");
+        let changed = "prefix runtime history changed";
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"]["previous_report"] = json!("model/elsewhere.json"))), changed);
+        refused(evidence(&tree, |tree| edit(tree, "engine-report.json", |report| report["runtime_regression"]["previous_sha256"] = json!("0"))), changed);
+        let other_selection = |tree: &Tree| {
+            let previous = format!("{DIRECTORY}/engine-history/other.json");
+            tree.write(&previous, br#"{"sequence_ids": []}"#);
+            let digest = checksum(&tree.path(&previous)).expect("a digest");
+            edit(tree, "engine-report.json", |report| report["runtime_regression"] = json!({"previous_report": previous, "previous_sha256": digest}));
+        };
+        refused(evidence(&tree, other_selection), changed);
+    }
+
+    /// A frozen split of these rows in the tree, pinned by the tree's receipt.
+    fn split_of(tree: &Tree, split: &str, rows: &[Value]) {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        for row in rows {
+            std::io::Write::write_all(&mut encoder, format!("{row}\n").as_bytes()).expect("in memory");
+        }
+        let path = format!("{DIRECTORY}/{split}.jsonl.gz");
+        tree.write(&path, &encoder.finish().expect("in memory"));
+        let digest = checksum(&tree.path(&path)).expect("a digest");
+        edit(tree, "corpus.json", |receipt| receipt["sha256"][split] = json!(digest));
+    }
+
+    #[test]
+    fn the_epoch_and_the_threshold_kept_are_the_first_the_held_out_rows_allow() {
+        let tree = Tree::new("prefix-train");
+        let row = |sequence: i64, feature: &str, label: u64, desired: bool| {
+            json!({"profile": "portable", "sequence": sequence, "text": "ghbdtn", "category": "wrong", "desired": desired, "length": 6, "features": {feature: 100.0}, "label": label, "legacy_convert": false})
+        };
+        let trained: Vec<Value> = (0..8).map(|sequence| if sequence % 2 == 0 { row(sequence, "a", 1, true) } else { row(sequence, "b", 0, false) }).collect();
+        split_of(&tree, "train", &trained);
+        // Development rows answer the other way: the more the fit learns, the worse it does on them.
+        split_of(&tree, "development", &(0..4).map(|sequence| row(sequence, "a", 0, false)).collect::<Vec<Value>>());
+        // Calibration rows that the learned weights convert, against what they want.
+        split_of(&tree, "calibration", &(0..4).map(|sequence| row(sequence, "a", 0, false)).collect::<Vec<Value>>());
+        let (_, seal) = train(&tree.root, &Value::Null).expect("a fit");
+        let seal: Value = serde_json::from_slice(&seal).expect("json");
+        assert_eq!(seal["epoch"], json!(1), "{seal}");
+        assert!(seal["threshold"].as_f64().expect("a threshold") > 0.985, "{seal}");
+    }
 }

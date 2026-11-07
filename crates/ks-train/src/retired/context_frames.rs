@@ -335,3 +335,81 @@ pub fn all_frames(root: &Path) -> Result<Vec<Frame>, String> {
     }
     Ok(frames)
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::super::testing::{Tree, refused, repository};
+    use super::*;
+    use crate::ortho_inputs::Phrase;
+    use serde_json::json;
+
+    fn chars(text: &str) -> Vec<char> {
+        text.chars().collect()
+    }
+
+    #[test]
+    fn a_token_may_end_the_text_and_be_joined_by_an_apostrophe_or_a_hyphen() {
+        assert_eq!(tokens(&chars("say hello")), [(0, 3), (4, 9)]);
+        assert_eq!(tokens(&chars("it's well-known")), [(0, 4), (5, 15)]);
+        assert_eq!(tokens(&chars("a- b")), [(0, 1), (3, 4)]);
+    }
+
+    fn frames_of(locale: &str, text: &str) -> Vec<Frame> {
+        let phrase = Phrase { identifier: 7, locale: locale.to_owned(), text: text.to_owned() };
+        let assigned: Vec<Assigned<'_>> = ["test", "reserve"].iter().map(|split| Assigned { phrase: &phrase, group: "tatoeba:7".to_owned(), split }).collect();
+        build(&assigned).expect("frames")
+    }
+
+    #[test]
+    fn a_phrase_without_a_word_of_its_layout_gives_no_frame() {
+        assert!(frames_of("eng", "1984, 2001.").is_empty());
+        assert!(frames_of("eng", "мир").is_empty());
+    }
+
+    #[test]
+    fn a_word_whose_wrong_layout_form_does_not_read_back_is_no_frame() {
+        // The apostrophe is no key of the Russian layout: typed there it stays, and read back it is the key of «э».
+        assert!(frames_of("rus", "д'артаньян").is_empty());
+        let frames = frames_of("rus", "привет");
+        assert!(frames.iter().any(|frame| frame.original == "привет" && frame.action == "keep"), "{frames:?}");
+    }
+
+    fn curriculum(tree: &Tree, value: &Value) -> Result<Vec<Frame>, String> {
+        tree.write("safety.json", &serde_json::to_vec(value).expect("json"));
+        technical_frames(&tree.path("safety.json"))
+    }
+
+    #[test]
+    fn a_safety_curriculum_is_of_schema_one_with_a_list_of_tokens() {
+        let tree = Tree::new("safety");
+        refused(curriculum(&tree, &json!({"schema_version": 2, "technical": []})), "invalid safety curriculum");
+        refused(curriculum(&tree, &json!({"technical": []})), "invalid safety curriculum");
+        refused(curriculum(&tree, &json!({"schema_version": 1})), "invalid technical tokens");
+        refused(curriculum(&tree, &json!({"schema_version": 1, "technical": [1]})), "invalid technical tokens");
+        assert!(curriculum(&tree, &json!({"schema_version": 1, "technical": []})).expect("no tokens").is_empty());
+    }
+
+    #[test]
+    fn authored_tokens_fall_in_every_split_by_their_family() {
+        let tree = Tree::new("safety-splits");
+        let tokens: Vec<String> = (0..200).map(|index| format!("tok{index}")).collect();
+        let frames = curriculum(&tree, &json!({"schema_version": 1, "technical": tokens})).expect("frames");
+        let splits: BTreeSet<&str> = frames.iter().map(|frame| frame.split).collect();
+        assert_eq!(splits, ["calibration", "development", "lexical_test", "test", "train"].into_iter().collect());
+        let per_token = TECHNICAL_BEFORE.len() * TECHNICAL_APPLICATIONS.len() * TECHNICAL_TRIGGERS.len();
+        assert_eq!(frames.len() % per_token, 0);
+        assert!(frames.len() < tokens.len() * per_token, "a lexical family outside test is left out");
+    }
+
+    #[test]
+    fn a_token_authored_twice_gives_two_frames_of_one_name_and_is_refused() {
+        let tree = Tree::new("safety-twice");
+        let path = "model/context_v2/safety.json";
+        let mut safety: Value = serde_json::from_slice(&std::fs::read(repository().join(path)).expect("the curriculum")).expect("json");
+        let twice: Vec<Value> = safety["technical"].as_array().expect("tokens").iter().flat_map(|token| [token.clone(), token.clone()]).collect();
+        safety["technical"] = json!(twice);
+        tree.write(path, &serde_json::to_vec(&safety).expect("json"));
+        refused(all_frames(&tree.root), "duplicate frame IDs");
+    }
+}
