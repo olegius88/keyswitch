@@ -44,7 +44,6 @@ const FITTING: [&str; 3] = ["train", "development", "calibration"];
 const LOCALES: [&str; 2] = ["en_US", "ru_RU"];
 const CONFIG: &str = "model/boundary_v2/config.json";
 const SOURCE: &str = "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz";
-const SOURCE_SHA256: &str = "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793";
 const TEST_SCOPE: &str = "First sealed synthetic segmentation evaluation of this candidate, on supervision families it was not fitted, selected or calibrated on; subsequent replays are regression only.";
 
 fn digest(text: &str) -> String {
@@ -92,27 +91,10 @@ pub fn canonical_tokens(text: &str) -> Vec<String> {
     tokens
 }
 
-/// `load_source`: the phrases of the frozen CC0 source, by identifier.
+/// `load_source`: the phrases of the frozen CC0 source, by identifier: the file, its pin and its rows read as the
+/// orthotactic inputs read them.
 fn load_source(root: &Path) -> Result<Vec<String>, String> {
-    let path = root.join(SOURCE);
-    if checksum(&path)? != SOURCE_SHA256 {
-        return Err("frozen CC0 source checksum mismatch".to_owned());
-    }
-    let mut raw = String::new();
-    MultiGzDecoder::new(std::fs::File::open(&path).map_err(|error| error.to_string())?).read_to_string(&mut raw).map_err(|error| error.to_string())?;
-    let mut phrases = BTreeMap::new();
-    for line in pystr::splitlines(&raw, true) {
-        let fields: Vec<&str> = line.strip_suffix('\n').unwrap_or(line).split('\t').collect();
-        let [identifier, language, text, _modified] = fields.as_slice() else { return Err("invalid CC0 TSV row".to_owned()) };
-        if *language != "eng" && *language != "rus" {
-            continue;
-        }
-        let number: i64 = identifier.parse().map_err(|_| "invalid CC0 source ID")?;
-        if number <= 0 || phrases.insert(number, (*text).to_owned()).is_some() {
-            return Err("nonpositive or duplicate source ID".to_owned());
-        }
-    }
-    Ok(phrases.into_values().collect())
+    Ok(crate::ortho_inputs::load_phrases(root)?.into_iter().map(|phrase| phrase.text).collect())
 }
 
 /// `onboard_vocabulary`: the frozen onboard lexicons the packages ship, and the built-in fallback words; the packaged
@@ -348,16 +330,14 @@ pub fn freeze(root: &Path, resources: &Arc<Resources>, directory: &Path) -> Resu
         categories.insert(split.to_owned(), json!(local));
         family_counts.insert(split.to_owned(), json!(members.len()));
     }
-    for a in SPLITS {
-        for b in SPLITS {
-            if a != b && !groups[a].is_disjoint(&groups[b]) {
-                return Err("boundary family contamination".to_owned());
-            }
+    // A row's split is `split_for` of its family, and a test family is never one the phrase source consumed: no family
+    // is in two splits, and none of the test is consumed.
+    for (index, a) in SPLITS.iter().enumerate() {
+        for b in &SPLITS[index + 1..] {
+            assert!(groups[a].is_disjoint(&groups[b]), "boundary family contamination");
         }
     }
-    if groups["test"].iter().any(|member| consumed.contains(member)) {
-        return Err("boundary family contamination".to_owned());
-    }
+    assert!(!groups["test"].iter().any(|member| consumed.contains(member)), "boundary family contamination");
     let selected: BTreeMap<&str, i64> = strata.into_iter().collect();
     let receipt = json!({"schema_version": 1, "provenance": corpus_provenance(root)?, "sha256": hashes, "rows": counts, "categories": categories, "families": family_counts, "family_overlap": 0, "prior_phrase_test_family_overlap": 0, "selected_words": selected, "scope": config["evidence_scope"]});
     std::fs::write(directory.join("corpus.json"), canonical(&receipt)).map_err(|error| error.to_string())?;

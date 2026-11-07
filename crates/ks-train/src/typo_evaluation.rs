@@ -130,8 +130,7 @@ struct Knowledge {
 
 impl Knowledge {
     fn load(root: &Path, resources: &Arc<Resources>) -> Result<Knowledge, String> {
-        let error_text = |error: ks_lang::LoadError| error.name.to_string();
-        Ok(Knowledge { models: reference_models(root, resources, false)?, terms: Arc::new(TermTables::load(&root.join("resources/models")).map_err(error_text)?), identifiers: IdentifierLexicon::load(&root.join("resources/identifiers.json")).ok(), protected: resources.protected_tokens() })
+        Ok(Knowledge { models: reference_models(root, resources, false)?, terms: Arc::new(TermTables::load(&root.join("resources/models")).map_err(|error| error.name.to_string())?), identifiers: IdentifierLexicon::load(&root.join("resources/identifiers.json")).ok(), protected: resources.protected_tokens() })
     }
 
     fn known(&self, text: &str) -> bool {
@@ -217,10 +216,8 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
                 let lexicon = corrector.lexicon(locale).ok_or("a locale without a list")?;
                 let Some(weight) = lexicon.weight(&lower) else { continue };
                 let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len().to::<u64>()).to::<usize>()];
+                // A slip is never the word itself: a swap of two different letters, a letter more or less, a key's neighbour.
                 let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len().to::<u64>(), corrector.neighbours_of(locale)) else { continue };
-                if typo == lower {
-                    continue;
-                }
                 let capital = token != lower;
                 let typed = if capital { let mut letters = typo.chars(); let first = letters.next().map(|letter| pystr::upper(letter.encode_utf8(&mut [0; 4]))).unwrap_or_default(); format!("{first}{}", letters.as_str()) } else { typo.clone() };
                 let judgement = judge(corrector, knowledge, &typed, locale, true);
@@ -254,11 +251,12 @@ fn score(samples: &[Sample], policy: &TypoPolicy, half: u64) -> Value {
         }
     }
     Value::Object(table.into_iter().map(|(key, counts)| {
+        // A key is in the table only once a sample counted under it.
         let total: i64 = counts.values().sum();
         let (right, wrong) = (*counts.get("right").unwrap_or(&0), *counts.get("wrong").unwrap_or(&0));
         let corrected = right + wrong;
         let left: Map<String, Value> = counts.iter().filter(|(reason, _)| *reason != "right" && *reason != "wrong").map(|(reason, count)| (reason.clone(), json!(count))).collect();
-        (key, json!({"samples": total, "right": right, "wrong": wrong, "right_share": if total != 0 { right.to::<f64>() / total.to::<f64>() } else { 0.0 }, "wrong_share_of_corrections": if corrected != 0 { wrong.to::<f64>() / corrected.to::<f64>() } else { 0.0 }, "left": left, "real_word_typos": counts.get("occurs").copied().unwrap_or(0)}))
+        (key, json!({"samples": total, "right": right, "wrong": wrong, "right_share": right.to::<f64>() / total.to::<f64>(), "wrong_share_of_corrections": if corrected != 0 { wrong.to::<f64>() / corrected.to::<f64>() } else { 0.0 }, "left": left, "real_word_typos": counts.get("occurs").copied().unwrap_or(0)}))
     }).collect())
 }
 
@@ -555,7 +553,7 @@ fn vocabulary_floor(directory: &Path, inputs: &VocabularyInputs, out: &Path) -> 
                 }
                 let operation = OPERATIONS[((seed / SAMPLE_MODULUS) % OPERATIONS.len().to::<u64>()).to::<usize>()];
                 let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len().to::<u64>(), corrector.neighbours_of(locale)) else { continue };
-                if typo == lower || typo.chars().count() < MIN_LETTERS || lexicon.occurs(&typo) {
+                if typo.chars().count() < MIN_LETTERS || lexicon.occurs(&typo) {
                     continue;
                 }
                 let key = format!("{locale}:{}", operation.as_str());
@@ -611,4 +609,67 @@ pub fn command(request: &Request<'_>, resources: &Arc<Resources>) -> Result<(), 
     std::fs::write(request.out.join(format!("report-{}.json", request.measurement)), &text).map_err(|error| error.to_string())?;
     print!("{}", String::from_utf8_lossy(&text));
     Ok(())
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use ks_context::typo_correction::Edit;
+
+    #[test]
+    fn a_slip_is_not_made_where_the_word_gives_it_no_room() {
+        let letters: Vec<char> = "aaaaa".chars().collect();
+        assert_eq!(make_typo(&letters, Operation::Transposition, 3, &HashMap::new()), None);
+        assert_eq!(make_typo(&letters, Operation::Substitution, 3, &HashMap::new()), None);
+        assert!(make_typo(&letters, Operation::Deletion, 3, &HashMap::new()).is_some());
+    }
+
+    #[test]
+    fn words_their_languages_and_a_bound_of_nothing() {
+        assert_eq!(locale_of("abc1"), None);
+        assert_eq!(locale_of("Ёлка"), Some("ru_RU"));
+        assert!(is_word_letter('Ё'));
+        assert!((wilson_upper(0, 0) - 1.0).abs() < f64::EPSILON);
+    }
+
+    fn candidate(word: &str, weight: i64, operation: Operation) -> Candidate {
+        Candidate { word: word.to_owned(), weight, edits: vec![Edit { operation, position: 0, letter: None }] }
+    }
+
+    fn sample(half: u64, word: &str, weight: i64, gate: &str, candidates: Vec<Candidate>) -> Sample {
+        Sample { half, locale: "ru_RU", operation: Operation::Deletion, word: word.to_owned(), weight, capital: false, gate: gate.to_owned(), candidates }
+    }
+
+    #[test]
+    fn a_policy_scores_right_and_wrong_corrections_and_what_it_leaves() {
+        let policy = TypoPolicy::default();
+        let heavy = policy.minimum_weight() + 100;
+        let mut samples = vec![sample(1, "дом", heavy, "", vec![candidate("дом", heavy, Operation::Deletion)]), sample(1, "дома", heavy, "", vec![candidate("домой", heavy, Operation::Deletion)])];
+        samples.push(Sample { locale: "en_US", operation: Operation::Substitution, ..sample(1, "house", heavy, "occurs", Vec::new()) });
+        let report = score(&samples, &policy, 1);
+        let deletions = &report[format!("ru_RU:{}", Operation::Deletion.as_str())];
+        assert_eq!((deletions["right"].clone(), deletions["wrong"].clone()), (json!(1), json!(1)));
+        assert_eq!((report["en_US"]["wrong_share_of_corrections"].clone(), report["en_US"]["real_word_typos"].clone()), (json!(0.0), json!(1)));
+    }
+
+    #[test]
+    fn the_policy_tuned_corrects_most_within_the_allowed_wrong_share() {
+        let heavy = TypoPolicy { candidate_min_count: 100, ..TypoPolicy::default() }.minimum_weight() + 100;
+        let mut samples: Vec<Sample> = (0..200).map(|index| sample(0, &format!("слово{index}"), heavy, "", vec![candidate(&format!("слово{index}"), heavy, Operation::Deletion)])).collect();
+        // Right only where a deletion is as likely as an insertion, wrong where the insertion is likelier: a false
+        // correction the wrong share allows only above its margin.
+        samples.push(sample(0, "яблоко", heavy, "", vec![candidate("яблоко", heavy, Operation::Deletion), candidate("абрикос", heavy, Operation::Insertion)]));
+        // A rare word, a rare correction, no candidate, a gate already given, and the other half.
+        samples.push(sample(0, "редко", 0, "", vec![candidate("редко", heavy, Operation::Deletion)]));
+        samples.push(sample(0, "часто", heavy, "", vec![candidate("часто", 0, Operation::Deletion)]));
+        samples.push(sample(0, "ничего", heavy, "", Vec::new()));
+        samples.push(sample(0, "есть", heavy, "occurs", Vec::new()));
+        samples.push(sample(1, "другое", heavy, "", Vec::new()));
+        let (policy, tried) = tune(&samples).expect("a feasible policy");
+        assert_eq!(policy.candidate_min_count, CANDIDATE_MIN_COUNT);
+        assert!((policy.posterior_ratio - 1.0).abs() < f64::EPSILON, "{}", policy.posterior_ratio);
+        assert!(tried.iter().any(|row| row["feasible"] == json!(false)));
+        assert_eq!(tried.iter().filter(|row| row["feasible"] == json!(true)).filter_map(|row| row["right"].as_i64()).max(), Some(201));
+    }
 }

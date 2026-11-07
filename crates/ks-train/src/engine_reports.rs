@@ -121,8 +121,7 @@ fn engine(parts: Parts<'_>) -> Result<Engine, String> {
         resource_dir: resources.resource_dir().to_path_buf(),
         clock: clock.read(),
         platform_reader: None,
-    })
-    .map_err(|error| format!("{error:?}"))?;
+    }).map_err(|error| format!("{error:?}"))?;
     Ok(Engine { clock, core, backend, folder: folder.to_path_buf() })
 }
 
@@ -385,12 +384,16 @@ pub fn prefix_report(root: &Path, resources: &Arc<Resources>, split: &str, scrat
         println!("{label} {name} {}", json!(counts));
         results.entry(label).or_default().insert(name, counts);
     }
-    let passed = results.values().all(|variant| {
-        let (candidate, shipping) = (&variant["candidate"], &variant["shipping_no_prefix"]);
-        candidate["length_mismatches"] == 0 && candidate["changed_correct"] <= shipping["changed_correct"] && candidate["restored"] >= shipping["restored"] && (candidate["early_restored"]).to::<f64>() >= PREFIX_EARLY_RESTORED_MIN_FRACTION * (candidate["desired"]).to::<f64>()
-    });
+    let passed = results.values().all(prefix_gates_hold);
     let identifiers: Vec<i64> = selected.iter().map(|row| row.sequence).collect();
     Ok(json!({"schema_version": 1, "split": split, "selection": format!("{PREFIX_SEQUENCES_PER_CATEGORY} hash-ranked situations per category, selected before scoring"), "sequence_ids": identifiers, "provenance": runtime, "scope": PREFIX_SCOPE, "results": results, "examples": failures, "passed": passed}))
+}
+
+/// The gates of one field-context variant: the candidate keeps every length, changes no more correct text and restores
+/// no fewer words than the engine without a prefix model, and most of its restorations come before the word ends.
+fn prefix_gates_hold(variant: &BTreeMap<&str, BTreeMap<&str, i64>>) -> bool {
+    let (candidate, shipping) = (&variant["candidate"], &variant["shipping_no_prefix"]);
+    candidate["length_mismatches"] == 0 && candidate["changed_correct"] <= shipping["changed_correct"] && candidate["restored"] >= shipping["restored"] && (candidate["early_restored"]).to::<f64>() >= PREFIX_EARLY_RESTORED_MIN_FRACTION * (candidate["desired"]).to::<f64>()
 }
 
 fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: ContextPolicy, profile: &str, name: &str, folder: &Path) -> Result<(BTreeMap<&'a str, i64>, Vec<Value>), String> {
@@ -408,10 +411,12 @@ fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: Contex
         ] {
             *counts.entry(key).or_insert(0) += value;
         }
-        if !exact && failures.len() < PREFIX_MAX_RECORDED_FAILURES {
+        if !exact {
             failures.push(json!({"variant": name, "profile": context, "sequence": row.sequence, "category": row.category, "desired": row.desired, "expected": expected, "actual": actual, "early_at": early_at, "injections": injections}));
         }
     }
+    // The first failures, in the order of the rows.
+    failures.truncate(PREFIX_MAX_RECORDED_FAILURES);
     Ok((counts, failures))
 }
 
@@ -479,12 +484,18 @@ const CONTEXT_V2_PHRASE_MIN: usize = 8;
 const CONTEXT_V2_PHRASE_MAX: usize = 96;
 const CONTEXT_V2_PUNCTUATION: &str = ".,!?'’-:;()";
 
+/// The context-v2 candidate against the frozen v1: every length kept, no more correct text changed, no fewer restored.
+fn context_v2_passed(results: &Map<String, Value>) -> bool {
+    let number = |variant: &str, field: &str| results[variant][field].as_i64().unwrap_or(0);
+    number("candidate", "length_mismatches") == 0 && number("candidate", "changed_correct") <= number("v1", "changed_correct") && number("candidate", "exactly_restored") >= number("v1", "exactly_restored")
+}
+
 /// `select_phrases` of the context-v2 replay: hash-ranked distinct groups of the old test partition, before any scoring.
 fn context_v2_phrases<'a>(rows: &'a [crate::ortho_inputs::Assigned<'a>]) -> Vec<&'a crate::ortho_inputs::Assigned<'a>> {
     let fits = |row: &crate::ortho_inputs::Assigned<'_>| {
         let english = row.phrase.locale == "eng";
         row.phrase.text.chars().all(|character| {
-            let letter = if english { character.is_ascii_alphabetic() } else { ('А'..='Я').contains(&character) || ('а'..='я').contains(&character) || character == 'Ё' || character == 'ё' };
+            let letter = if english { character.is_ascii_alphabetic() } else { matches!(character, 'А'..='Я' | 'а'..='я' | 'Ё' | 'ё') };
             letter || ks_text::ucd::isspace(character) || CONTEXT_V2_PUNCTUATION.contains(character)
         })
     };
@@ -541,9 +552,9 @@ pub fn context_v2_report(root: &Path, resources: &Arc<Resources>, scratch: &Path
     let phrases = crate::ortho_inputs::load_phrases(root)?;
     let assigned = crate::ortho_inputs::assign(&phrases);
     let selected = context_v2_phrases(&assigned);
-    if selected.len() != CONTEXT_V2_ROWS_PER_LOCALE * 2 {
-        return Err("insufficient independent phrase groups".to_owned());
-    }
+    // The phrases are the frozen source's, whose bytes `load_phrases` checks against their pin: the selection is always
+    // the same, and full.
+    assert_eq!(selected.len(), CONTEXT_V2_ROWS_PER_LOCALE * 2, "insufficient independent phrase groups");
     let models = crate::retired::reference_models(root)?;
     let directory = root.join("model/context_v2");
     let boundary = Arc::new(BoundaryPolicy::load(&root.join("resources/models/boundary-v2.json")).map_err(|error| error.name.to_string())?);
@@ -571,16 +582,48 @@ pub fn context_v2_report(root: &Path, resources: &Arc<Resources>, scratch: &Path
                 *counts.entry("changed_correct").or_insert(0) += i64::from(correct && !same);
                 *counts.entry("length_mismatches").or_insert(0) += i64::from(actual.chars().count() != text.chars().count());
                 *counts.entry("injections").or_insert(0) += injections.to::<i64>();
-                if !same && failures.len() < CONTEXT_V2_MAX_REPORTED_FAILURES {
+                if !same {
                     failures.push(json!({"source_id": row.phrase.identifier, "initially_correct": correct, "expected": text, "actual": actual}));
                 }
             }
         }
         results.insert(name.to_owned(), json!(counts));
+        failures.truncate(CONTEXT_V2_MAX_REPORTED_FAILURES);
         examples.insert(name.to_owned(), json!(failures));
     }
-    let number = |variant: &str, field: &str| results[variant][field].as_i64().unwrap_or(0);
-    let passed = number("candidate", "length_mismatches") == 0 && number("candidate", "changed_correct") <= number("v1", "changed_correct") && number("candidate", "exactly_restored") >= number("v1", "exactly_restored");
+    let passed = context_v2_passed(&results);
     let ids: Vec<i64> = selected.iter().map(|row| row.phrase.identifier).collect();
     Ok(json!({"schema_version": 1, "source_ids": ids, "results": results, "examples": examples, "promotion_passed": passed}))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn variant(candidate: [i64; 5], shipping: [i64; 5]) -> BTreeMap<&'static str, BTreeMap<&'static str, i64>> {
+        let counts = |values: [i64; 5]| ["length_mismatches", "changed_correct", "restored", "early_restored", "desired"].into_iter().zip(values).collect();
+        BTreeMap::from([("candidate", counts(candidate)), ("shipping_no_prefix", counts(shipping))])
+    }
+
+    #[test]
+    fn the_context_v2_candidate_passes_only_where_it_does_no_worse_than_v1() {
+        let results = |candidate: [i64; 3]| -> Map<String, Value> {
+            let counts = |values: [i64; 3]| json!({"length_mismatches": values[0], "changed_correct": values[1], "exactly_restored": values[2]});
+            Map::from_iter([("candidate".to_owned(), counts(candidate)), ("v1".to_owned(), counts([0, 2, 10]))])
+        };
+        assert!(context_v2_passed(&results([0, 2, 10])));
+        for candidate in [[1, 2, 10], [0, 3, 10], [0, 2, 9]] {
+            assert!(!context_v2_passed(&results(candidate)), "{candidate:?}");
+        }
+    }
+
+    #[test]
+    fn each_gate_of_a_prefix_variant_can_fail_alone() {
+        let shipping = [0, 2, 10, 0, 12];
+        assert!(prefix_gates_hold(&variant([0, 2, 10, 9, 12], shipping)));
+        for candidate in [[1, 2, 10, 9, 12], [0, 3, 10, 9, 12], [0, 2, 9, 9, 12], [0, 2, 10, 8, 12]] {
+            assert!(!prefix_gates_hold(&variant(candidate, shipping)), "{candidate:?}");
+        }
+    }
 }

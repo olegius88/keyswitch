@@ -19,6 +19,7 @@ use support::{digest, scratch, trainer, tree};
 fn the_words_of_a_phrase_keep_their_apostrophes_and_hyphens() {
     assert_eq!(canonical_tokens("Don’t re-use well-known_words, ёж; x- a- b 'c"), ["don't", "re-use", "well-known", "words", "еж", "x", "a", "b", "c"]);
     assert!(canonical_tokens("… — !").is_empty());
+    assert_eq!(canonical_tokens("re-use"), ["re-use"]);
 }
 
 #[test]
@@ -64,6 +65,9 @@ fn examples(directory: &Path) {
             let mut alike = example("word_ending", 0);
             alike["features"] = json!([{"word_ending:0:0": 1.0}, {"word_ending:0:0": 1.0}]);
             rows.push(alike);
+            let mut mislabelled = example("word_ending", 0);
+            mislabelled["labels"] = json!([1]);
+            rows.push(mislabelled);
         }
         let packed = gz(&rows);
         std::fs::write(directory.join(format!("{split}.jsonl.gz")), &packed).expect("a split");
@@ -185,4 +189,36 @@ fn a_boundary_experiment_short_of_its_gates_installs_nothing() {
     assert_eq!(read(&experiment.join("seal.json"))["threshold_search"].as_array().expect("the search").len(), 3);
     refused(&step(&none, "test", &experiment), "calibration gates failed");
     assert!(!experiment.join("report.json").exists());
+}
+
+#[test]
+fn a_freeze_stops_at_a_lexicon_that_is_not_the_pinned_one() {
+    let root = linked("boundary-lexicon");
+    edit(&root, "model/intent_v1/config.json", |config| config["sources"]["languages"]["ru_RU"]["sha256"] = json!("0"));
+    refused(&step(&root, "freeze", &scratch("boundary-lexicon-frozen").join("frozen")), "onboard lexicon checksum mismatch");
+}
+
+fn lexicon(words: &[&str]) -> String {
+    let counts: String = words.iter().map(|word| format!("100 {word}\n")).collect();
+    format!("\\data\\\nngram 1={}\n\n\\1-grams:\n{counts}\\end\\\n", words.len())
+}
+
+#[test]
+fn a_freeze_over_small_lexicons_keeps_only_the_rows_a_boundary_can_be_learned_on() {
+    let root = linked("boundary-small-lexicons");
+    // Words whose keys are all ambiguous punctuation, one of seven such keys, and two words that end in the comma key
+    // and drop, as their misspellings, different keys to the same seven: the draws were searched for such a pair.
+    let lexicons = [("ru_RU", "small-ru.lm", lexicon(&["бюжхъэё", "бюж", "пьеодтвб", "рпьеодвб", "привет"])), ("en_US", "small-en.lm", lexicon(&["hello", "world"]))];
+    for (_, file, text) in &lexicons {
+        std::fs::write(root.join(file), text).expect("a lexicon");
+    }
+    edit(&root, "model/intent_v1/config.json", |config| {
+        for (locale, file, text) in &lexicons {
+            config["sources"]["languages"][locale]["path"] = json!(file);
+            config["sources"]["languages"][locale]["sha256"] = json!(digest(text.as_bytes()));
+        }
+    });
+    let frozen = scratch("boundary-small-lexicons-frozen").join("frozen");
+    done(&step(&root, "freeze", &frozen));
+    assert!(read(&frozen.join("corpus.json"))["rows"]["train"].as_i64().expect("a count") > 0);
 }

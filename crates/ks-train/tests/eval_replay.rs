@@ -113,3 +113,19 @@ fn span_frames_are_captured_for_one_family_of_each_layout_with_an_anchor() {
     let built = build_span_curriculum(&mut replayer, &without, 4, "train");
     assert_eq!(built.report()["selected_group_1"], serde_json::Value::Null, "{}", built.report());
 }
+
+#[test]
+fn a_focus_of_joined_parts_is_asked_about_in_parts() {
+    let models = &*MODELS;
+    let mut replayer = Replayer::recording(&models.tools, &models.portable, (None, "unavailable".to_owned()), scratch("replay-joined"));
+    let rows = [
+        train_row("a", "hello", Some(0), "f-a"),
+        train_row("b", "e-mail", Some(0), "f-b"),
+        train_row("c", "don't", Some(0), "f-c"),
+        train_row("d", "привет", Some(1), "f-d"),
+        train_row("e", "кое-что", Some(1), "f-e"),
+        train_row("f", "вот,так", Some(1), "f-f"),
+    ];
+    let built = build_span_curriculum(&mut replayer, &rows, 8, "train");
+    assert_eq!(built.report()["selected_families"], 6, "{}", built.report());
+}

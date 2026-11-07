@@ -862,3 +862,97 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let (held, said) = told(promote(&run).arg("--check-only"));
     assert!(!held && said.contains("developer-chat development"), "{said}");
 }
+
+#[test]
+fn a_comparison_counts_what_each_artifact_gains_and_loses_against_the_first() {
+    let fitted = &*FITTED;
+    let installed = fitted.tree.join("resources/models/context_policy_v1.json");
+    let with_threshold = |name: &str, threshold: f64| {
+        let mut model = read(&installed);
+        model["conversion_threshold"] = json!(threshold);
+        let path = fitted.folder.join(format!("compare-{name}.json"));
+        std::fs::write(&path, serde_json::to_vec(&model).expect("json")).expect("a model");
+        path
+    };
+    let (eager, never) = (with_threshold("eager", 0.95), with_threshold("never", 1.0));
+    let output = fitted.folder.join("compared-thresholds.json");
+    let mut command = with_tree("compare", fitted);
+    command.arg("--corpus").arg(&fitted.corpus).arg("--ledger").arg(&fitted.ledger).arg("--output").arg(&output).args(["--jobs", "2"]);
+    for (name, path) in [("installed", installed.clone()), ("eager", eager), ("never", never), ("baseline", fitted.tree.join("model/context_v3/baseline-context-v1.json"))] {
+        command.arg("--artifact").arg(format!("{name}={}", path.display()));
+    }
+    succeeded(&command.output().expect("the trainer starts"));
+    let report = read(&output);
+    let differing = |name: &str| ["calibration", "development"].iter().any(|split| report[split]["portable"][name]["differences"]["all"].as_object().is_some_and(|kinds| !kinds.is_empty()));
+    assert!(differing("eager") || differing("never"), "{report}");
+    assert!(!differing("installed"));
+}
+
+#[test]
+fn a_seal_whose_calibration_breaks_even_or_whose_recipe_names_other_profiles_is_refused() {
+    let fitted = &*FITTED;
+    let good = read(&fitted.seal);
+    let models = fitted.tree.join("resources/models");
+    let even = changed_seal(fitted, &good, "even", |seal| {
+        let right = seal["calibration"]["converted_correctly"].clone();
+        seal["calibration"]["false_conversions"] = right;
+    });
+    assert!(validate_candidate_seal(&fitted.tree, &fitted.model, &even, &fitted.corpus, &models).unwrap_err().contains("calibration gate failed"));
+    // A tree whose recipe, and the seal's with it, names one profile only.
+    let mut recipe = good["recipe"].clone();
+    recipe["profiles"] = json!(["portable"]);
+    let tree = small_tree("one-profile", &recipe);
+    let sealed = changed_seal(fitted, &good, "one-profile", |seal| seal["recipe"] = recipe.clone());
+    assert!(validate_candidate_seal(&tree, &fitted.model, &sealed, &fitted.corpus, &tree.join("resources/models")).unwrap_err().contains("gate policy differs"));
+}
+
+#[test]
+fn inputs_that_change_during_a_replay_stop_its_report() {
+    let fitted = &*FITTED;
+    let folder = scratch("changed-inputs");
+    let seal = folder.join("candidate-seal.json");
+    std::fs::copy(&fitted.seal, &seal).expect("a copy");
+    let resources = fitted.tree.join("resources");
+    let (output, ledger) = (folder.join("report.json"), folder.join("ledger"));
+    let mut asked = request(fitted, &resources, "test", &output, &ledger);
+    asked.seal = &seal;
+    let identity = evaluation_identity(&asked).expect("an identity");
+    ks_train::evaluate::unchanged_since(&asked, &identity).expect("nothing changed yet");
+    std::fs::write(&seal, b"{}").expect("a file");
+    assert!(ks_train::evaluate::unchanged_since(&asked, &identity).unwrap_err().contains("inputs changed"));
+}
+
+#[test]
+fn a_sealed_test_that_cannot_be_replayed_keeps_the_record_of_its_failure() {
+    let fitted = &*FITTED;
+    // A tree of the same recipes whose frozen baseline prefix model, which neither seal pins, cannot be read.
+    let tree = small_tree("broken-prefix-baseline", &recipe());
+    write_recipe(&tree.join("model/prefix_v2/recipe.json"), &read(&fitted.tree.join("model/prefix_v2/recipe.json")));
+    let baseline = tree.join("model/prefix_v2/baseline-prefix-v1.json");
+    std::fs::remove_file(&baseline).expect("the link goes");
+    std::fs::write(&baseline, b"{}").expect("a file");
+    let folder = scratch("broken-prefix-baseline-test");
+    let (output, ledger) = (folder.join("report.json"), folder.join("ledger"));
+    let mut command = trainer();
+    command.arg("evaluate").arg("--tree").arg(&tree);
+    command
+        .arg("--candidate")
+        .arg(&fitted.model)
+        .arg("--seal")
+        .arg(&fitted.seal)
+        .arg("--prefix-candidate")
+        .arg(&fitted.prefix)
+        .arg("--prefix-seal")
+        .arg(&fitted.prefix_seal)
+        .arg("--corpus")
+        .arg(&fitted.corpus)
+        .arg("--output")
+        .arg(&output)
+        .arg("--ledger")
+        .arg(&ledger)
+        .args(["--split", "test", "--jobs", "2"]);
+    refused(&command.output().expect("the trainer starts"), "baseline-prefix-v1.json");
+    assert!(read(&output)["execution_error"].is_string());
+    let outcomes = std::fs::read_dir(&ledger).expect("the ledger").flatten().filter(|entry| entry.file_name().to_string_lossy().ends_with(".outcome.json")).count();
+    assert_eq!(outcomes, 1);
+}

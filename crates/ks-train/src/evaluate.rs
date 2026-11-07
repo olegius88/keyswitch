@@ -76,9 +76,11 @@ fn trimmed_window(row: &CorpusRow) -> (String, String, usize, usize) {
 /// `sequence_plan`.
 pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
     let declared = row.group.filter(|group| *group == 0 || *group == 1);
-    assert!(!initially_wrong || declared.is_some(), "mixed or unclassified focus has no unique wrong layout");
     let focus_letter = declared.and_then(|group| row.original.chars().position(|character| script_group(character) == Some(group)));
-    assert!(!initially_wrong || focus_letter.is_some(), "wrong intervention requires a focus letter in the declared group");
+    if initially_wrong {
+        assert!(declared.is_some(), "mixed or unclassified focus has no unique wrong layout");
+        assert!(focus_letter.is_some(), "wrong intervention requires a focus letter in the declared group");
+    }
     let (before, after, left, right) = trimmed_window(row);
     let mut intended = format!("{before}{}", row.original).chars().find_map(script_group).or(row.group).filter(|group| *group != 0).unwrap_or(0);
     let mut keys: Vec<PhysicalKey> = Vec::new();
@@ -533,6 +535,14 @@ pub struct EvaluationRequest<'a> {
     pub unsealed: bool,
 }
 
+/// The inputs of a replay are still the ones its identity named before it started.
+pub fn unchanged_since(request: &EvaluationRequest<'_>, identity: &Identity) -> Result<(), String> {
+    if evaluation_identity(request)?.value != identity.value {
+        return Err("evaluation inputs changed during sequence replay".to_owned());
+    }
+    Ok(())
+}
+
 /// `evaluate`: the report of a development diagnostic, or of the sealed test, read once.
 pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     let split = request.split;
@@ -581,8 +591,8 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
             return Err(error);
         }
     }
-    if !request.unsealed && evaluation_identity(request)?.value != identity.value {
-        return Err("evaluation inputs changed during sequence replay".to_owned());
+    if !request.unsealed {
+        unchanged_since(request, &identity)?;
     }
     if split == "test" {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
@@ -592,4 +602,22 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     }
     write_report(&report)?;
     Ok(report)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replay_that_failed_to_run_fails_its_gate_whichever_pair_it_was() {
+        let documents = BTreeMap::from([("0".to_owned(), 40), ("1".to_owned(), 40)]);
+        let clean = zeroed_counts();
+        let mut failed = zeroed_counts();
+        failed.add_by("execution_errors", 1);
+        assert_eq!(profile_gates(&clean, &clean, &documents)["execution_succeeded"], json!(true));
+        for (candidate, baseline) in [(&failed, &clean), (&clean, &failed)] {
+            assert_eq!(profile_gates(candidate, baseline, &documents)["execution_succeeded"], json!(false));
+        }
+    }
 }
