@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{KeyDisposition, KeyEvent};
 use ks_config::learning::{LearnedRule, LearningStore};
-use ks_engine::engine::{EngineError, KeySwitchEngine, QueueItem};
+use ks_engine::engine::{EngineError, KeySwitchEngine, QueueItem, Update};
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_engine::rule_editor::pattern_group;
 use ks_config::selection_commands::SelectionCommand;
@@ -54,6 +54,22 @@ fn the_hook_asks_about_every_kind_of_key() {
         }
     }
     assert!(!shared.put_nowait(QueueItem::Stop), "the queue has an end");
+    bundle.clean();
+}
+
+/// The menu's switch with every place in the queue taken: a worker that never takes from it is stood in for by a handle
+/// that reads as running while nothing was started, so the queue stays full whatever the machine's speed.
+#[test]
+fn a_menu_switch_into_a_full_queue_says_so() {
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let engine = KeySwitchEngine::of(session.core);
+    engine.shared.update(Update { current_group: Some(0), ..Update::default() });
+    engine.shared.running.store(true, Ordering::Relaxed);
+    while engine.shared.put_nowait(QueueItem::Stop) {}
+    assert!(!engine.select_alternate_group(), "the queue is full");
+    assert_eq!(engine.snapshot().last_error, "Очередь ввода переполнена");
+    engine.shared.running.store(false, Ordering::Relaxed);
     bundle.clean();
 }
 
