@@ -1,5 +1,6 @@
 //! Keys typed through the real engine over the model editor, in this process: plans a replay refuses to finish, and the
 //! span frames captured from rows written by hand.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_context::context_model::ContextModel;

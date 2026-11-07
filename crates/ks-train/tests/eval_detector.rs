@@ -1,5 +1,6 @@
 //! The measurement of the EN/RU detector over lexicons and dictionaries written for it: the order a lexicon fills its
 //! table in, a dictionary in another encoding, one too small to sample and one that is not there.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_lang::Resources;

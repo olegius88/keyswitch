@@ -1,5 +1,6 @@
 //! The typo measurement of the owner's typing over streams written by hand: a stream typed again too late, one with
 //! nothing after it, one whose close is not recorded and one whose next stream's time cannot be read.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use serde_json::{Value, json};

@@ -1,6 +1,7 @@
 //! The behaviour contract of the updater, over a fake opener (the cases of the Python tests that matter).
 
 #![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_cast::To as _;
 use std::collections::VecDeque;
 use std::fmt::Display;

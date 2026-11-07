@@ -5,6 +5,7 @@
 //! `KeySwitchEngine` is the handle the application keeps, and `engine::Shared` is all that another thread may touch.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 2a of the strict-json plan types them and removes this")]
 
 pub mod constants;
 pub mod context_access;

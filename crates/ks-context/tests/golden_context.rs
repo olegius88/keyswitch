@@ -3,6 +3,7 @@
 //! The files live in `$KS_GOLDEN_DIR/context` (default: the `golden` folder of the private work tree), the resources in
 //! `$KS_RESOURCES`; a test skips with a message when they are absent. Floats are compared by their bits. In a debug build
 //! only every 10th row of the big files is compared.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use ks_cast::To as _;
 use flate2::read::GzDecoder;

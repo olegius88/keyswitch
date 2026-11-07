@@ -3,6 +3,7 @@
 //! and on other systems, it says so and passes.
 
 #![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
+#![cfg_attr(windows, expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this"))]
 #[cfg(not(windows))]
 fn main() {
     println!("the Windows end-to-end test runs on Windows only, skipped");

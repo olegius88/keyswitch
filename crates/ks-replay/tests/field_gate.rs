@@ -1,4 +1,5 @@
 //! The field regression gate as the release runs it: over reports of a replay stub, every way it can stop.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use serde_json::{Value, json};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;

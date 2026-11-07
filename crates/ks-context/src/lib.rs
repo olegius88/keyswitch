@@ -7,6 +7,8 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
+#![expect(clippy::disallowed_types, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 2b of the strict-json plan types them and removes this")]
+#![cfg_attr(test, expect(clippy::disallowed_macros, reason = "temporary: the tests of this crate still build their JSON as untyped trees; step 2b of the strict-json plan types them and removes this"))]
 
 pub mod constants;
 pub mod context_action_features;

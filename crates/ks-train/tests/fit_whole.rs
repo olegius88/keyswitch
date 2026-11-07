@@ -1,5 +1,6 @@
 //! Whole fits on the small corpus that end where a recipe sends them: heads whose epochs repair nothing, a warm start a
 //! gate rejects, a frozen base of its own with no labelling model, and two bases at once.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use serde_json::{Map, Value, json};

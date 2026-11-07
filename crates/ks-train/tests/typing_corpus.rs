@@ -1,4 +1,5 @@
 //! A frozen split read as the trainer reads it: what its manifest pins, each row it refuses, and the edits a word is given.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_train::corpus::{load_rows, load_split, typo_variants};

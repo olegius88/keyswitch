@@ -1,5 +1,6 @@
 //! The small tools of a cycle where what they read is made up: the notices of the crates over a stub of `cargo`, a base
 //! for heads fitted again, what a machine lacks, the supplement and its receipt changed one field at a time.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use serde_json::{Value, json};

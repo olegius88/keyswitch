@@ -1,5 +1,6 @@
 //! The engine reports of the boundary and prefix models: the gate over the kept boundary regression, and the reports
 //! made again in a scratch tree, each way they refuse.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod eval_support;
 mod support;
 

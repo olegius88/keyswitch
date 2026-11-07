@@ -1,4 +1,5 @@
 //! The typo tools over small samples: the tables of word counts, the measurement of the corrector on texts, typos made on purpose and the owner's words.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

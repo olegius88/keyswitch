@@ -3,6 +3,8 @@
 //! The program reads and writes settings, history and rule files that must stay byte compatible with the
 //! Python's: same escapes, same float text (`repr`), same separators, same indentation, same key order.
 //! Reading is `serde_json`'s job (with `float_roundtrip`, so that doubles equal Python's).
+#![expect(clippy::disallowed_types, reason = "json.dumps over the tree serde_json parses: the one writer, the one reader")]
+#![cfg_attr(test, expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "the writer is checked on trees built and parsed by hand"))]
 
 use ks_cast::To as _;
 use crate::pynum::float_repr;

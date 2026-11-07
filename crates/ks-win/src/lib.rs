@@ -6,6 +6,7 @@
 //! holds.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 2c of the strict-json plan types them and removes this")]
 pub mod constants;
 #[cfg(windows)]
 pub mod desktop_app;

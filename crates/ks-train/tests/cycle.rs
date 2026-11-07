@@ -1,4 +1,5 @@
 //! A cycle after a fit, on a small corpus and a tree that holds its recipe: the candidate compared, replayed, sealed and tested.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_train::evaluate::{EvaluationRequest, evaluation_identity, protocol, validate_candidate_seal, validate_prefix_seal};

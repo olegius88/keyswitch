@@ -1,6 +1,7 @@
 //! The tools around a release, over stubs of the system programs: the APT repository built and read back, the Debian package checked.
 //! This program is its own packaged binary as well: asked as `keyswitch --version` or `--diagnose`, it answers as the program would.
 #![expect(clippy::unwrap_used, clippy::expect_used, reason = "a test or a probe stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 mod support;
 

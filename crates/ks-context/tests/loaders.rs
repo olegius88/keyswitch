@@ -1,4 +1,5 @@
 //! The model files as a loader may find them: damaged, cut, or written for another schema. Every such file is refused with its reason.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};

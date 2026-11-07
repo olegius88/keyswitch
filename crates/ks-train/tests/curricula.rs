@@ -1,4 +1,5 @@
 //! The curricula of a fit one by one, with every setting a recipe can give them, on rows of a small corpus.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_context::context_model::ContextAction;

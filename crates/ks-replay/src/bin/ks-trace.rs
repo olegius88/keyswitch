@@ -12,6 +12,7 @@
 #![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
 #![forbid(unsafe_code)]
 #![recursion_limit = "512"]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 3 of the strict-json plan types them and removes this")]
 
 #[path = "trace"]
 mod trace {

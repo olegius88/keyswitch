@@ -6,6 +6,7 @@
 //! Floats are compared by their bits. In a debug build only every 20th row of the big files is compared.
 
 #![expect(clippy::string_slice, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::detector::{DecideOptions, DetectionDecision, LanguageDetector};

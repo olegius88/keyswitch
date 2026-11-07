@@ -1,4 +1,5 @@
 //! The orthotactic model made from a thinned copy of its corpus, under every schema its configuration can name.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

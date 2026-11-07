@@ -1,4 +1,5 @@
 //! The message pools made from their public sources, from small samples of each source's format.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

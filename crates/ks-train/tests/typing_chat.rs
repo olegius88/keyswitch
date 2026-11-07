@@ -1,5 +1,6 @@
 //! The chat test at its edges: a ledger not made yet, a folder holding other files, a batch that repeats members, members the
 //! messages lack, a candidate much worse than the released model, messages that leave a typing mode untyped.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

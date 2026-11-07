@@ -1,4 +1,5 @@
 //! The layout-intent model fitted on a small lexicon: the corpora frozen and presealed, the fit, the one-shot ledgers of its test, the strict evaluation.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use serde_json::{Value, json};
