@@ -2,7 +2,7 @@
 
 ## Русский
 
-KeySwitch переписан на Rust: в программе больше нет Python. Раскладку он определяет так же, как 0.66.2, модели и словари — те же файлы, но установщик на 40% меньше, а памяти программа занимает в три–четыре раза меньше. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+KeySwitch переписан на Rust: в программе больше нет Python. Раскладку он определяет так же, как 0.66.2, модели и словари — те же файлы, но установщик на 40% меньше, а памяти программа занимает в три–четыре с половиной раза меньше. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
@@ -22,7 +22,8 @@ KeySwitch переписан на Rust: в программе больше не�
 ### Что изменилось
 
 - Установщик для Windows — 19,5 МБ вместо 31,8 МБ, пакет для Ubuntu — 20,4 МБ вместо 26,6 МБ, архив для Mac — 23 МБ вместо 37 МБ.
-- Памяти нужно меньше: в Windows сразу после запуска 49–57 МБ вместо 234 МБ, в Linux 119 МБ вместо 333 МБ, на Mac 61 МБ вместо 216 МБ.
+- Памяти нужно меньше: в Windows 59 МБ вместо 264 МБ, в Linux 119 МБ вместо 333 МБ, на Mac 61 МБ вместо 216 МБ.
+- В Windows программа готова переключать раскладку через 3 секунды после запуска вместо 17.
 - Windows: окно настроек, значок в трее и окна правил нарисованы стандартными элементами Windows.
 - macOS: исправление показывается в Центре уведомлений; страница обновлений говорит, что новую версию для Mac ставят вручную со страницы выпуска.
 - Linux: строки в окне выбора программы откликаются на щелчок; в 0.66.2 щелчок по ним ничего не делал.
@@ -40,7 +41,7 @@ KeySwitch переписан на Rust: в программе больше не�
 
 ## English
 
-KeySwitch is rewritten in Rust: no Python is left in the program. It recognises the layout as 0.66.2 does, with the same model and word-list files, while the installer is 40% smaller and the program takes three to four times less memory. Settings, rules, history and personal words are kept on update. The full list is in [CHANGELOG.md](CHANGELOG.md).
+KeySwitch is rewritten in Rust: no Python is left in the program. It recognises the layout as 0.66.2 does, with the same model and word-list files, while the installer is 40% smaller and the program takes three to four and a half times less memory. Settings, rules, history and personal words are kept on update. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
@@ -60,7 +61,8 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 ### Changed
 
 - The Windows installer is 19.5 MB instead of 31.8 MB, the Ubuntu package 20.4 MB instead of 26.6 MB, the Mac archive 23 MB instead of 37 MB.
-- It needs less memory: on Windows 49-57 MB right after start instead of 234 MB, on Linux 119 MB instead of 333 MB, on a Mac 61 MB instead of 216 MB.
+- It needs less memory: on Windows 59 MB instead of 264 MB, on Linux 119 MB instead of 333 MB, on a Mac 61 MB instead of 216 MB.
+- On Windows the program is ready to switch 3 seconds after start instead of 17.
 - Windows: the settings window, the tray icon and the rule windows are drawn with the standard Windows controls.
 - macOS: a correction is shown in Notification Center; the updates page says that a new Mac version is installed by hand from the release page.
 - Linux: the rows of the program picker answer a click; in 0.66.2 a click on them did nothing.
