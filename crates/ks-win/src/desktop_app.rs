@@ -37,13 +37,13 @@ use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, 
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MB_OK, MSG, MSGFLT_ALLOW,
     PostMessageW, PostQuitMessage, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SetForegroundWindow, SetTimer, ShowWindow,
-    TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETTINGCHANGE,
+    TranslateMessage, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_LBUTTONUP, WM_RBUTTONUP, WM_SETTINGCHANGE,
     WM_TIMER,
 };
 
 use crate::constants::{
     BACKEND_LABEL, ENGINE_STOP_WAIT_SECONDS, LEARNING_PROMPT_SHOW_DELAY_MS, SMOKE_UI_QUIT_AFTER_MS, UPDATE_CHECK_INITIAL_DELAY_MS,
-    UPDATE_CHECK_INTERVAL_MS,
+    UPDATE_CHECK_INTERVAL_MS, WM_APP, WM_TRAY,
 };
 use crate::learning_prompt;
 use crate::settings_window::{self, Services};
@@ -59,7 +59,6 @@ use crate::windows_system::{WindowsApplicationCatalog, WindowsAutostartManager};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const WM_POSTED: u32 = WM_APP + 1;
-const WM_TRAY: u32 = WM_APP + 2;
 const SMOKE_TIMER_ID: usize = 1;
 const PROMPT_TIMER_ID: usize = 2;
 const UPDATE_TIMER_ID: usize = 3;
@@ -218,6 +217,7 @@ pub fn run_with_instance(arguments: Arguments) -> i32 {
 
 struct App {
     window: HWND,
+    backend: Arc<WindowsBackend>,
     settings: Arc<SettingsStore>,
     history: Arc<HistoryStore>,
     engine: Arc<DeferredEngine>,
@@ -452,7 +452,10 @@ impl App {
             TrayAction::ShowExclusions => self.show_page_and_present("exclusions"),
             TrayAction::ShowAbout => self.show_page_and_present("about"),
             TrayAction::SwitchLayout => {
+                // The menu has taken the front from the window the user types in: the layout goes to that window.
+                self.backend.aim_next_switch_at_work_window(true);
                 if !self.engine.select_alternate_group() {
+                    self.backend.aim_next_switch_at_work_window(false);
                     let error = self.engine.snapshot().last_error;
                     self.set_error(&error);
                 }
@@ -689,7 +692,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             Arc::new(NoUpdates { version: VERSION.to_owned() })
         }
     };
-    let input_backend: Arc<dyn InputBackend> = backend;
+    let input_backend: Arc<dyn InputBackend> = backend.clone();
     let services = Services {
         settings: settings.clone(),
         history: history.clone(),
@@ -717,6 +720,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     });
     let app = Rc::new(App {
         window,
+        backend,
         settings: settings.clone(),
         history: history.clone(),
         engine: engine.clone(),

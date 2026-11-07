@@ -30,6 +30,9 @@ const WINDOWS_FAKE_HWND: i64 = 300;
 const WINDOWS_OTHER_HWND: i64 = 301;
 const WINDOWS_FOREGROUND_HWND: i64 = 0x5150;
 const WINDOWS_INACTIVE_HWND: i64 = 55;
+const KEYSWITCH_WINDOW_HWND: i64 = 302;
+const TASKBAR_HWND: i64 = 303;
+const EXPLORER_PROCESS_ID: i64 = 5151;
 const FAKE_FOREGROUND_PROCESS_ID: i64 = 4242;
 const WINDOWS_OWN_PROCESS_ID: i64 = 7777;
 const SELECTION_FIXTURE_WINDOW: i64 = 7;
@@ -89,6 +92,11 @@ struct FakeState {
     translation: HashMap<(u32, i64), String>,
     anchor: Option<ScreenAnchor>,
     activated_windows: Vec<i64>,
+    /// When set, an activated window comes to the front after this many more looks at the front; when not, it stays
+    /// where it was, as a test before these needs.
+    foreground_after_activation: Option<usize>,
+    pending_foreground: Option<(usize, i64)>,
+    activation_refused: bool,
     foreground: i64,
     window_owners: HashMap<i64, i64>,
     process_id: i64,
@@ -150,6 +158,9 @@ impl FakeWindowsAPI {
                 translation: HashMap::new(),
                 anchor: Some(ScreenAnchor { x: 11, y: 22, window: Some(WINDOWS_FAKE_HWND) }),
                 activated_windows: Vec::new(),
+                foreground_after_activation: None,
+                pending_foreground: None,
+                activation_refused: false,
                 foreground: WINDOWS_FAKE_HWND,
                 window_owners: HashMap::from([(WINDOWS_FAKE_HWND, FAKE_FOREGROUND_PROCESS_ID)]),
                 process_id: WINDOWS_OWN_PROCESS_ID,
@@ -278,7 +289,16 @@ impl WindowsAPI for FakeWindowsAPI {
     }
 
     fn foreground_window(&self) -> i64 {
-        self.state().foreground
+        let mut state = self.state();
+        if let Some((looks, window)) = state.pending_foreground {
+            if looks == 0 {
+                state.foreground = window;
+                state.pending_foreground = None;
+            } else {
+                state.pending_foreground = Some((looks - 1, window));
+            }
+        }
+        state.foreground
     }
 
     fn focused_control(&self) -> i64 {
@@ -299,8 +319,12 @@ impl WindowsAPI for FakeWindowsAPI {
     }
 
     fn activate_window(&self, window: i64) -> bool {
-        self.state().activated_windows.push(window);
-        true
+        let mut state = self.state();
+        state.activated_windows.push(window);
+        if let Some(looks) = state.foreground_after_activation {
+            state.pending_foreground = Some((looks, window));
+        }
+        !state.activation_refused
     }
 
     fn keep_window_inactive(&self, window: i64) -> bool {
@@ -1267,6 +1291,133 @@ fn a_switch_timeout_and_an_already_selected_group() {
             group: 1,
         }
     );
+}
+
+// ----------------------------------------------------------------------------------- a layout chosen in the tray menu
+
+/// KeySwitch's own window in front, as after a click on its tray icon, with the window the user worked in noted before.
+fn behind_the_tray_menu(api: &Arc<FakeWindowsAPI>, subject: &WindowsBackend) {
+    let own = api.state().process_id;
+    let _ = subject.focused_window();
+    let mut state = api.state();
+    state.window_owners.insert(KEYSWITCH_WINDOW_HWND, own);
+    state.foreground = KEYSWITCH_WINDOW_HWND;
+}
+
+#[test]
+fn a_layout_chosen_in_the_tray_menu_switches_the_window_the_user_worked_in() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    behind_the_tray_menu(&api, &subject);
+    // KeySwitch's own window is no window the user works in: the one before it stays noted.
+    assert_eq!(subject.focused_window().map(|focus| focus.own), Some(true));
+    api.state().foreground_after_activation = Some(2);
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(1).unwrap();
+    let state = api.state();
+    assert_eq!(state.activated_windows, [WINDOWS_FAKE_HWND]);
+    assert_eq!(state.foreground, WINDOWS_FAKE_HWND);
+    assert_eq!(state.requests, [RUSSIAN_HKL]);
+    drop(state);
+    // The switch waited for the window to come to the front before it asked for the layout.
+    assert_eq!(*clock.sleeps.lock().unwrap(), [LAYOUT_SWITCH_POLL_SECONDS, LAYOUT_SWITCH_POLL_SECONDS]);
+
+    // The aim is spent: the next switch is a key's, and goes to the window in front.
+    api.state().foreground = KEYSWITCH_WINDOW_HWND;
+    subject.switch_group(0).unwrap();
+    assert_eq!(api.state().activated_windows, [WINDOWS_FAKE_HWND]);
+    assert_eq!(api.requests(), [RUSSIAN_HKL, ENGLISH_HKL]);
+}
+
+#[test]
+fn the_shell_taskbar_is_no_window_the_user_worked_in() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let subject = backend(&api);
+    {
+        let mut state = api.state();
+        state.window_owners.insert(TASKBAR_HWND, EXPLORER_PROCESS_ID);
+        state.window_classes.insert(TASKBAR_HWND, SHELL_TRAY_WINDOW_CLASSES[0].to_owned());
+        state.foreground_after_activation = Some(0);
+    }
+    // The press on the tray icon comes while the window the user typed in is in front; the taskbar takes the front
+    // after it, and nothing in front with no window is noted either.
+    assert!(!subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1)));
+    for front in [TASKBAR_HWND, 0] {
+        api.state().foreground = front;
+        assert!(!subject.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 2)));
+    }
+    api.state().foreground = TASKBAR_HWND;
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(1).unwrap();
+    assert_eq!(api.state().activated_windows, [WINDOWS_FAKE_HWND]);
+    assert_eq!(api.requests(), [RUSSIAN_HKL]);
+
+    // With the window the user works in already in front, nothing is brought forward.
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(0).unwrap();
+    assert_eq!(api.state().activated_windows, [WINDOWS_FAKE_HWND]);
+    assert_eq!(api.requests(), [RUSSIAN_HKL, ENGLISH_HKL]);
+}
+
+#[test]
+fn without_a_window_to_return_to_the_menu_switch_fails_where_it_is() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let own = api.state().process_id;
+    api.state().window_owners.insert(WINDOWS_FAKE_HWND, own);
+    let _ = subject.focused_window();
+    api.state().apply_switch = false;
+    clock.readings.lock().unwrap().extend([0.0, 1.6]);
+    subject.aim_next_switch_at_work_window(true);
+    let error = subject.switch_group(1).unwrap_err();
+    assert!(matches!(error, BackendError::LayoutSwitchUnconfirmed { group: 1, .. }));
+    assert!(api.state().activated_windows.is_empty());
+
+    // An aim the engine did not take is taken back, and the switch after it goes where the keys go.
+    subject.aim_next_switch_at_work_window(true);
+    subject.aim_next_switch_at_work_window(false);
+    api.state().apply_switch = true;
+    subject.switch_group(1).unwrap();
+    assert!(api.state().activated_windows.is_empty());
+}
+
+#[test]
+fn a_window_that_will_not_come_back_is_waited_for_a_bounded_time() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    behind_the_tray_menu(&api, &subject);
+    // Refused: no wait at all.
+    api.state().activation_refused = true;
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(1).unwrap();
+    assert!(clock.sleeps.lock().unwrap().is_empty());
+
+    // Accepted but never in front: the wait ends at its deadline, and the switch goes to the window in front.
+    api.state().activation_refused = false;
+    api.state().current_layout = ENGLISH_HKL;
+    clock.readings.lock().unwrap().extend([0.0, 0.5, 1.5]);
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(1).unwrap();
+    assert_eq!(*clock.sleeps.lock().unwrap(), [LAYOUT_SWITCH_POLL_SECONDS]);
+    assert_eq!(api.state().foreground, KEYSWITCH_WINDOW_HWND);
+
+    // In front but without a focused control yet: waited for too, as far as the deadline.
+    clock.sleeps.lock().unwrap().clear();
+    {
+        let mut state = api.state();
+        state.current_layout = ENGLISH_HKL;
+        state.foreground = KEYSWITCH_WINDOW_HWND;
+        state.foreground_after_activation = Some(0);
+        state.no_control = true;
+    }
+    clock.readings.lock().unwrap().extend([0.0, 0.5, 1.5]);
+    subject.aim_next_switch_at_work_window(true);
+    subject.switch_group(1).unwrap();
+    assert_eq!(api.state().foreground, WINDOWS_FAKE_HWND);
+    assert_eq!(*clock.sleeps.lock().unwrap(), [LAYOUT_SWITCH_POLL_SECONDS]);
 }
 
 // --------------------------------------------------------------------------------------------- test_input_integrity.py

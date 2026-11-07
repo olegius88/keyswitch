@@ -17,7 +17,7 @@
 
 use ks_cast::To as _;
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, ThreadId};
@@ -41,12 +41,13 @@ use crate::constants::{
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
     LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
     PRIMARY_LANGID_MASK, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
-    SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
+    SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
     UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
     VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
+    WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
 };
 use crate::log;
 
@@ -484,6 +485,12 @@ struct Inner {
     /// UI Automation for the selection hotkeys, made on first use by the factory (`read_selection`). Engine's thread only.
     selection_reader: Mutex<Option<Box<dyn SelectionReader>>>,
     selection_reader_factory: SelectionReaderFactory,
+    /// Atomic: the last window in front the user worked in (`note_work_window`), 0 before one. The hook's thread notes it
+    /// at a pointer press, the engine's thread as it follows the focus, and the engine's thread reads it.
+    work_window: AtomicI64,
+    /// Atomic: the next layout switch was chosen in the tray menu (`aim_next_switch_at_work_window`). The window's thread
+    /// sets it, the engine's thread takes it.
+    menu_switch: AtomicBool,
 }
 
 /// Observe global Win32 keyboard events and inject physical corrections.
@@ -537,6 +544,8 @@ impl WindowsBackend {
                 unseen: Mutex::new(UnseenState::default()),
                 selection_reader: Mutex::new(None),
                 selection_reader_factory: parts.selection_reader_factory,
+                work_window: AtomicI64::new(0),
+                menu_switch: AtomicBool::new(false),
             }),
         }
     }
@@ -565,6 +574,15 @@ impl WindowsBackend {
     /// `_listener` set without the hook, for what drives `handle_native` itself.
     pub fn set_listener(&self, listener: Option<KeyListener>) {
         self.inner.listener.set(listener);
+    }
+
+    /// The next `switch_group` is the tray menu's (true), or no longer is (false: the engine did not take it).
+    ///
+    /// Windows keeps a layout per thread, and the menu has taken the front from the window the user types in: KeySwitch's
+    /// own window is there, or the shell's taskbar. That switch goes to the window the user worked in last, which comes
+    /// back to the front for it (`return_to_work_window`). A switch for a key the user pressed stays where the keys go.
+    pub fn aim_next_switch_at_work_window(&self, aimed: bool) {
+        self.inner.menu_switch.store(aimed, Ordering::Release);
     }
 }
 
@@ -789,12 +807,49 @@ impl Inner {
     }
 
     fn switch_group(&self, group: i32) -> Result<(), WindowsBackendError> {
+        let from_menu = self.menu_switch.swap(false, Ordering::AcqRel);
         self.layouts()?;
         if !valid_group(group) {
             return Err(failed(format!("Неизвестная группа раскладки {group}")));
         }
         let _inject_inner = lock(&self.inject_lock);
+        if from_menu {
+            self.return_to_work_window();
+        }
         self.switch_group_inner(group).map(drop)
+    }
+
+    /// Whether the user works in `window`: a window of another program than this one, and not the shell's taskbar or
+    /// the flyout of its hidden icons, which a click on the tray icon brings to the front.
+    fn is_work_window(&self, window: i64) -> bool {
+        let process_id = self.api.window_process_id(window);
+        process_id != 0
+            && process_id != self.api.current_process_id()
+            && self.api.selection_api().is_none_or(|api| !SHELL_TRAY_WINDOW_CLASSES.contains(&api.window_class(window).as_str()))
+    }
+
+    fn note_work_window(&self, window: i64) {
+        if self.is_work_window(window) {
+            self.work_window.store(window, Ordering::Release);
+        }
+    }
+
+    /// A layout chosen in the tray menu is the layout of the window the user worked in last: when the window in front is
+    /// KeySwitch's own or the shell's, that window comes back to the front, and the switch waits until it is there with
+    /// its keyboard focus, so that the layout switched is the one the user goes on typing with. Without such a window,
+    /// or when it does not come back in time, the switch goes to the window in front, as any switch does.
+    fn return_to_work_window(&self) {
+        if self.is_work_window(self.api.foreground_window()) {
+            return;
+        }
+        let window = self.work_window.load(Ordering::Acquire);
+        if window == 0 || !self.api.activate_window(window) {
+            return;
+        }
+        let deadline = self.clock.monotonic() + WORK_WINDOW_RETURN_TIMEOUT_SECONDS;
+        while (self.api.foreground_window() != window || self.api.focused_control() == 0) && self.clock.monotonic() < deadline {
+            self.clock.sleep(LAYOUT_SWITCH_POLL_SECONDS);
+        }
     }
 
     fn group_for_layout(&self, layout: i64) -> Result<i32, WindowsBackendError> {
@@ -820,6 +875,8 @@ impl Inner {
         if window == 0 {
             return None;
         }
+        // The engine asks at each key and at each wake of its loop: the window the tray menu switches is followed here.
+        self.note_work_window(window);
         let process_id = self.api.window_process_id(window);
         let own = process_id != 0 && process_id == self.api.current_process_id();
         let control = self.api.focused_control();
@@ -1053,6 +1110,8 @@ impl Inner {
     fn answer_native(&self, native: NativeKeyEvent) -> bool {
         if native.virtual_key == 0 {
             self.pointer_epoch.fetch_add(1, Ordering::AcqRel);
+            // A press on the tray icon reaches the hook while the window the user worked in is still in front.
+            self.note_work_window(self.api.foreground_window());
             if let Some(listener) = self.listener.get() {
                 listener(KeyEvent {
                     pressed: true,
