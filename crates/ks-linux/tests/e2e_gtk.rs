@@ -262,6 +262,44 @@ fn walk_everything() -> Result<(), String> {
     Ok(())
 }
 
+/// News that reaches the window after a newer change: a setting changed twice before the main loop runs, as two quick
+/// toggles or a toggle from the tray and one from the engine are, and an engine snapshot older than the setting. The window
+/// shows them and stores nothing back; a stored echo was a change of its own, reported late again, for good.
+fn late_news() -> Result<(), String> {
+    let mut outcome = Err("no application".to_owned());
+    gtk_app::with_app(|app| {
+        let settings = app.services.settings.clone();
+        let paths = ["enabled", "detection.correct_on_space"];
+        let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = heard.clone();
+        let unsubscribe = settings.subscribe(std::sync::Arc::new(move |path: &str, _: &serde_json::Value| {
+            if paths.contains(&path) {
+                log.lock().unwrap().push(path.to_owned());
+            }
+        }));
+        let flag = |path: &str| settings.get(path) == Some(json!(true));
+        let before: Vec<bool> = paths.iter().map(|path| flag(path)).collect();
+        for (path, now) in paths.iter().zip(&before) {
+            settings.set(path, json!(!now), false).unwrap();
+            settings.set(path, json!(now), false).unwrap();
+        }
+        pump(300);
+        gtk_app::with_window(|window| window.apply_engine_snapshot(&EngineSnapshot { enabled: !before[0], ..EngineSnapshot::default() }));
+        pump(300);
+        unsubscribe();
+        let heard = heard.lock().unwrap().clone();
+        let after: Vec<bool> = paths.iter().map(|path| flag(path)).collect();
+        outcome = if heard.len() == 2 * paths.len() && after == before {
+            Ok(())
+        } else {
+            Err(format!("the window stored what it was told: {} changes, the first {:?}; {before:?} became {after:?}", heard.len(), &heard[..heard.len().min(6)]))
+        };
+        // The switch shows the setting again.
+        gtk_app::with_window(|window| window.apply_setting_update("enabled", &json!(before[0])));
+    });
+    outcome
+}
+
 fn window_calls() {
     let _ = gtk_app::with_window_result(|window| {
         window.toast("проба");
@@ -731,6 +769,11 @@ fn main() {
     let failure = failed.clone();
     glib::timeout_add_local_once(Duration::from_millis(500), move || {
         pump(200);
+        note("late_news();");
+        if let Err(error) = late_news() {
+            println!("E2E_FAILED: {error}");
+            failure.set(true);
+        }
         note("window_calls();");
         window_calls();
         if let Err(error) = walk_everything() {

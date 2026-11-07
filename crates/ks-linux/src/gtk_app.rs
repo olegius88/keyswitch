@@ -359,7 +359,13 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
     this.sync_autostart();
     let _ = settings.subscribe(Arc::new(|path: &str, value: &Value| {
         let (path, value) = (path.to_owned(), value.clone());
-        post_app(move |app| app.apply_setting(&path, &value));
+        // Applied as the setting stands when the main loop gets to it. When a second change came first, the window, set to
+        // the first value, stored it again, and that came back here in turn, back and forth for good. A path the settings
+        // no longer hold ("*", or one a reset took away) is applied with the value it was changed to.
+        post_app(move |app| {
+            let current = app.settings().get(&path).unwrap_or(value);
+            app.apply_setting(&path, &current);
+        });
     }));
     history.subscribe(Arc::new(|| post_app(|app| app.with_window(MainWindow::refresh_history))));
     updates.subscribe(Arc::new(|snapshot: &UpdateSnapshot| {

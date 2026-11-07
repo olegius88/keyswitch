@@ -161,6 +161,9 @@ fn setting_strings(settings: &SettingsStore, path: &str) -> Vec<String> {
 }
 
 fn store(settings: &SettingsStore, path: &str, value: Value) {
+    if SHOWING_ENGINE.get() {
+        return;
+    }
     let _ = settings.set(path, value, true);
 }
 
@@ -256,6 +259,8 @@ pub fn apply_theme(theme: &str) {
 
 thread_local! {
     static CSS_INSTALLED: Cell<bool> = const { Cell::new(false) };
+    /// A control is being set to what the engine's snapshot says: its handler stores nothing meanwhile.
+    static SHOWING_ENGINE: Cell<bool> = const { Cell::new(false) };
 }
 
 fn install_css(resource_dir: &std::path::Path) {
@@ -550,7 +555,12 @@ impl MainWindow {
     pub fn apply_engine_snapshot(&self, snapshot: &EngineSnapshot) {
         let live = &self.live;
         if live.service_switch.is_active() != snapshot.enabled {
+            // Shown, not stored. The snapshot reaches the main loop after the engine has heard of the setting, so it can be
+            // older than the setting is by now; stored, it changed the setting back, which the engine and the settings each
+            // reported again. The echo of two quick changes grew until the main loop did nothing else.
+            SHOWING_ENGINE.set(true);
             live.service_switch.set_active(snapshot.enabled);
+            SHOWING_ENGINE.set(false);
         }
         let view = engine_view(snapshot, self.wayland.get());
         live.sidebar_detail.set_label(view.detail);
