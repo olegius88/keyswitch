@@ -31,7 +31,7 @@ use ks_config::selection_commands::caret_steps;
 use ks_text::pystr;
 
 use crate::constants::{
-    CLIPBOARD_SNAPSHOT_MAX_BYTES, CYRILLIC_CODEPOINT_RANGE, EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT,
+    CLIPBOARD_SNAPSHOT_MAX_BYTES, CYRILLIC_CODEPOINT_RANGE, EVENT_SCROLL_WHEEL, EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LAYOUT_SWITCH_POLL_SECONDS,
     LAYOUT_SWITCH_TIMEOUT_SECONDS, MAC_ALT_KEYS, MAC_CONTROL_KEYS, MAC_DEVICE_FLAGS_MASK, MAC_MODIFIER_DEVICE_FLAGS,
     MAC_MODIFIER_SHARED_FLAGS, MAC_SCRIPT_PROBE_KEYCODE, MAC_SHIFT_KEYS, MAC_SUPER_KEYS, MAC_VK_ANSI_V, MAC_VK_BACKSPACE,
@@ -789,6 +789,14 @@ impl Inner {
             // stall and a program that has silently stopped seeing the keyboard.
             self.tap_revivals.fetch_add(1, Ordering::Relaxed);
             self.api.enable_event_tap();
+            return false;
+        }
+        if native.event_type == EVENT_SCROLL_WHEEL {
+            // The view moves, not the caret, and no correction waits on it (pointer_epoch).
+            let listener = lock(&self.listener).clone();
+            if let Some(listener) = listener {
+                listener(KeyEvent::wheel(native.timestamp));
+            }
             return false;
         }
         if native.pointer {

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK, SUPER_MASK};
+use crate::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, POINTER_EVENT_GROUP, SHIFT_MASK, SUPER_MASK, WHEEL_KEY_NAME};
 use crate::input_delay::{HookGap, InputDelayReport};
 use crate::selected_text::{SelectedText, SelectionError, SelectionRefused};
 
@@ -56,6 +56,18 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
+    /// A wheel or a touchpad scroll turned (`WHEEL_KEY_NAME`), at `timestamp` on the clock of the backend's keys.
+    #[must_use]
+    pub fn wheel(timestamp: i64) -> KeyEvent {
+        KeyEvent {
+            key_name: WHEEL_KEY_NAME.to_owned(),
+            characters: vec![String::new(), String::new()],
+            group: POINTER_EVENT_GROUP,
+            timestamp,
+            ..KeyEvent::default()
+        }
+    }
+
     #[must_use]
     pub fn shift(&self) -> bool {
         self.state & SHIFT_MASK != 0

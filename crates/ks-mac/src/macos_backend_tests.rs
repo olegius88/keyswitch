@@ -360,6 +360,21 @@ fn a_pointer_press_is_an_event_of_its_own() {
 }
 
 #[test]
+fn a_scroll_is_reported_as_a_turn_and_moves_no_pointer_epoch() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    let scroll = NativeKeyEvent { event_type: EVENT_SCROLL_WHEEL, timestamp: 9, ..NativeKeyEvent::default() };
+    // No listener yet: the turn goes nowhere.
+    assert!(!backend.handle_native(scroll));
+    let (listener, events) = collector();
+    backend.set_listener(Some(listener));
+    assert!(!backend.handle_native(scroll));
+    let events = events.lock().unwrap();
+    assert_eq!((events[0].key_name.as_str(), events[0].pressed, events[0].group, events[0].timestamp), ("Wheel", false, POINTER_EVENT_GROUP, 9));
+    assert_eq!(backend.inner.pointer_epoch.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn a_tap_the_system_switched_off_is_switched_on_again() {
     let api = FakeMac::new();
     let backend = backend(&api);

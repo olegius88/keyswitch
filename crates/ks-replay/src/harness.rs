@@ -88,6 +88,7 @@ struct EditorState {
     own: bool,
     release_fails: bool,
     stall: Duration,
+    unconfirmed: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -115,7 +116,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, release_fails: false, stall: Duration::ZERO }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, release_fails: false, stall: Duration::ZERO, unconfirmed: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -191,6 +192,11 @@ impl Backend {
 
     pub fn set_group(&self, group: i32) {
         self.lock().group = group;
+    }
+
+    /// The next layout switches stay asked for and unconfirmed, as in a window slow to take them: the layout does not change.
+    pub fn set_unconfirmed(&self, unconfirmed: bool) {
+        self.lock().unconfirmed = unconfirmed;
     }
 
     /// `text[start:stop]`.
@@ -302,6 +308,9 @@ impl InputBackend for Backend {
         let mut state = self.lock();
         if state.failing {
             return Err(BackendError::Failed("the window is gone".to_owned()));
+        }
+        if state.unconfirmed {
+            return Err(BackendError::LayoutSwitchUnconfirmed { message: "the window did not confirm the layout".to_owned(), group });
         }
         state.group = group;
         Ok(())

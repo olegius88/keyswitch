@@ -76,6 +76,9 @@ pub const EVENT_KEY_DOWN: u32 = 10;
 pub const EVENT_KEY_UP: u32 = 11;
 pub const EVENT_FLAGS_CHANGED: u32 = 12;
 pub const EVENT_OTHER_MOUSE_DOWN: u32 = 25;
+/// A turn of the wheel or a scroll on the trackpad: reported only as a turn, which ends a lone press of the layout switch
+/// key (Control with the wheel zooms where Accessibility is set so, Shift with it scrolls sideways).
+pub const EVENT_SCROLL_WHEEL: u32 = 22;
 
 // Modifier bits of a Quartz event, from IOLLEvent.h.
 pub const EVENT_FLAG_ALPHA_SHIFT: u64 = 0x0001_0000;

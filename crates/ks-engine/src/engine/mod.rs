@@ -13,6 +13,7 @@ mod early;
 mod execute;
 mod handle;
 mod input;
+mod layout_tap;
 mod logging;
 mod manual;
 mod mention;
@@ -27,6 +28,7 @@ mod word_parts;
 pub use decide::WordOptions;
 pub use logging::WordEvaluation;
 pub use handle::KeySwitchEngine;
+pub use layout_tap::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE, LAYOUT_TAP_SOURCE};
 pub use shared::{Command, QueueItem, Shared};
 pub use types::*;
 
@@ -117,6 +119,8 @@ pub struct EngineCore {
     pub pressed: HashSet<u32>,
     pub pressed_since: Vec<(u32, f64)>,
     pub modifier_keycodes: HashSet<u32>,
+    /// A lone press of the layout switch key, until it comes up or anything else happens (`layout_tap`).
+    pub layout_tap: Option<LayoutTap>,
     pub symbol_strokes: Strokes,
     pub mention_shown: Option<Stroke>,
     pub last_key_character: String,
@@ -264,6 +268,7 @@ impl EngineCore {
             pressed: HashSet::new(),
             pressed_since: Vec::new(),
             modifier_keycodes: HashSet::new(),
+            layout_tap: None,
             symbol_strokes: Vec::new(),
             mention_shown: None,
             last_key_character: String::new(),

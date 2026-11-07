@@ -26,7 +26,7 @@ mod scenario {
     use ks_config::config::SettingsStore;
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
-    use ks_win::constants::{VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_PAUSE, VK_RETURN, VK_SHIFT};
+    use ks_win::constants::{VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT};
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
     use ks_win::windows_native::NativeWindowsAPI;
     use serde_json::{Value, json};
@@ -50,6 +50,8 @@ mod scenario {
     const SCAN_O: u32 = 0x18;
     const SCAN_SPACE: u32 = 0x39;
     const SCAN_ENTER: u32 = 0x1C;
+    const SCAN_LEFT_SHIFT: u32 = 0x2A;
+    const SCAN_RIGHT_SHIFT: u32 = 0x36;
     const PRIVET: [u32; 6] = [SCAN_G, SCAN_H, SCAN_B, SCAN_D, SCAN_T, SCAN_N];
     const HELLO: [u32; 5] = [SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O];
     const ENGLISH: u32 = 0x409;
@@ -475,6 +477,30 @@ mod scenario {
         Ok(())
     }
 
+    /// The layout switch key (`detection.layout_switch_key` set to Left Shift): a lone tap switches the layout of the
+    /// window and back; Right Shift, and Left Shift held over a letter, switch nothing.
+    fn layout_key(editor: &Editor) -> Result<(), String> {
+        editor.prepare(0)?;
+        let shift = |virtual_key: u32, scan_code: u32, pressed: bool| NativeInput { virtual_key, scan_code, ..user(pressed) };
+        for wanted in [1, 0] {
+            editor.send(&[shift(VK_LSHIFT, SCAN_LEFT_SHIFT, true), shift(VK_LSHIFT, SCAN_LEFT_SHIFT, false)])?;
+            if !editor.pump_until(STANDARD, |editor| editor.group() == wanted) {
+                return Err(format!("a tap of Left Shift left the layout {}, not {wanted}", editor.group()));
+            }
+            editor.pump(PHASE_SETTLE);
+        }
+        editor.send(&[shift(VK_RSHIFT, SCAN_RIGHT_SHIFT, true), shift(VK_RSHIFT, SCAN_RIGHT_SHIFT, false)])?;
+        let letter = |pressed: bool| NativeInput { scan_code: SCAN_H, ..user(pressed) };
+        editor.send(&[shift(VK_LSHIFT, SCAN_LEFT_SHIFT, true), letter(true), letter(false), shift(VK_LSHIFT, SCAN_LEFT_SHIFT, false)])?;
+        editor.expect("H", 0, LONG)?;
+        editor.pump(PHASE_SETTLE);
+        if editor.group() != 0 {
+            return Err(format!("Right Shift or Shift with a letter switched the layout to {}", editor.group()));
+        }
+        println!("WINDOWS_LAYOUT_KEY_E2E_OK");
+        Ok(())
+    }
+
     fn run(binary: &Path) -> Result<(), String> {
         let api = Arc::new(NativeWindowsAPI::new());
         hook(&api)?;
@@ -500,7 +526,7 @@ mod scenario {
             println!("WINDOWS_LEARNING_PROMPT_E2E_OK");
             let _ = child.kill();
             let _ = child.wait();
-            configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true))])?;
+            configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true)), ("detection.layout_switch_key", json!("Shift_L"))])?;
             child = start(binary, &root)?;
             editor.pump(WINDOW_OPENS);
             // The first word after a start waits for the hook, as above.
@@ -508,7 +534,7 @@ mod scenario {
             loop {
                 attempt += 1;
                 match correct_before_enter(&editor) {
-                    Ok(()) => return Ok(()),
+                    Ok(()) => break,
                     Err(error) if attempt >= START_ATTEMPTS => return Err(error),
                     Err(_) => {
                         editor.activate();
@@ -517,6 +543,7 @@ mod scenario {
                     }
                 }
             }
+            layout_key(&editor)
         })();
         let _ = child.kill();
         let _ = child.wait();

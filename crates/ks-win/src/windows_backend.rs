@@ -74,12 +74,14 @@ pub struct NativeKeyEvent {
     pub replayed: bool,
     /// Injected by another program; `injected` means `KeySwitch`'s own keys only.
     pub foreign: bool,
+    /// A turn of the mouse wheel the mouse hook saw, no key.
+    pub wheel: bool,
 }
 
 impl NativeKeyEvent {
     #[must_use]
     pub const fn new(pressed: bool, virtual_key: u32, scan_code: u32, extended: bool, injected: bool, timestamp: i64) -> Self {
-        NativeKeyEvent { pressed, virtual_key, scan_code, extended, injected, timestamp, replayed: false, foreign: false }
+        NativeKeyEvent { pressed, virtual_key, scan_code, extended, injected, timestamp, replayed: false, foreign: false, wheel: false }
     }
 }
 
@@ -1051,6 +1053,13 @@ impl Inner {
     }
 
     fn answer_native(&self, native: NativeKeyEvent) -> bool {
+        if native.wheel {
+            // The view moves, not the caret, and no correction waits on it (pointer_epoch).
+            if let Some(listener) = self.listener.get() {
+                listener(KeyEvent::wheel(native.timestamp));
+            }
+            return false;
+        }
         if native.virtual_key == 0 {
             self.pointer_epoch.fetch_add(1, Ordering::AcqRel);
             if let Some(listener) = self.listener.get() {

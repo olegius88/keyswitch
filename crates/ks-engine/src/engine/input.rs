@@ -3,6 +3,7 @@
 use super::logging::technical_event;
 use super::shared::SETTING_FROM_CORE;
 use super::*;
+use crate::constants::WHEEL_KEY_NAME;
 use crate::unicode_category::category;
 use serde_json::json;
 
@@ -18,6 +19,7 @@ impl EngineCore {
         let Some(gap) = self.backend.take_hook_gap() else {
             return false;
         };
+        self.layout_tap = None;
         technical_event!(self.shared, "hook_gap", "late_ms": gap.late_ms, "callback_ms": gap.callback_ms, "threshold_ms": HOOK_GAP_MS);
         self.clear_word(Some("Клавиши прошли мимо KeySwitch"), "hook_gap");
         self.untracked_token = true;
@@ -28,14 +30,22 @@ impl EngineCore {
     /// `handle_inner`: every key the worker takes, in the order the hook saw them.
     pub fn handle_inner(&mut self, event: Stroke) -> EngineResult<()> {
         let mut event = event;
+        if event.key_name == WHEEL_KEY_NAME {
+            // Ctrl+wheel zooms and Shift+wheel scrolls sideways: the modifier was held for that, not tapped. The wheel
+            // moves no caret, and it reaches the engine only while a layout switch key is set (Shared::enqueue).
+            self.layout_tap = None;
+            return Ok(());
+        }
         self.expire_manual_correction();
         if self.shared.input_overflow.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            self.layout_tap = None;
             self.complete_deferred_action(false, "input_overflow");
             self.clear_word(Some("Очередь ввода переполнена"), "input_overflow");
             self.untracked_token = true;
             self.context_policy.stream.clear();
         }
         self.take_hook_gap();
+        self.follow_layout_tap(&event);
         if event.pressed {
             self.track_focus();
         }
@@ -153,12 +163,14 @@ impl EngineCore {
             self.pressed_since.retain(|entry| entry.0 != event.keycode);
         }
         if is_modifier_key(&event.key_name) {
+            let repeat = event.pressed && self.modifier_keycodes.contains(&event.keycode);
             if event.pressed {
                 self.modifier_keycodes.insert(event.keycode);
             } else {
                 self.modifier_keycodes.remove(&event.keycode);
             }
             self.maybe_execute_pending(&event)?;
+            self.track_layout_tap(&event, repeat)?;
             return Ok(());
         }
         if event.pressed && !event.synthetic {
