@@ -401,6 +401,14 @@ fn switched_early(early_at: Option<usize>, text: &str) -> bool {
     early_at.is_some_and(|key| key < text.chars().count())
 }
 
+/// What one replayed row adds to the counts of its task.
+fn prefix_row_counts(desired: bool, exact: bool, early: bool, length_mismatch: bool, injections: i64) -> [(&'static str, i64); 8] {
+    [
+        ("sequences", 1), ("desired", i64::from(desired)), ("exact", i64::from(exact)), ("restored", i64::from(desired && exact)), ("changed_correct", i64::from(!desired && !exact)),
+        ("early_restored", i64::from(desired && exact && early)), ("length_mismatches", i64::from(length_mismatch)), ("injections", injections),
+    ]
+}
+
 fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: ContextPolicy, profile: &str, name: &str, folder: &Path) -> Result<(BTreeMap<&'a str, i64>, Vec<Value>), String> {
     let mut policy = Some(policy);
     let context = format!("{profile}/{}", if task.native { "field" } else { "observed" });
@@ -410,10 +418,8 @@ fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: Contex
         let (expected, actual, early_at, injections) = prefix_replay(row, task, &mut policy, folder)?;
         let exact = actual == expected;
         let early = switched_early(early_at, &row.text);
-        for (key, value) in [
-            ("sequences", 1), ("desired", i64::from(row.desired)), ("exact", i64::from(exact)), ("restored", i64::from(row.desired && exact)), ("changed_correct", i64::from(!row.desired && !exact)),
-            ("early_restored", i64::from(row.desired && exact && early)), ("length_mismatches", i64::from(actual.chars().count() != expected.chars().count())), ("injections", injections.to::<i64>()),
-        ] {
+        let length_mismatch = actual.chars().count() != expected.chars().count();
+        for (key, value) in prefix_row_counts(row.desired, exact, early, length_mismatch, injections.to::<i64>()) {
             *counts.entry(key).or_insert(0) += value;
         }
         if !exact {
@@ -637,6 +643,22 @@ mod tests {
         assert!(switched_early(Some(2), "абв"));
         assert!(!switched_early(Some(3), "абв"));
         assert!(!switched_early(None, "абв"));
+    }
+
+    #[test]
+    fn a_row_counts_as_restored_only_when_the_wanted_change_came_out_exact() {
+        let counted = |desired, exact, early| {
+            let counts = BTreeMap::from(prefix_row_counts(desired, exact, early, false, 0));
+            (counts["restored"], counts["early_restored"], counts["changed_correct"])
+        };
+        assert_eq!(counted(true, true, true), (1, 1, 0));
+        assert_eq!(counted(true, true, false), (1, 0, 0));
+        // A wanted change that went wrong restores nothing, however early it came.
+        assert_eq!(counted(true, false, true), (0, 0, 0));
+        assert_eq!(counted(false, true, true), (0, 0, 0));
+        assert_eq!(counted(false, false, false), (0, 0, 1));
+        let counts = BTreeMap::from(prefix_row_counts(false, true, false, true, 3));
+        assert_eq!((counts["sequences"], counts["desired"], counts["exact"], counts["length_mismatches"], counts["injections"]), (1, 0, 1, 1, 3));
     }
 
     #[test]
