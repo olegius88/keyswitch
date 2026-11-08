@@ -15,44 +15,18 @@
    "value_tokens": 0
   },
   "ks-config": {
-   "expect_roots": 3,
+   "expect_roots": 1,
    "files": {
-    "src/config.rs": {
-     "string_key_index": 3,
-     "value_tokens": 35
-    },
     "src/constants.rs": {
      "value_tokens": 4
-    },
-    "src/history.rs": {
-     "value_tokens": 19
-    },
-    "src/indicator.rs": {
-     "value_tokens": 9
-    },
-    "src/learning.rs": {
-     "value_tokens": 26
-    },
-    "src/lib.rs": {
-     "expect_roots": 1
     },
     "src/log_privacy.rs": {
      "value_tokens": 37
     },
-    "src/logsetup.rs": {
-     "value_tokens": 15
-    },
-    "src/personal_words.rs": {
-     "string_key_index": 3,
-     "value_tokens": 16
-    },
-    "src/pycompat.rs": {
-     "value_tokens": 36
-    },
-    "src/settings_diagnostics.rs": {
+    "src/settings_file.rs": {
      "literal_compares": 2,
-     "string_key_index": 1,
-     "value_tokens": 31
+     "string_key_index": 4,
+     "value_tokens": 142
     },
     "tests/golden_config.rs": {
      "expect_roots": 1,
@@ -60,15 +34,12 @@
      "value_tokens": 145
     },
     "tests/stores.rs": {
-     "expect_roots": 1,
-     "literal_compares": 1,
-     "string_key_index": 1,
-     "value_tokens": 101
+     "literal_compares": 1
     }
    },
-   "literal_compares": 3,
-   "string_key_index": 134,
-   "value_tokens": 474
+   "literal_compares": 1,
+   "string_key_index": 126,
+   "value_tokens": 145
   },
   "ks-context": {
    "expect_roots": 4,
@@ -275,7 +246,7 @@
     },
     "src/gtk_window.rs": {
      "literal_compares": 10,
-     "value_tokens": 25
+     "value_tokens": 16
     },
     "src/lib.rs": {
      "expect_roots": 1
@@ -326,7 +297,7 @@
    },
    "literal_compares": 36,
    "string_key_index": 19,
-   "value_tokens": 214
+   "value_tokens": 205
   },
   "ks-mac": {
    "expect_roots": 2,
@@ -458,7 +429,7 @@
    "expect_roots": 2,
    "files": {
     "src/json.rs": {
-     "value_tokens": 5
+     "value_tokens": 13
     },
     "src/layouts.rs": {
      "literal_compares": 4
@@ -937,12 +908,12 @@
      "expect_roots": 1
     },
     "src/windows_ui_model.rs": {
-     "value_tokens": 38
+     "value_tokens": 33
     }
    },
    "literal_compares": 0,
    "string_key_index": 0,
-   "value_tokens": 38
+   "value_tokens": 33
   },
   "ks-updates": {
    "expect_roots": 2,
@@ -1070,6 +1041,9 @@
   }
  },
  "exceptions": {
+  "crates/ks-config/src/constants.rs": "the shipped settings are the literal JSON of the file they seed",
+  "crates/ks-config/src/log_privacy.rs": "words that look like passwords are starred in every text of every record, whatever the record",
+  "crates/ks-config/src/settings_file.rs": "the settings file keeps unknown keys and values of any type at every nesting level, read and written as the tree they are; the dotted-path calls of the crates not yet typed stay here until they move to Key<T>",
   "crates/ks-text/src/json.rs": "json.dumps over the tree serde_json parses: the one writer, the one reader",
   "crates/ks-text/src/pyjson.rs": "json.dumps over the tree serde_json parses: the one writer, the one reader"
  }

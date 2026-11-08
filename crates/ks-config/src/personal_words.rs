@@ -13,10 +13,13 @@ use crate::constants::{
 };
 use crate::history::data_dir;
 use crate::pycompat::create_parent;
-use crate::pycompat::{decode_text, json_loads, py_eq, with_suffix, write_text};
+use crate::pycompat::{decode_text, with_suffix, write_text};
+use indexmap::IndexMap;
+use ks_cast::To as _;
+use ks_text::json::{dumps, loads_lenient, ObjectOf, Tolerant};
 use ks_text::pystr::casefold;
-use ks_text::{json_dumps, Indent, JsonOptions};
-use serde_json::{Map, Value};
+use ks_text::{Indent, JsonOptions};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::hash_map::RandomState;
 use std::collections::{BTreeMap, HashMap};
@@ -108,6 +111,47 @@ impl<V> Ordered<V> {
     }
 }
 
+/// `schema_version` of the file as Python compared it: `1`, `1.0` and `true` are all the same number.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SchemaNumber {
+    Flag(bool),
+    Whole(i64),
+    Fractional(f64),
+}
+
+impl SchemaNumber {
+    /// Python's `==` with a whole number.
+    fn equals(&self, number: i64) -> bool {
+        match self {
+            SchemaNumber::Flag(flag) => number == i64::from(*flag),
+            SchemaNumber::Whole(whole) => *whole == number,
+            SchemaNumber::Fractional(fractional) => {
+                fractional.fract() == 0.0 && fractional.abs() < 1.0e38 && fractional.to::<i128>() == i128::from(number)
+            }
+        }
+    }
+}
+
+/// The file as `load` reads it; what is missing or of another type makes the whole file unreadable, and what is not a
+/// word or a positive count inside the two lists is skipped.
+#[derive(Deserialize)]
+struct WordsFile {
+    schema_version: SchemaNumber,
+    salt: String,
+    personal: Vec<Tolerant<String>>,
+    counts: IndexMap<String, Tolerant<i64>>,
+}
+
+/// The file as it is written.
+#[derive(Serialize)]
+struct SavedWords<'a> {
+    schema_version: i64,
+    salt: &'a str,
+    personal: Vec<&'a str>,
+    counts: IndexMap<&'a str, i64>,
+}
+
 struct State {
     salt: String,
     personal: Ordered<()>,
@@ -169,25 +213,24 @@ impl PersonalWords {
         if !self.path.is_file() {
             return;
         }
-        let payload = std::fs::read(&self.path).ok().and_then(|bytes| decode_text(&bytes, true)).and_then(|text| json_loads(&text));
-        let valid = payload.as_ref().and_then(Value::as_object).filter(|payload| {
-            payload.get("schema_version").is_some_and(|version| py_eq(version, &Value::from(PERSONAL_WORDS_SCHEMA_VERSION)))
-                && payload.get("salt").is_some_and(Value::is_string)
-                && payload.get("personal").is_some_and(Value::is_array)
-                && payload.get("counts").is_some_and(Value::is_object)
-        });
-        let Some(payload) = valid else {
+        let payload = std::fs::read(&self.path)
+            .ok()
+            .and_then(|bytes| decode_text(&bytes, true))
+            .and_then(|text| loads_lenient::<ObjectOf<WordsFile>>(text.as_bytes()).ok())
+            .map(|file| file.0)
+            .filter(|file| file.schema_version.equals(PERSONAL_WORDS_SCHEMA_VERSION));
+        let Some(payload) = payload else {
             // The next word would save over the file: keep the user's words aside.
             state.unreadable = set_aside_unreadable(&self.path);
             return;
         };
-        state.salt = payload["salt"].as_str().unwrap_or_default().to_string();
-        for key in payload["personal"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-            state.personal.set(key.to_string(), ());
+        state.salt = payload.salt;
+        for key in payload.personal.into_iter().filter_map(Tolerant::into_read) {
+            state.personal.set(key, ());
         }
-        for (key, count) in payload["counts"].as_object().into_iter().flatten() {
-            if let Some(count) = crate::pycompat::as_py_int(count).filter(|count| *count > 0) {
-                state.counts.set(key.clone(), count);
+        for (key, count) in payload.counts {
+            if let Some(count) = count.into_read().filter(|count| *count > 0) {
+                state.counts.set(key, count);
             }
         }
     }
@@ -274,18 +317,15 @@ impl PersonalWords {
         if !(self.persist)() {
             return;
         }
-        let mut counts = Map::new();
-        for (key, count) in state.counts.iter() {
-            counts.insert(key.clone(), Value::from(*count));
-        }
-        let mut data = Map::new();
-        data.insert("schema_version".into(), Value::from(PERSONAL_WORDS_SCHEMA_VERSION));
-        data.insert("salt".into(), Value::String(state.salt.clone()));
-        data.insert("personal".into(), Value::Array(state.personal.iter().map(|(key, ())| Value::String(key.clone())).collect()));
-        data.insert("counts".into(), Value::Object(counts));
+        let saved = SavedWords {
+            schema_version: PERSONAL_WORDS_SCHEMA_VERSION,
+            salt: &state.salt,
+            personal: state.personal.iter().map(|(key, ())| key.as_str()).collect(),
+            counts: state.counts.iter().map(|(key, count)| (key.as_str(), *count)).collect(),
+        };
         // json.dumps(data, indent=2) with the default ensure_ascii: every character is ASCII anyway.
         let options = JsonOptions { indent: Some(Indent::Spaces(USER_DATA_JSON_INDENT)), ..JsonOptions::default() };
-        let mut text = json_dumps(&Value::Object(data), &options);
+        let mut text = dumps(&saved, &options);
         text.push('\n');
         let result: std::io::Result<()> = (|| {
             create_parent(&self.path)?;
@@ -350,6 +390,51 @@ mod tests {
         assert!(words.unreadable().is_some() && !file.exists());
         words.add("слово");
         assert!(words.contains("слово") && !file.exists());
+    }
+
+    #[test]
+    fn a_file_is_read_as_far_as_python_read_it() {
+        for (number, version) in ["1", "1.0", "true"].iter().enumerate() {
+            let file = path(&format!("version-{number}"));
+            std::fs::write(&file, format!(r#"{{"schema_version": {version}, "salt": "s", "personal": [], "counts": {{}}}}"#)).unwrap();
+            assert!(PersonalWords::always_persisting(Some(file)).unreadable().is_none(), "{version}");
+        }
+        for (number, version) in ["2", "2.5", "1e39", "false", "\"1\"", "null", "18446744073709551616"].iter().enumerate() {
+            let file = path(&format!("foreign-{number}"));
+            std::fs::write(&file, format!(r#"{{"schema_version": {version}, "salt": "s", "personal": [], "counts": {{}}}}"#)).unwrap();
+            assert!(PersonalWords::always_persisting(Some(file)).unreadable().is_some(), "{version}");
+        }
+        for (number, text) in [
+            "[1, \"s\", [], {}]",
+            r#"{"schema_version": 1, "salt": 5, "personal": [], "counts": {}}"#,
+            r#"{"schema_version": 1, "salt": "s", "personal": {}, "counts": {}}"#,
+            r#"{"schema_version": 1, "salt": "s", "personal": [], "counts": []}"#,
+        ].iter().enumerate() {
+            let file = path(&format!("broken-{number}"));
+            std::fs::write(&file, text).unwrap();
+            assert!(PersonalWords::always_persisting(Some(file)).unreadable().is_some(), "{text}");
+        }
+        // What is no word or no positive count inside the two lists is skipped, and the salt, the words and the counts stay.
+        let file = path("kept");
+        std::fs::write(&file, r#"{"schema_version": 1, "salt": "x", "salt": "s", "personal": ["aa", 5, null, "bb"], "counts": {"c": 2, "d": 0, "e": -1, "f": 1.5, "g": "1", "c": 3}}"#).unwrap();
+        let words = PersonalWords::always_persisting(Some(file));
+        let state = lock(&words.state);
+        assert_eq!(state.salt, "s");
+        assert_eq!(state.personal.iter().map(|(key, ())| key.as_str()).collect::<Vec<_>>(), ["aa", "bb"]);
+        assert_eq!(state.counts.iter().map(|(key, count)| (key.as_str(), *count)).collect::<Vec<_>>(), [("c", 3)]);
+    }
+
+    #[test]
+    fn the_file_is_written_key_by_key_as_it_was() {
+        let file = path("bytes");
+        let words = PersonalWords::with_salt_source(Some(file.clone()), Box::new(|| true), Box::new(|| "abc".to_owned()));
+        words.add("Слово");
+        assert!(!words.keep("другое"));
+        let hash = |word: &str| hex(&Sha256::digest(format!("abc{word}").as_bytes())).get(..PERSONAL_WORD_HASH_HEX_CHARACTERS).unwrap().to_owned();
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap().replace("\r\n", "\n"),
+            format!("{{\n  \"schema_version\": 1,\n  \"salt\": \"abc\",\n  \"personal\": [\n    \"{}\"\n  ],\n  \"counts\": {{\n    \"{}\": 1\n  }}\n}}\n", hash("слово"), hash("другое"))
+        );
     }
 
     #[test]

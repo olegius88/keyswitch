@@ -22,10 +22,9 @@
 
 use ks_cast::To as _;
 use crate::config::SettingsStore;
-use crate::constants::{BYTES_PER_MEBIBYTE, DEFAULT_LOG_ROTATION, TECHNICAL_LOG_ROTATION};
+use crate::constants::{BYTES_PER_MEBIBYTE, DEFAULT_LOG_ROTATION, DIAGNOSTICS_TECHNICAL_LOGGING, SettingChange, TECHNICAL_LOG_ROTATION};
 use crate::history::data_dir;
-use crate::pycompat::truthy;
-use serde_json::{json, Map, Value};
+use serde::Serialize;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -37,7 +36,6 @@ pub const LOG_FILE_NAME: &str = "keyswitch.log";
 /// Every line carries the version: a rotated file that outlives an update must not be read as if it came from the
 /// version that is installed now.
 pub const LOG_FORMAT: &str = "%(asctime)s %(version)s %(levelname)s %(name)s: %(message)s";
-pub const TECHNICAL_LOGGING_PATH: &str = "diagnostics.technical_logging";
 /// The version stamped on every line.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The logger of this module's own messages.
@@ -466,25 +464,30 @@ pub fn install_handler(handler: &RotatingFileHandler) {
 }
 
 /// State of the file log, so a silent journal is visible in a report.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LogStatus {
+    pub path: String,
+    pub installed: bool,
+    pub level: &'static str,
+    /// Bytes of the file, -1 when it cannot be read.
+    pub size: i64,
+    pub technical: bool,
+}
+
+/// State of the file log, so a silent journal is visible in a report.
 #[must_use]
-pub fn log_status() -> Map<String, Value> {
+pub fn log_status() -> LogStatus {
     log_status_of(&log_path())
 }
 
 /// `log_status` for a given log file path.
 #[must_use]
-pub fn log_status_of(path: &Path) -> Map<String, Value> {
+pub fn log_status_of(path: &Path) -> LogStatus {
     let handler = file_handler();
     let size = std::fs::metadata(path).map_or(-1, |m| m.len().to::<i64>());
     let level = locked(&ROOT).level;
     let technical = handler.as_ref().is_some_and(|h| h.max_bytes() == TECHNICAL_LOG_ROTATION.0);
-    let mut status = Map::new();
-    status.insert("path".into(), json!(path.to_string_lossy()));
-    status.insert("installed".into(), json!(handler.is_some()));
-    status.insert("level".into(), json!(level.name()));
-    status.insert("size".into(), json!(size));
-    status.insert("technical".into(), json!(technical));
-    status
+    LogStatus { path: path.to_string_lossy().into_owned(), installed: handler.is_some(), level: level.name(), size, technical }
 }
 
 /// The rotating handler installed by [`configure_logging`], if any.
@@ -517,6 +520,11 @@ pub fn apply_rotation(handler: &RotatingFileHandler, technical: bool) -> io::Res
 /// Stops the following of the settings; may be called any number of times.
 pub type Unsubscribe = Box<dyn Fn() + Send + Sync>;
 
+/// `bool(settings.get("diagnostics.technical_logging", False))`.
+fn technical_logging(settings: &SettingsStore) -> bool {
+    settings.read(DIAGNOSTICS_TECHNICAL_LOGGING).unwrap_or(false)
+}
+
 /// Track the diagnostics setting on `handler` and apply it right away.
 ///
 /// Returns the unsubscribe callable, or `None` when no file handler is installed (`--diagnose` and the tests run
@@ -526,17 +534,16 @@ pub fn follow_settings(settings: &Arc<SettingsStore>, handler: Option<&RotatingF
         Some(handler) => handler.clone(),
         None => file_handler()?,
     };
-    let technical = |settings: &SettingsStore| truthy(&settings.get_or(TECHNICAL_LOGGING_PATH, Value::Bool(false)));
-    let _ = apply_rotation(&target, technical(settings));
+    let _ = apply_rotation(&target, technical_logging(settings));
     let weak: Weak<SettingsStore> = Arc::downgrade(settings);
     let changed_target = target.clone();
-    Some(settings.subscribe(Arc::new(move |path: &str, _value: &Value| {
-        if path != TECHNICAL_LOGGING_PATH && path != "*" {
+    Some(settings.subscribe_changes(Arc::new(move |change: &SettingChange| {
+        if !matches!(change, SettingChange::DiagnosticsTechnicalLogging(_) | SettingChange::Reset) {
             return;
         }
         // The store calls this, so it is alive.
         weak.upgrade().into_iter().for_each(|settings| {
-            let _ = apply_rotation(&changed_target, truthy(&settings.get_or(TECHNICAL_LOGGING_PATH, Value::Bool(false))));
+            let _ = apply_rotation(&changed_target, technical_logging(&settings));
         });
     })))
 }
@@ -549,7 +556,7 @@ pub fn configure_logging(settings: Option<&Arc<SettingsStore>>) -> io::Result<Ro
 /// [`configure_logging`] with the log directory given.
 pub fn configure_logging_in(directory: &Path, settings: Option<&Arc<SettingsStore>>) -> io::Result<RotatingFileHandler> {
     std::fs::create_dir_all(directory)?;
-    let technical = settings.is_some_and(|s| truthy(&s.get_or(TECHNICAL_LOGGING_PATH, Value::Bool(false))));
+    let technical = settings.is_some_and(|settings| technical_logging(settings));
     let (maximum, backups) = rotation_limits(technical);
     let path = directory.join(LOG_FILE_NAME);
     let handler = RotatingFileHandler::new(&path, maximum, backups)?;
@@ -577,6 +584,8 @@ pub fn configure_logging_in(directory: &Path, settings: Option<&Arc<SettingsStor
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::constants::{DETECTION_AGGRESSIVE, HISTORY_LIMIT};
+    use crate::settings_file::HistoryLimit;
     use std::sync::Mutex as TestMutex;
 
     #[test]
@@ -645,7 +654,7 @@ mod tests {
         install_handler(&handler);
         install_handler(&handler);
         uninstall_handler();
-        assert!(!log_status_of(&folder.join("a.log")).is_empty());
+        assert!(log_status_of(&folder.join("a.log")).path.ends_with("a.log"));
         assert_eq!(log_path(), log_directory().join(LOG_FILE_NAME));
         let _ = log_status();
     }
@@ -656,8 +665,8 @@ mod tests {
         let folder = directory("settings");
         let settings = Arc::new(SettingsStore::new(Some(folder.join("config.json"))));
         let handler = configure_logging_in(&folder, Some(&settings)).unwrap();
-        settings.set("history.limit", Value::from(5), false).unwrap();
-        settings.set(TECHNICAL_LOGGING_PATH, Value::Bool(true), false).unwrap();
+        settings.write(HISTORY_LIMIT, HistoryLimit(5), false).unwrap();
+        settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, true, false).unwrap();
         handler.close();
         uninstall_handler();
     }
@@ -759,31 +768,30 @@ mod tests {
         let _turn = ROOT_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = directory("follow");
         let settings = Arc::new(SettingsStore::new(Some(dir.join("config.json"))));
-        settings.set("diagnostics.technical_logging", Value::Bool(true), true).unwrap();
+        settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, true, true).unwrap();
         let handler = configure_logging_in(&dir.join("data"), Some(&settings)).unwrap();
         assert_eq!((handler.max_bytes(), handler.backup_count()), TECHNICAL_LOG_ROTATION);
         let banner = std::fs::read_to_string(dir.join("data").join("keyswitch.log")).unwrap();
         assert!(banner.contains(&format!(" {VERSION} INFO keyswitch.logsetup: KeySwitch {VERSION} запущен на ")));
         assert!(banner.contains("5 МБ × 6 файлов, режим диагностики"));
-        settings.set("diagnostics.technical_logging", Value::Bool(false), true).unwrap();
+        settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, false, true).unwrap();
         assert_eq!((handler.max_bytes(), handler.backup_count()), DEFAULT_LOG_ROTATION);
-        settings.set("diagnostics.technical_logging", Value::Bool(true), true).unwrap();
-        settings.set("detection.aggressive", Value::Bool(true), true).unwrap();
+        settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, true, true).unwrap();
+        settings.write(DETECTION_AGGRESSIVE, true, true).unwrap();
         assert_eq!(handler.max_bytes(), TECHNICAL_LOG_ROTATION.0);
         settings.reset().unwrap();
         assert_eq!(handler.max_bytes(), DEFAULT_LOG_ROTATION.0);
         let unsubscribe = follow_settings(&settings, None).expect("the installed handler is found");
         unsubscribe();
-        settings.set("diagnostics.technical_logging", Value::Bool(true), true).unwrap();
+        settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, true, true).unwrap();
         assert_eq!(handler.max_bytes(), TECHNICAL_LOG_ROTATION.0);
 
         info("keyswitch.engine", "проверка");
         debug("keyswitch.engine", "не пишется");
         let status = log_status_of(&dir.join("data").join("keyswitch.log"));
-        assert_eq!(status["installed"], Value::Bool(true));
-        assert_eq!(status["level"], "INFO");
-        assert!(status["size"].as_i64().unwrap() > 0);
-        assert_eq!(status["technical"], Value::Bool(true));
+        assert!(status.installed && status.technical);
+        assert_eq!(status.level, "INFO");
+        assert!(status.size > 0);
         let text = std::fs::read_to_string(dir.join("data").join("keyswitch.log")).unwrap();
         assert!(text.contains(" INFO keyswitch.engine: проверка") && !text.contains("не пишется"));
 
@@ -793,7 +801,7 @@ mod tests {
         uninstall_handler();
         assert!(file_handler().is_none());
         set_root_level(Level::Warning);
-        assert_eq!(log_status_of(&dir.join("missing").join("keyswitch.log"))["size"], -1);
+        assert_eq!(log_status_of(&dir.join("missing").join("keyswitch.log")).size, -1);
         assert!(follow_settings(&settings, None).is_none());
     }
 }

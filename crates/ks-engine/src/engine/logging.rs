@@ -76,7 +76,7 @@ impl EngineCore {
                 "words": model.frequencies.len(),
                 "source": model.source,
             }))).collect()),
-            "settings": Value::Object(settings_snapshot(&self.settings)),
+            "settings": settings_snapshot(&self.settings),
         );
     }
 

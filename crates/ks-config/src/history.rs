@@ -2,12 +2,14 @@
 
 use ks_cast::To as _;
 use crate::config::home_dir;
-use crate::constants::{DEFAULT_HISTORY_LIMIT, HISTORY_CONFIDENCE_DECIMALS};
+use crate::constants::HISTORY_CONFIDENCE_DECIMALS;
 use crate::logsetup::utc_now;
 use crate::pycompat::create_parent;
-use crate::pycompat::{decode_text, encoded_text, json_loads, with_suffix, write_text};
-use ks_text::{json_dumps, py_int, py_round_ndigits, JsonOptions};
-use serde_json::{Map, Number, Value};
+use crate::pycompat::{decode_text, encoded_text, with_suffix, write_text};
+pub use crate::settings_file::history_limit;
+use ks_text::json::{Kept, ObjectOf, dumps, loads_lenient};
+use ks_text::{JsonOptions, py_round_ndigits};
+use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -81,78 +83,46 @@ impl HistoryEntry {
     }
 
     fn as_row(&self) -> Row {
-        Row([
-            Value::String(self.timestamp.clone()),
-            Value::String(self.original.clone()),
-            Value::String(self.replacement.clone()),
-            Value::String(self.application.clone()),
-            Number::from_f64(self.confidence).map_or(Value::Null, Value::Number),
-        ])
+        Row {
+            timestamp: Kept::text(self.timestamp.clone()),
+            original: Kept::text(self.original.clone()),
+            replacement: Kept::text(self.replacement.clone()),
+            application: Kept::text(self.application.clone()),
+            confidence: Kept::float(self.confidence),
+        }
     }
 }
 
-/// `history_limit(value)`: the `history.limit` setting as a count of entries.
-///
-/// The settings file can be edited by hand; a value that is not a number falls back to the default instead of
-/// stopping the application at start. A count beyond 64 bits is kept at the largest one.
-#[must_use]
-pub fn history_limit(value: &Value) -> i64 {
-    let parsed: Option<i128> = match value {
-        Value::Number(n) => match n.as_i64() {
-            Some(i) => Some(i128::from(i)),
-            None => match n.as_u64() {
-                Some(u) => Some(i128::from(u)),
-                // int(float): the fraction is cut off; an infinity or a NaN has no int.
-                None => n.as_f64().filter(|f| f.is_finite()).map(|f| f.trunc().to::<i128>()),
-            },
-        },
-        Value::String(text) => py_int(text),
-        Value::Null | Value::Bool(_) | Value::Array(_) | Value::Object(_) => None,
-    };
-    match parsed {
-        Some(count) => (count.clamp(1, i128::from(i64::MAX))).to::<i64>(),
-        None => DEFAULT_HISTORY_LIMIT,
-    }
+/// The five values of a file line, whatever their types (Python's dataclass does not check them): a hand-written row
+/// goes back into the file as it came.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Row {
+    timestamp: Kept,
+    original: Kept,
+    replacement: Kept,
+    application: Kept,
+    confidence: Kept,
 }
-
-/// The five values of a file line, whatever their types (Python's dataclass does not check them).
-#[derive(Clone, Debug)]
-struct Row([Value; 5]);
-
-const FIELDS: [&str; 5] = ["timestamp", "original", "replacement", "application", "confidence"];
 
 impl Row {
+    /// `HistoryEntry(**payload)`: exactly the five fields, by name, in any order, or no row at all.
     fn from_line(line: &str) -> Option<Row> {
-        let Value::Object(payload) = json_loads(line)? else { return None };
-        // HistoryEntry(**payload): exactly the five fields, by name, in any order.
-        if payload.len() != FIELDS.len() {
-            return None;
-        }
-        let mut values: [Value; 5] = Default::default();
-        for (slot, name) in values.iter_mut().zip(FIELDS) {
-            *slot = payload.get(name)?.clone();
-        }
-        Some(Row(values))
+        loads_lenient::<ObjectOf<Row>>(line).ok().map(|row| row.0)
     }
 
     fn line(&self) -> String {
-        let mut map = Map::new();
-        for (name, value) in FIELDS.iter().zip(&self.0) {
-            map.insert((*name).to_string(), value.clone());
-        }
-        let options = JsonOptions { ensure_ascii: false, ..JsonOptions::default() };
-        json_dumps(&Value::Object(map), &options) + "\n"
+        dumps(self, &JsonOptions { ensure_ascii: false, ..JsonOptions::default() }) + "\n"
     }
 
     /// The typed entry, when the fields have the types the program writes.
     fn entry(&self) -> Option<HistoryEntry> {
-        let [timestamp, original, replacement, application, confidence] = &self.0;
         Some(HistoryEntry {
-            timestamp: timestamp.as_str()?.to_string(),
-            original: original.as_str()?.to_string(),
-            replacement: replacement.as_str()?.to_string(),
-            application: application.as_str()?.to_string(),
-            confidence: confidence.as_f64()?,
+            timestamp: self.timestamp.as_str()?.to_string(),
+            original: self.original.as_str()?.to_string(),
+            replacement: self.replacement.as_str()?.to_string(),
+            application: self.application.as_str()?.to_string(),
+            confidence: self.confidence.as_f64()?,
         })
     }
 }
@@ -282,7 +252,6 @@ impl HistoryStore {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn an_entry_made_now_and_a_folder_in_place_of_the_file() {
@@ -291,11 +260,6 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("ks-history-folder-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         assert!(HistoryStore::new(Some(folder), 10).read(None).unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_limit_above_the_signed_range_is_still_a_number() {
-        assert!(history_limit(&serde_json::json!(u64::MAX)) > 0);
     }
 
     fn directory(name: &str) -> PathBuf {
@@ -363,16 +327,30 @@ mod tests {
     }
 
     #[test]
-    fn limits() {
-        assert_eq!(history_limit(&json!("abc")), DEFAULT_HISTORY_LIMIT);
-        assert_eq!(history_limit(&Value::Null), DEFAULT_HISTORY_LIMIT);
-        assert_eq!(history_limit(&json!(true)), DEFAULT_HISTORY_LIMIT);
-        assert_eq!(history_limit(&json!([200])), DEFAULT_HISTORY_LIMIT);
-        assert_eq!(history_limit(&json!("200")), 200);
-        assert_eq!(history_limit(&json!(" 12 ")), 12);
-        assert_eq!(history_limit(&json!(0)), 1);
-        assert_eq!(history_limit(&json!(7.9)), 7);
-        assert_eq!(history_limit(&json!(-3.5)), 1);
+    fn a_line_is_a_row_only_with_exactly_the_five_fields_of_an_object() {
+        let row = |text: &str| Row::from_line(text);
+        let whole = r#"{"timestamp": "t", "original": "a", "replacement": "b", "application": "c", "confidence": 1}"#;
+        assert_eq!(row(whole).unwrap().entry().unwrap().confidence, 1.0);
+        // A key given twice keeps its last value, as a dict does; the fields can come in any order.
+        let doubled = r#"{"confidence": 0.5, "original": "x", "replacement": "b", "application": "c", "original": "a", "timestamp": "t"}"#;
+        assert_eq!(row(doubled).unwrap().entry().unwrap().original, "a");
+        assert!(row(r#"{"timestamp": "t", "original": "a", "replacement": "b", "application": "c"}"#).is_none());
+        assert!(row(r#"{"timestamp": "t", "original": "a", "replacement": "b", "application": "c", "confidence": 1, "more": 2}"#).is_none());
+        assert!(row(r#"["t", "a", "b", "c", 1]"#).is_none());
+        // Fields of other types make a row of the file, but no entry; each field type is checked.
+        for odd in [
+            r#"{"timestamp": 1, "original": "a", "replacement": "b", "application": "c", "confidence": 1}"#,
+            r#"{"timestamp": "t", "original": 2, "replacement": "b", "application": "c", "confidence": 1}"#,
+            r#"{"timestamp": "t", "original": "a", "replacement": [3], "application": "c", "confidence": 1}"#,
+            r#"{"timestamp": "t", "original": "a", "replacement": "b", "application": null, "confidence": 1}"#,
+            r#"{"timestamp": "t", "original": "a", "replacement": "b", "application": "c", "confidence": "1"}"#,
+        ] {
+            assert!(row(odd).unwrap().entry().is_none(), "{odd}");
+        }
+    }
+
+    #[test]
+    fn at_least_one_entry_is_kept() {
         let store = HistoryStore::new(Some(directory("min").join("missing.jsonl")), 0);
         assert_eq!(store.limit(), 1);
         assert!(store.read(None).unwrap().is_empty());

@@ -603,11 +603,11 @@ fn misc() {
                 for p in r["sets"].as_array().unwrap() {
                     store.set(s(&p[0]), serde_json::from_str(s(&p[1])).unwrap(), false).unwrap();
                 }
-                f.eq("snapshot", &json!(snapshot_as_python(&jt(&Value::Object(settings_diagnostics::settings_snapshot(&store))), &store)), &r["snapshot"]);
+                f.eq("snapshot", &json!(snapshot_as_python(&jt(&serde_json::to_value(settings_diagnostics::settings_snapshot(&store)).unwrap()), &store)), &r["snapshot"]);
                 for (key, want) in r["changes"].as_object().unwrap() {
                     let (p, t) = key.split_once('\0').unwrap();
                     let c = settings_diagnostics::setting_change(&store, p, &serde_json::from_str(t).unwrap());
-                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| snapshot_as_python(&jt(&Value::Object(m)), &store))), want);
+                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| snapshot_as_python(&jt(&serde_json::to_value(m).unwrap()), &store))), want);
                 }
             }
             "line" => {

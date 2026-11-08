@@ -8,14 +8,22 @@
 //! `serde_json::json!` would build from it (both go through `serde_json::to_value`), so a typed record writes exactly
 //! the bytes that the same data built key by key wrote before.
 //!
-//! The untyped tree stays inside this module and [`crate::pyjson`]; nothing else names it.
-#![expect(clippy::disallowed_methods, reason = "json.dumps over the tree serde_json parses: the one writer, the one reader")]
-#![cfg_attr(test, expect(clippy::disallowed_macros, clippy::disallowed_types, reason = "the typed writer is checked against the tree it replaces"))]
+//! The untyped tree stays inside this module and [`crate::pyjson`]; nothing else names it. Three things let typed code
+//! read files that people edit, or that an older program wrote: [`loads_lenient`] reads a key given twice the way Python's
+//! dict does, [`ObjectOf`] refuses a list where a record belongs (a derived struct also reads a list, by position), and
+//! [`Kept`] carries a value of any type through the program unread; [`Tolerant`] lets one broken entry of a list or a
+//! table be skipped while the rest stay.
+#![expect(clippy::disallowed_methods, clippy::disallowed_types, reason = "json.dumps over the tree serde_json parses: the one writer, the one reader")]
+#![cfg_attr(test, expect(clippy::disallowed_macros, reason = "the typed writer is checked against the tree it replaces"))]
 
 use crate::pyjson::{json_dumps, JsonOptions};
-use serde::de::{DeserializeOwned, DeserializeSeed};
-use serde::Serialize;
+use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, IgnoredAny, MapAccess, Visitor};
+use serde::{Deserialize, Serialize};
+use serde::de::value::MapAccessDeserializer;
+use serde_json::{Number, Value};
+use std::fmt;
 use std::io;
+use std::marker::PhantomData;
 
 /// Why a document could not be read: its text, where the parser stopped, and the kind of fault.
 pub use serde_json::Error as JsonError;
@@ -49,14 +57,109 @@ pub fn dumps<T: Serialize + ?Sized>(value: &T, options: &JsonOptions) -> String 
     json_dumps(&tree, options)
 }
 
+/// [`loads`] for a file that may have been edited by hand, read the way `json.loads` reads it: a key written twice keeps its last
+/// value, in the place of its first. A type derived with serde refuses such a key instead ("duplicate field"), and a
+/// hand-edited file must not be refused for that, so the text becomes the tree first, where every key is there once, and
+/// the type is read from the tree. For small files: the tree is built whole.
+pub fn loads_lenient<T: DeserializeOwned>(text: impl AsRef<[u8]>) -> Result<T, JsonError> {
+    serde_json::from_value(serde_json::from_slice(text.as_ref())?)
+}
+
+/// `T` read from a JSON object and nothing else. A struct derived with serde also reads a JSON list, field by field in
+/// order, and a list where a record belongs is what Python's `dict.get` would have failed on: a hand-written list must
+/// not pass for a record.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObjectOf<T>(pub T);
+
+struct ObjectOfVisitor<T>(PhantomData<T>);
+
+impl<'de, T: Deserialize<'de>> Visitor<'de> for ObjectOfVisitor<T> {
+    type Value = ObjectOf<T>;
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON object")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<ObjectOf<T>, A::Error> {
+        T::deserialize(MapAccessDeserializer::new(map)).map(ObjectOf)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for ObjectOf<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<ObjectOf<T>, D::Error> {
+        deserializer.deserialize_map(ObjectOfVisitor(PhantomData))
+    }
+}
+
+/// A value that reads as `T`, or anything else at all: one broken entry of a list or a table, in a file edited by hand, is
+/// skipped and the rest stay.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum Tolerant<T> {
+    Read(T),
+    Other(IgnoredAny),
+}
+
+impl<T> Tolerant<T> {
+    /// The value, when it read as `T`.
+    #[must_use]
+    pub fn into_read(self) -> Option<T> {
+        match self {
+            Tolerant::Read(value) => Some(value),
+            Tolerant::Other(_) => None,
+        }
+    }
+
+    /// A reference to the value, when it read as `T`.
+    #[must_use]
+    pub fn as_read(&self) -> Option<&T> {
+        match self {
+            Tolerant::Read(value) => Some(value),
+            Tolerant::Other(_) => None,
+        }
+    }
+}
+
+/// A value of a file that this program carries as it is, without reading it: a field that may hold anything, and whose
+/// bytes must stay when the file is written again (a hand-written row of the history, say). It can only be carried,
+/// written back, and asked whether it is the text or the number the program would have put there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Kept(Value);
+
+impl Kept {
+    /// A value this program writes as text.
+    #[must_use]
+    pub fn text(value: String) -> Kept {
+        Kept(Value::String(value))
+    }
+
+    /// A value this program writes as a float: `null` when it is not finite, as `json!` writes it.
+    #[must_use]
+    pub fn float(value: f64) -> Kept {
+        Kept(Number::from_f64(value).map_or(Value::Null, Value::Number))
+    }
+
+    /// The text this value is, when it is one.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        self.0.as_str()
+    }
+
+    /// The number this value is, when it is one.
+    #[must_use]
+    pub fn as_f64(&self) -> Option<f64> {
+        self.0.as_f64()
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::pyjson::Indent;
-    use serde::Deserialize;
-    use serde::de::{Deserializer, IgnoredAny, Visitor};
-    use serde_json::{json, Value};
+    use serde_json::json;
     use std::collections::BTreeMap;
     use std::fmt;
     use std::marker::PhantomData;
@@ -290,5 +393,64 @@ mod tests {
     #[should_panic(expected = "a record of this program is JSON")]
     fn a_value_that_is_not_json_stops_the_writer() {
         let _ = dumps(&BTreeMap::from([((1, 2), 3)]), &JsonOptions::default());
+    }
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct Pair {
+        word: String,
+        #[serde(default)]
+        count: i64,
+    }
+
+    #[test]
+    fn a_key_given_twice_keeps_its_last_value_in_the_place_of_its_first_as_python_reads_it() {
+        // A derived type refuses the repeated key when it reads the text itself: that is why the store files go by the tree.
+        assert!(loads::<Pair>(r#"{"word": "a", "word": "b"}"#).unwrap_err().to_string().contains("duplicate field"));
+        assert_eq!(loads_lenient::<Pair>(r#"{"word": "a", "count": 2, "word": "b"}"#).unwrap(), Pair { word: "b".to_owned(), count: 2 });
+        let order: Value = loads_lenient(r#"{"z": 1, "a": 2, "z": 3}"#).unwrap();
+        assert_eq!(serde_json::to_string(&order).unwrap(), r#"{"z":3,"a":2}"#);
+    }
+
+    #[test]
+    fn the_lenient_reader_refuses_what_is_no_document_of_this_shape() {
+        assert!(loads_lenient::<Pair>("{} trailing").is_err());
+        assert!(loads_lenient::<Pair>("[").is_err());
+        assert!(loads_lenient::<Pair>(r#"{"count": 2}"#).is_err());
+    }
+
+    #[test]
+    fn a_record_comes_from_an_object_and_never_from_a_list() {
+        // The derived type alone reads a list by position.
+        assert_eq!(serde_json::from_str::<Pair>(r#"["a", 2]"#).unwrap(), Pair { word: "a".to_owned(), count: 2 });
+        assert_eq!(loads_lenient::<ObjectOf<Pair>>(r#"{"word": "a", "count": 2}"#).unwrap(), ObjectOf(Pair { word: "a".to_owned(), count: 2 }));
+        assert!(loads_lenient::<ObjectOf<Pair>>(r#"["a", 2]"#).is_err());
+        assert!(loads_lenient::<ObjectOf<Pair>>("5").is_err());
+        let refused = loads_lenient::<Vec<ObjectOf<Pair>>>(r#"[{"word": "a"}, "b"]"#).unwrap_err();
+        assert!(refused.to_string().contains("expected a JSON object"), "{refused}");
+    }
+
+    #[test]
+    fn a_broken_entry_is_skipped_and_the_rest_stay() {
+        let read: Vec<Tolerant<i64>> = loads_lenient(r#"[1, "x", null, 2.5, {}, [3], 4]"#).unwrap();
+        assert_eq!(read.iter().filter_map(Tolerant::as_read).copied().collect::<Vec<_>>(), [1, 4]);
+        assert_eq!(read.into_iter().filter_map(Tolerant::into_read).collect::<Vec<_>>(), [1, 4]);
+        let table: BTreeMap<String, Tolerant<ObjectOf<Pair>>> = loads_lenient(r#"{"good": {"word": "a"}, "list": ["a"], "broken": {"count": 1}, "no": 5}"#).unwrap();
+        assert_eq!(table["good"].as_read(), Some(&ObjectOf(Pair { word: "a".to_owned(), count: 0 })));
+        assert_eq!((table["list"].as_read(), table["broken"].as_read(), table["no"].as_read()), (None, None, None));
+    }
+
+    #[test]
+    fn a_kept_value_comes_back_as_it_was_read() {
+        for text in [r#"{"b":null,"a":[1,2.5,"x",true]}"#, "1", "1.5", "true", "null", r#""text""#, "[]", "{}"] {
+            let kept: Kept = loads_lenient(text).unwrap();
+            assert_eq!(serde_json::to_string(&kept).unwrap(), text);
+        }
+        let text: Kept = loads("\"a\"").unwrap();
+        assert_eq!((text.as_str(), text.as_f64()), (Some("a"), None));
+        let number: Kept = loads("2").unwrap();
+        assert_eq!((number.as_str(), number.as_f64()), (None, Some(2.0)));
+        assert_eq!(serde_json::to_string(&Kept::text("b".to_owned())).unwrap(), "\"b\"");
+        assert_eq!(serde_json::to_string(&Kept::float(0.5)).unwrap(), "0.5");
+        assert_eq!(serde_json::to_string(&Kept::float(f64::NAN)).unwrap(), "null");
     }
 }

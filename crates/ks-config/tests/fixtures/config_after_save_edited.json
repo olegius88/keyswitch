@@ -1,0 +1,97 @@
+{
+  "schema_version": 8,
+  "enabled": false,
+  "general": {
+    "start_hidden": true,
+    "close_to_tray": true,
+    "autostart": true,
+    "notifications": true,
+    "sound": false,
+    "keep_history": true
+  },
+  "detection": {
+    "layouts": [
+      "us",
+      "ru"
+    ],
+    "language_models": [
+      "en_US",
+      "ru_RU"
+    ],
+    "minimum_length": "seven",
+    "confidence": 3.25,
+    "correct_on_pause": true,
+    "pause_delay_seconds": 0.7,
+    "early_switch": true,
+    "early_switch_min_length": 4,
+    "correct_on_space": true,
+    "correct_on_enter": true,
+    "correct_on_tab": true,
+    "correct_on_punctuation": true,
+    "respect_manual_layout": true,
+    "layout_switch_key": "",
+    "fix_double_capitals": true,
+    "aggressive": true,
+    "context_aware": true,
+    "context_policy": "assist",
+    "context_read_field": true,
+    "hold_after_caret_move": true,
+    "field_catch_up": "300",
+    "protect_code": true,
+    "intent_model_enabled": true,
+    "correct_typos": true,
+    "correct_typos_english": false,
+    "learning": true,
+    "injected_input": false,
+    "unknown_inside": {
+      "deep": true
+    }
+  },
+  "hotkeys": {
+    "toggle": 5,
+    "convert_last": "Pause",
+    "undo": "Ctrl+Alt+Z",
+    "selection_layout": "Shift+Pause",
+    "selection_case": "Alt+Pause",
+    "selection_transliterate": "Alt+Scroll_Lock",
+    "another": "F9"
+  },
+  "applications": {
+    "telegram_quote_mention": true
+  },
+  "exclusions": {
+    "applications": [
+      "keepassxc",
+      "1password",
+      "bitwarden"
+    ],
+    "words": []
+  },
+  "appearance": {
+    "theme": "system",
+    "show_indicator": true,
+    "indicator_style": "letters"
+  },
+  "updates": "none",
+  "diagnostics": {
+    "technical_logging": false
+  },
+  "history": {
+    "limit": 200
+  },
+  "note": "keep me",
+  "mine": {
+    "kept": [
+      1,
+      {
+        "b": null
+      }
+    ],
+    "a": 1.5
+  },
+  "extra": [
+    1,
+    "two",
+    null
+  ]
+}

@@ -1,10 +1,10 @@
 //! Settings, history, personal data and the small text commands: everything the engine needs that knows no language model.
 //!
 //! One file per Python module of the same name; `pycompat` holds the few behaviours of Python's standard library
-//! (text files, equality of JSON values, `Path.with_suffix`) that the stores of this crate rely on.
+//! (text files, `Path.with_suffix`) that the stores of this crate rely on, and `settings_file` the settings file itself and
+//! the tree that holds it.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
-#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 1 of the strict-json plan types them and removes this")]
 
 pub mod app_quirks;
 pub mod config;
@@ -20,3 +20,4 @@ pub mod pycompat;
 pub mod selection_commands;
 pub mod selection_text;
 pub mod settings_diagnostics;
+pub mod settings_file;

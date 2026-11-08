@@ -8,6 +8,7 @@ use std::fmt;
 use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::history::HistoryEntry;
 use ks_config::learning::LearnedRule;
+use ks_config::logsetup::LogStatus;
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
@@ -602,9 +603,10 @@ pub fn learning_count_text(count: usize) -> String {
 }
 
 /// `_refresh_log_state`: whether the journal is really being written, and how large. `status` is `log_status()`.
-pub fn log_state_text(status: &Map<String, Value>, path: &str, rotation: &str) -> String {
-    let size = status.get("size").and_then(Value::as_i64).unwrap_or(-1);
-    let installed = status.get("installed").is_some_and(truthy);
+#[must_use]
+pub fn log_state_text(status: &LogStatus, path: &str, rotation: &str) -> String {
+    let size = status.size;
+    let installed = status.installed;
     let state = if !installed {
         "журнал не ведётся: обработчик не установлен".to_owned()
     } else if size < 0 {
@@ -649,7 +651,7 @@ pub struct DiagnosticsInput {
     pub autostart: Value,
     pub technical_logging: bool,
     pub technical_log: String,
-    pub log: Map<String, Value>,
+    pub log: LogStatus,
     pub settings: String,
     pub data: String,
     pub error: String,
@@ -855,6 +857,10 @@ mod tests {
     use super::*;
     use ks_config::config::default_settings;
 
+    fn status_of_nothing() -> LogStatus {
+        LogStatus { path: "x.log".to_owned(), installed: false, level: "WARNING", size: -1, technical: false }
+    }
+
     #[test]
     fn python_truth_and_python_text_of_every_kind_of_value() {
         for (value, truth, text) in [
@@ -990,15 +996,15 @@ mod tests {
         assert_eq!(status_line(true, false), "Движок остановлен");
         assert_eq!(learning_count_text(0), "Правил пока нет");
         assert_eq!(learning_count_text(3), "Правил: 3");
-        let mut status = Map::new();
-        status.insert("installed".into(), json!(true));
-        status.insert("size".into(), json!(2048));
+        let mut status = status_of_nothing();
+        status.installed = true;
+        status.size = 2048;
         assert!(log_state_text(&status, "x.log", "5 МБ × 2 файлов").contains("Состояние: записывается, 2.0 КБ\n"));
-        status.insert("size".into(), json!(0));
+        status.size = 0;
         assert!(log_state_text(&status, "x.log", "r").contains("файл пуст"));
-        status.insert("size".into(), json!(-1));
+        status.size = -1;
         assert!(log_state_text(&status, "x.log", "r").contains("файл недоступен"));
-        status.insert("installed".into(), json!(false));
+        status.installed = false;
         assert!(log_state_text(&status, "x.log", "r").contains("обработчик не установлен"));
     }
 
@@ -1058,7 +1064,7 @@ mod tests {
             autostart: json!({"effective": true}),
             technical_logging: false,
             technical_log: "log".into(),
-            log: Map::new(),
+            log: status_of_nothing(),
             settings: "s".into(),
             data: "d".into(),
             error: String::new(),

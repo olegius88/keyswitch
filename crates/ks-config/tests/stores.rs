@@ -1,21 +1,18 @@
 //! The stores over files that are odd, damaged or written by older versions, and the small values around them.
-#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ks_config::app_quirks::TELEGRAM_QUOTE_MENTION;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{LOG_SECRET_REMEMBERED_WORDS, PERSONAL_WORDS_MAX};
+use ks_config::constants::{DETECTION_EARLY_SWITCH, DETECTION_PAUSE_DELAY_SECONDS, PERSONAL_WORDS_MAX, SettingChange};
 use ks_config::history::{HistoryEntry, HistoryStore, data_dir_from};
-use ks_config::indicator::layout_icon_name;
-use ks_config::learning::{LearnedRule, LearningError, LearningStore, RuleAction, RuleMatch, migrate_legacy};
-use ks_config::log_privacy::{LogRedactor, masked_text, secret_token};
+use ks_config::learning::{LearnedRule, LearningError, LearningFile, LearningStore, RuleAction, RuleMatch, migrate_legacy};
 use ks_config::logsetup::{LOG_FILE_NAME, Level, LogRecord, RotatingFileHandler, configure_logging, utc_time};
 use ks_config::personal_words::PersonalWords;
-use ks_config::pycompat::{encoded_text, py_eq};
-use ks_config::settings_diagnostics::setting_change;
-use serde_json::{Map, Value, json};
+use ks_config::pycompat::encoded_text;
+use ks_config::settings_diagnostics::{LoggedValue, Operation, change_record};
+use ks_text::json::{ObjectOf, loads_lenient};
 
 fn folder(name: &str) -> PathBuf {
     static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -26,8 +23,9 @@ fn folder(name: &str) -> PathBuf {
     directory
 }
 
-fn object(value: &Value) -> Map<String, Value> {
-    value.as_object().expect("an object").clone()
+/// A legacy learning file as `load` reads it.
+fn legacy_file(text: &str) -> LearningFile {
+    loads_lenient::<ObjectOf<LearningFile>>(text).expect("a legacy file").0
 }
 
 // ---------------------------------------------------------------- settings
@@ -35,30 +33,30 @@ fn object(value: &Value) -> Map<String, Value> {
 #[test]
 fn settings_of_older_files_adopt_new_defaults_once() {
     let cases = [
-        (json!({"detection": {"early_switch": true}}), true),
-        (json!({"schema_version": "x"}), true),
-        (json!({"schema_version": 1}), true),
-        (json!({"schema_version": 6, "detection": {"early_switch": false}}), true),
-        (json!({"schema_version": 7, "detection": {"early_switch": false}}), false),
-        (json!({"schema_version": 5, "detection": {"early_switch": true}}), true),
-        (json!({"schema_version": 7, "detection": {"pause_delay_seconds": 1.5}}), true),
-        (json!({"schema_version": 7, "detection": {"pause_delay_seconds": 0.5}}), true),
-        (json!({"schema_version": 99, "detection": {"early_switch": false}}), false),
+        (r#"{"detection": {"early_switch": true}}"#, true),
+        (r#"{"schema_version": "x"}"#, true),
+        (r#"{"schema_version": 1}"#, true),
+        (r#"{"schema_version": 6, "detection": {"early_switch": false}}"#, true),
+        (r#"{"schema_version": 7, "detection": {"early_switch": false}}"#, false),
+        (r#"{"schema_version": 5, "detection": {"early_switch": true}}"#, true),
+        (r#"{"schema_version": 7, "detection": {"pause_delay_seconds": 1.5}}"#, true),
+        (r#"{"schema_version": 7, "detection": {"pause_delay_seconds": 0.5}}"#, true),
+        (r#"{"schema_version": 99, "detection": {"early_switch": false}}"#, false),
     ];
     let directory = folder("settings");
     for (number, (file, early)) in cases.iter().enumerate() {
         let path = directory.join(format!("{number}.json"));
-        std::fs::write(&path, file.to_string()).expect("the file");
+        std::fs::write(&path, file).expect("the file");
         let store = SettingsStore::new(Some(path));
         store.load();
-        assert_eq!(store.get("detection.early_switch"), Some(Value::Bool(*early)), "{file}");
+        assert_eq!(store.read(DETECTION_EARLY_SWITCH), Some(*early), "{file}");
         store.save().expect("saved");
     }
     let path = directory.join("pause.json");
-    std::fs::write(&path, json!({"schema_version": 7, "detection": {"pause_delay_seconds": 1.5}}).to_string()).expect("the file");
+    std::fs::write(&path, r#"{"schema_version": 7, "detection": {"pause_delay_seconds": 1.5}}"#).expect("the file");
     let store = SettingsStore::new(Some(path));
     store.load();
-    assert_ne!(store.get("detection.pause_delay_seconds"), Some(json!(1.5)));
+    assert_ne!(store.read(DETECTION_PAUSE_DELAY_SECONDS), Some(1.5));
 }
 
 #[test]
@@ -66,7 +64,7 @@ fn settings_in_a_folder_instead_of_a_file_are_set_aside() {
     let path = folder("settings-dir");
     let store = SettingsStore::new(Some(path));
     store.load();
-    assert_eq!(store.get("detection.early_switch"), Some(Value::Bool(true)));
+    assert_eq!(store.read(DETECTION_EARLY_SWITCH), Some(true));
 }
 
 #[test]
@@ -74,19 +72,15 @@ fn a_change_of_a_setting_for_the_log() {
     let directory = folder("diagnostics");
     let store = SettingsStore::new(Some(directory.join("settings.json")));
     store.load();
-    let all = setting_change(&store, "*", &Value::Null).expect("a snapshot");
-    assert_eq!(all.get("operation"), Some(&json!("snapshot")));
-    assert_eq!(setting_change(&store, "no.such.path", &Value::Null), None);
-    assert_eq!(setting_change(&store, "schema_version", &json!(1)), None);
-    let default = store.default("detection.early_switch").expect("a default");
-    assert_eq!(setting_change(&store, "detection.early_switch", &default).and_then(|change| change.get("operation").cloned()), Some(json!("reset")));
-    let path = "detection.early_switch";
-    let changed = |value: Value| setting_change(&store, path, &value).expect("known").get("value").cloned();
-    assert_eq!(changed(json!(false)), Some(json!(false)));
-    assert_eq!(changed(json!("short")), Some(json!("short")));
-    assert!(changed(json!("x".repeat(10_000))).is_some_and(|value| value.as_str().is_some_and(|text| text.ends_with("...") && text.len() < 10_000)));
-    assert_eq!(changed(json!([1, 2])), Some(json!({"type": "list", "items": 2})));
-    assert_eq!(changed(json!({"a": 1})), Some(json!({"type": "dict", "items": 1})));
+    assert_eq!(change_record(&store, &SettingChange::Reset).expect("a snapshot").operation, Operation::Snapshot);
+    assert_eq!(change_record(&store, &SettingChange::SchemaVersion(1)), None);
+    assert_eq!(change_record(&store, &SettingChange::DetectionEarlySwitch(true)).expect("known").operation, Operation::Reset);
+    assert_eq!(change_record(&store, &SettingChange::DetectionEarlySwitch(false)).expect("known").value, Some(LoggedValue::Flag(false)));
+    let cut = change_record(&store, &SettingChange::AppearanceTheme("x".repeat(10_000))).expect("known").value.expect("a value");
+    let LoggedValue::Text(cut) = cut else { panic!("a text") };
+    assert!(cut.ends_with("...") && cut.len() < 10_000);
+    let words = change_record(&store, &SettingChange::ExclusionsWords(vec!["a".to_owned(), "b".to_owned()])).expect("known");
+    assert_eq!(words.value, Some(LoggedValue::Collection { r#type: "list", items: 2 }));
 }
 
 // ---------------------------------------------------------------- history
@@ -152,24 +146,24 @@ fn a_continuation_of_a_rule_respects_case_and_group() {
 #[test]
 fn old_rule_files_carry_over_only_what_acted() {
     let cases = [
-        (json!({"rules": [1]}), 0),
-        (json!({"rules": {"nocolon": {"target_group": 1, "confirmations": 9}}}), 0),
-        (json!({"rules": {"x:word": {"target_group": 1, "confirmations": 9}}}), 0),
-        (json!({"rules": {"0:word": 1}}), 0),
-        (json!({"rules": {"0:word": {}}}), 0),
-        (json!({"rules": {"0:word": {"target_group": 1}}}), 0),
-        (json!({"rules": {"0:word": {"target_group": 1, "confirmations": "x"}}}), 0),
-        (json!({"rules": {"0:word": {"target_group": 1, "confirmations": 9}}}), 1),
-        (json!({"rules": {"0:": {"target_group": 1, "confirmations": 9}}}), 0),
-        (json!({"rules": {"0:word": {"target_group": 0, "confirmations": 9}}}), 0),
-        (json!({"rejections": []}), 0),
-        (json!({"rejections": {"nocolon": [1]}}), 0),
-        (json!({"rejections": {"0:word": 1}}), 0),
-        (json!({"rejections": {"0:word": ["x", 1]}}), 1),
-        (json!({"rules": {"0:word": {"target_group": 1, "confirmations": 9}}, "rejections": {"0:word": [1]}}), 1),
+        (r#"{"rules": [1]}"#, 0),
+        (r#"{"rules": {"nocolon": {"target_group": 1, "confirmations": 9}}}"#, 0),
+        (r#"{"rules": {"x:word": {"target_group": 1, "confirmations": 9}}}"#, 0),
+        (r#"{"rules": {"0:word": 1}}"#, 0),
+        (r#"{"rules": {"0:word": {}}}"#, 0),
+        (r#"{"rules": {"0:word": {"target_group": 1}}}"#, 0),
+        (r#"{"rules": {"0:word": {"target_group": 1, "confirmations": "x"}}}"#, 0),
+        (r#"{"rules": {"0:word": {"target_group": 1, "confirmations": 9}}}"#, 1),
+        (r#"{"rules": {"0:": {"target_group": 1, "confirmations": 9}}}"#, 0),
+        (r#"{"rules": {"0:word": {"target_group": 0, "confirmations": 9}}}"#, 0),
+        (r#"{"rejections": []}"#, 0),
+        (r#"{"rejections": {"nocolon": [1]}}"#, 0),
+        (r#"{"rejections": {"0:word": 1}}"#, 0),
+        (r#"{"rejections": {"0:word": ["x", 1]}}"#, 1),
+        (r#"{"rules": {"0:word": {"target_group": 1, "confirmations": 9}}, "rejections": {"0:word": [1]}}"#, 1),
     ];
     for (payload, count) in cases {
-        assert_eq!(migrate_legacy(&object(&payload), 3).expect("no error").len(), count, "{payload}");
+        assert_eq!(migrate_legacy(&legacy_file(payload), 3).expect("no error").len(), count, "{payload}");
     }
 }
 
@@ -177,9 +171,11 @@ fn old_rule_files_carry_over_only_what_acted() {
 fn a_rule_of_the_file_with_an_odd_flag_is_no_rule() {
     let directory = folder("flag");
     let path = directory.join("rules.json");
-    let good = json!({"pattern": "word", "source_group": 0, "target_group": 1, "action": "convert", "match": "exact", "case_sensitive": true});
-    let odd = json!({"pattern": "other", "source_group": 0, "target_group": 1, "action": "convert", "match": "exact", "case_sensitive": 1});
-    std::fs::write(&path, json!({"schema_version": 2, "rules": [good, odd]}).to_string()).expect("the file");
+    let text = r#"{"schema_version": 2, "rules": [
+        {"pattern": "word", "source_group": 0, "target_group": 1, "action": "convert", "match": "exact", "case_sensitive": true},
+        {"pattern": "other", "source_group": 0, "target_group": 1, "action": "convert", "match": "exact", "case_sensitive": 1}
+    ]}"#;
+    std::fs::write(&path, text).expect("the file");
     let store = LearningStore::new(Some(path), None).expect("the store");
     assert_eq!(store.count(), 1);
 }
@@ -217,40 +213,6 @@ fn replacing_a_rule() {
 // ---------------------------------------------------------------- the log
 
 #[test]
-fn secrets_are_masked_at_any_depth() {
-    assert!(secret_token("parol123"));
-    assert!(!secret_token("12345678901"));
-    assert!(!secret_token("onlyletters"));
-    let none = std::collections::HashSet::new();
-    assert_eq!(masked_text("ok ", &none), "ok ");
-    assert_eq!(masked_text("ok", &none), "ok");
-    let mut redactor = LogRedactor::new();
-    let masked = redactor.record(&object(&json!({"list": ["parol123", 7, null, true], "number": 5})));
-    assert_eq!(masked.get("number"), Some(&json!(5)));
-    assert_ne!(masked.get("list"), Some(&json!(["parol123", 7, null, true])));
-    assert_eq!(masked.get("list").and_then(|list| list.get(1)), Some(&json!(7)));
-}
-
-#[test]
-fn the_words_after_a_password_marker_are_remembered_and_the_oldest_forgotten() {
-    let mut redactor = LogRedactor::new();
-    let after_marker = |redactor: &mut LogRedactor, word: &str| {
-        let _ = redactor.record(&object(&json!({"context": {"words": {"before": "пароль"}}, "nested": [{"original": word}]})));
-    };
-    after_marker(&mut redactor, "");
-    after_marker(&mut redactor, "!!!");
-    after_marker(&mut redactor, "пароль");
-    for number in 0..=LOG_SECRET_REMEMBERED_WORDS {
-        after_marker(&mut redactor, &format!("word{number}x"));
-    }
-    let last = format!("word{LOG_SECRET_REMEMBERED_WORDS}x");
-    let again = redactor.record(&object(&json!({"text": last})));
-    assert_ne!(again.get("text"), Some(&json!(last)));
-    let first = redactor.record(&object(&json!({"text": "word0x"})));
-    assert_eq!(first.get("text"), Some(&json!("word0x")));
-}
-
-#[test]
 fn a_journal_without_limits_never_rolls_over() {
     let directory = folder("journal");
     let path = directory.join("keyswitch.log");
@@ -272,16 +234,16 @@ fn a_journal_without_limits_never_rolls_over() {
 fn a_personal_file_without_its_parts_is_set_aside() {
     let directory = folder("personal");
     let parts = [
-        json!({"schema_version": 1}),
-        json!({"schema_version": 1, "salt": "s"}),
-        json!({"schema_version": 1, "salt": "s", "personal": []}),
-        json!({"schema_version": 1, "salt": 1, "personal": [], "counts": {}}),
-        json!({"schema_version": 1, "salt": "s", "personal": 1, "counts": {}}),
-        json!({"schema_version": 1, "salt": "s", "personal": [], "counts": 1}),
+        r#"{"schema_version": 1}"#,
+        r#"{"schema_version": 1, "salt": "s"}"#,
+        r#"{"schema_version": 1, "salt": "s", "personal": []}"#,
+        r#"{"schema_version": 1, "salt": 1, "personal": [], "counts": {}}"#,
+        r#"{"schema_version": 1, "salt": "s", "personal": 1, "counts": {}}"#,
+        r#"{"schema_version": 1, "salt": "s", "personal": [], "counts": 1}"#,
     ];
     for (number, payload) in parts.iter().enumerate() {
         let path = directory.join(format!("{number}.json"));
-        std::fs::write(&path, payload.to_string()).expect("the file");
+        std::fs::write(&path, payload).expect("the file");
         let words = PersonalWords::always_persisting(Some(path));
         assert!(words.unreadable().is_some(), "{payload}");
     }
@@ -291,14 +253,14 @@ fn a_personal_file_without_its_parts_is_set_aside() {
 fn a_personal_file_with_doubles_and_odd_counts() {
     let directory = folder("doubles");
     let path = directory.join("words.json");
-    let payload = json!({"schema_version": 1, "salt": "s", "personal": ["a", "a", 7, "b"], "counts": {"a": 1, "b": 0, "c": "x", "d": -1, "e": 2}});
-    std::fs::write(&path, payload.to_string()).expect("the file");
+    let payload = r#"{"schema_version": 1, "salt": "s", "personal": ["a", "a", 7, "b"], "counts": {"a": 1, "b": 0, "c": "x", "d": -1, "e": 2}}"#;
+    std::fs::write(&path, payload).expect("the file");
     let words = PersonalWords::always_persisting(Some(path.clone()));
     assert_eq!(words.unreadable(), None);
     assert_eq!(words.len(), 2);
     words.save();
-    let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("saved")).expect("JSON");
-    assert_eq!(saved["counts"], json!({"a": 1, "e": 2}));
+    let saved = std::fs::read_to_string(&path).expect("saved").replace("\r\n", "\n");
+    assert!(saved.ends_with("\"counts\": {\n    \"a\": 1,\n    \"e\": 2\n  }\n}\n"), "{saved}");
 }
 
 #[test]
@@ -313,28 +275,6 @@ fn the_oldest_personal_word_goes_out_over_the_limit() {
 }
 
 // ---------------------------------------------------------------- small values
-
-#[test]
-fn python_equality_of_values() {
-    let answers = [
-        (json!(null), json!(null), true),
-        (json!(null), json!(0), false),
-        (json!("a"), json!("a"), true),
-        (json!([1]), json!([1, 2]), false),
-        (json!([1, 2]), json!([1.0, 2]), true),
-        (json!({"a": 1}), json!({"a": 1.0}), true),
-        (json!({"a": 1}), json!({"b": 1}), false),
-        (json!({"a": 1}), json!({"a": 1, "b": 2}), false),
-        (json!(1), json!(1.5), false),
-        (json!(1), json!(1.0), true),
-        (json!(true), json!(1), true),
-        (json!(1.0), json!(1.0), true),
-        (json!(1e300), json!(1), false),
-    ];
-    for (left, right, answer) in answers {
-        assert_eq!(py_eq(&left, &right), answer, "{left} {right}");
-    }
-}
 
 #[test]
 fn text_for_a_file_has_the_line_ends_of_the_system() {
@@ -371,18 +311,4 @@ fn a_mention_applies_only_to_its_own_pair() {
     assert!(!head.applies(application, head.typed, "other"));
     assert!(!head.applies(application, "other", head.meant));
     assert!(!head.applies("no such program", head.typed, head.meant));
-}
-
-#[test]
-fn every_layout_has_its_icon() {
-    for (style, group, name) in [
-        (json!("letters"), 0, "keyswitch-en"),
-        (json!("letters"), 1, "keyswitch-ru"),
-        (json!("letters"), 2, "keyswitch"),
-        (json!("flags"), 0, "keyswitch-flag-us"),
-        (json!("flags"), 1, "keyswitch-flag-ru"),
-        (json!("flags"), 2, "keyswitch"),
-    ] {
-        assert_eq!(layout_icon_name(&style, group), name, "{style} {group}");
-    }
 }

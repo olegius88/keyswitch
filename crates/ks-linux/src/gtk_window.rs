@@ -19,7 +19,7 @@ use ks_config::config::SettingsStore;
 use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
-use ks_config::logsetup::{log_directory, log_path, log_status, rotation_summary};
+use ks_config::logsetup::{LogStatus, log_directory, log_path, log_status, rotation_summary};
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
@@ -181,20 +181,9 @@ fn thousands(count: usize) -> String {
 }
 
 /// Python's `repr` of the log status dictionary, which the copied report carries.
-fn status_repr(status: &serde_json::Map<String, Value>) -> String {
-    let items: Vec<String> = status
-        .iter()
-        .map(|(key, value)| {
-            let shown = match value {
-                Value::Bool(true) => "True".to_owned(),
-                Value::Bool(false) => "False".to_owned(),
-                Value::String(text) => format!("'{text}'"),
-                other @ (Value::Null | Value::Number(_) | Value::Array(_) | Value::Object(_)) => other.to_string(),
-            };
-            format!("'{key}': {shown}")
-        })
-        .collect();
-    format!("{{{}}}", items.join(", "))
+fn status_repr(status: &LogStatus) -> String {
+    let flag = |value: bool| if value { "True" } else { "False" };
+    format!("{{'path': '{}', 'installed': {}, 'level': '{}', 'size': {}, 'technical': {}}}", status.path, flag(status.installed), status.level, status.size, flag(status.technical))
 }
 
 fn label(text: &str) -> gtk::Label {
@@ -1813,10 +1802,7 @@ mod tests {
 
     #[test]
     fn the_log_status_reads_like_a_python_dict() {
-        let mut status = serde_json::Map::new();
-        status.insert("path".into(), json!("/x"));
-        status.insert("installed".into(), json!(true));
-        status.insert("size".into(), json!(-1));
-        assert_eq!(status_repr(&status), "{'path': '/x', 'installed': True, 'size': -1}");
+        let status = LogStatus { path: "/x".to_owned(), installed: true, level: "INFO", size: -1, technical: false };
+        assert_eq!(status_repr(&status), "{'path': '/x', 'installed': True, 'level': 'INFO', 'size': -1, 'technical': False}");
     }
 }

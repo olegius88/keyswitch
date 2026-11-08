@@ -5,6 +5,8 @@
 //! go into it as stars, as many as the word has characters, in every text a record carries: the word evaluated, its
 //! readings and replacements, and the words around it. The passwords that reached the log before the rule were such
 //! tokens or the words after such a marker.
+#![expect(clippy::disallowed_types, clippy::disallowed_methods, reason = "words that look like passwords are starred in every text of every record, whatever the record")]
+#![cfg_attr(test, expect(clippy::disallowed_macros, reason = "the tests build the records the engine logs"))]
 
 use crate::constants::{
     LOG_SECRET_MARKERS, LOG_SECRET_MIN_CHARACTERS, LOG_SECRET_REMEMBERED_WORDS, LOG_STRUCTURE_KEYS,
@@ -207,6 +209,44 @@ mod tests {
         assert_eq!(masked_text("gfhjkm  qwerty", &none), "gfhjkm  ******");
         assert_eq!(masked_text("Password hunter2", &none), "Password *******");
         assert_eq!(masked_text("Password", &none), "Password");
+    }
+
+    fn object(value: &Value) -> Map<String, Value> {
+        value.as_object().expect("an object").clone()
+    }
+
+    #[test]
+    fn secrets_are_masked_at_any_depth() {
+        assert!(secret_token("parol123"));
+        assert!(!secret_token("12345678901"));
+        assert!(!secret_token("onlyletters"));
+        let none = HashSet::new();
+        assert_eq!(masked_text("ok ", &none), "ok ");
+        assert_eq!(masked_text("ok", &none), "ok");
+        let mut redactor = LogRedactor::new();
+        let masked = redactor.record(&object(&json!({"list": ["parol123", 7, null, true], "number": 5})));
+        assert_eq!(masked.get("number"), Some(&json!(5)));
+        assert_ne!(masked.get("list"), Some(&json!(["parol123", 7, null, true])));
+        assert_eq!(masked.get("list").and_then(|list| list.get(1)), Some(&json!(7)));
+    }
+
+    #[test]
+    fn the_words_after_a_password_marker_are_remembered_and_the_oldest_forgotten() {
+        let mut redactor = LogRedactor::new();
+        let after_marker = |redactor: &mut LogRedactor, word: &str| {
+            let _ = redactor.record(&object(&json!({"context": {"words": {"before": "пароль"}}, "nested": [{"original": word}]})));
+        };
+        after_marker(&mut redactor, "");
+        after_marker(&mut redactor, "!!!");
+        after_marker(&mut redactor, "пароль");
+        for number in 0..=LOG_SECRET_REMEMBERED_WORDS {
+            after_marker(&mut redactor, &format!("word{number}x"));
+        }
+        let last = format!("word{LOG_SECRET_REMEMBERED_WORDS}x");
+        let again = redactor.record(&object(&json!({"text": last})));
+        assert_ne!(again.get("text"), Some(&json!(last)));
+        let first = redactor.record(&object(&json!({"text": "word0x"})));
+        assert_eq!(first.get("text"), Some(&json!("word0x")));
     }
 
     #[test]
