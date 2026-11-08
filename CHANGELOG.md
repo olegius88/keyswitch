@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.71.0 — 2026-11-09
+
 - One-time hints about what the program can do: above the caret right after a correction, near the tray icon, and on the pages of the settings window. Each shows once, one at a time, at most three a day and ten minutes apart, never while a word is being typed and never taking the keyboard from the field. Each has «Понятно» (got it) and «Больше не показывать подсказки» (no more hints), and the setting «Показывать подсказки о возможностях» (show hints about features) turns them off. Near the tray icon on Linux they are system notifications. Whoever updates sees them too, and the hints do not change how a word is decided.
 - GNOME on Wayland: the shell extension gives the keyboard back to the field in the same pass when a hint window appears, and keeps the hint above it; the updated extension is loaded at the next login.
 - For developers: the settings, the history, the rules and the personal words are read and written through typed records, with the same bytes in the files.
