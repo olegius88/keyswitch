@@ -2,7 +2,7 @@
 //! on every page changed and every button pressed, and the application's own calls made. With `KS_E2E` unset, it is skipped.
 #![expect(unsafe_code, reason = "the test program names its folders before any thread starts")]
 #![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
-#![expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use std::cell::Cell;
 use std::rc::Rc;
