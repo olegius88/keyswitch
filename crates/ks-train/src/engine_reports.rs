@@ -396,6 +396,11 @@ fn prefix_gates_hold(variant: &BTreeMap<&str, BTreeMap<&str, i64>>) -> bool {
     candidate["length_mismatches"] == 0 && candidate["changed_correct"] <= shipping["changed_correct"] && candidate["restored"] >= shipping["restored"] && (candidate["early_restored"]).to::<f64>() >= PREFIX_EARLY_RESTORED_MIN_FRACTION * (candidate["desired"]).to::<f64>()
 }
 
+/// Whether the early switch came before the last key of the text.
+fn switched_early(early_at: Option<usize>, text: &str) -> bool {
+    early_at.is_some_and(|key| key < text.chars().count())
+}
+
 fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: ContextPolicy, profile: &str, name: &str, folder: &Path) -> Result<(BTreeMap<&'a str, i64>, Vec<Value>), String> {
     let mut policy = Some(policy);
     let context = format!("{profile}/{}", if task.native { "field" } else { "observed" });
@@ -404,7 +409,7 @@ fn prefix_task<'a>(selected: &[PrefixRow], task: &PrefixTask<'_>, policy: Contex
     for row in selected {
         let (expected, actual, early_at, injections) = prefix_replay(row, task, &mut policy, folder)?;
         let exact = actual == expected;
-        let early = early_at.is_some_and(|key| key < row.text.chars().count());
+        let early = switched_early(early_at, &row.text);
         for (key, value) in [
             ("sequences", 1), ("desired", i64::from(row.desired)), ("exact", i64::from(exact)), ("restored", i64::from(row.desired && exact)), ("changed_correct", i64::from(!row.desired && !exact)),
             ("early_restored", i64::from(row.desired && exact && early)), ("length_mismatches", i64::from(actual.chars().count() != expected.chars().count())), ("injections", injections.to::<i64>()),
@@ -625,6 +630,13 @@ mod tests {
         for candidate in [[1, 2, 10], [0, 3, 10], [0, 2, 9]] {
             assert!(!context_v2_passed(&results(candidate)), "{candidate:?}");
         }
+    }
+
+    #[test]
+    fn a_switch_at_the_last_key_is_not_early() {
+        assert!(switched_early(Some(2), "абв"));
+        assert!(!switched_early(Some(3), "абв"));
+        assert!(!switched_early(None, "абв"));
     }
 
     #[test]

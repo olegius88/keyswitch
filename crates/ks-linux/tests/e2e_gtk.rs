@@ -855,6 +855,9 @@ fn hints(app: &Rc<gtk_app::App>) {
         for callback in engine.shared.correction_callbacks() {
             callback(&plan);
         }
+        for callback in engine.shared.selection_notice_callbacks() {
+            callback("Нет выделенного текста");
+        }
     }
     pump(20);
     // A card with no setting to mark, one whose setting has no row, and each kind of row marked.

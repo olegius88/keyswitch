@@ -79,6 +79,8 @@ mod scenario {
     const STANDARD: u64 = 5_000;
     const LONG: u64 = 10_000;
     const PHASE_START: u64 = 100;
+    /// How often a layout not yet taken is asked for again.
+    const LAYOUT_ASKED_AGAIN: u64 = 300;
     const PHASE_SETTLE: u64 = 300;
     const WINDOW_OPENS: u64 = 1_000;
     const START_ATTEMPTS: u32 = 4;
@@ -293,11 +295,20 @@ mod scenario {
                 return Err(format!("the layout {group} could not be requested"));
             }
             self.pump(PHASE_START);
+            let mut asked = Instant::now();
             let ready = self.pump_until(STANDARD, |editor| {
                 editor.activate();
-                editor.group() == group
+                if editor.group() == group {
+                    return true;
+                }
+                // The request goes to the window in front, and the window of a program that has just gone can leave another one there.
+                if asked.elapsed() >= Duration::from_millis(LAYOUT_ASKED_AGAIN) {
+                    editor.api.request_layout(layout);
+                    asked = Instant::now();
+                }
+                false
             });
-            if ready { Ok(()) } else { Err(format!("the layout did not become {group}: it is {}", self.group())) }
+            if ready { Ok(()) } else { Err(format!("the layout did not become {group}: it is {}, and {:?} is in front", self.group(), self.api.active_application())) }
         }
 
         fn expect(&self, text: &str, group: i32, milliseconds: u64) -> Result<(), String> {
