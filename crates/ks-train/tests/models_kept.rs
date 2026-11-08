@@ -4,7 +4,7 @@ mod support;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use support::{recipe, scratch, small_tree, trainer, tree};
+use support::{digest, recipe, scratch, small_tree, trainer, tree};
 
 fn run(command: &mut Command) -> Output {
     command.output().expect("the trainer starts")
@@ -57,11 +57,23 @@ fn every_rejected_or_retired_model_replays() {
 fn the_engine_reports_are_refreshed_and_then_hold() {
     let small = small_tree("engine-reports", &recipe());
     for (which, report) in [("boundary", "model/boundary_v1/engine-regression.json"), ("prefix", "model/prefix_v1/engine-report.json")] {
+        // The kept report is what an older program said, whatever the repository holds: the refresh replaces it and keeps it in the history under its digest.
+        let report = small.join(report);
+        let history = report.parent().expect("a folder").join("engine-history");
+        let mut older: Value = serde_json::from_slice(&std::fs::read(&report).expect("the report")).expect("json");
+        older["provenance"] = json!("an older program");
+        let older = serde_json::to_vec_pretty(&older).expect("json");
+        std::fs::write(&report, &older).expect("a file");
         done(&run(on(&small, &["engine", which]).arg("--refresh-runtime").args(["--jobs", "2"])));
+        assert_eq!(std::fs::read(history.join(format!("{}.json", digest(&older)))).expect("the older report is kept"), older);
+        let refreshed: Value = serde_json::from_slice(&std::fs::read(&report).expect("the report")).expect("json");
+        assert_ne!(refreshed["provenance"], json!("an older program"));
+        if which == "prefix" {
+            assert_eq!(refreshed["runtime_regression"], json!({"previous_report": format!("model/prefix_v1/engine-history/{}.json", digest(&older)), "previous_sha256": digest(&older)}));
+        }
         done(&run(on(&small, &["engine", which]).arg("--verify").args(["--jobs", "2"])));
         // A second refresh of the same program keeps the report and adds nothing to the history.
-        let report = small.join(report);
-        let kept = || (std::fs::read_dir(report.parent().expect("a folder").join("engine-history")).expect("the history").count(), std::fs::read(&report).expect("the report"));
+        let kept = || (std::fs::read_dir(&history).expect("the history").count(), std::fs::read(&report).expect("the report"));
         let before = kept();
         let again = run(on(&small, &["engine", which]).arg("--refresh-runtime").args(["--jobs", "2"]));
         done(&again);
