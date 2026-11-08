@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.70.0 — 2026-11-08
+
 - KeySwitch is written in Rust: no Python is left in the program, its packages or its tools. It decides every word as 0.66.2 does: the models and word lists are the same files byte for byte, the recorded real typing (57 200 words over 24 recordings) comes out the same word for word, with the Hunspell dictionaries and without them, and the 892 recorded runs of the old engine's tests replay against the new one in CI (850 compared entry by entry, 0 differ; 2 do not run and 40 are left out where those tests replaced parts of the engine).
 - The packages are smaller: the Windows installer is 19.5 MB instead of 31.8 MB on x64, 19.4 MB instead of 30.9 MB on Arm and 19.4 MB instead of 30.2 MB on x86; the portable archives about 23 MB instead of 40-42 MB; the Debian package 20.4 MB instead of 26.6 MB; the Mac archives 22.9 MB instead of 37.4 MB (Intel) and 37.0 MB (Apple silicon).
 - It takes much less memory. On Windows the program commits 59 MB right after start instead of 264 MB in 0.66.2, its working set peaks at 71 MB instead of 415 MB, and it is ready to switch 3 seconds after start instead of 17 (Windows 11 x64 in one virtual machine, both versions alike). On Linux, started hidden on a private X server, its private memory is 119 MB instead of 333 MB in 0.66.2 and its resident size 246 MB instead of 488 MB (602 MB at the peak while 0.66.2 loads its models). On a Mac its physical footprint while typing is 61 MB instead of 216 MB (0.66.1 run from its sources, since the packaged 0.66.1 did not start).
