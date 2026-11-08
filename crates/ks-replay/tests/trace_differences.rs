@@ -93,7 +93,7 @@ fn cases() -> Vec<(&'static str, Value, &'static str, &'static str)> {
         }), "not_run", "settings .enabled"),
         // A trace that holds a setting the Python never had is no trace of the Python's: it is compared whole, and the
         // defaults it names are the Python's.
-        ("settings-newer", with(&|trace| trace["settings"]["detection"]["layout_switch_key"] = json!("")), "differed", "log: engine_initialized.settings.defaults_sha256"),
+        ("settings-newer", with(&|trace| { trace["settings"]["detection"]["layout_switch_key"] = json!(""); trace["settings"]["general"]["hints"] = json!(true); }), "differed", "log: engine_initialized.settings.defaults_sha256"),
         ("engine-not-built", with(&|trace| trace["files"]["learning"] = json!(r#"{"rules": {"²:word": {"target_group": 1, "confirmations": 5}}}"#)), "differed", "panic: the engine was not built"),
         ("panic", steps(json!([{"k": "policy", "n": "model", "a": [], "io": [], "c": clock, "o": {}}])), "differed", "panic: index out of bounds"),
         ("step-kind", steps(json!([{"k": "strange", "n": "x", "a": [], "io": [], "c": clock, "o": {}}])), "not_run", "step kind strange"),
