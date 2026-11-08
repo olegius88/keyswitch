@@ -11,7 +11,7 @@ use gtk::prelude::{EditableExt as _, GtkWindowExt as _, WidgetExt as _};
 use ks_linux::x11_backend::X11Api;
 use ks_linux::x11_native;
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ConnectionExt as _, KEY_PRESS_EVENT, KEY_RELEASE_EVENT};
+use x11rb::protocol::xproto::{AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as _, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
@@ -37,6 +37,11 @@ pub(crate) const CONTROL_L_KEYSYM: u32 = 0xffe3;
 pub(crate) const BACKSPACE_KEYSYM: u32 = 0xff08;
 pub(crate) const SHIFT_L_KEYSYM: u32 = 0xffe1;
 pub(crate) const SHIFT_R_KEYSYM: u32 = 0xffe2;
+pub(crate) const ESCAPE_KEYSYM: u32 = 0xff1b;
+const LEFT_BUTTON: u8 = 1;
+/// The window manager the keyboard is tried against, and how long it takes to start.
+pub(crate) const WINDOW_MANAGER: &str = "xfwm4";
+const WINDOW_MANAGER_STARTS: u64 = 10_000;
 
 /// Physical US-layout keys, independent of any input method.
 pub(crate) struct Typer {
@@ -103,6 +108,34 @@ impl Typer {
         self.tap_keysym(BACKSPACE_KEYSYM)
     }
 
+    /// A press and a release of the left button at a point of the screen.
+    pub(crate) fn click_at(&self, x: i32, y: i32) -> Result<(), String> {
+        let (x, y) = (x.low::<i16>(), y.low::<i16>());
+        self.connection.xtest_fake_input(MOTION_NOTIFY_EVENT, 0, 0, self.root, x, y, 0).map_err(|error| error.to_string())?;
+        for (kind, delay) in [(BUTTON_PRESS_EVENT, KEY_PRESS_DELAY_MS), (BUTTON_RELEASE_EVENT, KEY_PRESS_DELAY_MS)] {
+            self.connection.xtest_fake_input(kind, LEFT_BUTTON, delay, self.root, 0, 0, 0).map_err(|error| error.to_string())?;
+        }
+        self.sync()
+    }
+
+    /// The window that has the keyboard now, by X11 itself: the one a window manager or a call gave it to.
+    pub(crate) fn input_focus(&self) -> Result<u32, String> {
+        Ok(self.connection.get_input_focus().map_err(|error| error.to_string())?.reply().map_err(|error| error.to_string())?.focus)
+    }
+
+    /// The top left corner of a window on the screen.
+    pub(crate) fn window_origin(&self, window: u32) -> Result<(i32, i32), String> {
+        let reply = self.connection.translate_coordinates(window, self.root, 0, 0).map_err(|error| error.to_string())?.reply().map_err(|error| error.to_string())?;
+        Ok((i32::from(reply.dst_x), i32::from(reply.dst_y)))
+    }
+
+    /// Whether a window manager has said it runs on this screen (`_NET_SUPPORTING_WM_CHECK` on the root window).
+    pub(crate) fn window_manager_runs(&self) -> Result<bool, String> {
+        let atom = self.connection.intern_atom(false, b"_NET_SUPPORTING_WM_CHECK").map_err(|error| error.to_string())?.reply().map_err(|error| error.to_string())?.atom;
+        let property = self.connection.get_property(false, self.root, atom, AtomEnum::WINDOW, 0, 1).map_err(|error| error.to_string())?.reply().map_err(|error| error.to_string())?;
+        Ok(property.value_len != 0)
+    }
+
     pub(crate) fn current_group(&self) -> i32 {
         self.api.xkb_state().map_or(-1, |state| i32::from(state.group))
     }
@@ -114,6 +147,20 @@ impl Typer {
         self.api.sync();
         Ok(())
     }
+}
+
+/// A window manager on the private screen, and the moment it says it runs.
+pub(crate) fn start_window_manager(typer: &Typer) -> Result<std::process::Child, String> {
+    let child = std::process::Command::new(WINDOW_MANAGER)
+        .args(["--compositor=off", "--sm-client-disable"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("{WINDOW_MANAGER} is needed for the test that a hint keeps its hands off the keyboard: {error}"))?;
+    if !pump_until(WINDOW_MANAGER_STARTS, || typer.window_manager_runs().unwrap_or(false)) {
+        return Err(format!("{WINDOW_MANAGER} did not start"));
+    }
+    Ok(child)
 }
 
 /// Runs the main loop for this long.

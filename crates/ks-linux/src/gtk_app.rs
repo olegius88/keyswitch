@@ -8,6 +8,7 @@ use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
@@ -20,6 +21,7 @@ use ks_engine::engine::default_learning_store;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
 use ks_engine::{EngineSnapshot, KeySwitchEngine, LearningPrompt};
+use ks_ui::hints::{Click, Hints, Moment, RUNNING_PLATFORM, subscribe as subscribe_hints};
 use ks_updates::constants::{UPDATE_CHECK_INITIAL_DELAY_SECONDS, UPDATE_CHECK_INTERVAL_SECONDS};
 use ks_updates::{UpdateController, UpdateManager, UpdatePhase, UpdateSnapshot};
 use serde_json::{Value, json};
@@ -28,6 +30,8 @@ use crate::atspi_bus;
 use crate::atspi_caret::focused_caret_anchor;
 use crate::constants::APP_ID;
 use crate::desktop_backend::{DesktopBackend, new_desktop_backend};
+use crate::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
+use crate::gtk_model::{HINT_ACTION_NEVER, HINT_ACTION_OPEN, LEARNING_PROMPT_WINDOW_TITLE};
 use crate::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use crate::gtk_window::{MainWindow, ModelInfo, Services, SharedModelInfo, apply_theme};
 use crate::linux_app::{VERSION, engine_builder, resource_dir, setting_bool};
@@ -65,6 +69,7 @@ pub struct App {
     last_update_notification: RefCell<String>,
     /// The switch of the autostart row being put back after a failed change.
     pub reverting_autostart: Cell<bool>,
+    pub hints: Rc<HintDriver>,
 }
 
 fn app() -> Option<Rc<App>> {
@@ -97,6 +102,36 @@ pub fn with_window(action: impl FnOnce(&MainWindow)) {
     if let Some(window) = app().and_then(|app| app.window.borrow().clone()) {
         action(&window);
     }
+}
+
+/// What the user did to a hint.
+pub fn hint_clicked(id: &str, click: Click) {
+    with_app(|app| app.hints.clicked(id, click));
+}
+
+/// A page of the settings window came up: the card of a hint, if one is due there.
+pub fn hint_page_shown(page: &str) {
+    with_app(|app| {
+        app.with_window(|window| {
+            let clicked: HintClicked = Rc::new(hint_clicked);
+            app.hints.page_shown(page).iter().for_each(|view| window.show_hint_card(page, view, &clicked));
+        });
+    });
+}
+
+/// How the hints reach the windows of this desktop.
+fn hint_screen(application: &adw::Application, desktop: &DesktopBackend) -> HintScreen {
+    let (placer, restorer) = (desktop.position_window.clone(), desktop.input.clone());
+    HintScreen::new(
+        application.upcast_ref(),
+        HintCalls {
+            position: Box::new(move |title, window, x, y| placer(title, window, x, y)),
+            restore: Box::new(move |window| restorer.restore_window(window)),
+            clicked: Rc::new(hint_clicked),
+            open_page: Box::new(|page| with_app(|app| app.show_page(page))),
+            hide_card: Box::new(|id| with_window(|window| window.remove_hint_card(id))),
+        },
+    )
 }
 
 fn post(work: impl FnOnce() + Send + 'static) {
@@ -279,6 +314,9 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
 
 fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
     let settings = Arc::new(SettingsStore::new(None));
+    // Before anything writes a file of the user's: a new installation would read as an update.
+    let hints_origin = Instant::now();
+    let hints = Hints::start(settings.clone(), &ks_config::history::data_dir(), RUNNING_PLATFORM, &Moment::now(hints_origin, 0));
     logsetup::follow_settings(&settings, None);
     let history = Arc::new(HistoryStore::new(
         None,
@@ -293,6 +331,7 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
         }
     };
     let desktop = new_desktop_backend();
+    let hints = HintDriver::new(hints, hints_origin, hint_screen(application, &desktop));
     let models: SharedModelInfo = Arc::new(Mutex::new(ModelInfo::default()));
     let build: Build = {
         let inner = engine_builder(settings.clone(), history.clone(), desktop.input.clone(), desktop.process_for_window.clone(), learning.clone());
@@ -341,6 +380,7 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
         update_periodic: RefCell::new(None),
         last_update_notification: RefCell::new(String::new()),
         reverting_autostart: Cell::new(false),
+        hints,
     });
     APP.with(|slot| *slot.borrow_mut() = Some(this.clone()));
 
@@ -352,6 +392,15 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
                 1 => app.toggle("enabled", true),
                 _ => app.application.quit(),
             });
+        });
+        application.add_action(&simple);
+    }
+    // What a notification of a hint asks for, with the hint's id.
+    for (name, click) in [(HINT_ACTION_OPEN, Click::Text), (HINT_ACTION_NEVER, Click::Never)] {
+        let simple = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
+        simple.connect_activate(move |_, id| {
+            let id = id.and_then(glib::Variant::str).unwrap_or_default().to_owned();
+            hint_clicked(&id, click);
         });
         application.add_action(&simple);
     }
@@ -407,6 +456,7 @@ fn shutdown() {
         app.cancel_update_checks();
         (app.close_updates)();
         app.services.engine.stop();
+        app.hints.close();
         if let Some(tray) = app.tray.borrow_mut().take() {
             tray.close();
         }
@@ -459,17 +509,22 @@ impl App {
         }
         let window = MainWindow::new(&self.application, self.services.clone());
         *self.window.borrow_mut() = Some(window.clone());
+        self.hints.settings_opened();
         window
     }
 
     pub fn show_window(&self) {
-        self.ensure_window().window.present();
+        let window = self.ensure_window();
+        window.window.present();
+        // The page a new window opens on was selected before the window could carry a card.
+        hint_page_shown(&window.current_page());
     }
 
     pub fn show_page(&self, page: &str) {
         let window = self.ensure_window();
         window.show_page(page);
         window.window.present();
+        hint_page_shown(page);
     }
 
     /// The window is taken apart so that a program in the tray holds none of its widgets.
@@ -497,6 +552,8 @@ impl App {
     /// The subscriptions to the engine, made once it is built, on the main thread.
     fn attach_engine(&self) {
         let desktop = self.desktop.clone();
+        let anchor_desktop = self.desktop.clone();
+        let wants_anchor = self.hints.caret_anchor_wanted();
         self.services.engine.when_built(Box::new(move |engine: &KeySwitchEngine| {
             engine.subscribe(Arc::new(|snapshot: &EngineSnapshot| {
                 let snapshot = snapshot.clone();
@@ -521,6 +578,9 @@ impl App {
                     app.open_rule_editor(draft, window);
                 });
             }));
+            subscribe_hints(&engine.shared, wants_anchor, Arc::new(move || prompt_anchor(&anchor_desktop)), Arc::new(|input| post_app(move |app| app.hints.input(input))));
+            let shared = engine.shared.clone();
+            post_app(move |app| app.hints.engine_built(shared));
             post_app(|app| {
                 app.with_window(|window| {
                     window.refresh_models();
@@ -580,6 +640,7 @@ impl App {
 
     pub fn apply_setting(&self, path: &str, value: &Value) {
         self.with_window(|window| window.apply_setting_update(path, value));
+        self.hints.settings_changed();
         let truth = crate::linux_app::truthy(value);
         match path {
             "enabled" => self.tray.borrow().iter().for_each(|tray| tray.set_enabled(truth)),
@@ -712,7 +773,7 @@ impl App {
             let callbacks = PromptCallbacks {
                 confirm: Box::new(move |prompt| confirm.confirm_learning_prompt(Some(prompt))),
                 dismiss: Box::new(move |prompt| dismiss.dismiss_learning_prompt(Some(prompt))),
-                position: Box::new(move |window, x, y| placer(window, x, y)),
+                position: Box::new(move |window, x, y| placer(LEARNING_PROMPT_WINDOW_TITLE, window, x, y)),
                 restore: Box::new(move |window| restorer.restore_window(window)),
             };
             *self.prompt.borrow_mut() = Some(LearningPromptWindow::new(self.application.upcast_ref(), callbacks));

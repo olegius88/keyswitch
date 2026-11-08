@@ -21,7 +21,9 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::{log_directory, log_path, log_status, rotation_summary};
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
-use ks_ui::windows_ui_model::EARLY_SWITCH_TITLE;
+use ks_config::constants::HINTS_SETTING;
+use ks_ui::hints::{HintView, Place};
+use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE};
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
@@ -40,6 +42,7 @@ use ks_updates::{UpdateController, UpdatePhase, UpdateSnapshot};
 use serde_json::{Value, json};
 
 use crate::gtk_app;
+use crate::gtk_hint::{HintClicked, hint_content};
 use crate::gtk_model::{with_live, GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
 use crate::system::AutostartManager;
 
@@ -137,6 +140,31 @@ enum Control {
     Switch(adw::SwitchRow),
     Spin(adw::SpinRow),
     Combo(adw::ComboRow),
+}
+
+impl Control {
+    fn row(&self) -> gtk::Widget {
+        match self {
+            Control::Switch(row) => row.clone().upcast(),
+            Control::Spin(row) => row.clone().upcast(),
+            Control::Combo(row) => row.clone().upcast(),
+        }
+    }
+}
+
+/// The box of a page and the line under whose title and subtitle the card of a hint goes.
+#[derive(Clone)]
+struct PageHead {
+    content: gtk::Box,
+    subtitle: gtk::Label,
+}
+
+/// A card of a hint on a page, and the row it marks.
+struct ShownCard {
+    id: String,
+    content: gtk::Box,
+    card: gtk::Box,
+    target: Option<gtk::Widget>,
 }
 
 fn setting_flag(settings: &SettingsStore, path: &str, default: bool) -> bool {
@@ -246,7 +274,7 @@ fn clear_list(list: &gtk::ListBox) {
     }
 }
 
-fn open_uri(uri: &str) -> Result<bool, String> {
+pub(crate) fn open_uri(uri: &str) -> Result<bool, String> {
     gio::AppInfo::launch_default_for_uri(uri, None::<&gio::AppLaunchContext>).map(|()| true).map_err(|error| error.message().to_owned())
 }
 
@@ -323,11 +351,14 @@ pub struct MainWindow {
     catalog: RefCell<Option<Rc<Vec<ApplicationChoice>>>>,
     wayland: Cell<bool>,
     probe: BackendProbe,
+    page_heads: RefCell<HashMap<String, PageHead>>,
+    hint_cards: RefCell<Vec<ShownCard>>,
 }
 
 /// A page of the stack: its content box, which the builders fill.
 struct PageBuilder<'a> {
     stack: &'a gtk::Stack,
+    heads: &'a RefCell<HashMap<String, PageHead>>,
 }
 
 impl PageBuilder<'_> {
@@ -342,6 +373,7 @@ impl PageBuilder<'_> {
         content.append(&description);
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&content).build();
         self.stack.add_named(&scroll, Some(name));
+        self.heads.borrow_mut().insert(name.to_owned(), PageHead { content: content.clone(), subtitle: description });
         content
     }
 }
@@ -385,12 +417,13 @@ impl MainWindow {
 
         let controls = RefCell::new(HashMap::new());
         let save_sources = Rc::new(RefCell::new(HashMap::new()));
+        let page_heads = RefCell::new(HashMap::new());
         let mut builder = Builder {
             services: services.clone(),
             controls: &controls,
             save_sources: save_sources.clone(),
             probe: &probe,
-            pages: PageBuilder { stack: &stack },
+            pages: PageBuilder { stack: &stack, heads: &page_heads },
         };
         let dashboard = builder.dashboard(&sidebar_detail);
         let automation = builder.automation();
@@ -443,6 +476,8 @@ impl MainWindow {
             catalog: RefCell::new(None),
             wayland: Cell::new(wayland),
             probe,
+            page_heads,
+            hint_cards: RefCell::new(Vec::new()),
         });
         this.connect();
         this.refresh_history();
@@ -529,6 +564,7 @@ impl MainWindow {
             if name == "history" || name == "automation" {
                 gtk_app::refresh_current(name);
             }
+            gtk_app::hint_page_shown(name);
         });
         self.window.connect_close_request(|_| gtk_app::window_close_requested());
     }
@@ -541,8 +577,41 @@ impl MainWindow {
         self.controls.borrow().keys().cloned().collect()
     }
 
+    /// The card of a hint under the title of `page`, with the row of the setting it names marked until it goes.
+    pub fn show_hint_card(&self, page: &str, view: &HintView, clicked: &HintClicked) {
+        let head = self.page_heads.borrow().get(page).cloned().expect("the card comes for a page of the navigation");
+        let card = hint_content(view, true, clicked);
+        styled(&card, "hint-card");
+        head.content.insert_child_after(&card, Some(&head.subtitle));
+        let control = if let Place::Settings { control, .. } = view.place { control } else { None };
+        let target = control.and_then(|path| self.controls.borrow().get(path).map(Control::row));
+        if let Some(row) = &target {
+            styled(row, "hint-target");
+        }
+        self.hint_cards.borrow_mut().push(ShownCard { id: view.id.to_owned(), content: head.content, card, target });
+    }
+
+    pub fn remove_hint_card(&self, id: &str) {
+        let shown = {
+            let mut cards = self.hint_cards.borrow_mut();
+            cards.iter().position(|card| card.id == id).map(|at| cards.remove(at))
+        };
+        if let Some(shown) = shown {
+            shown.content.remove(&shown.card);
+            if let Some(row) = shown.target {
+                row.remove_css_class("hint-target");
+            }
+        }
+    }
+
     pub fn toast(&self, message: &str) {
         self.toast_overlay.add_toast(adw::Toast::new(message));
+    }
+
+    /// The name of the page shown now.
+    #[must_use]
+    pub fn current_page(&self) -> String {
+        self.stack.visible_child_name().map(|name| name.to_string()).unwrap_or_default()
     }
 
     pub fn show_page(&self, page: &str) -> bool {
@@ -1459,7 +1528,7 @@ impl Builder<'_> {
             &labels,
             keys.iter().map(|key| (*key).to_owned()).collect(),
             index_of(&keys, &current, 0),
-            false,
+            true,
         ));
         page.append(&switching);
         let commands = group("Команды");
@@ -1572,6 +1641,7 @@ impl Builder<'_> {
         let feedback = group("Обратная связь");
         feedback.add(&self.switch_row("general.notifications", "Уведомлять об исправлении", "Показывать исходное и исправленное слово"));
         feedback.add(&self.switch_row("general.sound", "Звуковой сигнал", "Короткий системный сигнал после замены"));
+        feedback.add(&self.switch_row(HINTS_SETTING, HINTS_SETTING_TITLE, HINTS_SETTING_DESCRIPTION));
         feedback.add(&self.switch_row("general.keep_history", "Сохранять историю исправлений", "Только пары слов; полный ввод никогда не сохраняется"));
         page.append(&feedback);
 

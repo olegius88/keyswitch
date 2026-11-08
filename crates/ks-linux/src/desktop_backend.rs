@@ -13,8 +13,8 @@ use crate::x11_backend::ProcessForWindow;
 pub struct DesktopBackend {
     pub input: Arc<dyn InputBackend>,
     pub process_for_window: ProcessForWindow,
-    /// Puts the window with a native id at a screen position.
-    pub position_window: Arc<dyn Fn(i64, i32, i32) -> bool + Send + Sync>,
+    /// Puts a window of this program at a screen position: X11 goes by its native id, the Wayland desktops by its title.
+    pub position_window: Arc<dyn Fn(&str, i64, i32, i32) -> bool + Send + Sync>,
     pub wayland: bool,
 }
 
@@ -25,7 +25,7 @@ fn x11_backend() -> DesktopBackend {
     DesktopBackend {
         input: backend,
         process_for_window,
-        position_window: Arc::new(move |window, x, y| placer.position_window(window, x, y)),
+        position_window: Arc::new(move |_title, window, x, y| placer.position_window(window, x, y)),
         wayland: false,
     }
 }
@@ -43,7 +43,7 @@ pub fn desktop_of_wayland(backend: Arc<crate::wayland_backend::WaylandBackend>) 
     DesktopBackend {
         input: backend,
         process_for_window,
-        position_window: Arc::new(move |window, x, y| placer.position_window(window, i64::from(x), i64::from(y))),
+        position_window: Arc::new(move |title, window, x, y| placer.position_window(title, window, i64::from(x), i64::from(y))),
         wayland: true,
     }
 }
@@ -62,7 +62,7 @@ fn desktop_or_reason(built: Result<DesktopBackend, String>) -> DesktopBackend {
     built.unwrap_or_else(|reason| DesktopBackend {
         input: Arc::new(UnavailableBackend { reason }),
         process_for_window: Arc::new(|_| 0),
-        position_window: Arc::new(|_, _, _| false),
+        position_window: Arc::new(|_, _, _, _| false),
         wayland: true,
     })
 }
@@ -128,7 +128,7 @@ mod tests {
         let desktop = desktop_or_reason(Err("why not".to_owned()));
         assert!(desktop.wayland);
         assert_eq!((desktop.process_for_window)(5), 0);
-        assert!(!(desktop.position_window)(5, 1, 2));
+        assert!(!(desktop.position_window)("окно", 5, 1, 2));
         assert_eq!(desktop.input.probe().error, "why not");
     }
 

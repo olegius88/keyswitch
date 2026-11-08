@@ -3,10 +3,11 @@
 #![expect(unsafe_code, reason = "the test program names its folders before any thread starts")]
 #![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 mod support;
 
@@ -18,9 +19,16 @@ use ks_engine::rule_editor::RuleDraft;
 use ks_config::history::{HistoryEntry, HistoryStore};
 use ks_config::learning::{LearnedRule, LearningStore, RuleAction, RuleMatch};
 use ks_engine::engine::{EngineSnapshot, LearningPrompt};
+use ks_linux::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
+use ks_linux::gtk_model::{HINT_ACTION_NEVER, HINT_ACTION_OPEN, HINT_PLACE_ATTEMPTS, HINT_PLACE_RETRY_MS, HINT_WINDOW_TITLE};
 use ks_linux::gtk_prompt::PromptAnchor;
 use ks_linux::gtk_window::{MainWindow, ModelInfo};
 use ks_linux::tray::TrayAction;
+use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
+use ks_ui::hints::{Click, CorrectionInfo, EngineInput, HINT_OK_LABEL, HintPresenter, HintView, Hints, Moment, Opens, Place, RUNNING_PLATFORM, SettingsPage};
+use ks_ui::windows_ui_model::HINTS_SETTING_TITLE;
+use ks_config::constants::HINTS_SETTING;
+use ks_config::config::SettingsStore;
 use ks_updates::{UpdatePhase, UpdateSnapshot};
 use serde_json::json;
 use ks_linux::gtk_app;
@@ -29,6 +37,9 @@ const ROWS_TRIED: i32 = 30;
 
 /// What the walk did last, for the watchdog to say.
 static LAST: Mutex<String> = Mutex::new(String::new());
+/// The notification daemon of the private bus, there before the program sends anything: an installed daemon would be
+/// activated by the first notification and hold its name.
+static NOTIFICATIONS: std::sync::OnceLock<Notifications> = std::sync::OnceLock::new();
 
 fn note(what: impl Into<String>) {
     *LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = what.into();
@@ -174,8 +185,8 @@ fn walk_dialogs(window: &gtk::Widget, round: usize) {
 
 fn pump(milliseconds: u64) {
     let context = glib::MainContext::default();
-    let until = std::time::Instant::now() + Duration::from_millis(milliseconds);
-    while std::time::Instant::now() < until {
+    let until = Instant::now() + Duration::from_millis(milliseconds);
+    while Instant::now() < until {
         // One at a time: an animation always has more to do.
         if !context.iteration(false) {
             std::thread::sleep(Duration::from_millis(1));
@@ -270,9 +281,9 @@ fn late_news() -> Result<(), String> {
     gtk_app::with_app(|app| {
         let settings = app.services.settings.clone();
         let paths = ["enabled", "detection.correct_on_space"];
-        let heard = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let heard = Arc::new(Mutex::new(Vec::new()));
         let log = heard.clone();
-        let unsubscribe = settings.subscribe(std::sync::Arc::new(move |path: &str, _: &serde_json::Value| {
+        let unsubscribe = settings.subscribe(Arc::new(move |path: &str, _: &serde_json::Value| {
             if paths.contains(&path) {
                 log.lock().unwrap().push(path.to_owned());
             }
@@ -379,6 +390,8 @@ fn seed() {
         rules.add_rule(rule).unwrap();
     }
     let _ = rules.save();
+    // An update from a version before the hints: the settings window carries the news.
+    std::fs::write(ks_config::history::data_dir().join("hints.json"), r#"{"last_run_version": "0.66.0"}"#).unwrap();
 }
 
 /// What the tray, the engine and the update check call on the application.
@@ -464,6 +477,7 @@ fn app_calls() {
         }
         app.application.activate();
         offers(app);
+        hints(app);
         rule_window(app);
         autostart(app);
         app.drop_window();
@@ -545,6 +559,364 @@ fn offers(app: &Rc<gtk_app::App>) {
         pump(5);
     }
     let _ = gtk_app::prompt_anchor(&app.desktop);
+}
+
+/// The notification daemon of a desktop on the private bus: what the program sends it, and a button pressed on it.
+struct Notifications {
+    sent: Arc<Mutex<Vec<(u32, String, String, Vec<String>)>>>,
+    closed: Arc<Mutex<Vec<u32>>>,
+    connection: zbus::blocking::Connection,
+}
+
+struct NotificationServer {
+    sent: Arc<Mutex<Vec<(u32, String, String, Vec<String>)>>>,
+    closed: Arc<Mutex<Vec<u32>>>,
+}
+
+#[zbus::interface(name = "org.freedesktop.Notifications")]
+impl NotificationServer {
+    #[expect(clippy::too_many_arguments, reason = "what the notification interface passes")]
+    #[zbus(name = "Notify")]
+    fn notify(&self, application: String, replaces: u32, icon: String, summary: String, body: String, actions: Vec<String>, hints: std::collections::HashMap<String, zbus::zvariant::OwnedValue>, timeout: i32) -> u32 {
+        let _ = (application, replaces, icon, hints, timeout);
+        let mut sent = self.sent.lock().unwrap();
+        let id = u32::try_from(sent.len()).unwrap() + 100;
+        sent.push((id, summary, body, actions));
+        id
+    }
+
+    #[zbus(name = "CloseNotification")]
+    fn close_notification(&self, id: u32) {
+        self.closed.lock().unwrap().push(id);
+    }
+
+    #[zbus(name = "GetCapabilities")]
+    fn get_capabilities(&self) -> Vec<String> {
+        vec!["actions".to_owned(), "body".to_owned()]
+    }
+}
+
+impl Notifications {
+    fn start() -> Notifications {
+        let (sent, closed): (Arc<Mutex<Vec<(u32, String, String, Vec<String>)>>>, Arc<Mutex<Vec<u32>>>) = (Arc::default(), Arc::default());
+        let server = NotificationServer { sent: sent.clone(), closed: closed.clone() };
+        let connection = zbus::blocking::connection::Builder::session()
+            .and_then(|builder| builder.name("org.freedesktop.Notifications"))
+            .and_then(|builder| builder.serve_at("/org/freedesktop/Notifications", server))
+            .and_then(zbus::blocking::connection::Builder::build)
+            .expect("the private bus takes the name of the notifications");
+        Notifications { sent, closed, connection }
+    }
+
+    /// The user pressed the button `key` on the notification `id`.
+    fn press(&self, id: u32, key: &str) {
+        self.connection.emit_signal(None::<&str>, "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", &(id, key)).expect("the signal is sent");
+    }
+
+    fn sent_after(&self, count: usize) -> (u32, String, String, Vec<String>) {
+        let arrived = (0..2000).any(|_| {
+            pump(5);
+            self.sent.lock().unwrap().len() > count
+        });
+        assert!(arrived, "no notification arrived");
+        self.sent.lock().unwrap().last().unwrap().clone()
+    }
+}
+
+/// A label's click gesture answers as a press and a release on it do.
+fn click_text(label: &gtk::Widget) {
+    let controllers = label.observe_controllers();
+    for index in 0..controllers.n_items() {
+        if let Some(gesture) = controllers.item(index).and_then(|item| item.downcast::<gtk::GestureClick>().ok()) {
+            gesture.emit_by_name::<()>("released", &[&1_i32, &0.0_f64, &0.0_f64]);
+        }
+    }
+}
+
+/// The card on the screen with this text: the program's own hints may be up beside the test's.
+fn hint_card_widget(text: &str) -> Option<gtk::Window> {
+    gtk::Window::list_toplevels().into_iter().filter_map(|top| top.downcast::<gtk::Window>().ok()).find(|top| {
+        let mut inside = Vec::new();
+        every_widget(top.upcast_ref(), &mut inside);
+        top.is_visible() && top.title().is_some_and(|title| title == HINT_WINDOW_TITLE) && inside.iter().any(|widget| widget.downcast_ref::<gtk::Label>().is_some_and(|label| label.text() == text))
+    })
+}
+
+fn hint_button(widget: &gtk::Widget, wanted: &str) -> Option<gtk::Button> {
+    let mut inside = Vec::new();
+    every_widget(widget, &mut inside);
+    inside.iter().find_map(|widget| widget.downcast_ref::<gtk::Button>().filter(|button| button.label().is_some_and(|label| label == wanted)).cloned())
+}
+
+/// The cards of the hints in the settings window: on the first page the hint about the hints, whose text opens what it is
+/// about; on the page of the hotkeys the news of the update, its row marked until the card goes.
+fn hint_cards() -> Result<(), String> {
+    let root = gtk_app::with_app_window().ok_or("the window did not open")?;
+    let with_class = |class: &str| {
+        let mut found = Vec::new();
+        every_widget(&root, &mut found);
+        found.into_iter().filter(|widget| widget.has_css_class(class)).collect::<Vec<_>>()
+    };
+    pump(100);
+    let first = with_class("hint-card");
+    if first.len() != 1 {
+        return Err(format!("the first page has {} cards of hints", first.len()));
+    }
+    let mut parts = Vec::new();
+    every_widget(&first[0], &mut parts);
+    let text = parts.iter().find(|part| part.is::<gtk::Label>()).ok_or("a card of a hint has no text")?;
+    click_text(text);
+    pump(100);
+    let mut rows = Vec::new();
+    every_widget(&root, &mut rows);
+    let switch = rows.iter().filter_map(|widget| widget.downcast_ref::<adw::SwitchRow>()).find(|row| row.title() == HINTS_SETTING_TITLE).ok_or("no switch of the hints")?;
+    if !with_class("hint-card").is_empty() || !switch.is_drawable() {
+        return Err(format!("a click on the text of the card: {} cards left, its page shown: {}", with_class("hint-card").len(), switch.is_drawable()));
+    }
+    gtk_app::with_window_result(|window| window.show_page("hotkeys"));
+    pump(100);
+    let news = with_class("hint-card");
+    let marked = with_class("hint-target");
+    let title = marked.first().and_then(|row| row.downcast_ref::<adw::ComboRow>()).map(PreferencesRowExt::title);
+    if news.len() != 1 || marked.len() != 1 || title.as_deref() != Some(LAYOUT_SWITCH_KEY_TITLE) {
+        return Err(format!("the news of the update: {} cards, marked row {title:?}", news.len()));
+    }
+    hint_button(&news[0], HINT_OK_LABEL).ok_or("a card of a hint has no button")?.emit_clicked();
+    pump(100);
+    if !with_class("hint-card").is_empty() || !with_class("hint-target").is_empty() {
+        return Err("the card of the news stayed after it was dismissed".to_owned());
+    }
+    Ok(())
+}
+
+/// A hint to draw, as the hints hand one out.
+fn drawn_hint(settings: &Arc<SettingsStore>, folder: &std::path::Path, origin: Instant) -> HintView {
+    let mut hints = Hints::<PromptAnchor>::start(settings.clone(), folder, RUNNING_PLATFORM, &Moment::now(origin, 0));
+    hints.settings_opened();
+    let mut view = hints.settings_card(SettingsPage::Overview, &Moment::now(origin, 0)).expect("a new folder has not shown the card");
+    view.place = Place::Caret;
+    view.text.push_str(" (проверка)");
+    view
+}
+
+/// The hints on the screen of this desktop, with the system around them played by the test: the card over a field with
+/// no keyboard to give back, the notification, and the timer that serves them.
+fn hints(app: &Rc<gtk_app::App>) {
+    let settings = app.services.settings.clone();
+    settings.set(HINTS_SETTING, json!(true), true).unwrap();
+    pump(50);
+    let origin = Instant::now();
+    let folder = ks_config::history::data_dir().join("hints-of-the-test");
+    let view = drawn_hint(&settings, &folder.join("view"), origin);
+    let (answers, placed): (Rc<Cell<bool>>, Rc<Cell<u32>>) = (Rc::new(Cell::new(true)), Rc::default());
+    let (clicks, pages, cards): (Rc<RefCell<Vec<(String, Click)>>>, Rc<RefCell<Vec<&'static str>>>, Rc<RefCell<Vec<String>>>) = (Rc::default(), Rc::default(), Rc::default());
+    let calls = {
+        let (answers, placed, clicks, pages, cards) = (answers.clone(), placed.clone(), clicks.clone(), pages.clone(), cards.clone());
+        let clicked: HintClicked = Rc::new(move |id: &str, click| clicks.borrow_mut().push((id.to_owned(), click)));
+        HintCalls {
+            position: Box::new(move |title, _, _, _| {
+                assert_eq!(title, HINT_WINDOW_TITLE);
+                placed.set(placed.get() + 1);
+                answers.get()
+            }),
+            restore: Box::new(|_| false),
+            clicked,
+            open_page: Box::new(move |page| pages.borrow_mut().push(page)),
+            hide_card: Box::new(move |id| cards.borrow_mut().push(id.to_owned())),
+        }
+    };
+    let mut screen = HintScreen::new(app.application.upcast_ref(), calls);
+    let at = |x, y| PromptAnchor { x, y, window: Some(5) };
+    // Anchors on no monitor, off each edge; a new card replaces the one before; placed once it is known.
+    for (x, y) in [(10, 10), (-5, 10), (99_999, 10), (10, -5), (10, 99_999)] {
+        assert!(screen.show_caret(&view, &at(x, y)));
+        assert_eq!(screen.card_id(), Some(view.id));
+        pump(3 * u64::from(HINT_PLACE_RETRY_MS));
+    }
+    assert_eq!(placed.get(), 5, "each card is placed once it is known");
+    // A desktop that does not know the card yet is asked again, and for so long and no longer.
+    placed.set(0);
+    answers.set(false);
+    assert!(screen.show_caret(&view, &at(10, 10)));
+    let tried = (0..2000).any(|_| {
+        pump(5);
+        placed.get() >= HINT_PLACE_ATTEMPTS
+    });
+    pump(4 * u64::from(HINT_PLACE_RETRY_MS));
+    assert!(tried && placed.get() == HINT_PLACE_ATTEMPTS, "tried as many times as it may be: {}", placed.get());
+    answers.set(true);
+    // Its buttons, its text and the window manager's close.
+    let card = hint_card_widget(&view.text).expect("the card is on the screen");
+    for (label, click) in [(view.ok, Click::Ok), (view.never, Click::Never)] {
+        clicks.borrow_mut().clear();
+        hint_button(card.upcast_ref(), label).expect("the card's button").emit_clicked();
+        assert_eq!(clicks.borrow().as_slice(), [(view.id.to_owned(), click)]);
+    }
+    clicks.borrow_mut().clear();
+    let mut parts = Vec::new();
+    every_widget(card.upcast_ref(), &mut parts);
+    for part in parts.iter().filter(|part| part.is::<gtk::Label>()) {
+        click_text(part);
+    }
+    assert_eq!(clicks.borrow().as_slice(), [(view.id.to_owned(), Click::Text)]);
+    clicks.borrow_mut().clear();
+    card.close();
+    assert_eq!(clicks.borrow().as_slice(), [(view.id.to_owned(), Click::Closed)]);
+    // The window goes when it is its turn, and only then.
+    screen.hide("another");
+    assert!(screen.card_id().is_some());
+    screen.hide(view.id);
+    pump(20);
+    assert!(hint_card_widget(&view.text).is_none() && screen.card_id().is_none());
+    assert_eq!(cards.borrow().as_slice(), ["another", view.id]);
+    screen.close_card();
+    // The place near the icon: a notification, withdrawn when its turn comes.
+    assert!(screen.show_tray(&view));
+    screen.hide("another");
+    screen.hide(view.id);
+    screen.hide(view.id);
+    // What a click on a text opens, a page by way of the main loop.
+    screen.open(&Opens::Settings { page: SettingsPage::Hotkeys, setting: Some("hotkeys.undo") });
+    assert!(pages.borrow().is_empty(), "the window is not opened while the hints are in use");
+    pump(20);
+    assert_eq!(pages.borrow().as_slice(), ["hotkeys"]);
+    screen.open(&Opens::Url("ksprobe://release".to_owned()));
+    screen.open(&Opens::Url("ksnone://release".to_owned()));
+    pump(20);
+    hint_driver(app, &settings, &folder.join("driver"), &view);
+    // The application's own screen under a window manager: placed through the desktop, and the keyboard the manager gives
+    // the card goes back to the window it came from.
+    let typer = support::Typer::new().unwrap();
+    let mut manager = support::start_window_manager(&typer).unwrap();
+    let window = gtk_app::with_app_window().and_then(|window| window.downcast::<gtk::Window>().ok()).expect("the settings window");
+    let settings_window = window.surface().and_then(|surface| surface.downcast::<gdk_x11::X11Surface>().ok()).map(|surface| i64::try_from(surface.xid()).unwrap());
+    window.present();
+    let focused = (0..600).any(|_| {
+        pump(5);
+        window.is_active()
+    });
+    assert!(focused, "the window manager gave the settings window no keyboard");
+    assert!(app.hints.screen().show_caret(&view, &PromptAnchor { x: 20, y: 20, window: settings_window }));
+    pump(4 * u64::from(HINT_PLACE_RETRY_MS));
+    assert_eq!(app.hints.card_id(), Some(view.id));
+    let card = hint_card_widget(&view.text).expect("the application's card");
+    assert!(!card.is_active(), "the card took the keyboard when it was shown");
+    card.present();
+    let taken_back = (0..600).any(|_| {
+        pump(5);
+        !card.is_active() && window.is_active()
+    });
+    assert!(taken_back, "the keyboard did not go back from the card: card active {}, window active {}", card.is_active(), window.is_active());
+    gtk_app::hint_clicked(view.id, Click::Ok);
+    pump(20);
+    assert_eq!(app.hints.card_id(), None);
+    let _ = manager.kill();
+    let _ = manager.wait();
+    pump(200);
+    // The notification's actions, each with the hint it is about.
+    let hint = view.id.to_variant();
+    app.application.activate_action(HINT_ACTION_OPEN, Some(&hint));
+    pump(50);
+    app.application.activate_action(HINT_ACTION_NEVER, Some(&hint));
+    pump(50);
+    assert_eq!(settings.get(HINTS_SETTING), Some(json!(false)));
+    settings.set(HINTS_SETTING, json!(true), true).unwrap();
+    pump(50);
+    // The place near the icon on the private bus: what a desktop's notification daemon is sent, withdrawn when its turn
+    // comes, and a press on its button reaches the application.
+    let notifications = NOTIFICATIONS.get().expect("the daemon of the private bus");
+    let sent = notifications.sent.lock().unwrap().len();
+    assert!(app.hints.screen().show_tray(&view));
+    let (id, title, body, actions) = notifications.sent_after(sent);
+    assert_eq!((title.as_str(), body.as_str()), (view.title, view.text.as_str()));
+    let key = actions.iter().position(|action| action == view.never).map(|at| actions[at - 1].clone()).expect("the button of the hint");
+    // The system's id of the notification reaches the program with the daemon's answer; before it, nothing can be withdrawn.
+    pump(100);
+    app.hints.screen().hide(view.id);
+    assert!((0..400).any(|_| {
+        pump(5);
+        notifications.closed.lock().unwrap().contains(&id)
+    }), "the notification was not withdrawn");
+    let sent = notifications.sent.lock().unwrap().len();
+    assert!(app.hints.screen().show_tray(&view));
+    let (id, _, _, _) = notifications.sent_after(sent);
+    notifications.press(id, &key);
+    assert!((0..400).any(|_| {
+        pump(5);
+        settings.get(HINTS_SETTING) == Some(json!(false))
+    }), "the button of the notification did not turn the hints off");
+    settings.set(HINTS_SETTING, json!(true), true).unwrap();
+    pump(50);
+    // A correction with the caret to be found on the engine's thread, and every setting heard.
+    if let Ok(engine) = app.services.engine.engine() {
+        let plan = ks_engine::engine::CorrectionPlan::new(Vec::new(), None, 0, 1, "ghbdtn".to_owned(), "привет".to_owned(), 0.9, "firefox");
+        for callback in engine.shared.correction_callbacks() {
+            callback(&plan);
+        }
+    }
+    pump(20);
+    // A card with no setting to mark, one whose setting has no row, and each kind of row marked.
+    let clicked: HintClicked = Rc::new(gtk_app::hint_clicked);
+    let shown = |place: Place, id: &'static str| -> HintView {
+        let mut card = view.clone();
+        card.id = id;
+        card.place = place;
+        card
+    };
+    let card_with = |control| shown(Place::Settings { page: SettingsPage::System, control }, "hint-of-a-test");
+    gtk_app::with_window(|window| {
+        for card in [shown(Place::Caret, "hint-of-a-test"), card_with(None), card_with(Some("nothing.at.all")), card_with(Some("general.sound")), card_with(Some("detection.minimum_length")), card_with(Some("detection.layout_switch_key"))] {
+            window.show_hint_card("system", &card, &clicked);
+            window.remove_hint_card(card.id);
+        }
+        window.remove_hint_card("hint-of-a-test");
+    });
+    // Asked for a page with no hints of its own.
+    assert!(app.hints.page_shown("languages").is_none());
+}
+
+/// The timer of the hints: running while a hint waits or shows, and only then, with what the engine reports in the real order.
+fn hint_driver(app: &Rc<gtk_app::App>, settings: &Arc<SettingsStore>, folder: &std::path::Path, view: &HintView) {
+    let origin = Instant::now();
+    std::fs::create_dir_all(folder).unwrap();
+    std::fs::write(folder.join("hints.json"), format!(r#"{{"last_run_version": "{}"}}"#, ks_config::logsetup::VERSION)).unwrap();
+    let hints = Hints::start(settings.clone(), folder, RUNNING_PLATFORM, &Moment::now(origin, 0));
+    let clicks: Rc<RefCell<Vec<(String, Click)>>> = Rc::default();
+    let recorder = clicks.clone();
+    let clicked: HintClicked = Rc::new(move |id: &str, click| recorder.borrow_mut().push((id.to_owned(), click)));
+    let calls = HintCalls { position: Box::new(|_, _, _, _| true), restore: Box::new(|_| false), clicked, open_page: Box::new(|_| {}), hide_card: Box::new(|_| {}) };
+    let driver: Rc<HintDriver> = HintDriver::new(hints, origin, HintScreen::new(app.application.upcast_ref(), calls));
+    assert!(driver.caret_anchor_wanted().load(std::sync::atomic::Ordering::Relaxed));
+    if let Ok(engine) = app.services.engine.engine() {
+        driver.engine_built(engine.shared.clone());
+    }
+    // Nothing is due: no timer. A setting heard, a window opened, a page asked for: the same.
+    driver.settings_changed();
+    driver.settings_opened();
+    assert!(driver.page_shown("hotkeys").is_none());
+    driver.input(EngineInput::Snapshot { running: true });
+    // A correction sets it off; a second event finds the timer running; the card comes when the typing has settled.
+    let correction = CorrectionInfo { mode: "boundary", automatic: true, case_fix: false };
+    driver.input(EngineInput::Correction { correction, anchor: Some(PromptAnchor { x: 30, y: 30, window: None }) });
+    driver.input(EngineInput::Prompt { shown: false });
+    let came = (0..600).any(|_| {
+        pump(5);
+        driver.card_id().is_some()
+    });
+    assert!(came, "the card did not come");
+    // Its timer hides it: taken away here by the click and it stops.
+    let id = driver.card_id().unwrap();
+    driver.clicked(id, Click::Ok);
+    pump(600);
+    assert!(driver.card_id().is_none());
+    // Another waits behind the quiet period, and the program ends with its timer running.
+    assert_ne!(id, view.id);
+    let early = CorrectionInfo { mode: "early", automatic: true, case_fix: false };
+    driver.input(EngineInput::Correction { correction: early, anchor: Some(PromptAnchor { x: 30, y: 30, window: None }) });
+    pump(50);
+    driver.close();
+    drop(driver);
+    pump(300);
 }
 
 /// What a confirmed offer opened goes again.
@@ -788,6 +1160,11 @@ fn main() {
             println!("E2E_FAILED: {error}");
             failure.set(true);
         }
+        note("hint_cards();");
+        if let Err(error) = hint_cards() {
+            println!("E2E_FAILED: {error}");
+            failure.set(true);
+        }
         note("window_calls();");
         window_calls();
         if let Err(error) = walk_everything() {
@@ -803,6 +1180,7 @@ fn main() {
         }
     });
     let watcher = support::Watcher::new().unwrap();
+    let _ = NOTIFICATIONS.set(Notifications::start());
     let code = gtk_app::run(false, false);
     drop(watcher);
     // Asked once it has gone, and the window's style with no display to go on.

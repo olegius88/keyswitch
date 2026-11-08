@@ -1,11 +1,15 @@
 //! The real thing on X11: a GTK entry, keys through XTEST, RECORD into the engine, the correction through XTEST back.
 //! Runs under `packaging/e2e.sh`, with `KS_E2E` set in a private X server; otherwise it says so and passes.
 
+use ks_cast::To as _;
 mod support;
 
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use gtk::prelude::*;
 use ks_backend::InputBackend;
@@ -14,10 +18,15 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
 use ks_engine::{KeySwitchEngine, LearningPrompt};
+use ks_linux::desktop_backend::DesktopBackend;
+use ks_linux::gtk_app::prompt_anchor;
+use ks_linux::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
+use ks_linux::gtk_model::prompt_position;
 use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use ks_linux::linux_app::{engine_builder, new_backend};
+use ks_ui::hints::{Click, EngineInput, Hints, Moment, RUNNING_PLATFORM, subscribe};
 use serde_json::json;
-use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, dbus_call};
+use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, pump_until, start_window_manager, WINDOW_MANAGER, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, ESCAPE_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, dbus_call};
 
 const CASES: [Case; 15] = [
     Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),
@@ -55,6 +64,17 @@ const EXPECTED_HISTORY: [(&str, &str); 13] = [
 ];
 
 const OFFER_POSITION: i32 = 100;
+/// The longest a hint takes to appear after a correction: the typing settles for a second, then the next timer tick.
+const HINT_APPEARS: u64 = 3000;
+/// How long a window manager takes to focus a window.
+const FOCUS_ARRIVES: u64 = 3000;
+const HINT_WINDOW_TITLE: &str = ks_linux::gtk_model::HINT_WINDOW_TITLE;
+/// The private screen, and how far from its place a window manager may leave a window it has moved.
+const SCREEN_WIDTH: i32 = 1280;
+const SCREEN_HEIGHT: i32 = 800;
+const PLACE_TOLERANCE: i32 = 3;
+/// The caret-hint's button that says it was understood.
+const HINT_OK: &str = ks_ui::hints::HINT_OK_LABEL;
 
 enum Posted {
     Prompt(Option<LearningPrompt>),
@@ -119,8 +139,8 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
             },
         )
     };
-    let rule_windows: Rc<std::cell::RefCell<Vec<RuleEditorWindow>>> = Rc::default();
-    let offer_window: Rc<std::cell::Cell<Option<i64>>> = Rc::default();
+    let rule_windows: Rc<RefCell<Vec<RuleEditorWindow>>> = Rc::default();
+    let offer_window: Rc<Cell<Option<i64>>> = Rc::default();
     let drain = {
         let (posted, engine, backend, application, rule_windows, offer_window) = (posted.clone(), engine.clone(), backend.clone(), application.clone(), rule_windows.clone(), offer_window.clone());
         let prompt_window = &prompt_window;
@@ -161,11 +181,15 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
             }
         }
     };
+    // What the engine posts for the hints, handed to the driver that is on trial.
+    let hint_inputs: Arc<Mutex<VecDeque<EngineInput<PromptAnchor>>>> = Arc::default();
+    let driver: Rc<RefCell<Option<Rc<HintDriver>>>> = Rc::default();
     let settle = |milliseconds: u64| {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(milliseconds);
-        while std::time::Instant::now() < deadline {
+        let deadline = Instant::now() + std::time::Duration::from_millis(milliseconds);
+        while Instant::now() < deadline {
             pump(10);
             drain();
+            drain_hints(&hint_inputs, &driver);
         }
     };
 
@@ -291,6 +315,35 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
             return Err("GUI tests unexpectedly activated a desktop or document portal".to_owned());
         }
         println!("NO_DOCUMENT_PORTAL_E2E_OK");
+        // A hint over the field the user types in, with no window manager and then with one: a real correction brings it,
+        // and the keys, the Enter and the layout go on as if it were not there.
+        set("detection.layout_switch_key", json!(""))?;
+        hint_inputs.lock().expect("the queue").clear();
+        let desktop = DesktopBackend {
+            input: backend.clone(),
+            process_for_window: backend.process_for_window(),
+            position_window: {
+                let placer = backend.clone();
+                Arc::new(move |_, window, x, y| placer.position_window(window, x, y))
+            },
+            wayland: false,
+        };
+        let wants_anchor = Arc::new(AtomicBool::new(true));
+        let inputs = hint_inputs.clone();
+        subscribe(&engine.shared, wants_anchor, Arc::new(move || prompt_anchor(&desktop)), Arc::new(move |input| inputs.lock().expect("the queue").push_back(input)));
+        let activated: Rc<Cell<u32>> = Rc::default();
+        entry.connect_activate({
+            let activated = activated.clone();
+            move |_| activated.set(activated.get() + 1)
+        });
+        let stand = HintStand { folder, settings: &settings, application: &application, engine: &engine, backend: &backend, typer: &typer, entry: &entry, group: &group, activated: &activated };
+        hint_over_the_field(&stand, "alone", &driver, &settle)?;
+        println!("HINT_KEEPS_THE_KEYBOARD_E2E_OK");
+        let mut manager = start_window_manager(&typer)?;
+        let under_manager = window_manager_cases(&stand, &window, &driver, &settle);
+        let _ = manager.kill();
+        let _ = manager.wait();
+        under_manager?;
         Ok(())
     })();
     if original_group >= 0 {
@@ -300,6 +353,201 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
     prompt_window.destroy();
     window.destroy();
     outcome
+}
+
+fn drain_hints(inputs: &Mutex<VecDeque<EngineInput<PromptAnchor>>>, driver: &RefCell<Option<Rc<HintDriver>>>) {
+    loop {
+        let Some(input) = inputs.lock().expect("the queue").pop_front() else { break };
+        if let Some(driver) = driver.borrow().as_ref() {
+            driver.input(input);
+        }
+    }
+}
+
+/// What the hints are tried on.
+struct HintStand<'a> {
+    folder: &'a std::path::Path,
+    settings: &'a Arc<SettingsStore>,
+    application: &'a gtk::Application,
+    engine: &'a Arc<KeySwitchEngine>,
+    backend: &'a Arc<ks_linux::x11_backend::X11Backend>,
+    typer: &'a Typer,
+    entry: &'a gtk::Entry,
+    group: &'a dyn Fn() -> i32,
+    activated: &'a Rc<Cell<u32>>,
+}
+
+/// The card of the hint on the screen, as a toplevel window of this process.
+fn hint_card() -> Option<gtk::Window> {
+    gtk::Window::list_toplevels().into_iter().filter_map(|top| top.downcast::<gtk::Window>().ok()).find(|top| top.is_visible() && top.title().is_some_and(|title| title == HINT_WINDOW_TITLE))
+}
+
+/// The X11 id of a window of this process.
+fn x11_id(window: &gtk::Window) -> Option<u32> {
+    window.surface().and_then(|surface| surface.downcast::<gdk_x11::X11Surface>().ok()).and_then(|surface| u32::try_from(surface.xid()).ok())
+}
+
+/// A button of a window, by its label.
+fn button_with_label(widget: &gtk::Widget, wanted: &str) -> Option<gtk::Button> {
+    let mut child = widget.first_child();
+    while let Some(next) = child {
+        if let Some(button) = next.downcast_ref::<gtk::Button>().filter(|button| button.label().is_some_and(|label| label == wanted)) {
+            return Some(button.clone());
+        }
+        if let Some(found) = button_with_label(&next, wanted) {
+            return Some(found);
+        }
+        child = next.next_sibling();
+    }
+    None
+}
+
+/// The middle of a window's button on the screen.
+fn button_centre(window: &gtk::Window, button: &gtk::Button, typer: &Typer) -> Result<(i32, i32), String> {
+    let origin = typer.window_origin(x11_id(window).ok_or("the card has no X11 window")?)?;
+    let inside = button.compute_point(window, &gtk::graphene::Point::new(button.width().to::<f32>() / 2.0, button.height().to::<f32>() / 2.0)).ok_or("the button is not in the card")?;
+    Ok((origin.0 + inside.x().to::<i32>(), origin.1 + inside.y().to::<i32>()))
+}
+
+/// A correction brings a hint over the field. The hint keeps nothing of the keyboard: the keys go into the field and switch
+/// the layout, Enter is the field's and is not taken for an answer to it, Esc leaves it on the screen, and a click on it gives
+/// the keyboard back at once.
+fn hint_over_the_field(stand: &HintStand<'_>, name: &str, driver_slot: &RefCell<Option<Rc<HintDriver>>>, settle: &dyn Fn(u64)) -> Result<(), String> {
+    let origin = Instant::now();
+    // The hints of a version that has run before: no news and no first start to wait behind.
+    let data = stand.folder.join(format!("hints-{name}"));
+    std::fs::create_dir_all(&data).map_err(|error| error.to_string())?;
+    std::fs::write(data.join("hints.json"), format!(r#"{{"last_run_version": "{}"}}"#, ks_config::logsetup::VERSION)).map_err(|error| error.to_string())?;
+    let hints = Hints::start(stand.settings.clone(), &data, RUNNING_PLATFORM, &Moment::now(origin, 0));
+    let clicks: Rc<RefCell<Vec<(String, Click)>>> = Rc::default();
+    let recorder = clicks.clone();
+    let clicked: HintClicked = Rc::new(move |id: &str, click| recorder.borrow_mut().push((id.to_owned(), click)));
+    let (placer, restorer) = (stand.backend.clone(), stand.backend.clone());
+    let restored: Rc<Cell<u32>> = Rc::default();
+    let counted = restored.clone();
+    let calls = HintCalls {
+        position: Box::new(move |_, window, x, y| placer.position_window(window, x, y)),
+        restore: Box::new(move |window| {
+            counted.set(counted.get() + 1);
+            restorer.restore_window(window)
+        }),
+        clicked,
+        open_page: Box::new(|_| {}),
+        hide_card: Box::new(|_| {}),
+    };
+    let driver = HintDriver::new(hints, origin, HintScreen::new(stand.application, calls));
+    driver.engine_built(stand.engine.shared.clone());
+    *driver_slot.borrow_mut() = Some(driver.clone());
+    let outcome = (|| -> Result<(), String> {
+        let focused = stand.typer.input_focus()?;
+        // A layout chosen by hand protects the next word: that word stays as typed, and only the one after it is corrected.
+        stand.backend.switch_group(0).map_err(|error| format!("{error:?}"))?;
+        stand.typer.type_keys("hello ")?;
+        settle(SETTLE);
+        stand.typer.clear_field()?;
+        stand.typer.type_keys("ghbdtn ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "привет " || (stand.group)() != 1 {
+            return Err(format!("{name}: the correction that brings the hint: text={:?} group={}", stand.entry.text().as_str(), (stand.group)()));
+        }
+        let deadline = Instant::now() + std::time::Duration::from_millis(HINT_APPEARS);
+        while driver.card_id().is_none() && Instant::now() < deadline {
+            settle(20);
+        }
+        if driver.card_id() != Some("first_correction_undo") {
+            return Err(format!("{name}: no hint appeared: {:?}", driver.card_id()));
+        }
+        settle(INTER_CASE);
+        let card = hint_card().ok_or_else(|| format!("{name}: no card on the screen"))?;
+        // Above the place the correction was made at, inside the screen.
+        let pointer = stand.backend.input_anchor().ok_or("no pointer")?;
+        let placed = stand.typer.window_origin(x11_id(&card).ok_or("the card has no X11 window")?)?;
+        let expected = prompt_position((pointer.x, pointer.y), (card.width(), card.height()), Some((0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)));
+        if (placed.0 - expected.0).abs() > PLACE_TOLERANCE || (placed.1 - expected.1).abs() > PLACE_TOLERANCE {
+            return Err(format!("{name}: the card is at {placed:?}, expected {expected:?}, pointer {:?}", (pointer.x, pointer.y)));
+        }
+        // Not taken and handed back: the card never had the keyboard at all.
+        if stand.typer.input_focus()? != focused || card.is_active() || restored.get() != 0 {
+            return Err(format!("{name}: the card took the keyboard: {:#x}, card active {}, given back {} times", stand.typer.input_focus()?, card.is_active(), restored.get()));
+        }
+        // Keys typed while it is up: the text, the correction and the layout are those of a field with no hint over it.
+        stand.typer.type_keys("hello ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "привет hello " || (stand.group)() != 0 {
+            return Err(format!("{name}: typing under the hint: text={:?} group={}", stand.entry.text().as_str(), (stand.group)()));
+        }
+        let before = stand.activated.get();
+        stand.typer.tap_keysym(RETURN_KEYSYM)?;
+        settle(INTER_CASE);
+        if stand.activated.get() != before + 1 || stand.engine.shared.prompt_key_deadline() != 0.0 {
+            return Err(format!("{name}: Enter did not reach the field: {} activations, deadline {}", stand.activated.get() - before, stand.engine.shared.prompt_key_deadline()));
+        }
+        stand.typer.tap_keysym(ESCAPE_KEYSYM)?;
+        settle(INTER_CASE);
+        if hint_card().is_none() || driver.card_id().is_none() || stand.typer.input_focus()? != focused {
+            return Err(format!("{name}: Esc took the hint down or moved the keyboard"));
+        }
+        // A real click on «Понятно»: reported, and the keyboard is where it was for the next word.
+        let button = button_with_label(card.upcast_ref(), HINT_OK).ok_or("the card has no button to dismiss it")?;
+        let (x, y) = button_centre(&card, &button, stand.typer)?;
+        stand.typer.click_at(x, y)?;
+        if !pump_until(FOCUS_ARRIVES, || !clicks.borrow().is_empty()) {
+            return Err(format!("{name}: the click on the button was not heard"));
+        }
+        if clicks.borrow()[0] != ("first_correction_undo".to_owned(), Click::Ok) {
+            return Err(format!("{name}: the click reported {:?}", clicks.borrow()));
+        }
+        // A window manager gives the card the keyboard on a click; it is asked back at once.
+        let given_back = restored.get();
+        driver.clicked("first_correction_undo", Click::Ok);
+        settle(INTER_CASE);
+        if hint_card().is_some() || driver.card_id().is_some() {
+            return Err(format!("{name}: the hint stayed after it was dismissed"));
+        }
+        if !pump_until(FOCUS_ARRIVES, || stand.typer.input_focus().is_ok_and(|window| window == focused)) {
+            return Err(format!("{name}: the keyboard did not come back after the click: {:#x}", stand.typer.input_focus()?));
+        }
+        if name != "alone" && given_back == 0 {
+            return Err(format!("{name}: the window manager gave the clicked card the keyboard and it was not asked back"));
+        }
+        stand.typer.type_keys("ghbdtn ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "привет hello привет " || (stand.group)() != 1 {
+            return Err(format!("{name}: typing after the hint: text={:?} group={}", stand.entry.text().as_str(), (stand.group)()));
+        }
+        Ok(())
+    })();
+    driver.close();
+    *driver_slot.borrow_mut() = None;
+    outcome
+}
+
+/// What the method rests on, under a real window manager. A plain window shown the same way takes the keyboard, so that
+/// the card's not taking it says something; then the whole of it again, with the field's window focused by the manager.
+fn window_manager_cases(stand: &HintStand<'_>, field: &gtk::Window, driver: &RefCell<Option<Rc<HintDriver>>>, settle: &dyn Fn(u64)) -> Result<(), String> {
+    field.present();
+    stand.entry.grab_focus();
+    let field_id = x11_id(field).ok_or("the field's window has no X11 id")?;
+    if !pump_until(FOCUS_ARRIVES, || field.is_active()) {
+        return Err(format!("the window manager did not focus the field's window: {:#x}", stand.typer.input_focus()?));
+    }
+    let plain = gtk::Window::builder().title("A plain window").default_width(100).default_height(100).build();
+    plain.set_visible(true);
+    let taken = pump_until(FOCUS_ARRIVES, || plain.is_active());
+    plain.destroy();
+    if !taken {
+        return Err(format!("{WINDOW_MANAGER} did not focus a new plain window, so it proves nothing about the card"));
+    }
+    field.present();
+    stand.entry.grab_focus();
+    if !pump_until(FOCUS_ARRIVES, || field.is_active()) {
+        return Err(format!("the field's window did not get the keyboard back: {field_id:#x}"));
+    }
+    println!("WINDOW_MANAGER_FOCUSES_A_PLAIN_WINDOW_E2E_OK");
+    pump(INTER_CASE);
+    hint_over_the_field(stand, "under-window-manager", driver, settle)?;
+    println!("HINT_KEEPS_THE_KEYBOARD_UNDER_A_WINDOW_MANAGER_E2E_OK");
+    Ok(())
 }
 
 fn main() {
