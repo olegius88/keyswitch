@@ -26,11 +26,14 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
 use ks_engine::{KeySwitchEngine, LearningPrompt};
+use ks_linux::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
+use ks_linux::gtk_model::{HINT_WINDOW_TITLE, LEARNING_PROMPT_WINDOW_TITLE};
 use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use ks_linux::linux_app::{engine_builder, selection_factory};
 use ks_linux::tray::{MENU_INTERFACE, MENU_PATH};
 use ks_linux::wayland_constants::{EV_KEY, EV_LED, EV_REP, EV_SYN, EVIOCGNAME_256, EVIOCGRAB, UI_DEV_CREATE, UI_DEV_DESTROY, UI_DEV_SETUP, UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_LEDBIT, UINPUT_MAX_NAME_BYTES, WAYLAND_FORWARDED_LEDS, WAYLAND_UINPUT_MAX_KEYCODE, WAYLAND_UINPUT_VERSION};
 use ks_linux::wayland_native::new_wayland_backend;
+use ks_ui::hints::{EngineInput, Hints, Moment, RUNNING_PLATFORM, subscribe};
 use serde_json::{Value, json};
 use support::{CONTEXT_RESOLUTION, ENTRY_MARGIN, IDLE_PAUSE, WINDOW_HEIGHT, WINDOW_WIDTH, Watcher, dbus_call, pump_until};
 
@@ -85,6 +88,9 @@ const SLOW_KEY: Duration = Duration::from_millis(75);
 const NATIVE_CASE_SETTLE: u64 = 900;
 const GRACE_MS: u64 = 4000;
 const DOCUMENT_PORTAL: &str = "org.freedesktop.portal.Documents";
+/// The longest a hint takes to appear after a correction, and to have the keyboard given back.
+const HINT_APPEARS: Duration = Duration::from_secs(4);
+const HINT_GIVES_KEYBOARD_BACK: Duration = Duration::from_secs(2);
 const CASES: [support::Case; 15] = [
     support::Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),
     support::Case("RU keys to English", 1, "hello ", "hello ", 0, NATIVE_CASE_SETTLE),
@@ -843,6 +849,42 @@ fn source(desktop: &str) -> Result<(), String> {
     application.register(None::<&gtk::gio::Cancellable>).map_err(|error| error.to_string())?;
     let mut target = TargetApp::new()?;
     let posted: Arc<Mutex<VecDeque<Posted>>> = Arc::default();
+    let hint_inputs: Arc<Mutex<VecDeque<EngineInput<PromptAnchor>>>> = Arc::default();
+    {
+        let (inputs, anchors) = (hint_inputs.clone(), backend.clone());
+        let anchor = Arc::new(move || anchors.input_anchor().map(|anchor| PromptAnchor { x: anchor.x, y: anchor.y, window: anchor.window }));
+        subscribe(&engine.shared, Arc::new(std::sync::atomic::AtomicBool::new(true)), anchor, Arc::new(move |input| inputs.lock().expect("the queue").push_back(input)));
+    }
+    let restored = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let hints_origin = Instant::now();
+    let hint_driver = {
+        let (placer, restorer, restored) = (backend.clone(), backend.clone(), restored.clone());
+        let clicked: HintClicked = std::rc::Rc::new(|_, _| {});
+        // A version that has run before: no news and no first start to wait behind.
+        std::fs::create_dir_all(root.join("hints")).map_err(|error| error.to_string())?;
+        std::fs::write(root.join("hints/hints.json"), format!(r#"{{"last_run_version": "{}"}}"#, ks_config::logsetup::VERSION)).map_err(|error| error.to_string())?;
+        HintDriver::new(
+            Hints::start(settings.clone(), &root.join("hints"), RUNNING_PLATFORM, &Moment::now(hints_origin, 0)),
+            hints_origin,
+            HintScreen::new(
+                &application,
+                HintCalls {
+                    position: Box::new(move |title, window, x, y| {
+                        assert_eq!(title, HINT_WINDOW_TITLE);
+                        placer.position_window(title, window, i64::from(x), i64::from(y))
+                    }),
+                    restore: Box::new(move |window| {
+                        restored.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        restorer.restore_window(window)
+                    }),
+                    clicked,
+                    open_page: Box::new(|_| {}),
+                    hide_card: Box::new(|_| {}),
+                },
+            ),
+        )
+    };
+    hint_driver.engine_built(engine.shared.clone());
     {
         let (posted, anchors) = (posted.clone(), backend.clone());
         engine.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| {
@@ -865,7 +907,7 @@ fn source(desktop: &str) -> Result<(), String> {
             PromptCallbacks {
                 confirm: Box::new(move |prompt| confirm.confirm_learning_prompt(Some(prompt))),
                 dismiss: Box::new(move |prompt| dismiss.dismiss_learning_prompt(Some(prompt))),
-                position: Box::new(move |window, x, y| position.position_window(window, i64::from(x), i64::from(y))),
+                position: Box::new(move |window, x, y| position.position_window(LEARNING_PROMPT_WINDOW_TITLE, window, i64::from(x), i64::from(y))),
                 restore: Box::new(move |window| restore.restore_window(window)),
             },
         )
@@ -902,9 +944,16 @@ fn source(desktop: &str) -> Result<(), String> {
             }
         }
     };
+    let drain_hints = || {
+        loop {
+            let Some(input) = hint_inputs.lock().expect("the queue").pop_front() else { break };
+            hint_driver.input(input);
+        }
+    };
     let wait = |limit: Duration, condition: &mut dyn FnMut() -> bool| -> bool {
         pump_until(limit.as_millis().low::<u64>(), || {
             drain();
+            drain_hints();
             condition()
         })
     };
@@ -944,8 +993,10 @@ fn source(desktop: &str) -> Result<(), String> {
             wait(SETTLE, &mut || target.text().is_empty());
             Ok(())
         };
+        // The hint alone, for a quick check of the card on one desktop; the full run goes through everything.
+        let only_hint = std::env::var_os("KS_E2E_WAYLAND_HINT_ONLY").is_some();
         // 1. The typing cases of X11.
-        for case in &CASES {
+        for case in CASES.iter().filter(|_| !only_hint) {
             switch(case.1)?;
             target.command("focus", "")?;
             clear(&target)?;
@@ -959,6 +1010,56 @@ fn source(desktop: &str) -> Result<(), String> {
             settle(INTER_CASE);
         }
         println!("TYPING_CASES_E2E_OK");
+        // A hint over the field. A desktop may give a new window the keyboard: it comes back to the field by itself, and the
+        // keys, the correction and Enter are the field's. With KS_E2E_WAYLAND_NO_HINT the same keys with no hint at all, to
+        // compare a failure against.
+        let show_hint = std::env::var_os("KS_E2E_WAYLAND_NO_HINT").is_none();
+        if !show_hint {
+            set("general.hints", json!(false))?;
+            hint_driver.settings_changed();
+        }
+        switch(0)?;
+        target.command("present", "")?;
+        target.command("focus", "")?;
+        settle(GRAB_SETTLE);
+        clear(&target)?;
+        keyboard.type_keys("ghbdtn ")?;
+        if !wait(LATE, &mut || target.text() == "привет " && group() == 1) {
+            return Err(format!("the correction that brings the hint: {:?} group {} engine {:?}", target.text(), group(), engine.snapshot().last_action));
+        }
+        let field = backend.focused_window().ok_or("no focused window under the hint")?;
+        if show_hint && !wait(HINT_APPEARS, &mut || hint_driver.card_id().is_some()) {
+            return Err("the hint did not appear after the correction".to_owned());
+        }
+        if !show_hint {
+            // The time a hint takes to appear, spent with no hint.
+            settle(Duration::from_millis(1500));
+        }
+        let appeared = Instant::now();
+        let gave_back = wait(HINT_GIVES_KEYBOARD_BACK, &mut || backend.focused_window().is_some_and(|focus| focus.window == field.window));
+        println!("hint: the keyboard back with the field after {} ms, restored {} times, window {:?}", appeared.elapsed().as_millis(), restored.load(std::sync::atomic::Ordering::Relaxed), backend.focused_window());
+        if !gave_back {
+            return Err(format!("the hint kept the keyboard: {:?}", backend.focused_window()));
+        }
+        settle(INTER_CASE);
+        keyboard.type_keys("hello ")?;
+        if !wait(LATE, &mut || target.text() == "привет hello " && group() == 0) {
+            return Err(format!("typing under the hint: {:?} group {} engine {:?}", target.text(), group(), engine.snapshot().last_action));
+        }
+        target.clear_activations();
+        keyboard.tap(KEY_ENTER)?;
+        if !wait(LATE, &mut || target.activations().len() == 1) || engine.shared.prompt_key_deadline() != 0.0 {
+            return Err(format!("Enter under the hint: {:?} deadline {}", target.activations(), engine.shared.prompt_key_deadline()));
+        }
+        println!("HINT_KEEPS_THE_KEYBOARD_E2E_OK");
+        // Long enough for a look at the desktop, when somebody asks for one.
+        if let Some(hold) = std::env::var("KS_E2E_WAYLAND_HINT_HOLD_MS").ok().and_then(|text| text.parse::<u64>().ok()) {
+            settle(Duration::from_millis(hold));
+        }
+        hint_driver.close();
+        if only_hint {
+            return Ok(());
+        }
         // The checks of single features do without the protection of a manual switch.
         set("detection.respect_manual_layout", json!(false))?;
         // 2. Enter is withheld until the replacement is done, then delivered once.

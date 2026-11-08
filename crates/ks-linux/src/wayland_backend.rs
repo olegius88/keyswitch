@@ -156,7 +156,7 @@ pub trait WaylandApi: Send + Sync {
     fn window_origin(&self, window: i64) -> Option<(i64, i64)>;
     fn window_is_password(&self, window: i64) -> bool;
     fn input_anchor(&self) -> Option<ScreenAnchor>;
-    fn position_window(&self, window: i64, x: i64, y: i64) -> bool;
+    fn position_window(&self, title: &str, window: i64, x: i64, y: i64) -> bool;
     fn activate_window(&self, window: i64) -> bool;
     fn isolated_layout(&self) -> bool;
     fn caps_lock_enabled(&self) -> bool;
@@ -332,8 +332,8 @@ impl WaylandBackend {
     }
 
     #[must_use]
-    pub fn position_window(&self, window: i64, x: i64, y: i64) -> bool {
-        self.inner.api.position_window(window, x, y)
+    pub fn position_window(&self, title: &str, window: i64, x: i64, y: i64) -> bool {
+        self.inner.api.position_window(title, window, x, y)
     }
 
     fn stop_inner(&self) {

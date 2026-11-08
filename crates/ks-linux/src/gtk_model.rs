@@ -5,6 +5,7 @@ use ks_cast::To as _;
 use ks_backend::BackendProbe;
 use ks_engine::EngineSnapshot;
 use ks_text::russian_text::{NounForms, quantity};
+use ks_ui::hints::SettingsPage;
 use ks_ui::windows_ui_model::{AUTOCORRECTION_PAGE_TITLE, HOTKEYS_PAGE_TITLE, SYSTEM_PAGE_TITLE};
 
 pub const GTK_WINDOW_DEFAULT_WIDTH_PIXELS: i32 = 1040;
@@ -46,6 +47,14 @@ pub const LEARNING_PROMPT_GTK_WIDTH_PIXELS: i32 = 410;
 pub const LEARNING_PROMPT_GTK_SPACING_PIXELS: i32 = 5;
 pub const LEARNING_PROMPT_GTK_MARGIN_Y_PIXELS: i32 = 14;
 pub const LEARNING_PROMPT_GTK_MARGIN_X_PIXELS: i32 = 18;
+pub const HINT_WINDOW_TITLE: &str = "Подсказка KeySwitch";
+pub const HINT_NOTIFICATION_ID: &str = "keyswitch-hint";
+/// The application's actions behind a notification of a hint, each with the hint's id.
+pub const HINT_ACTION_OPEN: &str = "hint-open";
+pub const HINT_ACTION_NEVER: &str = "hints-off";
+/// A hint's card is put above the caret this long after it is shown, and again for as long as the desktop does not know it.
+pub const HINT_PLACE_RETRY_MS: u32 = 40;
+pub const HINT_PLACE_ATTEMPTS: u32 = 50;
 pub const MAX_CARET_SEARCH_NODES: usize = 4096;
 pub const MAX_CARET_SEARCH_CHILDREN: usize = 512;
 
@@ -65,6 +74,33 @@ pub const NAVIGATION: [(&str, &str, &str); 9] = [
     ("history", "История", "document-open-recent-symbolic"),
     ("diagnostics", "О программе", "help-about-symbolic"),
 ];
+
+/// The page of the settings window that shows a settings page of the hints; the others have none.
+#[must_use]
+pub fn hint_page(page: &str) -> Option<SettingsPage> {
+    match page {
+        "dashboard" => Some(SettingsPage::Overview),
+        "automation" => Some(SettingsPage::Autocorrection),
+        "hotkeys" => Some(SettingsPage::Hotkeys),
+        "exceptions" => Some(SettingsPage::Exclusions),
+        "system" => Some(SettingsPage::System),
+        "history" => Some(SettingsPage::History),
+        _ => None,
+    }
+}
+
+/// The name in `NAVIGATION` of a settings page of the hints.
+#[must_use]
+pub fn hint_page_name(page: SettingsPage) -> &'static str {
+    match page {
+        SettingsPage::Overview => "dashboard",
+        SettingsPage::Autocorrection => "automation",
+        SettingsPage::Hotkeys => "hotkeys",
+        SettingsPage::Exclusions => "exceptions",
+        SettingsPage::System => "system",
+        SettingsPage::History => "history",
+    }
+}
 
 pub const SELECTION_HOTKEY_TITLES: [(&str, &str); 3] = [
     ("selection_layout", "Сменить раскладку выделенного текста"),
@@ -288,6 +324,21 @@ pub fn with_shared<T>(weak: &std::rc::Weak<T>, action: impl FnOnce(&T)) {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_extension_keeps_the_keyboard_from_the_window_of_a_hint_by_its_title() {
+        let extension = include_str!("../../../packaging/gnome-shell/keyswitch@io.github.olegius88.KeySwitch/extension.js");
+        assert!(extension.contains(&format!("const HINT_WINDOW_TITLE = '{HINT_WINDOW_TITLE}';")));
+    }
+
+    #[test]
+    fn every_page_of_the_hints_is_a_page_of_the_window() {
+        for page in [SettingsPage::Overview, SettingsPage::Autocorrection, SettingsPage::Hotkeys, SettingsPage::Exclusions, SettingsPage::System, SettingsPage::History] {
+            assert_eq!(hint_page(hint_page_name(page)), Some(page));
+            assert!(NAVIGATION.iter().any(|(name, title, _)| *name == hint_page_name(page) && *title == page.title(ks_ui::hints::Platform::Linux)));
+        }
+        assert_eq!(hint_page("languages"), None);
+    }
 
     #[test]
     fn the_word_being_typed_is_what_the_window_shows_and_a_failure_is_in_the_report() {

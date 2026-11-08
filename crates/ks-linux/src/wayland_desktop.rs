@@ -266,29 +266,22 @@ pub fn parse_sway_focused_window(tree: &Value) -> Option<DesktopWindowInfo> {
     None
 }
 
-/// Locate a sway container `con_id` owned by `pid` (and optional `title`).
+/// Locate a sway container `con_id` owned by `pid` and, when one is named, with this `title`. Another window of the
+/// program is no answer: a window not on the screen yet would have the settings window moved in its place.
 #[must_use]
 pub fn find_sway_window_by_pid(tree: &Value, pid: i64, title: &str) -> Option<i64> {
     if !tree.is_object() || pid <= 0 {
         return None;
     }
     let mut stack: Vec<&Value> = vec![tree];
-    let mut fallback: Option<i64> = None;
     while let Some(node) = stack.pop() {
-        if int_field(node, "pid", 0) == pid {
-            let con_id = int_field(node, "id", 0);
-            if con_id > 0 {
-                if title.is_empty() || str_field(node, "name") == title {
-                    return Some(con_id);
-                }
-                if fallback.is_none() {
-                    fallback = Some(con_id);
-                }
-            }
+        let con_id = int_field(node, "id", 0);
+        if int_field(node, "pid", 0) == pid && con_id > 0 && (title.is_empty() || str_field(node, "name") == title) {
+            return Some(con_id);
         }
         push_sway_children(node, &mut stack);
     }
-    fallback
+    None
 }
 
 #[must_use]
@@ -527,19 +520,14 @@ pub fn build_kwin_action_script(action: &KwinAction<'_>) -> String {
         let (pid, x, y) = (action.move_pid, action.x, action.y);
         for line in [
             format!("var targetTitle = {title_json};"),
-            "var fallbackPopup = null;".to_owned(),
-            "var chosenPopup = null;".to_owned(),
+            "var popup = null;".to_owned(),
             "for (var i = 0; i < list.length; i++) {".to_owned(),
             "    var cand = list[i];".to_owned(),
-            format!("    if (Number(cand.pid || 0) === {pid}) {{"),
-            "        if (targetTitle && String(cand.caption || '') === targetTitle) {".to_owned(),
-            "            chosenPopup = cand;".to_owned(),
-            "            break;".to_owned(),
-            "        }".to_owned(),
-            "        if (!fallbackPopup) fallbackPopup = cand;".to_owned(),
+            format!("    if (Number(cand.pid || 0) === {pid} && String(cand.caption || '') === targetTitle) {{"),
+            "        popup = cand;".to_owned(),
+            "        break;".to_owned(),
             "    }".to_owned(),
             "}".to_owned(),
-            "var popup = chosenPopup || fallbackPopup;".to_owned(),
             "if (popup) {".to_owned(),
             "    popup.keepAbove = true;".to_owned(),
             "    popup.frameGeometry = {".to_owned(),
@@ -749,7 +737,7 @@ mod tests {
             {"id": 99, "pid": 4242, "name": "Popup"},
         ], "floating_nodes": null});
         assert_eq!(find_sway_window_by_pid(&tree, 4242, "Popup"), Some(99));
-        assert_eq!(find_sway_window_by_pid(&tree, 4242, "Missing"), Some(42));
+        assert_eq!(find_sway_window_by_pid(&tree, 4242, "Missing"), None);
         assert_eq!(find_sway_window_by_pid(&tree, 4242, ""), Some(42));
     }
 
@@ -816,7 +804,7 @@ mod tests {
         assert!(full.contains("popup.keepAbove = true;") && full.contains("\"uuid-kwrite\"") && full.contains("callDBus"));
         // json.dumps escapes non-ASCII text as the Python writes it.
         assert!(full.contains("var targetTitle = \"\\u041e\\u0431\\u0443\\u0447\\u0435\\u043d\\u0438\\u0435 KeySwitch\";"));
-        assert!(full.contains("=== 4242)"));
+        assert!(full.contains("=== 4242 &&"));
         assert!(full.contains("        x: 600,\n        y: 400,\n"));
     }
 }

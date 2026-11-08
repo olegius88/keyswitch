@@ -292,7 +292,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin xfwm4
       - uses: actions/download-artifact@v7
         with:
           name: keyswitch-release-deb
@@ -436,7 +436,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils onboard-data
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils onboard-data xfwm4
       - name: Linux measure
         if: runner.os == 'Linux'
         run: packaging/coverage.sh coverage-linux.json

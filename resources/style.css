@@ -139,6 +139,26 @@ window.learning-prompt {
   box-shadow: 0 8px 28px alpha(black, .32);
 }
 
+window.hint-window {
+  background: alpha(@window_bg_color, .98);
+  border: 1px solid alpha(@accent_color, .75);
+  border-radius: 12px;
+  box-shadow: 0 8px 28px alpha(black, .32);
+}
+
+.hint-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: alpha(@accent_bg_color, .10);
+  border: 1px solid alpha(@accent_bg_color, .35);
+}
+
+.hint-target {
+  outline: 2px solid alpha(@accent_color, .75);
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
 .learning-prompt-word {
   color: @accent_color;
   font-weight: 700;

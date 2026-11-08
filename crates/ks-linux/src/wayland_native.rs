@@ -38,7 +38,7 @@ use zbus::{MatchRule, Message};
 
 use crate::wayland_access::access_hint;
 use crate::wayland_backend::{NativeKeyEvent, NativeListener, ReadyCallback, WaylandApi, join_within};
-use crate::wayland_constants::{EVDEV_READ_BATCH_EVENTS, EVIOCGID, EVDEV_NAME_BUFFER_BYTES, EVIOCGNAME_256, EVIOCGPHYS_256, EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES, EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES, EVIOCGBIT_REL_8, EVIOCGBIT_ABS_8, UI_SET_EVBIT, EV_SYN, EV_KEY, WAYLAND_UINPUT_MAX_KEYCODE, UI_SET_KEYBIT, EV_LED, WAYLAND_FORWARDED_LEDS, UI_SET_LEDBIT, BUS_I8042, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, WAYLAND_UINPUT_VERSION, UINPUT_MAX_NAME_BYTES, UI_DEV_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY, EVIOCSCLOCKID, EVIOCGRAB, EVIOCGKEY_96, EVIOCGLED_8, LED_CAPSL, IN_NONBLOCK, IN_CLOEXEC, IN_CREATE, IN_ATTRIB, IN_DELETE, INOTIFY_READ_BUFFER_BYTES, INOTIFY_EVENT_HEADER_BYTES, WAYLAND_REPEAT_DEFAULT_DELAY_MS, UINT32_MODULO_MASK, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, WAYLAND_KEYMAP_WAIT_SECONDS, WAYLAND_XKB_KEYCODE_OFFSET, XKB_KEYSYM_NAME_BUFFER_BYTES, WAYLAND_IPC_TIMEOUT_SECONDS, WAYLAND_SEAT_INTERFACE_MAX_VERSION, WL_SEAT_CAPABILITY_KEYBOARD, WAYLAND_KEYMAP_ROUNDTRIPS, WAYLAND_DBUS_CALL_TIMEOUT_MS, LAYOUT_SWITCH_POLL_SECONDS, LEARNING_PROMPT_WINDOW_TITLE, SWAY_IPC_HEADER_BYTES, SWAY_IPC_GET_INPUTS, SWAY_IPC_GET_TREE, SWAY_IPC_RUN_COMMAND, SWAY_IPC_SUBSCRIBE, SWAY_IPC_EVENT_INPUT, SWAY_IPC_EVENT_WINDOW, WAYLAND_HELPER_RESTARTS, WAYLAND_HELPER_RESTART_DELAY_SECONDS};
+use crate::wayland_constants::{EVDEV_READ_BATCH_EVENTS, EVIOCGID, EVDEV_NAME_BUFFER_BYTES, EVIOCGNAME_256, EVIOCGPHYS_256, EVIOCGBIT_EV_8, EVDEV_SMALL_BITMAP_BYTES, EVIOCGBIT_KEY_96, EVDEV_KEY_BITMAP_BYTES, EVIOCGBIT_REL_8, EVIOCGBIT_ABS_8, UI_SET_EVBIT, EV_SYN, EV_KEY, WAYLAND_UINPUT_MAX_KEYCODE, UI_SET_KEYBIT, EV_LED, WAYLAND_FORWARDED_LEDS, UI_SET_LEDBIT, BUS_I8042, WAYLAND_UINPUT_VENDOR_ID, WAYLAND_UINPUT_PRODUCT_ID, WAYLAND_UINPUT_VERSION, UINPUT_MAX_NAME_BYTES, UI_DEV_SETUP, UI_DEV_CREATE, UI_DEV_DESTROY, EVIOCSCLOCKID, EVIOCGRAB, EVIOCGKEY_96, EVIOCGLED_8, LED_CAPSL, IN_NONBLOCK, IN_CLOEXEC, IN_CREATE, IN_ATTRIB, IN_DELETE, INOTIFY_READ_BUFFER_BYTES, INOTIFY_EVENT_HEADER_BYTES, WAYLAND_REPEAT_DEFAULT_DELAY_MS, UINT32_MODULO_MASK, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, WAYLAND_KEYMAP_WAIT_SECONDS, WAYLAND_XKB_KEYCODE_OFFSET, XKB_KEYSYM_NAME_BUFFER_BYTES, WAYLAND_IPC_TIMEOUT_SECONDS, WAYLAND_SEAT_INTERFACE_MAX_VERSION, WL_SEAT_CAPABILITY_KEYBOARD, WAYLAND_KEYMAP_ROUNDTRIPS, WAYLAND_DBUS_CALL_TIMEOUT_MS, LAYOUT_SWITCH_POLL_SECONDS, SWAY_IPC_HEADER_BYTES, SWAY_IPC_GET_INPUTS, SWAY_IPC_GET_TREE, SWAY_IPC_RUN_COMMAND, SWAY_IPC_SUBSCRIBE, SWAY_IPC_EVENT_INPUT, SWAY_IPC_EVENT_WINDOW, WAYLAND_HELPER_RESTARTS, WAYLAND_HELPER_RESTART_DELAY_SECONDS};
 use crate::wayland_desktop::{DesktopWindowInfo, DesktopSnapshot, parse_gnome_state, GNOME_DBUS_NAME, GNOME_DBUS_PATH, GNOME_DBUS_INTERFACE, GNOME_EXTENSIONS_BUS_NAME, GNOME_EXTENSIONS_PATH, GNOME_EXTENSIONS_INTERFACE, GNOME_EXTENSION_UUID, parse_kwin_report, KdeWindowIdMap, KDE_KEYBOARD_BUS_NAME, KDE_KEYBOARD_PATH, KDE_KEYBOARD_INTERFACE, parse_kde_layouts, KWIN_BUS_NAME, KWIN_SCRIPTING_PATH, KWIN_SCRIPTING_INTERFACE, KWIN_SCRIPT_INTERFACE, build_kwin_watcher_script, KwinAction, build_kwin_action_script, encode_sway_ipc, decode_sway_ipc_header, parse_sway_inputs, parse_sway_focused_window, sway_switch_layout_command, find_sway_window_by_pid, sway_popup_move_command, sway_focus_command, detect_desktop_kind, DesktopKind};
 use crate::wayland_helper::{RawInputEvent, InputDeviceInfo, HelperOs, seconds, WaylandInputHelper, Flag, HelperClient, HelperKey, HelperCallbacks, classify_input_device, DeviceRole};
 
@@ -1115,7 +1115,7 @@ pub trait DesktopAdapter: Send + Sync {
     fn active_window(&self) -> Option<DesktopWindowInfo>;
     fn window_by_id(&self, window_id: i64) -> Option<DesktopWindowInfo>;
     fn input_anchor(&self) -> Option<ScreenAnchor>;
-    fn position_window(&self, window: i64, x: i64, y: i64) -> bool;
+    fn position_window(&self, title: &str, window: i64, x: i64, y: i64) -> bool;
     fn activate_window(&self, window: i64) -> bool;
     fn isolated_layout(&self) -> bool;
     fn locked(&self) -> bool;
@@ -1339,8 +1339,8 @@ impl DesktopAdapter for GnomeShellAdapter {
         anchor_of(window.as_ref(), pointer)
     }
 
-    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
-        self.bool_call("MoveWindow", &(std::process::id(), LEARNING_PROMPT_WINDOW_TITLE, x.low::<i32>(), y.low::<i32>()))
+    fn position_window(&self, title: &str, _window: i64, x: i64, y: i64) -> bool {
+        self.bool_call("MoveWindow", &(std::process::id(), title, x.low::<i32>(), y.low::<i32>()))
     }
 
     fn activate_window(&self, window: i64) -> bool {
@@ -1577,8 +1577,8 @@ impl DesktopAdapter for KdePlasmaAdapter {
         anchor_of(window.as_ref(), pointer)
     }
 
-    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
-        let action = KwinAction { move_pid: i64::from(std::process::id()), move_title: LEARNING_PROMPT_WINDOW_TITLE, x, y, ..KwinAction::default() };
+    fn position_window(&self, title: &str, _window: i64, x: i64, y: i64) -> bool {
+        let action = KwinAction { move_pid: i64::from(std::process::id()), move_title: title, x, y, ..KwinAction::default() };
         self.run_kwin_oneshot(&build_kwin_action_script(&action))
     }
 
@@ -1800,9 +1800,9 @@ impl DesktopAdapter for SwayIpcAdapter {
         Some(ScreenAnchor { x: x.low::<i32>(), y: y.low::<i32>(), window: Some(window.window_id) })
     }
 
-    fn position_window(&self, _window: i64, x: i64, y: i64) -> bool {
+    fn position_window(&self, title: &str, _window: i64, x: i64, y: i64) -> bool {
         let Ok(tree) = self.shared.refresh_tree() else { return false };
-        let Some(con_id) = find_sway_window_by_pid(&tree, i64::from(std::process::id()), LEARNING_PROMPT_WINDOW_TITLE) else { return false };
+        let Some(con_id) = find_sway_window_by_pid(&tree, i64::from(std::process::id()), title) else { return false };
         self.shared.command_succeeded(&sway_popup_move_command(con_id, x, y), false)
     }
 
@@ -1870,7 +1870,7 @@ impl DesktopAdapter for GenericWaylandAdapter {
     fn input_anchor(&self) -> Option<ScreenAnchor> {
         None
     }
-    fn position_window(&self, _window: i64, _x: i64, _y: i64) -> bool {
+    fn position_window(&self, _title: &str, _window: i64, _x: i64, _y: i64) -> bool {
         false
     }
     fn activate_window(&self, _window: i64) -> bool {
@@ -2329,8 +2329,8 @@ impl WaylandApi for NativeWaylandApi {
         self.shared.components()?.adapter.input_anchor()
     }
 
-    fn position_window(&self, window: i64, x: i64, y: i64) -> bool {
-        self.shared.components().is_some_and(|components| components.adapter.position_window(window, x, y))
+    fn position_window(&self, title: &str, window: i64, x: i64, y: i64) -> bool {
+        self.shared.components().is_some_and(|components| components.adapter.position_window(title, window, x, y))
     }
 
     fn activate_window(&self, window: i64) -> bool {

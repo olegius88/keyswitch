@@ -164,7 +164,7 @@ impl WaylandApi for FakeApi {
     fn input_anchor(&self) -> Option<ScreenAnchor> {
         Some(ScreenAnchor { x: 10, y: 20, window: Some(WINDOW) })
     }
-    fn position_window(&self, _window: i64, _x: i64, _y: i64) -> bool {
+    fn position_window(&self, _title: &str, _window: i64, _x: i64, _y: i64) -> bool {
         true
     }
     fn activate_window(&self, _window: i64) -> bool {
@@ -702,7 +702,7 @@ fn what_the_compositor_knows_is_asked_through() {
     assert_eq!(backend.layouts(), Ok((EN, RU)));
     assert_eq!(backend.window_process_id(WINDOW), 4242);
     assert_eq!(backend.window_origin(WINDOW), api.window_origin(WINDOW));
-    assert_eq!(backend.position_window(WINDOW, 1, 2), api.position_window(WINDOW, 1, 2));
+    assert_eq!(backend.position_window("окно", WINDOW, 1, 2), api.position_window("окно", WINDOW, 1, 2));
     assert_eq!(backend.input_anchor(), api.input_anchor());
     assert!(spawn_failed(std::io::Error::other("no threads")).to_string().contains("no threads"));
 }
@@ -874,7 +874,7 @@ fn the_window_sees_a_wayland_backend_through_its_own_calls() {
     let desktop = crate::desktop_backend::desktop_of_wayland(backend);
     assert!(desktop.wayland);
     assert_eq!((desktop.process_for_window)(WINDOW), 4242);
-    assert_eq!((desktop.position_window)(WINDOW, 1, 2), api.position_window(WINDOW, 1, 2));
+    assert_eq!((desktop.position_window)("окно", WINDOW, 1, 2), api.position_window("окно", WINDOW, 1, 2));
 }
 
 // ---------------------------------------------------------------- a long walk

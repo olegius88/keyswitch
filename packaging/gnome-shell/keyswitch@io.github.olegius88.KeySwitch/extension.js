@@ -12,6 +12,9 @@ import {getInputSourceManager} from 'resource:///org/gnome/shell/ui/status/keybo
 // its own, so KeySwitch leaves the word typed elsewhere and reads the Shell's field (a password
 // prompt is a password field) instead of the window behind it.
 const SHELL_WINDOW_ID = 0x7fffffff;
+// The window of a one-time hint: mutter gives every new window the keyboard, and this one must never keep it
+// (HINT_WINDOW_TITLE of the program).
+const HINT_WINDOW_TITLE = 'Подсказка KeySwitch';
 
 const IFACE_XML = `
 <node>
@@ -73,7 +76,9 @@ export default class KeySwitchExtension extends Extension {
         this._sourcesSig = this._ism.connect('sources-changed', () => {
             this._emitState();
         });
+        this._lastFocused = global.display.focus_window;
         this._focusSig = global.display.connect('notify::focus-window', () => {
+            this._keepKeyboardFromHint();
             this._emitState();
         });
         this._stageFocusSig = global.stage.connect('notify::key-focus', () => {
@@ -95,6 +100,7 @@ export default class KeySwitchExtension extends Extension {
     }
 
     disable() {
+        this._lastFocused = null;
         if (this._groupSig) {
             global.backend.disconnect(this._groupSig);
             this._groupSig = 0;
@@ -178,24 +184,25 @@ export default class KeySwitchExtension extends Extension {
         return null;
     }
 
-    _findWindowByPid(pid, title) {
-        let fallback = null;
+    // A hint that was given the keyboard gives it back within the same turn of the main loop, before any key can reach it.
+    _keepKeyboardFromHint() {
         const focused = global.display.focus_window;
-        if (focused && focused.get_pid() === pid) {
-            if (!title || (focused.get_title() || '') === title)
-                return focused;
-            fallback = focused;
+        if (!focused || (focused.get_title() || '') !== HINT_WINDOW_TITLE) {
+            this._lastFocused = focused;
+            return;
         }
+        const previous = this._lastFocused;
+        if (previous && previous !== focused && previous.get_compositor_private())
+            previous.activate(global.get_current_time());
+    }
+
+    _findWindowByPid(pid, title) {
         for (const actor of global.get_window_actors()) {
             const win = actor.get_meta_window();
-            if (!win || win.get_pid() !== pid)
-                continue;
-            if (!title || (win.get_title() || '') === title)
+            if (win && win.get_pid() === pid && (win.get_title() || '') === title)
                 return win;
-            if (!fallback)
-                fallback = win;
         }
-        return fallback;
+        return null;
     }
 
     _buildStateJson() {
@@ -294,6 +301,8 @@ export default class KeySwitchExtension extends Extension {
         if (!w)
             return false;
         w.move_frame(true, x, y);
+        // The card stays over the field it is about when the keyboard goes back to the field's window.
+        w.make_above();
         return true;
     }
 
