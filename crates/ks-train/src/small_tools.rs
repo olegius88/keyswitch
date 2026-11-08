@@ -525,6 +525,13 @@ pub fn apt_verify(root: &Path, repository: &Path, expected_version: &str, public
 /// inputs of later steps, so they must not move; nothing is computed from them again.
 const ARCHIVED_FOLDERS: [&str; 4] = ["model/boundary_v1", "model/context_v1", "model/context_v2", "model/ortho_v2"];
 const ARCHIVE_RECORD: &str = "model/archive-sha256.json";
+/// The replay of the boundary regressions on today's engine lives beside the retired boundary-v1 files, but every
+/// release recomputes it for its own program (`ks-train engine boundary --refresh-runtime`): its gates hold it, not the
+/// record.
+const RUNTIME_REPORTS: [&str; 1] = ["model/boundary_v1/engine-regression.json"];
+/// The engine reports a refresh replaced. Each is named by the digest of its bytes, so one a release adds is checked by its
+/// name; those in the record stay as recorded.
+const RUNTIME_HISTORIES: [&str; 2] = ["model/boundary_v1/engine-history", "model/prefix_v1/engine-history"];
 
 fn archived_files(folder: &Path, root: &Path, into: &mut std::collections::BTreeMap<String, String>) -> Result<(), String> {
     for entry in std::fs::read_dir(folder).map_err(|error| format!("{}: {error}", folder.display()))? {
@@ -539,25 +546,44 @@ fn archived_files(folder: &Path, root: &Path, into: &mut std::collections::BTree
     Ok(())
 }
 
-/// `ks-train archive --tree <root> [--write]`: the digest of every archived file, against the record in the repository.
+/// `ks-train archive --tree <root> [--write]`: the digest of every archived file, against the record in the repository,
+/// and the name of every engine report a refresh replaced, against its digest.
 pub fn archive(root: &Path, write: bool) -> Result<(), String> {
+    let mut history = std::collections::BTreeMap::new();
+    for folder in RUNTIME_HISTORIES {
+        archived_files(&root.join(folder), root, &mut history)?;
+    }
+    let misnamed: Vec<&String> = history.iter().filter(|(name, digest)| Path::new(name.as_str()).file_name().and_then(|file| file.to_str()) != Some(format!("{digest}.json").as_str())).map(|(name, _)| name).collect();
+    if !misnamed.is_empty() {
+        return Err(format!("engine reports of the history are not named by their digest: {misnamed:?}"));
+    }
     let mut files = std::collections::BTreeMap::new();
     for folder in ARCHIVED_FOLDERS {
         archived_files(&root.join(folder), root, &mut files)?;
     }
-    let value = serde_json::json!(files);
+    for report in RUNTIME_REPORTS {
+        files.remove(report);
+    }
     if write {
-        return std::fs::write(root.join(ARCHIVE_RECORD), crate::train_json(&value)).map_err(|error| error.to_string());
+        return std::fs::write(root.join(ARCHIVE_RECORD), crate::train_json(&serde_json::json!(files))).map_err(|error| error.to_string());
     }
     let recorded = read_json(&root.join(ARCHIVE_RECORD))?;
-    if recorded != value {
-        let empty = Map::new();
-        let table = recorded.as_object().unwrap_or(&empty);
-        let changed: Vec<&String> = files.iter().filter(|(name, digest)| table.get(*name).and_then(Value::as_str) != Some(digest.as_str())).map(|(name, _)| name).collect();
-        let missing: Vec<&String> = table.keys().filter(|name| !files.contains_key(*name)).collect();
+    let empty = Map::new();
+    let table = recorded.as_object().unwrap_or(&empty);
+    let added_by_a_refresh = |name: &str| RUNTIME_HISTORIES.iter().any(|folder| Path::new(name).parent() == Some(Path::new(folder)));
+    let changed: Vec<&String> = files
+        .iter()
+        .filter(|(name, digest)| match table.get(*name) {
+            Some(kept) => kept.as_str() != Some(digest.as_str()),
+            None => !added_by_a_refresh(name),
+        })
+        .map(|(name, _)| name)
+        .collect();
+    let missing: Vec<&String> = table.keys().filter(|name| !files.contains_key(*name)).collect();
+    if !changed.is_empty() || !missing.is_empty() {
         return Err(format!("archived files moved: changed {changed:?}, missing {missing:?}"));
     }
-    println!("{} archived files are as recorded", files.len());
+    println!("{} archived files are as recorded, {} engine reports of the history are named by their digest", files.len(), history.len());
     Ok(())
 }
 

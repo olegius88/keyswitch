@@ -99,6 +99,29 @@ fn apply_version(root: &Path, options: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// What a release writes into the tree besides the files that spell the version: the changelog, the lockfile cargo rewrites
+/// for a new version, and the two engine reports its checks replay for this program.
+const RELEASE_WRITES: [&str; 4] = ["CHANGELOG.md", "Cargo.lock", "model/boundary_v1/engine-regression.json", "model/prefix_v1/engine-report.json"];
+/// Where a replay keeps the report it replaced: the only folders a release adds files to.
+const RELEASE_HISTORIES: [&str; 2] = ["model/boundary_v1/engine-history", "model/prefix_v1/engine-history"];
+
+/// The changes in the tree that the release does not make itself; they would ride into the release commit unseen.
+fn foreign_changes(root: &Path) -> Result<Vec<String>, String> {
+    let changed = output(root, "git", &["diff", "--name-only", "HEAD"])?;
+    let added = output(root, "git", &["ls-files", "--others", "--exclude-standard"])?;
+    let written = |name: &str| RELEASE_WRITES.contains(&name) || VERSION_SITES.iter().any(|(site, _, _)| *site == name);
+    let kept = |name: &str| RELEASE_HISTORIES.iter().any(|folder| Path::new(name).parent() == Some(Path::new(folder)));
+    Ok(changed.lines().filter(|name| !written(name)).chain(added.lines().filter(|name| !kept(name))).map(str::to_owned).collect())
+}
+
+fn refuse_foreign_changes(root: &Path, what: &str) -> Result<(), String> {
+    let foreign = foreign_changes(root)?;
+    if foreign.is_empty() {
+        return Ok(());
+    }
+    Err(format!("{what} files a release does not write: {}; commit them or move them out of the tree", foreign.join(", ")))
+}
+
 /// `changelog_sections`: the entries under each `## ` heading, in order.
 fn changelog_sections(text: &str) -> Vec<(String, Vec<String>)> {
     let mut sections: Vec<(String, Vec<String>)> = Vec::new();
@@ -226,17 +249,20 @@ fn check_release_notes(root: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Every check a release holds to, stopping at the first that does not.
+/// Every check a release holds to, stopping at the first that does not. The engine reports are replayed for this program
+/// first, so every check after them holds the tree that is committed.
 fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     let tree = root.to_string_lossy().into_owned();
+    run(root, "the trainer", "cargo", &["build", "--profile", "train", "-p", "ks-train"])?;
+    let trainer = root.join("target/train/ks-train");
+    let trainer = trainer.to_string_lossy().into_owned();
+    run(root, "the boundary regressions", "dbus-run-session", &["--", &trainer, "engine", "boundary", "--tree", &tree, "--refresh-runtime"])?;
+    run(root, "the prefix replay", "dbus-run-session", &["--", &trainer, "engine", "prefix", "--tree", &tree, "--refresh-runtime"])?;
     let mut arguments = vec!["test", "--profile", "parity"];
     for name in TESTED_CRATES {
         arguments.extend(["-p", name]);
     }
     run(root, "the tests of the engine, the trainer and LogCourier", "cargo", &arguments)?;
-    run(root, "the trainer", "cargo", &["build", "--profile", "train", "-p", "ks-train"])?;
-    let trainer = root.join("target/train/ks-train");
-    let trainer = trainer.to_string_lossy().into_owned();
     run(root, "the evidence of every installed and rejected model", &trainer, &["gates", "--tree", &tree])?;
     run(root, "the boundary model reproduces", &trainer, &["boundary", "--tree", &tree, "--verify"])?;
     run(root, "the orthotactic model reproduces", &trainer, &["ortho", "--tree", &tree, "--verify"])?;
@@ -247,8 +273,6 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     for family in ["boundary-v1", "context-v2", "ortho-v2", "prefix-v1"] {
         run(root, "a rejected or retired model replays", &trainer, &["retired", family, "--tree", &tree, "--replay"])?;
     }
-    run(root, "the boundary regressions", "dbus-run-session", &["--", &trainer, "engine", "boundary", "--tree", &tree, "--refresh-runtime"])?;
-    run(root, "the prefix replay", "dbus-run-session", &["--", &trainer, "engine", "prefix", "--tree", &tree, "--refresh-runtime"])?;
     if let (Some(field_root), Some(released)) = (&options.field_root, &options.field_released) {
         let (field_root, released) = (field_root.to_string_lossy().into_owned(), released.to_string_lossy().into_owned());
         // The gate runs the replay beside it: both are built, so neither is left from an older tree.
@@ -270,6 +294,7 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
 
 fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
     let tag = release_tag(options);
+    refuse_foreign_changes(root, "the checks changed")?;
     if !output(root, "git", &["status", "--porcelain"])?.is_empty() {
         let message = if let Some(path) = &options.message_file { std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))? } else {
             let text = std::fs::read_to_string(root.join("CHANGELOG.md")).map_err(|error| error.to_string())?;
@@ -335,7 +360,7 @@ fn check_preconditions(root: &Path, options: &Options) -> Result<(), String> {
     if !output(root, "git", &["ls-remote", "--tags", &options.remote, &tag])?.is_empty() && !output(root, "git", &["status", "--porcelain"])?.is_empty() {
         return Err(format!("{tag} is already published and the tree has changes; choose another version"));
     }
-    Ok(())
+    refuse_foreign_changes(root, "the tree has changed")
 }
 
 fn release(root: &Path, options: &Options) -> Result<(), String> {

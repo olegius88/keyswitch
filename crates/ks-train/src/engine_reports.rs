@@ -437,10 +437,17 @@ pub fn command(root: &Path, resources: &Arc<Resources>, which: &str, verify: boo
             let result_object = result.as_object_mut().ok_or("a report")?;
             if report.exists() {
                 let previous = read_json(&report)?;
-                if refresh {
-                    if result_object["sequence_ids"] != previous["sequence_ids"] {
-                        return Err("runtime refresh cannot change the observed selection or candidate".to_owned());
-                    }
+                if refresh && result_object["sequence_ids"] != previous["sequence_ids"] {
+                    return Err("runtime refresh cannot change the observed selection or candidate".to_owned());
+                }
+                // A replay that says what the kept report says keeps it, and the link to the report before it.
+                let without_link = |report: &Map<String, Value>| {
+                    let mut report = report.clone();
+                    report.remove("runtime_regression");
+                    report
+                };
+                let unchanged = previous.as_object().map(without_link) == Some(without_link(result_object));
+                if refresh && !unchanged {
                     let archive = directory.join("engine-history").join(format!("{}.json", checksum(&report)?));
                     result_object.insert("runtime_regression".to_owned(), json!({"previous_report": archive.strip_prefix(root).map_err(|_| "a report outside the tree")?.to_string_lossy(), "previous_sha256": checksum(&report)?}));
                 } else if let Some(earlier) = previous.get("runtime_regression") {
@@ -460,6 +467,8 @@ pub fn command(root: &Path, resources: &Arc<Resources>, which: &str, verify: boo
         }
     } else if report.exists() && !refresh {
         return Err("regression report already exists; use --verify or --refresh-runtime".to_owned());
+    } else if std::fs::read(&report).ok().as_deref() == Some(content.as_slice()) {
+        println!("the {which} engine report is as it was");
     } else {
         if report.exists() {
             let history = directory.join("engine-history");

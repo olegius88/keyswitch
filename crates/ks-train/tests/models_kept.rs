@@ -56,9 +56,17 @@ fn every_rejected_or_retired_model_replays() {
 #[test]
 fn the_engine_reports_are_refreshed_and_then_hold() {
     let small = small_tree("engine-reports", &recipe());
-    for which in ["boundary", "prefix"] {
+    for (which, report) in [("boundary", "model/boundary_v1/engine-regression.json"), ("prefix", "model/prefix_v1/engine-report.json")] {
         done(&run(on(&small, &["engine", which]).arg("--refresh-runtime").args(["--jobs", "2"])));
         done(&run(on(&small, &["engine", which]).arg("--verify").args(["--jobs", "2"])));
+        // A second refresh of the same program keeps the report and adds nothing to the history.
+        let report = small.join(report);
+        let kept = || (std::fs::read_dir(report.parent().expect("a folder").join("engine-history")).expect("the history").count(), std::fs::read(&report).expect("the report"));
+        let before = kept();
+        let again = run(on(&small, &["engine", which]).arg("--refresh-runtime").args(["--jobs", "2"]));
+        done(&again);
+        assert!(String::from_utf8_lossy(&again.stdout).contains("is as it was"), "{}", String::from_utf8_lossy(&again.stdout));
+        assert_eq!(kept(), before);
     }
     let output = scratch("engine-output").join("report.json");
     done(&run(on(&small, &["engine", "boundary"]).arg("--output").arg(&output)));
@@ -223,14 +231,30 @@ fn the_small_tools_do_what_they_say() {
     let small = small_tree("archive", &recipe());
     done(&run(on(&small, &["archive"]).arg("--write")));
     done(&run(&mut on(&small, &["archive"])));
+    // The replay of today's engine is written again by every release, and the report it replaced goes to the history
+    // under the name of its digest: neither is a move.
+    std::fs::write(small.join("model/boundary_v1/engine-regression.json"), b"{}").expect("a file");
+    let replaced = b"{\"replaced\": true}\n";
+    let named = format!("{:x}.json", <sha2::Sha256 as sha2::Digest>::digest(replaced));
+    std::fs::write(small.join("model/boundary_v1/engine-history").join(&named), replaced).expect("a file");
+    done(&run(&mut on(&small, &["archive"])));
+    // A report of either history under another name is refused.
+    let misnamed = small.join("model/prefix_v1/engine-history/0.json");
+    std::fs::write(&misnamed, replaced).expect("a file");
+    refused(&run(&mut on(&small, &["archive"])), "not named by their digest");
+    std::fs::remove_file(&misnamed).expect("the file goes");
     let record = small.join("model/archive-sha256.json");
-    let mut changed: Value = serde_json::from_slice(&std::fs::read(&record).expect("the record")).expect("json");
-    let table = changed.as_object_mut().expect("a table");
-    let first = table.keys().next().expect("a file").clone();
-    table[&first] = json!("0");
-    table.insert("gone".to_owned(), json!("0"));
-    std::fs::write(&record, serde_json::to_vec(&changed).expect("json")).expect("a file");
-    refused(&run(&mut on(&small, &["archive"])), "archived files moved");
+    let kept: Value = serde_json::from_slice(&std::fs::read(&record).expect("the record")).expect("json");
+    let edited = |edit: &dyn Fn(&mut serde_json::Map<String, Value>)| {
+        let mut changed = kept.clone();
+        edit(changed.as_object_mut().expect("a table"));
+        std::fs::write(&record, serde_json::to_vec(&changed).expect("json")).expect("a file");
+        run(&mut on(&small, &["archive"]))
+    };
+    // A recorded file that changed, a recorded file that is gone, a file the record does not know.
+    refused(&edited(&|table| drop(table.insert(table.keys().next().expect("a file").clone(), json!("0")))), "archived files moved: changed [");
+    refused(&edited(&|table| drop(table.insert("gone".to_owned(), json!("0")))), "missing [\"gone\"]");
+    refused(&edited(&|table| drop(table.remove(&table.keys().next().expect("a file").clone()))), "archived files moved: changed [");
     std::fs::write(&record, b"[]").expect("a file");
     refused(&run(&mut on(&small, &["archive"])), "archived files moved");
     // The notices of third parties.

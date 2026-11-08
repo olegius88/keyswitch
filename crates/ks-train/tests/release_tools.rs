@@ -384,7 +384,8 @@ fn project(name: &str) -> Project {
     let bin = folder.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let trainer_stub = root.join("target/train/ks-train");
-    executable(&trainer_stub, "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
+    // A replay keeps the report it replaced in the history, as the real one does; a step may also leave a stray file.
+    executable(&trainer_stub, "#!/bin/sh\nif [ \"$1\" = engine ]; then mkdir -p model/boundary_v1/engine-history && : > model/boundary_v1/engine-history/0.json; fi\nif [ \"$1\" = \"$KS_STRAY_STEP\" ]; then : > stray; fi\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
     executable(&bin.join("cargo"), "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_CARGO\" ]\n");
     std::fs::create_dir_all(root.join("target/parity")).unwrap();
     executable(&root.join("target/parity/field-gate"), "#!/bin/sh\ncase \"$*\" in\n  *--speller*) [ \"$KS_FAIL_GATE\" != speller ] ;;\n  *) [ \"$KS_FAIL_GATE\" != plain ] ;;\nesac\n");
@@ -483,6 +484,11 @@ fn the_release_command() {
     failing("KS_FAIL_STEP", "gates", "the evidence");
     failing("KS_FAIL_STEP", "retired", "rejected or retired");
     failing("KS_FAIL_STEP", "engine", "the boundary regressions");
+    // A file the release does not write stops it: one a check leaves before the commit, one in the tree before it starts.
+    failing("KS_STRAY_STEP", "gates", "the checks changed files a release does not write: stray");
+    let tree = project("release-foreign");
+    std::fs::write(tree.root.join(".gitignore"), "target\nother\n").unwrap();
+    refused(&tree.release(&whole_arguments), "the tree has changed files a release does not write: .gitignore");
     // Nothing to describe.
     let tree = project("release-no-entries");
     std::fs::write(tree.root.join("CHANGELOG.md"), "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n").unwrap();
