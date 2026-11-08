@@ -1,6 +1,7 @@
 //! The packaged program itself, through real X11 and D-Bus: its panel icon and menu, its corrections, its history and a rule
 //! taught through its own windows. Runs under `packaging/e2e.sh <deb>`, with `KS_E2E_BINARY` naming the program; otherwise
 //! it says so and passes.
+#![expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 mod support;
 

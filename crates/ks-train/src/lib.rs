@@ -4,6 +4,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
 #![forbid(unsafe_code)]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; steps 4 and 5 of the strict-json plan type them and remove this")]
 
 pub mod artifact;
 pub mod base_corpus;

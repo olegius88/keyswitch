@@ -1,4 +1,5 @@
 //! What a row of a corpus gives the fit: the frames of each kind, and those rows a selection leaves out.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_lang::Resources;

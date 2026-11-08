@@ -8,6 +8,7 @@
 
 mod bigint;
 pub mod constants;
+pub mod json;
 pub mod layouts;
 pub mod normalize;
 pub mod pyjson;

@@ -1,5 +1,6 @@
 //! The real thing on X11: a GTK entry, keys through XTEST, RECORD into the engine, the correction through XTEST back.
 //! Runs under `packaging/e2e.sh`, with `KS_E2E` set in a private X server; otherwise it says so and passes.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use ks_cast::To as _;
 mod support;

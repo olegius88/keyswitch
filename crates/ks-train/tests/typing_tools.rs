@@ -1,5 +1,6 @@
 //! What every curriculum reads, at its edges: a word of no letters, a glyph no layout types, a lexicon or a morphology that is
 //! not the pinned one, and the capitals the onboard Russian lexicon writes.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_lang::Resources;

@@ -1,5 +1,6 @@
 //! The gate a package is built behind, over a tree of links to this repository with one file of its own changed: each
 //! piece of evidence that no longer describes an installed model stops it.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod eval_support;
 mod support;
 

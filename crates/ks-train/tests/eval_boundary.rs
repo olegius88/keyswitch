@@ -1,6 +1,7 @@
 //! The boundary-v2 model's tools over small inputs: the words of a phrase, the commands asked what they do not know, and
 //! a whole experiment over a few frozen examples written by hand, in a tree of links whose config and installed model
 //! are its own.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod eval_support;
 mod support;
 

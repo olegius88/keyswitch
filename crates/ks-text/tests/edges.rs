@@ -1,4 +1,5 @@
 //! The edges of the Python functions, with the answers CPython gives: what the larger recorded sets happen to pass by.
+#![expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use ks_text::normalize::{combining_class, nfc, nfd};
 use ks_text::pystr::{casefold, center, char_at, count, find, isascii, istitle, ljust, lower, lstrip, lstrip_chars, rfind, rjust, rsplit_sep, rstrip, rstrip_chars, slice, split_max, zfill};

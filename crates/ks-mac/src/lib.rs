@@ -7,6 +7,7 @@
 //! says why it holds.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 2c of the strict-json plan types them and removes this")]
 pub mod constants;
 pub mod hint_place;
 pub mod macos_app;

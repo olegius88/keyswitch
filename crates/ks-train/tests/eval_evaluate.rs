@@ -1,5 +1,6 @@
 //! The sequences of a development replay, over rows written out by hand: the windows trimmed, the keys typed, the
 //! characters no layout has, and what a replay of the installed pair reports of them.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod eval_support;
 mod support;
 

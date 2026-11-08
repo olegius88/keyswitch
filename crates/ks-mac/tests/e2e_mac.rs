@@ -3,6 +3,7 @@
 //! with `KS_E2E_BINARY` naming the program; otherwise, and on other systems, it says so and passes.
 
 #![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
+#![cfg_attr(target_os = "macos", expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this"))]
 #[cfg(not(target_os = "macos"))]
 fn main() {
     println!("the Mac end-to-end test runs on macOS only, skipped");

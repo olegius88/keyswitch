@@ -1,4 +1,5 @@
 //! The bench that types messages through the engine: the jobs of a recipe, each typing mode, the questions captured from a run and the chat test.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

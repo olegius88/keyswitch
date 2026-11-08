@@ -1,4 +1,5 @@
 //! The numeric core against dumps of the previous trainer: every float compared as bits.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_cast::To as _;
 use std::collections::HashMap;
 use std::io::Read;

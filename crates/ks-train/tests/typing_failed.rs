@@ -1,6 +1,7 @@
 //! A chat-test read on which the engine fails for a pair: each message it failed on counts as an error, the read goes on
 //! to its end and no floor of every message typed holds. A program of its own: the failure is set up in the folder the
 //! bench's first worker types in, which every read of this process shares.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_train::mixed::{DevchatRequest, devchat};

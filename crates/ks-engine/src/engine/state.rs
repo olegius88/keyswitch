@@ -157,7 +157,7 @@ impl EngineCore {
             let mut payload = serde_json::Map::new();
             payload.insert("schema".into(), serde_json::json!(1));
             payload.insert("event".into(), serde_json::json!("setting_changed"));
-            payload.extend(change);
+            payload.extend(change.into_tree());
             self.shared.emit_technical(payload);
         }
         if path == "diagnostics.technical_logging" && truthy(value) {

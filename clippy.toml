@@ -5,3 +5,66 @@ allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
 allow-dbg-in-tests = true
 avoid-breaking-exported-api = false
+
+# The union of all JSON types stays inside the modules that read and write files and say why; everything else is typed.
+# The workspace denies these lints (Cargo.toml); crates not converted yet carry a temporary crate-level `expect`, which
+# stops compiling the day the crate is clean (`unfulfilled_lint_expectations`). tests/strict_typing.rs of ks-train counts
+# what no lint can see.
+disallowed-types = [
+  { path = "serde_json::Value", reason = "a JSON tree is a union of all types: read it into a struct, or keep it inside a module that says why it cannot" },
+  { path = "serde_json::Map", reason = "a JSON object is a union of all types under text keys: read it into a struct" },
+  { path = "std::any::Any", reason = "a value of every type: name the type" },
+]
+disallowed-macros = [
+  { path = "serde_json::json", reason = "builds the untyped tree: write a struct and pass it to ks_text::json::dumps" },
+]
+# Every method that gives an untyped value its meaning: a tree that was never written as a type still cannot be read or
+# built. Reading and writing JSON goes through ks_text::json, which keeps the Python's bytes and the strict trailing check.
+disallowed-methods = [
+  { path = "serde_json::Value::get", reason = "read a typed field" },
+  { path = "serde_json::Value::get_mut", reason = "read a typed field" },
+  { path = "serde_json::Value::pointer", reason = "read a typed field" },
+  { path = "serde_json::Value::pointer_mut", reason = "read a typed field" },
+  { path = "serde_json::Value::as_str", reason = "read a typed field" },
+  { path = "serde_json::Value::as_i64", reason = "read a typed field" },
+  { path = "serde_json::Value::as_u64", reason = "read a typed field" },
+  { path = "serde_json::Value::as_f64", reason = "read a typed field" },
+  { path = "serde_json::Value::as_bool", reason = "read a typed field" },
+  { path = "serde_json::Value::as_null", reason = "read a typed field" },
+  { path = "serde_json::Value::as_number", reason = "read a typed field" },
+  { path = "serde_json::Value::as_object", reason = "read a typed field" },
+  { path = "serde_json::Value::as_object_mut", reason = "read a typed field" },
+  { path = "serde_json::Value::as_array", reason = "read a typed field" },
+  { path = "serde_json::Value::as_array_mut", reason = "read a typed field" },
+  { path = "serde_json::Value::is_null", reason = "read a typed field" },
+  { path = "serde_json::Value::take", reason = "read a typed field" },
+  { path = "serde_json::Value::String", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Value::Number", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Value::Bool", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Value::Array", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Value::Object", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Map::new", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Map::with_capacity", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Map::insert", reason = "builds the untyped tree: write a struct" },
+  { path = "serde_json::Map::get", reason = "read a typed field" },
+  { path = "serde_json::Map::get_mut", reason = "read a typed field" },
+  { path = "serde_json::Map::remove", reason = "read a typed field" },
+  { path = "serde_json::Map::entry", reason = "read a typed field" },
+  { path = "serde_json::Map::contains_key", reason = "read a typed field" },
+  { path = "serde_json::from_str", reason = "ks_text::json::loads" },
+  { path = "serde_json::from_slice", reason = "ks_text::json::loads" },
+  { path = "serde_json::from_reader", reason = "ks_text::json::read_seed" },
+  { path = "serde_json::from_value", reason = "read the file into the type with ks_text::json::loads" },
+  { path = "serde_json::to_value", reason = "ks_text::json::dumps" },
+  { path = "serde_json::to_string", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::to_string_pretty", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::to_vec", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::to_vec_pretty", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::to_writer", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::to_writer_pretty", reason = "ks_text::json::dumps writes the Python's bytes" },
+  { path = "serde_json::Deserializer::from_slice", reason = "ks_text::json::loads_seed" },
+  { path = "serde_json::Deserializer::from_str", reason = "ks_text::json::loads_seed" },
+  { path = "serde_json::Deserializer::from_reader", reason = "ks_text::json::read_seed" },
+  { path = "core::any::Any::downcast_ref", reason = "only a panic payload is of every type: expect it there" },
+  { path = "core::any::Any::downcast_mut", reason = "only a panic payload is of every type: expect it there" },
+]

@@ -6,6 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 2b of the strict-json plan types them and removes this")]
 
 pub mod boundary_model;
 pub mod boundary_policy;

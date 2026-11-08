@@ -38,6 +38,8 @@ md-5 = "0.10"
 
 [dev-dependencies]
 flate2.workspace = true
+# tests/strict_typing.rs reads its record into typed structs.
+serde.workspace = true
 
 [lints]
 workspace = true

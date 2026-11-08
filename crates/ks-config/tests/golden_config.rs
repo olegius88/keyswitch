@@ -2,6 +2,7 @@
 //! They live in `$KS_GOLDEN_DIR/config`; a test skips with a message when its file is absent.
 
 #![expect(clippy::string_slice, clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_config::config::SettingsStore;
@@ -602,11 +603,11 @@ fn misc() {
                 for p in r["sets"].as_array().unwrap() {
                     store.set(s(&p[0]), serde_json::from_str(s(&p[1])).unwrap(), false).unwrap();
                 }
-                f.eq("snapshot", &json!(snapshot_as_python(&jt(&Value::Object(settings_diagnostics::settings_snapshot(&store))), &store)), &r["snapshot"]);
+                f.eq("snapshot", &json!(snapshot_as_python(&jt(&serde_json::to_value(settings_diagnostics::settings_snapshot(&store)).unwrap()), &store)), &r["snapshot"]);
                 for (key, want) in r["changes"].as_object().unwrap() {
                     let (p, t) = key.split_once('\0').unwrap();
                     let c = settings_diagnostics::setting_change(&store, p, &serde_json::from_str(t).unwrap());
-                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| snapshot_as_python(&jt(&Value::Object(m)), &store))), want);
+                    f.eq(&format!("change {key:?}"), &json!(c.map_or("null".to_string(), |m| snapshot_as_python(&jt(&serde_json::to_value(m).unwrap()), &store))), want);
                 }
             }
             "line" => {

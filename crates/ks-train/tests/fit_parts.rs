@@ -1,4 +1,5 @@
 //! The parts of a fit one by one: the numeric core's refusals, what a seal pins of a tree, the evidence of a frame.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_backend::FieldRole;

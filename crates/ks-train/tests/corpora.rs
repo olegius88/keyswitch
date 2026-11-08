@@ -1,5 +1,6 @@
 //! The corpora made from their public sources, on small samples of each format: treebanks, package indexes and sentence exports,
 //! through the base, its reconciliation, the technical corpus, their merge, a holdout and a fitting extension.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_train::base_corpus::BASE_PINS;

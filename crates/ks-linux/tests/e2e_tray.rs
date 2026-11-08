@@ -1,5 +1,6 @@
 //! The panel icon and its menu on a real session bus: it registers, answers, and a click reaches the application. Runs
 //! under `dbus-run-session`, with `KS_E2E` set; otherwise it says so and passes.
+#![expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 mod support;
 

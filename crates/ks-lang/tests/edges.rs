@@ -1,5 +1,6 @@
 //! What the language files and the decisions meet outside the shipped data.
 #![expect(clippy::unwrap_used, reason = "a test stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

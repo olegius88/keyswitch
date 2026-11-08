@@ -31,6 +31,7 @@
 //! line per frame with floats as C99 hex, to be compared with another trainer's.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![expect(clippy::panic, reason = "a tool stops on input it cannot use: nobody is typing through it")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; steps 4 and 5 of the strict-json plan type them and remove this")]
 use ks_cast::To as _;
 use ks_text::JsonOptions;
 use ks_train::fit::{FitRequest, NoStages, fit};

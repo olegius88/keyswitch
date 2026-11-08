@@ -1,8 +1,7 @@
 //! Values used by the modules of this crate, each once, as in the Python's `constants` folder (the file each group
 //! comes from is named on top of it).
 
-use serde_json::{json, Map, Value};
-use std::sync::LazyLock;
+use crate::settings_file::{HistoryLimit, setting_keys};
 
 // ---- constants/units.py
 pub const BYTES_PER_KIBIBYTE: u64 = 1024;
@@ -164,6 +163,83 @@ pub const MACOS_HOTKEY_DEFAULTS: [(&str, &str); 4] = [
 /// that holds Pause, the seeded default, takes it once. The other systems keep Pause and stay at schema 8.
 pub const MACOS_CONVERT_HOTKEY_SCHEMA_VERSION: i64 = 9;
 
+/// Every setting of the program, one per line, in the order of `DEFAULT_SETTINGS`: the constant that names it, its variant
+/// of `SettingChange`, the type its value has, and its dotted path. A setting added to `DEFAULT_SETTINGS` gets its line here
+/// and nothing else: the test of the table in `settings_file` fails until both are there.
+macro_rules! for_each_setting {
+    ($with:ident) => {
+        $with! {
+            SCHEMA_VERSION, SchemaVersion, i64, "schema_version";
+            ENABLED, Enabled, bool, "enabled";
+            GENERAL_START_HIDDEN, GeneralStartHidden, bool, "general.start_hidden";
+            GENERAL_CLOSE_TO_TRAY, GeneralCloseToTray, bool, "general.close_to_tray";
+            GENERAL_AUTOSTART, GeneralAutostart, bool, "general.autostart";
+            GENERAL_NOTIFICATIONS, GeneralNotifications, bool, "general.notifications";
+            GENERAL_SOUND, GeneralSound, bool, "general.sound";
+            GENERAL_KEEP_HISTORY, GeneralKeepHistory, bool, "general.keep_history";
+            GENERAL_HINTS, GeneralHints, bool, "general.hints";
+            DETECTION_LAYOUTS, DetectionLayouts, Vec<String>, "detection.layouts";
+            DETECTION_LANGUAGE_MODELS, DetectionLanguageModels, Vec<String>, "detection.language_models";
+            DETECTION_MINIMUM_LENGTH, DetectionMinimumLength, i64, "detection.minimum_length";
+            DETECTION_CONFIDENCE, DetectionConfidence, f64, "detection.confidence";
+            DETECTION_CORRECT_ON_PAUSE, DetectionCorrectOnPause, bool, "detection.correct_on_pause";
+            DETECTION_PAUSE_DELAY_SECONDS, DetectionPauseDelaySeconds, f64, "detection.pause_delay_seconds";
+            DETECTION_EARLY_SWITCH, DetectionEarlySwitch, bool, "detection.early_switch";
+            DETECTION_EARLY_SWITCH_MIN_LENGTH, DetectionEarlySwitchMinLength, i64, "detection.early_switch_min_length";
+            DETECTION_CORRECT_ON_SPACE, DetectionCorrectOnSpace, bool, "detection.correct_on_space";
+            DETECTION_CORRECT_ON_ENTER, DetectionCorrectOnEnter, bool, "detection.correct_on_enter";
+            DETECTION_CORRECT_ON_TAB, DetectionCorrectOnTab, bool, "detection.correct_on_tab";
+            DETECTION_CORRECT_ON_PUNCTUATION, DetectionCorrectOnPunctuation, bool, "detection.correct_on_punctuation";
+            DETECTION_RESPECT_MANUAL_LAYOUT, DetectionRespectManualLayout, bool, "detection.respect_manual_layout";
+            DETECTION_LAYOUT_SWITCH_KEY, DetectionLayoutSwitchKey, String, "detection.layout_switch_key";
+            DETECTION_FIX_DOUBLE_CAPITALS, DetectionFixDoubleCapitals, bool, "detection.fix_double_capitals";
+            DETECTION_AGGRESSIVE, DetectionAggressive, bool, "detection.aggressive";
+            DETECTION_CONTEXT_AWARE, DetectionContextAware, bool, "detection.context_aware";
+            DETECTION_CONTEXT_POLICY, DetectionContextPolicy, String, "detection.context_policy";
+            DETECTION_CONTEXT_READ_FIELD, DetectionContextReadField, bool, "detection.context_read_field";
+            DETECTION_HOLD_AFTER_CARET_MOVE, DetectionHoldAfterCaretMove, bool, "detection.hold_after_caret_move";
+            DETECTION_FIELD_CATCH_UP, DetectionFieldCatchUp, String, "detection.field_catch_up";
+            DETECTION_PROTECT_CODE, DetectionProtectCode, bool, "detection.protect_code";
+            DETECTION_INTENT_MODEL_ENABLED, DetectionIntentModelEnabled, bool, "detection.intent_model_enabled";
+            DETECTION_CORRECT_TYPOS, DetectionCorrectTypos, bool, "detection.correct_typos";
+            DETECTION_CORRECT_TYPOS_ENGLISH, DetectionCorrectTyposEnglish, bool, "detection.correct_typos_english";
+            DETECTION_LEARNING, DetectionLearning, bool, "detection.learning";
+            DETECTION_INJECTED_INPUT, DetectionInjectedInput, bool, "detection.injected_input";
+            HOTKEYS_TOGGLE, HotkeysToggle, String, "hotkeys.toggle";
+            HOTKEYS_CONVERT_LAST, HotkeysConvertLast, String, "hotkeys.convert_last";
+            HOTKEYS_UNDO, HotkeysUndo, String, "hotkeys.undo";
+            HOTKEYS_SELECTION_LAYOUT, HotkeysSelectionLayout, String, "hotkeys.selection_layout";
+            HOTKEYS_SELECTION_CASE, HotkeysSelectionCase, String, "hotkeys.selection_case";
+            HOTKEYS_SELECTION_TRANSLITERATE, HotkeysSelectionTransliterate, String, "hotkeys.selection_transliterate";
+            APPLICATIONS_TELEGRAM_QUOTE_MENTION, ApplicationsTelegramQuoteMention, bool, "applications.telegram_quote_mention";
+            EXCLUSIONS_APPLICATIONS, ExclusionsApplications, Vec<String>, "exclusions.applications";
+            EXCLUSIONS_WORDS, ExclusionsWords, Vec<String>, "exclusions.words";
+            APPEARANCE_THEME, AppearanceTheme, String, "appearance.theme";
+            APPEARANCE_SHOW_INDICATOR, AppearanceShowIndicator, bool, "appearance.show_indicator";
+            APPEARANCE_INDICATOR_STYLE, AppearanceIndicatorStyle, String, "appearance.indicator_style";
+            UPDATES_CHECK_AUTOMATICALLY, UpdatesCheckAutomatically, bool, "updates.check_automatically";
+            UPDATES_INSTALL_AUTOMATICALLY, UpdatesInstallAutomatically, bool, "updates.install_automatically";
+            DIAGNOSTICS_TECHNICAL_LOGGING, DiagnosticsTechnicalLogging, bool, "diagnostics.technical_logging";
+            HISTORY_LIMIT, HistoryLimit, HistoryLimit, "history.limit";
+        }
+    };
+}
+pub(crate) use for_each_setting;
+for_each_setting!(setting_keys);
+
+pub use shipped::DEFAULT_SETTINGS;
+
+mod shipped {
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "the shipped settings are the literal JSON of the file they seed")]
+use super::{
+    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
+    DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SELECTION_CASE_HOTKEY,
+    DEFAULT_SELECTION_LAYOUT_HOTKEY, DEFAULT_SELECTION_TRANSLITERATE_HOTKEY, HOTKEY_CONVERT_LAST, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT,
+    HOTKEY_SELECTION_TRANSLITERATE, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
+};
+use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
+
 /// The shipped settings; the persisted file is seeded from it and merged over it. Key order is the file's order.
 pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
     let value = json!({
@@ -252,3 +328,4 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
     });
     value.as_object().cloned().expect("the defaults are a literal object above")
 });
+}

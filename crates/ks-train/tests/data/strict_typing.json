@@ -1,0 +1,1050 @@
+{
+ "crates": {
+  "ks-backend": {
+   "expect_roots": 0,
+   "files": {},
+   "literal_compares": 0,
+   "string_key_index": 0,
+   "value_tokens": 0
+  },
+  "ks-cast": {
+   "expect_roots": 0,
+   "files": {},
+   "literal_compares": 0,
+   "string_key_index": 0,
+   "value_tokens": 0
+  },
+  "ks-config": {
+   "expect_roots": 1,
+   "files": {
+    "src/constants.rs": {
+     "value_tokens": 4
+    },
+    "src/log_privacy.rs": {
+     "value_tokens": 37
+    },
+    "src/settings_file.rs": {
+     "literal_compares": 2,
+     "string_key_index": 4,
+     "value_tokens": 142
+    },
+    "tests/golden_config.rs": {
+     "expect_roots": 1,
+     "string_key_index": 126,
+     "value_tokens": 145
+    },
+    "tests/stores.rs": {
+     "literal_compares": 1
+    }
+   },
+   "literal_compares": 1,
+   "string_key_index": 126,
+   "value_tokens": 145
+  },
+  "ks-context": {
+   "expect_roots": 4,
+   "files": {
+    "src/context_action_features.rs": {
+     "literal_compares": 21
+    },
+    "src/context_model.rs": {
+     "value_tokens": 7
+    },
+    "src/context_policy.rs": {
+     "literal_compares": 7
+    },
+    "src/flat_table.rs": {
+     "literal_compares": 1,
+     "value_tokens": 8
+    },
+    "src/input_context.rs": {
+     "literal_compares": 1
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/prefix_model.rs": {
+     "string_key_index": 1,
+     "value_tokens": 7
+    },
+    "src/prefix_schema.rs": {
+     "value_tokens": 3
+    },
+    "src/typo_correction.rs": {
+     "value_tokens": 14
+    },
+    "tests/baseline_features.rs": {
+     "expect_roots": 1,
+     "string_key_index": 5,
+     "value_tokens": 3
+    },
+    "tests/golden_context.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "string_key_index": 77,
+     "value_tokens": 130
+    },
+    "tests/loaders.rs": {
+     "expect_roots": 1,
+     "string_key_index": 52,
+     "value_tokens": 68
+    }
+   },
+   "literal_compares": 32,
+   "string_key_index": 135,
+   "value_tokens": 240
+  },
+  "ks-engine": {
+   "expect_roots": 1,
+   "files": {
+    "src/context_access.rs": {
+     "literal_compares": 1,
+     "value_tokens": 16
+    },
+    "src/engine/commit.rs": {
+     "literal_compares": 5
+    },
+    "src/engine/decide.rs": {
+     "literal_compares": 3
+    },
+    "src/engine/early.rs": {
+     "literal_compares": 14,
+     "string_key_index": 1,
+     "value_tokens": 3
+    },
+    "src/engine/execute.rs": {
+     "literal_compares": 21
+    },
+    "src/engine/input.rs": {
+     "literal_compares": 21,
+     "value_tokens": 3
+    },
+    "src/engine/logging.rs": {
+     "literal_compares": 3,
+     "value_tokens": 36
+    },
+    "src/engine/manual.rs": {
+     "literal_compares": 7
+    },
+    "src/engine/mention.rs": {
+     "literal_compares": 2
+    },
+    "src/engine/mod.rs": {
+     "value_tokens": 6
+    },
+    "src/engine/neighbours.rs": {
+     "literal_compares": 7,
+     "value_tokens": 7
+    },
+    "src/engine/pause.rs": {
+     "literal_compares": 2
+    },
+    "src/engine/selection.rs": {
+     "value_tokens": 28
+    },
+    "src/engine/shared.rs": {
+     "literal_compares": 1,
+     "value_tokens": 15
+    },
+    "src/engine/state.rs": {
+     "literal_compares": 5,
+     "value_tokens": 3
+    },
+    "src/engine/types.rs": {
+     "literal_compares": 2
+    },
+    "src/engine/word_parts.rs": {
+     "literal_compares": 2
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    }
+   },
+   "literal_compares": 96,
+   "string_key_index": 1,
+   "value_tokens": 117
+  },
+  "ks-hunspell": {
+   "expect_roots": 0,
+   "files": {},
+   "literal_compares": 0,
+   "string_key_index": 0,
+   "value_tokens": 0
+  },
+  "ks-lang": {
+   "expect_roots": 4,
+   "files": {
+    "src/boundary_model.rs": {
+     "value_tokens": 6
+    },
+    "src/boundary_policy.rs": {
+     "string_key_index": 7,
+     "value_tokens": 2
+    },
+    "src/early_switch.rs": {
+     "literal_compares": 1,
+     "value_tokens": 7
+    },
+    "src/identifier_lexicon.rs": {
+     "value_tokens": 10
+    },
+    "src/intent_model.rs": {
+     "literal_compares": 1,
+     "string_key_index": 19,
+     "value_tokens": 79
+    },
+    "src/language_model.rs": {
+     "literal_compares": 2
+    },
+    "src/lexicon_supplement.rs": {
+     "value_tokens": 8
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/load_error.rs": {
+     "value_tokens": 11
+    },
+    "src/ortho_model.rs": {
+     "literal_compares": 5,
+     "string_key_index": 2,
+     "value_tokens": 59
+    },
+    "src/resources.rs": {
+     "literal_compares": 1
+    },
+    "tests/edges.rs": {
+     "expect_roots": 1,
+     "string_key_index": 14,
+     "value_tokens": 9
+    },
+    "tests/golden_decide.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 39,
+     "value_tokens": 41
+    },
+    "tests/golden_lang.rs": {
+     "expect_roots": 1,
+     "literal_compares": 4,
+     "string_key_index": 83,
+     "value_tokens": 47
+    }
+   },
+   "literal_compares": 15,
+   "string_key_index": 164,
+   "value_tokens": 279
+  },
+  "ks-linux": {
+   "expect_roots": 6,
+   "files": {
+    "src/gtk_app.rs": {
+     "value_tokens": 11
+    },
+    "src/gtk_model.rs": {
+     "literal_compares": 2
+    },
+    "src/gtk_window.rs": {
+     "literal_compares": 10,
+     "value_tokens": 16
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/linux_app.rs": {
+     "literal_compares": 3,
+     "value_tokens": 22
+    },
+    "src/tray.rs": {
+     "literal_compares": 1,
+     "value_tokens": 3
+    },
+    "src/wayland_desktop.rs": {
+     "literal_compares": 2,
+     "value_tokens": 29
+    },
+    "src/wayland_native.rs": {
+     "literal_compares": 1,
+     "value_tokens": 8
+    },
+    "src/x11_backend.rs": {
+     "literal_compares": 3
+    },
+    "tests/e2e_gtk.rs": {
+     "expect_roots": 1,
+     "literal_compares": 4,
+     "value_tokens": 54
+    },
+    "tests/e2e_package.rs": {
+     "expect_roots": 1,
+     "value_tokens": 8
+    },
+    "tests/e2e_tray.rs": {
+     "expect_roots": 1,
+     "value_tokens": 3
+    },
+    "tests/e2e_wayland.rs": {
+     "expect_roots": 1,
+     "literal_compares": 8,
+     "string_key_index": 19,
+     "value_tokens": 41
+    },
+    "tests/e2e_x11.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "value_tokens": 10
+    }
+   },
+   "literal_compares": 36,
+   "string_key_index": 19,
+   "value_tokens": 205
+  },
+  "ks-mac": {
+   "expect_roots": 2,
+   "files": {
+    "src/desktop_app.rs": {
+     "value_tokens": 7
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/macos_app.rs": {
+     "value_tokens": 2
+    },
+    "src/settings_window.rs": {
+     "literal_compares": 1,
+     "value_tokens": 12
+    },
+    "tests/e2e_mac.rs": {
+     "expect_roots": 1,
+     "literal_compares": 7,
+     "value_tokens": 6
+    }
+   },
+   "literal_compares": 8,
+   "string_key_index": 0,
+   "value_tokens": 27
+  },
+  "ks-replay": {
+   "expect_roots": 5,
+   "files": {
+    "src/bin/field-gate.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "string_key_index": 13,
+     "value_tokens": 15
+    },
+    "src/bin/ks-trace.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "string_key_index": 9,
+     "value_tokens": 12
+    },
+    "src/bin/trace/backend.rs": {
+     "literal_compares": 1,
+     "string_key_index": 61,
+     "value_tokens": 69
+    },
+    "src/bin/trace/compare.rs": {
+     "value_tokens": 19
+    },
+    "src/bin/trace/entries.rs": {
+     "string_key_index": 21,
+     "value_tokens": 47
+    },
+    "src/bin/trace/run.rs": {
+     "literal_compares": 2,
+     "string_key_index": 66,
+     "value_tokens": 69
+    },
+    "src/harness.rs": {
+     "value_tokens": 3
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/main.rs": {
+     "expect_roots": 1,
+     "literal_compares": 12,
+     "string_key_index": 35,
+     "value_tokens": 61
+    },
+    "tests/battery.rs": {
+     "string_key_index": 3,
+     "value_tokens": 6
+    },
+    "tests/commands.rs": {
+     "string_key_index": 10,
+     "value_tokens": 17
+    },
+    "tests/engine_shell.rs": {
+     "value_tokens": 14
+    },
+    "tests/field_gate.rs": {
+     "expect_roots": 1,
+     "string_key_index": 5,
+     "value_tokens": 29
+    },
+    "tests/guards.rs": {
+     "value_tokens": 13
+    },
+    "tests/harness_editor.rs": {
+     "literal_compares": 1
+    },
+    "tests/layout_tap.rs": {
+     "literal_compares": 1,
+     "value_tokens": 18
+    },
+    "tests/mac_hotkeys.rs": {
+     "literal_compares": 1,
+     "string_key_index": 2,
+     "value_tokens": 1
+    },
+    "tests/openings.rs": {
+     "string_key_index": 6,
+     "value_tokens": 86
+    },
+    "tests/rare.rs": {
+     "literal_compares": 1,
+     "string_key_index": 4,
+     "value_tokens": 50
+    },
+    "tests/sweep.rs": {
+     "value_tokens": 42
+    },
+    "tests/trace_differences.rs": {
+     "string_key_index": 36,
+     "value_tokens": 70
+    },
+    "tests/walk.rs": {
+     "literal_compares": 1,
+     "value_tokens": 8
+    }
+   },
+   "literal_compares": 24,
+   "string_key_index": 271,
+   "value_tokens": 649
+  },
+  "ks-text": {
+   "expect_roots": 2,
+   "files": {
+    "src/json.rs": {
+     "value_tokens": 13
+    },
+    "src/layouts.rs": {
+     "literal_compares": 4
+    },
+    "src/pyjson.rs": {
+     "value_tokens": 11
+    },
+    "tests/edges.rs": {
+     "expect_roots": 1,
+     "value_tokens": 4
+    },
+    "tests/golden_text.rs": {
+     "expect_roots": 1,
+     "string_key_index": 52,
+     "value_tokens": 17
+    }
+   },
+   "literal_compares": 4,
+   "string_key_index": 52,
+   "value_tokens": 21
+  },
+  "ks-train": {
+   "expect_roots": 38,
+   "files": {
+    "src/artifact.rs": {
+     "literal_compares": 1,
+     "value_tokens": 5
+    },
+    "src/base_corpus.rs": {
+     "literal_compares": 16,
+     "string_key_index": 80,
+     "value_tokens": 122
+    },
+    "src/bin/ks-release.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "string_key_index": 8,
+     "value_tokens": 4
+    },
+    "src/boundary.rs": {
+     "literal_compares": 1,
+     "string_key_index": 54,
+     "value_tokens": 45
+    },
+    "src/captured.rs": {
+     "literal_compares": 1,
+     "string_key_index": 9,
+     "value_tokens": 37
+    },
+    "src/compare.rs": {
+     "value_tokens": 14
+    },
+    "src/corpus.rs": {
+     "string_key_index": 8,
+     "value_tokens": 8
+    },
+    "src/coverage_gate.rs": {
+     "string_key_index": 5,
+     "value_tokens": 7
+    },
+    "src/curricula.rs": {
+     "literal_compares": 2,
+     "value_tokens": 48
+    },
+    "src/deb_check.rs": {
+     "literal_compares": 4,
+     "string_key_index": 8,
+     "value_tokens": 6
+    },
+    "src/detector.rs": {
+     "literal_compares": 1,
+     "string_key_index": 2,
+     "value_tokens": 14
+    },
+    "src/engine_reports.rs": {
+     "literal_compares": 6,
+     "string_key_index": 30,
+     "value_tokens": 57
+    },
+    "src/evaluate.rs": {
+     "literal_compares": 13,
+     "string_key_index": 24,
+     "value_tokens": 65
+    },
+    "src/fit.rs": {
+     "literal_compares": 6,
+     "string_key_index": 46,
+     "value_tokens": 93
+    },
+    "src/freeze.rs": {
+     "literal_compares": 11,
+     "string_key_index": 132,
+     "value_tokens": 112
+    },
+    "src/gates.rs": {
+     "string_key_index": 33,
+     "value_tokens": 24
+    },
+    "src/heads.rs": {
+     "string_key_index": 1,
+     "value_tokens": 4
+    },
+    "src/historical.rs": {
+     "literal_compares": 8,
+     "value_tokens": 8
+    },
+    "src/intent/dataset.rs": {
+     "literal_compares": 4,
+     "string_key_index": 31,
+     "value_tokens": 21
+    },
+    "src/intent/evaluate.rs": {
+     "literal_compares": 8,
+     "string_key_index": 93,
+     "value_tokens": 161
+    },
+    "src/intent/external.rs": {
+     "string_key_index": 16,
+     "value_tokens": 25
+    },
+    "src/intent/fit.rs": {
+     "literal_compares": 1,
+     "string_key_index": 6,
+     "value_tokens": 32
+    },
+    "src/intent/mod.rs": {
+     "literal_compares": 14,
+     "string_key_index": 19,
+     "value_tokens": 3
+    },
+    "src/intent/pipeline.rs": {
+     "literal_compares": 2,
+     "string_key_index": 42,
+     "value_tokens": 91
+    },
+    "src/intent/probe.rs": {
+     "literal_compares": 1,
+     "string_key_index": 1,
+     "value_tokens": 9
+    },
+    "src/intent/seal.rs": {
+     "string_key_index": 23,
+     "value_tokens": 61
+    },
+    "src/intent/train.rs": {
+     "string_key_index": 39,
+     "value_tokens": 65
+    },
+    "src/lib.rs": {
+     "expect_roots": 1,
+     "value_tokens": 2
+    },
+    "src/licenses.rs": {
+     "string_key_index": 18,
+     "value_tokens": 5
+    },
+    "src/lookahead.rs": {
+     "literal_compares": 9,
+     "value_tokens": 13
+    },
+    "src/main.rs": {
+     "expect_roots": 1,
+     "literal_compares": 18,
+     "string_key_index": 24,
+     "value_tokens": 8
+    },
+    "src/messages.rs": {
+     "literal_compares": 4,
+     "string_key_index": 19,
+     "value_tokens": 76
+    },
+    "src/mixed.rs": {
+     "literal_compares": 17,
+     "string_key_index": 73,
+     "value_tokens": 116
+    },
+    "src/ortho.rs": {
+     "literal_compares": 5,
+     "string_key_index": 44,
+     "value_tokens": 90
+    },
+    "src/ortho_inputs.rs": {
+     "literal_compares": 13,
+     "string_key_index": 52,
+     "value_tokens": 54
+    },
+    "src/prefix.rs": {
+     "literal_compares": 5,
+     "string_key_index": 13,
+     "value_tokens": 49
+    },
+    "src/prefix_corpus.rs": {
+     "string_key_index": 6,
+     "value_tokens": 17
+    },
+    "src/promote.rs": {
+     "literal_compares": 1,
+     "string_key_index": 13,
+     "value_tokens": 5
+    },
+    "src/receipt.rs": {
+     "string_key_index": 182,
+     "value_tokens": 55
+    },
+    "src/replay.rs": {
+     "value_tokens": 32
+    },
+    "src/retired/boundary_v1.rs": {
+     "literal_compares": 2,
+     "string_key_index": 2,
+     "value_tokens": 29
+    },
+    "src/retired/context_frames.rs": {
+     "literal_compares": 7,
+     "value_tokens": 3
+    },
+    "src/retired/context_v2.rs": {
+     "literal_compares": 4,
+     "string_key_index": 16,
+     "value_tokens": 75
+    },
+    "src/retired/feature_two.rs": {
+     "literal_compares": 1,
+     "string_key_index": 32,
+     "value_tokens": 26
+    },
+    "src/retired/mod.rs": {
+     "string_key_index": 8,
+     "value_tokens": 12
+    },
+    "src/retired/ortho_v2.rs": {
+     "literal_compares": 14,
+     "string_key_index": 34,
+     "value_tokens": 101
+    },
+    "src/retired/prefix_v1.rs": {
+     "string_key_index": 22,
+     "value_tokens": 46
+    },
+    "src/retired/sources.rs": {
+     "literal_compares": 1,
+     "value_tokens": 11
+    },
+    "src/rows.rs": {
+     "literal_compares": 11
+    },
+    "src/selection.rs": {
+     "string_key_index": 8,
+     "value_tokens": 14
+    },
+    "src/small_tools.rs": {
+     "literal_compares": 3,
+     "string_key_index": 31,
+     "value_tokens": 35
+    },
+    "src/spans.rs": {
+     "value_tokens": 3
+    },
+    "src/stages.rs": {
+     "value_tokens": 56
+    },
+    "src/tools.rs": {
+     "literal_compares": 1,
+     "string_key_index": 8,
+     "value_tokens": 10
+    },
+    "src/typo_evaluation.rs": {
+     "literal_compares": 6,
+     "string_key_index": 20,
+     "value_tokens": 46
+    },
+    "src/typo_frequency.rs": {
+     "literal_compares": 1,
+     "string_key_index": 10,
+     "value_tokens": 16
+    },
+    "tests/captured.rs": {
+     "expect_roots": 1,
+     "literal_compares": 2,
+     "string_key_index": 17,
+     "value_tokens": 116
+    },
+    "tests/core.rs": {
+     "expect_roots": 1,
+     "string_key_index": 21,
+     "value_tokens": 10
+    },
+    "tests/corpora.rs": {
+     "expect_roots": 1,
+     "string_key_index": 247,
+     "value_tokens": 219
+    },
+    "tests/curricula.rs": {
+     "expect_roots": 1,
+     "literal_compares": 4,
+     "string_key_index": 14,
+     "value_tokens": 120
+    },
+    "tests/cycle.rs": {
+     "expect_roots": 1,
+     "string_key_index": 263,
+     "value_tokens": 196
+    },
+    "tests/eval_boundary.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 37,
+     "value_tokens": 33
+    },
+    "tests/eval_detector.rs": {
+     "expect_roots": 1
+    },
+    "tests/eval_engine_reports.rs": {
+     "expect_roots": 1,
+     "string_key_index": 20,
+     "value_tokens": 19
+    },
+    "tests/eval_evaluate.rs": {
+     "expect_roots": 1,
+     "string_key_index": 18,
+     "value_tokens": 16
+    },
+    "tests/eval_gates.rs": {
+     "expect_roots": 1,
+     "string_key_index": 40,
+     "value_tokens": 35
+    },
+    "tests/eval_replay.rs": {
+     "expect_roots": 1,
+     "string_key_index": 4,
+     "value_tokens": 1
+    },
+    "tests/eval_selection.rs": {
+     "expect_roots": 1,
+     "string_key_index": 8,
+     "value_tokens": 9
+    },
+    "tests/eval_support/mod.rs": {
+     "value_tokens": 5
+    },
+    "tests/eval_typo.rs": {
+     "expect_roots": 1,
+     "string_key_index": 16,
+     "value_tokens": 31
+    },
+    "tests/fit_parts.rs": {
+     "expect_roots": 1,
+     "literal_compares": 6,
+     "value_tokens": 4
+    },
+    "tests/fit_prefix.rs": {
+     "expect_roots": 1,
+     "literal_compares": 5,
+     "string_key_index": 19,
+     "value_tokens": 63
+    },
+    "tests/fit_small.rs": {
+     "expect_roots": 1,
+     "string_key_index": 58,
+     "value_tokens": 36
+    },
+    "tests/fit_whole.rs": {
+     "expect_roots": 1,
+     "string_key_index": 52,
+     "value_tokens": 28
+    },
+    "tests/intent.rs": {
+     "expect_roots": 1,
+     "literal_compares": 4,
+     "string_key_index": 198,
+     "value_tokens": 148
+    },
+    "tests/intent_external.rs": {
+     "expect_roots": 1,
+     "string_key_index": 5,
+     "value_tokens": 2
+    },
+    "tests/messages.rs": {
+     "expect_roots": 1,
+     "string_key_index": 16,
+     "value_tokens": 75
+    },
+    "tests/models_kept.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 6,
+     "value_tokens": 47
+    },
+    "tests/ortho.rs": {
+     "expect_roots": 1,
+     "string_key_index": 50,
+     "value_tokens": 52
+    },
+    "tests/ortho_inputs.rs": {
+     "expect_roots": 1,
+     "string_key_index": 6,
+     "value_tokens": 24
+    },
+    "tests/quality_ratchet.rs": {
+     "expect_roots": 1,
+     "string_key_index": 85,
+     "value_tokens": 10
+    },
+    "tests/receipt.rs": {
+     "expect_roots": 1,
+     "string_key_index": 252,
+     "value_tokens": 100
+    },
+    "tests/release_tools.rs": {
+     "expect_roots": 1,
+     "literal_compares": 6,
+     "string_key_index": 5,
+     "value_tokens": 22
+    },
+    "tests/rows.rs": {
+     "expect_roots": 1,
+     "string_key_index": 9,
+     "value_tokens": 13
+    },
+    "tests/strict_typing.rs": {
+     "literal_compares": 4
+    },
+    "tests/support/mod.rs": {
+     "literal_compares": 1,
+     "string_key_index": 14,
+     "value_tokens": 33
+    },
+    "tests/tools_small.rs": {
+     "expect_roots": 1,
+     "string_key_index": 14,
+     "value_tokens": 26
+    },
+    "tests/typing.rs": {
+     "expect_roots": 1,
+     "string_key_index": 42,
+     "value_tokens": 63
+    },
+    "tests/typing_capture.rs": {
+     "expect_roots": 1,
+     "string_key_index": 4,
+     "value_tokens": 7
+    },
+    "tests/typing_chat.rs": {
+     "expect_roots": 1,
+     "string_key_index": 26,
+     "value_tokens": 50
+    },
+    "tests/typing_corpus.rs": {
+     "expect_roots": 1,
+     "string_key_index": 16,
+     "value_tokens": 15
+    },
+    "tests/typing_failed.rs": {
+     "expect_roots": 1,
+     "string_key_index": 11,
+     "value_tokens": 4
+    },
+    "tests/typing_tools.rs": {
+     "expect_roots": 1,
+     "value_tokens": 6
+    },
+    "tests/typo.rs": {
+     "expect_roots": 1,
+     "string_key_index": 10,
+     "value_tokens": 32
+    }
+   },
+   "literal_compares": 259,
+   "string_key_index": 2948,
+   "value_tokens": 3816
+  },
+  "ks-ui": {
+   "expect_roots": 1,
+   "files": {
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/windows_ui_model.rs": {
+     "value_tokens": 33
+    }
+   },
+   "literal_compares": 0,
+   "string_key_index": 0,
+   "value_tokens": 33
+  },
+  "ks-updates": {
+   "expect_roots": 2,
+   "files": {
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/updates.rs": {
+     "literal_compares": 6,
+     "value_tokens": 24
+    },
+    "tests/updates.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 34,
+     "value_tokens": 29
+    }
+   },
+   "literal_compares": 7,
+   "string_key_index": 34,
+   "value_tokens": 53
+  },
+  "ks-win": {
+   "expect_roots": 2,
+   "files": {
+    "src/desktop_app.rs": {
+     "value_tokens": 13
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/settings_window.rs": {
+     "literal_compares": 3,
+     "value_tokens": 27
+    },
+    "src/tray_icon.rs": {
+     "literal_compares": 1
+    },
+    "src/windows_app.rs": {
+     "literal_compares": 2,
+     "value_tokens": 29
+    },
+    "tests/e2e_windows.rs": {
+     "expect_roots": 1,
+     "value_tokens": 13
+    }
+   },
+   "literal_compares": 6,
+   "string_key_index": 0,
+   "value_tokens": 82
+  },
+  "logcourier": {
+   "expect_roots": 2,
+   "files": {
+    "src/batching.rs": {
+     "string_key_index": 10,
+     "value_tokens": 8
+    },
+    "src/catalog.rs": {
+     "literal_compares": 1,
+     "string_key_index": 76,
+     "value_tokens": 35
+    },
+    "src/cli.rs": {
+     "literal_compares": 7,
+     "string_key_index": 12,
+     "value_tokens": 8
+    },
+    "src/collector.rs": {
+     "string_key_index": 2,
+     "value_tokens": 5
+    },
+    "src/config.rs": {
+     "value_tokens": 10
+    },
+    "src/gui_gtk.rs": {
+     "string_key_index": 6,
+     "value_tokens": 6
+    },
+    "src/gui_model.rs": {
+     "string_key_index": 9,
+     "value_tokens": 3
+    },
+    "src/gui_win.rs": {
+     "string_key_index": 7,
+     "value_tokens": 7
+    },
+    "src/lib.rs": {
+     "expect_roots": 1
+    },
+    "src/rate_limit.rs": {
+     "literal_compares": 1,
+     "value_tokens": 7
+    },
+    "src/reset.rs": {
+     "string_key_index": 21,
+     "value_tokens": 16
+    },
+    "src/service.rs": {
+     "value_tokens": 5
+    },
+    "src/store.rs": {
+     "string_key_index": 1,
+     "value_tokens": 18
+    },
+    "src/telegram.rs": {
+     "literal_compares": 1,
+     "string_key_index": 16,
+     "value_tokens": 22
+    },
+    "src/versions.rs": {
+     "string_key_index": 13,
+     "value_tokens": 19
+    },
+    "tests/delivery.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 82,
+     "value_tokens": 118
+    }
+   },
+   "literal_compares": 11,
+   "string_key_index": 255,
+   "value_tokens": 287
+  }
+ },
+ "exceptions": {
+  "crates/ks-config/src/constants.rs": "the shipped settings are the literal JSON of the file they seed",
+  "crates/ks-config/src/log_privacy.rs": "words that look like passwords are starred in every text of every record, whatever the record",
+  "crates/ks-config/src/settings_file.rs": "the settings file keeps unknown keys and values of any type at every nesting level, read and written as the tree they are; the dotted-path calls of the crates not yet typed stay here until they move to Key<T>",
+  "crates/ks-text/src/json.rs": "json.dumps over the tree serde_json parses: the one writer, the one reader",
+  "crates/ks-text/src/pyjson.rs": "json.dumps over the tree serde_json parses: the one writer, the one reader"
+ }
+}

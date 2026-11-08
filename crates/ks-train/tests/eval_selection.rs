@@ -1,5 +1,6 @@
 //! The choices made on development and calibration, over a few rows written out by hand: the features kept, the epoch
 //! that qualifies and the serving threshold, and what each of them refuses.
+#![expect(clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_train::selection::{EpochSelection, Qualifying, ThresholdOptions, assess_epoch, choose_threshold, metrics, select_features, settled_epoch};
 use serde_json::json;
 use std::collections::HashMap;

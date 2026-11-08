@@ -1,4 +1,5 @@
 //! The frozen baseline model of the sealed tests answers as the trainer that fitted it wrote its features.
+#![expect(clippy::disallowed_types, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 use ks_cast::To as _;
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::context_action_features::extract_baseline_features;

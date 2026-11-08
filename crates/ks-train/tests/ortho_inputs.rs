@@ -1,4 +1,5 @@
 //! The inputs of the orthotactic model from their sources: the web list, the public-domain prose of a dump of pages, and independent test sets.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use flate2::Compression;

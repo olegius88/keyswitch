@@ -1,5 +1,6 @@
 //! `LogCourier`: a personal collector of log files into a closed Telegram group.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 6 of the strict-json plan types them and removes this")]
 pub mod batching;
 pub mod catalog;
 pub mod cli;

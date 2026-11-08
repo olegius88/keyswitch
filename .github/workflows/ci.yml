@@ -48,7 +48,7 @@ jobs:
       - name: The trainer, and the models it can rebuild from the files in the repository
         run: |
           # The whole runs on small corpora are in the coverage job, which has the time for them.
-          cargo test --release -p ks-train --lib --bins --test core --test line_endings --test quality_ratchet --test receipt
+          cargo test --release -p ks-train --lib --bins --test core --test line_endings --test quality_ratchet --test receipt --test strict_typing
           cargo run --release -p ks-train --bin ks-train -- boundary --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- archive --tree "$PWD"

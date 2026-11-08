@@ -8,7 +8,10 @@ license.workspace = true
 ks-cast.workspace = true
 ks-text.workspace = true
 ks-backend.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+# Ordered tables in the typed records of the stores: a file keeps the order of its keys.
+indexmap = { workspace = true, features = ["serde"] }
 # The salted hashes of personal_words and the defaults digest of settings_diagnostics.
 sha2.workspace = true
 

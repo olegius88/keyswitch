@@ -1,4 +1,5 @@
 //! Questions captured from a typing run as a curriculum: the manifest and its pins, each column, each kind of row a file holds.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextAction};

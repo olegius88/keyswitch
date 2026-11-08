@@ -11,16 +11,20 @@ use crate::constants::{
 };
 use crate::history::data_dir;
 use crate::pycompat::create_parent;
-use crate::pycompat::{decode_text, json_loads, with_name_suffix, with_suffix, write_text};
+use crate::pycompat::{decode_text, with_name_suffix, with_suffix, write_text};
+use indexmap::IndexMap;
+use ks_text::json::{dumps, loads_lenient, ObjectOf, Tolerant};
 use ks_text::pystr::{casefold, isdigit, isspace, strip};
-use ks_text::{json_dumps, max_by_key_first, py_int, Indent, JsonOptions};
-use serde_json::{Map, Value};
+use ks_text::{max_by_key_first, py_int, Indent, JsonOptions};
+use serde::{Deserialize, Serialize};
+use serde::de::IgnoredAny;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RuleMatch {
     Exact,
     Prefix,
@@ -36,13 +40,10 @@ impl RuleMatch {
             RuleMatch::Contains => "contains",
         }
     }
-
-    fn parse(text: &str) -> Option<RuleMatch> {
-        RULE_MATCHES.iter().copied().find(|item| item.as_str() == text)
-    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RuleAction {
     Convert,
     Keep,
@@ -55,10 +56,6 @@ impl RuleAction {
             RuleAction::Convert => "convert",
             RuleAction::Keep => "keep",
         }
-    }
-
-    fn parse(text: &str) -> Option<RuleAction> {
-        RULE_ACTIONS.iter().copied().find(|item| item.as_str() == text)
     }
 }
 
@@ -117,13 +114,18 @@ impl From<io::Error> for LearningError {
 /// `pattern` is the text as typed in `source_group`'s layout: the same keys typed in the other layout are a different
 /// word and need their own rule. `target_group` is the layout a `convert` rule switches to; a `keep` rule names it too,
 /// as the layout the word is not taken to.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// This is also the record of the file: the fields in the file's order. A broken rule of the file is no rule:
+/// the record is read tolerantly, one rule at a time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LearnedRule {
     pub pattern: String,
     pub source_group: i64,
     pub target_group: i64,
     pub action: RuleAction,
+    #[serde(rename = "match")]
     pub r#match: RuleMatch,
+    #[serde(default)]
     pub case_sensitive: bool,
 }
 
@@ -215,33 +217,49 @@ pub fn validate_rule(rule: &LearnedRule) -> Result<(), InvalidRule> {
     Ok(())
 }
 
-/// A rule from a JSON value of the file, or `None` for one that is not a rule.
-fn rule_from_json(value: &Value) -> Option<LearnedRule> {
-    let object = value.as_object()?;
-    let pattern = object.get("pattern")?.as_str()?;
-    let source = crate::pycompat::as_py_int(object.get("source_group")?)?;
-    let target = crate::pycompat::as_py_int(object.get("target_group")?)?;
-    let action = RuleAction::parse(object.get("action")?.as_str()?)?;
-    let r#match = RuleMatch::parse(object.get("match")?.as_str()?)?;
-    let case_sensitive = match object.get("case_sensitive") {
-        None => false,
-        Some(Value::Bool(flag)) => *flag,
-        Some(_) => return None,
-    };
-    let rule = LearnedRule { pattern: pattern.to_string(), source_group: source, target_group: target, action, r#match, case_sensitive };
-    validate_rule(&rule).ok()?;
-    Some(rule)
+/// `rules` of a learning file: a list of rules since schema 3, a table of counters before it.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RulesField {
+    List(Vec<Tolerant<ObjectOf<LearnedRule>>>),
+    Table(IndexMap<String, Tolerant<ObjectOf<LegacyCounter>>>),
+    Other(IgnoredAny),
 }
 
-fn rule_to_json(rule: &LearnedRule) -> Value {
-    let mut map = Map::new();
-    map.insert("pattern".into(), Value::String(rule.pattern.clone()));
-    map.insert("source_group".into(), Value::from(rule.source_group));
-    map.insert("target_group".into(), Value::from(rule.target_group));
-    map.insert("action".into(), Value::String(rule.action.as_str().to_string()));
-    map.insert("match".into(), Value::String(rule.r#match.as_str().to_string()));
-    map.insert("case_sensitive".into(), Value::Bool(rule.case_sensitive));
-    Value::Object(map)
+/// A counter of a legacy file: a word counted towards a rule, and the layout it would have gone to.
+#[derive(Deserialize)]
+struct LegacyCounter {
+    target_group: i64,
+    #[serde(default)]
+    confirmations: i64,
+}
+
+/// `rejections` of a legacy file: the layouts a word was forbidden to go to.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RejectionsField {
+    Table(IndexMap<String, Tolerant<Vec<Tolerant<i64>>>>),
+    Other(IgnoredAny),
+}
+
+/// A learning file as `load` looks at it: every part may be anything else in a file edited by hand, and is then no part.
+#[derive(Deserialize)]
+pub struct LearningFile {
+    rules: Option<RulesField>,
+    rejections: Option<RejectionsField>,
+}
+
+impl LearningFile {
+    fn is_legacy(&self) -> bool {
+        matches!(self.rules, Some(RulesField::Table(_))) || matches!(self.rejections, Some(RejectionsField::Table(_)))
+    }
+}
+
+/// The file as it is written: its schema, then the rules in their order.
+#[derive(Serialize)]
+struct SavedRules<'a> {
+    schema_version: i64,
+    rules: &'a [LearnedRule],
 }
 
 /// `(group, word)` of a legacy key `"<digits>:<word>"`.
@@ -263,35 +281,26 @@ fn legacy_identity(key: &str) -> Result<Option<(i64, String)>, LearningError> {
 /// threshold acted as a rule and stays one, as a whole-word "convert" rule; a forbidden direction becomes a whole-word
 /// "keep" rule. A counter still short of the threshold never acted and is not carried over: the old versions wrote one
 /// on every manual conversion, without asking.
-pub fn migrate_legacy(payload: &Map<String, Value>, confirmations_required: i64) -> Result<Vec<LearnedRule>, LearningError> {
+pub fn migrate_legacy(payload: &LearningFile, confirmations_required: i64) -> Result<Vec<LearnedRule>, LearningError> {
     let mut rules: Vec<LearnedRule> = Vec::new();
-    if let Some(Value::Object(stored)) = payload.get("rules") {
+    if let Some(RulesField::Table(stored)) = &payload.rules {
         for (key, value) in stored {
             let Some(identity) = legacy_identity(key)? else { continue };
-            let Some(value) = value.as_object() else { continue };
-            let target = value.get("target_group").and_then(crate::pycompat::as_py_int);
-            // value.get("confirmations", 0): absent is 0, anything but an int is skipped.
-            let confirmations = match value.get("confirmations") {
-                None => Some(0),
-                Some(other) => crate::pycompat::as_py_int(other),
-            };
-            let (Some(target), Some(confirmations)) = (target, confirmations) else { continue };
-            if confirmations < confirmations_required.max(1) {
+            let Some(ObjectOf(counter)) = value.as_read() else { continue };
+            if counter.confirmations < confirmations_required.max(1) {
                 continue;
             }
-            rules.push(LearnedRule::new(&identity.1, identity.0, target));
+            rules.push(LearnedRule::new(&identity.1, identity.0, counter.target_group));
         }
     }
-    if let Some(Value::Object(rejections)) = payload.get("rejections") {
+    if let Some(RejectionsField::Table(rejections)) = &payload.rejections {
         for (key, value) in rejections {
             let Some(identity) = legacy_identity(key)? else { continue };
-            let Some(targets) = value.as_array() else { continue };
-            for target in targets {
-                if let Some(target) = crate::pycompat::as_py_int(target) {
-                    let mut rule = LearnedRule::new(&identity.1, identity.0, target);
-                    rule.action = RuleAction::Keep;
-                    rules.push(rule);
-                }
+            let Some(targets) = value.as_read() else { continue };
+            for target in targets.iter().filter_map(Tolerant::as_read) {
+                let mut rule = LearnedRule::new(&identity.1, identity.0, *target);
+                rule.action = RuleAction::Keep;
+                rules.push(rule);
             }
         }
     }
@@ -365,33 +374,29 @@ impl LearningStore {
             return Ok(());
         }
         let mut raw: Vec<u8> = Vec::new();
-        let payload: Option<Value> = match std::fs::read(&self.path) {
+        let payload: Option<LearningFile> = match std::fs::read(&self.path) {
             Ok(bytes) => {
                 raw = bytes;
                 // utf-8-sig: Notepad saves UTF-8 with a byte order mark, which json rejects.
-                decode_text(&raw, true).and_then(|text| json_loads(&text))
+                decode_text(&raw, true).and_then(|text| loads_lenient::<ObjectOf<LearningFile>>(text.as_bytes()).ok()).map(|file| file.0)
             }
             Err(_) => None,
         };
-        let payload_object = payload.as_ref().and_then(Value::as_object);
-        let stored = payload_object.and_then(|payload| payload.get("rules"));
-        if let Some(Value::Array(stored)) = stored {
-            for value in stored {
-                if let Some(rule) = rule_from_json(value) {
+        if let Some(LearningFile { rules: Some(RulesField::List(stored)), .. }) = payload {
+            for rule in stored.into_iter().filter_map(Tolerant::into_read) {
+                let ObjectOf(rule) = rule;
+                if validate_rule(&rule).is_ok() {
                     Self::insert(&mut state.rules, rule);
                 }
             }
             return Ok(());
         }
-        let legacy = payload_object.filter(|payload| {
-            matches!(stored, Some(Value::Object(_))) || matches!(payload.get("rejections"), Some(Value::Object(_)))
-        });
-        let Some(payload) = legacy else {
+        let Some(payload) = payload.filter(LearningFile::is_legacy) else {
             // The next rule would save over the file: keep the user's rules aside.
             state.unreadable = set_aside_unreadable(&self.path);
             return Ok(());
         };
-        for rule in migrate_legacy(payload, self.legacy_confirmations)? {
+        for rule in migrate_legacy(&payload, self.legacy_confirmations)? {
             Self::insert(&mut state.rules, rule);
         }
         state.migrated = state.rules.len();
@@ -408,14 +413,11 @@ impl LearningStore {
     }
 
     fn save_locked(&self, rules: &[LearnedRule]) -> io::Result<()> {
-        let mut data = Map::new();
-        data.insert("schema_version".into(), Value::from(LEARNING_STORE_SCHEMA_VERSION));
-        data.insert("rules".into(), Value::Array(rules.iter().map(rule_to_json).collect()));
         create_parent(&self.path)?;
         let temporary = with_suffix(&self.path, ".json.tmp");
         let options =
             JsonOptions { ensure_ascii: false, indent: Some(Indent::Spaces(USER_DATA_JSON_INDENT)), ..JsonOptions::default() };
-        let mut text = json_dumps(&Value::Object(data), &options);
+        let mut text = dumps(&SavedRules { schema_version: LEARNING_STORE_SCHEMA_VERSION, rules }, &options);
         text.push('\n');
         write_text(&temporary, &text)?;
         std::fs::rename(&temporary, &self.path)
@@ -521,7 +523,6 @@ impl LearningStore {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
     fn errors_say_what_happened() {
@@ -562,6 +563,11 @@ mod tests {
 
     fn rule(pattern: &str, matching: RuleMatch, action: RuleAction) -> LearnedRule {
         LearnedRule { pattern: pattern.into(), source_group: 0, target_group: 1, action, r#match: matching, case_sensitive: false }
+    }
+
+    #[test]
+    fn the_names_of_the_actions_are_those_of_the_file() {
+        assert_eq!((RuleAction::Convert.as_str(), RuleAction::Keep.as_str()), ("convert", "keep"));
     }
 
     #[test]
@@ -633,19 +639,64 @@ mod tests {
     fn an_old_file_becomes_rules_and_is_kept_aside() {
         let dir = directory("legacy");
         let path = dir.join("learning.json");
-        let old = json!({
-            "schema_version": 2,
-            "rules": {"0:ghbdtn": {"target_group": 1, "confirmations": 3}, "0:cold": {"target_group": 1, "confirmations": 1}, "bad": {}, "1:ПРИВЕТ": {"target_group": 0}},
-            "rejections": {"0:ghbdtn": [1], "1:xx": [0, "z"]}
-        });
-        std::fs::write(&path, old.to_string()).unwrap();
+        let old = r#"{"schema_version":2,"rules":{"0:ghbdtn":{"target_group":1,"confirmations":3},"0:cold":{"target_group":1,"confirmations":1},"bad":{},"1:ПРИВЕТ":{"target_group":0}},"rejections":{"0:ghbdtn":[1],"1:xx":[0,"z"]}}"#;
+        std::fs::write(&path, old).unwrap();
         let store = LearningStore::new(Some(path.clone()), None).unwrap();
         // ghbdtn is forced and forbidden: the "keep" rule stands, in the place of the first.
         assert_eq!(store.migrated(), 2);
         let rules = store.rules();
         assert_eq!(rules.iter().map(|r| (r.pattern.as_str(), r.action)).collect::<Vec<_>>(), [("ghbdtn", RuleAction::Keep), ("xx", RuleAction::Keep)]);
-        assert_eq!(std::fs::read_to_string(dir.join("learning.json.v2-backup")).unwrap(), old.to_string());
+        assert_eq!(std::fs::read_to_string(dir.join("learning.json.v2-backup")).unwrap(), old);
         assert!(std::fs::read_to_string(&path).unwrap().contains("\"schema_version\": 3"));
+    }
+
+    #[test]
+    fn a_hand_edited_rule_is_read_as_far_as_it_can_be() {
+        let dir = directory("tolerant");
+        let path = dir.join("learning.json");
+        // A list in place of a record is no rule, however its values line up; a key written twice keeps its last value,
+        // as a dict does; a broken rule goes and the rest stay; a rule that cannot work is dropped.
+        std::fs::write(&path, r#"{"schema_version": 3, "rules": [
+            ["list", 0, 1, "keep", "prefix"],
+            {"pattern": "first", "pattern": "word", "source_group": 0, "target_group": 1, "action": "keep", "match": "prefix"},
+            {"pattern": "float", "source_group": 0.0, "target_group": 1, "action": "keep", "match": "prefix"},
+            {"pattern": "flag", "source_group": true, "target_group": 1, "action": "keep", "match": "prefix"},
+            {"pattern": "other", "source_group": 0, "target_group": 1, "action": "drop", "match": "prefix"},
+            {"pattern": "with space", "source_group": 0, "target_group": 1, "action": "keep", "match": "prefix"},
+            {"pattern": "same", "source_group": 0, "target_group": 0, "action": "keep", "match": "prefix"}
+        ]}"#).unwrap();
+        let store = LearningStore::new(Some(path), None).unwrap();
+        assert_eq!(store.rules(), vec![rule("word", RuleMatch::Prefix, RuleAction::Keep)]);
+    }
+
+    #[test]
+    fn what_is_neither_a_list_nor_a_table_of_rules_is_set_aside() {
+        for text in ["{}", r#"{"rules": 5}"#, r#"{"rules": null}"#, r#"{"rejections": []}"#, "7", r#"[["word"]]"#] {
+            let path = directory("neither").join("learning.json");
+            std::fs::write(&path, text).unwrap();
+            let store = LearningStore::new(Some(path.clone()), None).unwrap();
+            assert_eq!((store.count(), store.unreadable().is_some(), path.exists()), (0, true, false), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_table_of_rejections_alone_makes_an_old_file() {
+        let path = directory("rejections").join("learning.json");
+        std::fs::write(&path, r#"{"rejections": {"0:слово": [1, 1.0, true, "x"]}, "rules": null}"#).unwrap();
+        let store = LearningStore::new(Some(path), None).unwrap();
+        assert_eq!(store.migrated(), 1);
+        assert_eq!(store.rules()[0].action, RuleAction::Keep);
+    }
+
+    #[test]
+    fn the_rules_are_written_key_by_key_as_they_were() {
+        let path = directory("bytes").join("learning.json");
+        let store = LearningStore::new(Some(path.clone()), None).unwrap();
+        store.add_rule(LearnedRule { case_sensitive: true, ..rule("Слово", RuleMatch::Contains, RuleAction::Keep) }).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n"),
+            "{\n  \"schema_version\": 3,\n  \"rules\": [\n    {\n      \"pattern\": \"Слово\",\n      \"source_group\": 0,\n      \"target_group\": 1,\n      \"action\": \"keep\",\n      \"match\": \"contains\",\n      \"case_sensitive\": true\n    }\n  ]\n}\n"
+        );
     }
 
     #[test]

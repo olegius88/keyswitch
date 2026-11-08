@@ -1,6 +1,7 @@
 //! The receipt of the installed pair passes the checks, and a receipt whose numbers were changed, whose fields are gone or
 //! that names other files does not.
 #![expect(clippy::unwrap_used, reason = "a test or a probe stops on what it did not expect")]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use ks_train::corpus::read_json;

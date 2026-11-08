@@ -1,4 +1,5 @@
 //! The models kept in the repository, replayed and made again in a scratch tree of it: what the release runs, and what a new cycle of each does.
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
 use serde_json::{Value, json};

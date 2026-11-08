@@ -8,6 +8,7 @@
 //! `--speller` replays the candidate with the Hunspell dictionaries the installed program uses (`ks-replay --speller`).
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
+#![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; step 3 of the strict-json plan types them and removes this")]
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
