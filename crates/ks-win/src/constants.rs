@@ -167,6 +167,13 @@ pub const CONSOLE_WINDOW_CLASSES: [&str; 2] = ["ConsoleWindowClass", "CASCADIA_H
 /// they replace a selection: `привет мир` typed over one came out as `привет `, and pasted it was whole. A selection
 /// hotkey pastes its result there (`WindowsBackend::pasted_selection`).
 pub const SLOW_INPUT_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+/// The top-level window of Chrome, Edge and every Electron program. Chromium builds its accessibility tree the first time
+/// a program asks; until it is there, UI Automation answers for the window and not for the field in it, so the first
+/// selection hotkey in such a window found no field and the next one worked.
+pub const CHROMIUM_WINDOW_CLASS: &str = "Chrome_WidgetWin_1";
+/// How long a selection hotkey waits for that tree, and how often it asks.
+pub const SELECTION_ACCESSIBILITY_WAIT_SECONDS: f64 = 1.5;
+pub const SELECTION_ACCESSIBILITY_POLL_SECONDS: f64 = 0.1;
 /// The shell's taskbars, on the main monitor and on the others, and the flyouts of the hidden notification icons of
 /// Windows 10 and of Windows 11 22H2 and later (`IsSystemClass` in src/modules/GrabAndMove/GrabAndMove/main.cpp of
 /// microsoft/PowerToys). A click on the tray icon brings them to the front, and what the user types in is not there: a

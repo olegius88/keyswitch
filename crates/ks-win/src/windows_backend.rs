@@ -37,10 +37,10 @@ use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{
-    ALT_KEYS, CF_UNICODETEXT, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK, HOOK_SILENCE_MS,
+    ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK, HOOK_SILENCE_MS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
     LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
-    PRIMARY_LANGID_MASK, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+    PRIMARY_LANGID_MASK, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
     UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
     VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
@@ -1476,7 +1476,18 @@ impl Inner {
             };
             // Copying a selection that is not in a field would type the result into whatever has the keys: a web page
             // takes letters for its own shortcuts. A text caret, or an edit field UI Automation names, says it is a field.
-            if !(clipboard.text_caret(foreground) || Self::uia_editable(reader, field)) {
+            let mut field_found = clipboard.text_caret(foreground) || Self::uia_editable(reader, field);
+            if !field_found && clipboard.window_class(foreground) == CHROMIUM_WINDOW_CLASS {
+                let deadline = self.clock.monotonic() + SELECTION_ACCESSIBILITY_WAIT_SECONDS;
+                while !field_found && self.clock.monotonic() < deadline {
+                    self.clock.sleep(SELECTION_ACCESSIBILITY_POLL_SECONDS);
+                    if let Some(selected) = Self::uia_selection(reader, field)? {
+                        return Ok(selected);
+                    }
+                    field_found = Self::uia_editable(reader, field);
+                }
+            }
+            if !field_found {
                 return Err(refused(RefusalReason::NoCaret));
             }
             clipboard

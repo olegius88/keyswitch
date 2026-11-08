@@ -1,7 +1,7 @@
 //! The engine as the application keeps it: the worker thread and the calls made from other threads.
 
 use super::logging::technical_event;
-use super::shared::{Command, CorrectionCallback, LearningPromptCallback, Next, QueueItem, RuleRequestCallback, SnapshotCallback};
+use super::shared::{Command, CorrectionCallback, SelectionNoticeCallback, LearningPromptCallback, Next, QueueItem, RuleRequestCallback, SnapshotCallback};
 use super::*;
 use crate::constants::{ENGINE_LOOP_MAX_WAKE_SECONDS, ENGINE_LOOP_MIN_WAKE_SECONDS, ENGINE_WORKER_JOIN_TIMEOUT_SECONDS, FIELD_CATCH_UP_RETRY_SECONDS};
 use ks_backend::{BackendError, FieldReader};
@@ -96,6 +96,11 @@ impl KeySwitchEngine {
 
     pub fn subscribe_corrections(&self, callback: CorrectionCallback) {
         self.shared.subscribe_corrections(callback);
+    }
+
+    /// Told why a selection hotkey could not do its work, on the engine's thread.
+    pub fn subscribe_selection_notices(&self, callback: SelectionNoticeCallback) {
+        self.shared.subscribe_selection_notices(callback);
     }
 
     pub fn learning_prompt(&self) -> Option<LearningPrompt> {

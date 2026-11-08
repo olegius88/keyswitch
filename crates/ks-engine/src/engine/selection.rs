@@ -61,7 +61,7 @@ impl EngineCore {
         fields.insert("pressed_keycodes".into(), json!(sorted_keycodes(&self.pressed)));
         fields.insert("modifier_keycodes".into(), json!(sorted_keycodes(&self.modifier_keycodes)));
         self.log_selection(pending.command, "refused", self.monotonic(), fields);
-        self.shared.update(Update { last_action: Some(refusal_message(RefusalReason::ReleaseTimeout)), ..Update::default() });
+        self.report_selection_outcome(refusal_message(RefusalReason::ReleaseTimeout));
     }
 
     /// Why a selection hotkey may not touch the focused field: the checks every correction passes.
@@ -93,7 +93,7 @@ impl EngineCore {
             fields.insert("reason".into(), json!(refusal.reason.as_str()));
             fields.insert("application".into(), json!(application));
             self.log_selection(command, "refused", started, fields);
-            self.shared.update(Update { last_action: Some(refusal_message(refusal.reason)), ..Update::default() });
+            self.report_selection_outcome(refusal_message(refusal.reason));
             return;
         }
         let backend = self.backend.clone();
@@ -125,7 +125,7 @@ impl EngineCore {
                 fields.insert("reason".into(), json!(error.reason.as_str()));
                 fields.insert("application".into(), json!(application));
                 self.log_selection(command, "refused", started, fields);
-                self.shared.update(Update { last_action: Some(refusal_message(error.reason)), ..Update::default() });
+                self.report_selection_outcome(refusal_message(error.reason));
                 return;
             }
             Err(SelectionError::Failed(error)) => {
@@ -138,11 +138,8 @@ impl EngineCore {
                 fields.insert("error".into(), json!(name));
                 fields.insert("application".into(), json!(application));
                 self.log_selection(command, "failed", started, fields);
-                self.shared.update(Update {
-                    last_error: Some(error.to_string()),
-                    last_action: Some("Ошибка замены выделения · проверьте текст в приложении".to_owned()),
-                    ..Update::default()
-                });
+                self.shared.update(Update { last_error: Some(error.to_string()), ..Update::default() });
+                self.report_selection_outcome("Ошибка замены выделения · проверьте текст в приложении".to_owned());
                 return;
             }
             Ok(()) => {}
@@ -171,6 +168,14 @@ impl EngineCore {
             last_error: Some(String::new()),
             ..Update::default()
         });
+    }
+
+    /// A selection hotkey that could not do its work says why where the user is looking, not only on the status line.
+    fn report_selection_outcome(&self, message: String) {
+        self.shared.update(Update { last_action: Some(message.clone()), ..Update::default() });
+        for callback in self.shared.selection_notice_callbacks() {
+            callback(&message);
+        }
     }
 
     fn layout_names(&self) -> Vec<String> {

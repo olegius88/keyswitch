@@ -14,6 +14,7 @@ use ks_config::history::{HistoryStore, history_limit};
 use ks_config::indicator::normalize_indicator_style;
 use ks_config::learning::LearningStore;
 use ks_config::logsetup;
+use ks_config::selection_commands::SELECTION_NOTICE_TITLE;
 use ks_engine::constants::MILLISECONDS_PER_SECOND;
 use ks_engine::{KeySwitchEngine, Shared};
 use ks_engine::context_access::ReaderFactory;
@@ -346,6 +347,11 @@ fn attach_engine(services: &Arc<Services>, wants_caret: Arc<AtomicBool>) {
                     beep();
                 }
             }));
+        }));
+        engine.subscribe_selection_notices(Arc::new(|message: &str| {
+            // It answers a key the user has just pressed, so the setting for the notices of corrections does not silence it.
+            let message = message.to_owned();
+            run_on_main(Box::new(move || notify(SELECTION_NOTICE_TITLE, &message)));
         }));
         engine.subscribe_learning_prompts(Arc::new(|prompt| {
             let prompt = prompt.cloned();
