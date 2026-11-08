@@ -436,6 +436,13 @@ pub const LEARNING_PROMPT_MINIMUM_WIDTH_PIXELS: i32 = 390;
 pub const LEARNING_PROMPT_ANCHOR_GAP_PIXELS: i32 = 12;
 pub const LEARNING_PROMPT_SCREEN_MARGIN_PIXELS: i32 = 8;
 pub const LEARNING_PROMPT_CLASS: &str = "KeySwitchLearningPrompt";
+// The one-time hint card (`hint_card`): the card of the rule prompt with a longer text, and two links on the last line.
+pub const HINT_CARD_CLASS: &str = "KeySwitchHintCard";
+pub const HINT_CARD_BORDER_PIXELS: i32 = 1;
+pub const HINT_CARD_LINE_GAP_PIXELS: i32 = 6;
+pub const HINT_CARD_LINK_GAP_PIXELS: i32 = 18;
+/// The caret's anchor is the bottom of the caret: a card this far above it stays off a line of ordinary text.
+pub const HINT_CARD_CARET_GAP_PIXELS: i32 = 28;
 pub const RULE_EDITOR_CLASS: &str = "KeySwitchRuleEditor";
 pub const PAGE_CLASS: &str = "KeySwitchPage";
 

@@ -13,18 +13,20 @@ use std::collections::VecDeque;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use ks_config::config::SettingsStore;
-use ks_config::history::{HistoryStore, history_limit};
+use ks_config::history::{HistoryStore, data_dir, history_limit};
 use ks_config::indicator::normalize_indicator_style;
 use ks_config::logsetup::{self, LocalTime};
 use ks_engine::context_access::ReaderFactory;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_backend::backend::{InputBackend, ScreenAnchor};
 use ks_engine::rule_editor::draft_from_prompt;
-use ks_engine::{CorrectionPlan, EngineSnapshot, KeySwitchEngine, LearningPrompt, engine::default_learning_store};
+use ks_engine::{CorrectionPlan, EngineSnapshot, KeySwitchEngine, LearningPrompt, Shared, engine::default_learning_store};
+use ks_ui::constants::HINT_TICK_INTERVAL_MS;
+use ks_ui::hints::{Click, EngineInput, HintPresenter, HintView, Hints, Moment, Opens, RUNNING_PLATFORM, SettingsPage, subscribe as subscribe_hints};
 use serde_json::Value;
 use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
 use windows_sys::Win32::Foundation::{GENERIC_WRITE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, WPARAM};
@@ -34,6 +36,7 @@ use windows_sys::Win32::System::SystemInformation::{GetLocalTime, OSVERSIONINFOW
 use windows_sys::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows_sys::Win32::System::Threading::ExitProcess;
 use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+use windows_sys::Win32::UI::Shell::NIN_BALLOONUSERCLICK;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer, MB_OK, MSG, MSGFLT_ALLOW,
     PostMessageW, PostQuitMessage, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SetForegroundWindow, SetTimer, ShowWindow,
@@ -45,8 +48,10 @@ use crate::constants::{
     BACKEND_LABEL, ENGINE_STOP_WAIT_SECONDS, LEARNING_PROMPT_SHOW_DELAY_MS, SMOKE_UI_QUIT_AFTER_MS, UPDATE_CHECK_INITIAL_DELAY_MS,
     UPDATE_CHECK_INTERVAL_MS, WM_APP, WM_TRAY,
 };
-use crate::learning_prompt;
-use crate::settings_window::{self, Services};
+use crate::hint_card;
+use crate::hint_layout::{Area, icon_is_on_screen};
+use crate::learning_prompt::{self, virtual_screen};
+use crate::settings_window::{self, HintCards, Services};
 use crate::windows_ui_model::{NoUpdates, UpdateController, UpdatePhase, UpdateSnapshot};
 use crate::tray::Tray;
 use crate::tray_model::TrayAction;
@@ -62,6 +67,8 @@ const WM_POSTED: u32 = WM_APP + 1;
 const SMOKE_TIMER_ID: usize = 1;
 const PROMPT_TIMER_ID: usize = 2;
 const UPDATE_TIMER_ID: usize = 3;
+/// The settings window's own timer is the next number, 4.
+const HINT_TIMER_ID: usize = 5;
 
 type Posted = Box<dyn FnOnce() + Send>;
 
@@ -230,6 +237,59 @@ struct App {
     pending_prompt: RefCell<Option<(LearningPrompt, Option<ScreenAnchor>)>>,
     prompt_callbacks: Rc<learning_prompt::Callbacks>,
     last_update_notification: RefCell<String>,
+    hints: RefCell<Hints<ScreenAnchor>>,
+    hint_callbacks: Rc<hint_card::Callbacks>,
+    /// The clock of the hints.
+    hints_started: Instant,
+    /// The engine's key presses, once it is built: the hints see by them that the user is typing.
+    hint_presses: Arc<OnceLock<Arc<Shared>>>,
+    hint_timer_on: Cell<bool>,
+    /// The hint the icon's last balloon tells, until another balloon replaces it.
+    balloon_hint: Cell<Option<&'static str>>,
+}
+
+/// What draws the hints on Windows: the card above the caret or the icon, the balloon of the icon, the cards of the settings
+/// window.
+struct Presenter<'a> {
+    app: &'a App,
+}
+
+impl HintPresenter<ScreenAnchor> for Presenter<'_> {
+    fn show_caret(&mut self, view: &HintView, anchor: &ScreenAnchor) -> bool {
+        hint_card::show_at_caret(view, anchor.x, anchor.y, &self.app.hint_callbacks)
+    }
+
+    /// The card above the icon where the shell says where the icon is; the balloon of the icon where it does not, or the
+    /// balloon is all that can be shown. With no icon there is nothing to show it near.
+    fn show_tray(&mut self, view: &HintView) -> bool {
+        let tray = self.app.tray.borrow();
+        let Some(tray) = tray.as_ref() else { return false };
+        let icon = tray.icon_rect().map(|place| Area { left: place.left, top: place.top, right: place.right, bottom: place.bottom });
+        let screen = virtual_screen();
+        if let Some(icon) = icon.filter(|icon| icon_is_on_screen(*icon, screen))
+            && hint_card::show_at_icon(view, icon, &self.app.hint_callbacks)
+        {
+            return true;
+        }
+        tray.notify(view.title, &view.text);
+        self.app.balloon_hint.set(Some(view.id));
+        true
+    }
+
+    fn hide(&mut self, id: &str) {
+        hint_card::hide(id);
+        settings_window::hide_hint_card(id);
+        if self.app.balloon_hint.get() == Some(id) {
+            // The balloon goes by itself; only its click stops meaning this hint.
+            self.app.balloon_hint.set(None);
+        }
+    }
+
+    /// Posted: `Hints` is borrowed through this call, and opening the settings window asks it for the cards of the page.
+    fn open(&mut self, opens: &Opens) {
+        let opens = opens.clone();
+        post(Box::new(move || with_app(|app| app.open_hint(&opens))));
+    }
 }
 
 fn setting_bool(settings: &SettingsStore, path: &str, default: bool) -> bool {
@@ -287,6 +347,7 @@ impl App {
                 && let Some(tray) = self.tray.borrow().as_ref()
             {
                 tray.notify("Доступно обновление KeySwitch", &snapshot.message);
+                self.balloon_hint.set(None);
             }
         }
     }
@@ -354,6 +415,7 @@ impl App {
         {
             let title = if plan.case_fix() { "Регистр исправлен" } else { "Раскладка исправлена" };
             tray.notify(title, &format!("{}  →  {}", plan.original, plan.replacement));
+            self.balloon_hint.set(None);
         }
         if setting_bool(&self.settings, "general.sound", false) {
             // SAFETY: plays the system alert sound.
@@ -421,6 +483,7 @@ impl App {
 
     fn apply_setting(&self, path: &str, value: &Value) {
         settings_window::apply_setting(path, value);
+        self.with_hints(|hints, presenter, moment| hints.settings_changed(presenter, moment));
         match path {
             "*" => {
                 self.history.set_limit(history_limit(&self.settings.get("history.limit").unwrap_or(Value::Null)));
@@ -479,6 +542,79 @@ impl App {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------- the hints
+
+    fn hint_moment(&self) -> Moment {
+        let presses = self.hint_presses.get().map_or(0, |shared| shared.typed_presses.load(Ordering::Relaxed));
+        Moment::now(self.hints_started, presses)
+    }
+
+    /// Runs `action` with the hints, unless they are already in use further up this thread's stack.
+    fn with_hints(&self, action: impl FnOnce(&mut Hints<ScreenAnchor>, &mut Presenter<'_>, &Moment)) {
+        let Ok(mut hints) = self.hints.try_borrow_mut() else { return };
+        let moment = self.hint_moment();
+        action(&mut hints, &mut Presenter { app: self }, &moment);
+        drop(hints);
+        self.sync_hint_timer();
+    }
+
+    /// The hints ask to be called every `HINT_TICK_INTERVAL_MS` only while one waits or is on screen.
+    fn sync_hint_timer(&self) {
+        let wanted = self.hints.try_borrow().is_ok_and(|hints| hints.needs_tick());
+        if self.hint_timer_on.replace(wanted) == wanted {
+            return;
+        }
+        // SAFETY: the timer belongs to the window made by this thread; setting it again restarts it, killing one not set is harmless.
+        unsafe {
+            if wanted {
+                SetTimer(self.window, HINT_TIMER_ID, HINT_TICK_INTERVAL_MS, None);
+            } else {
+                KillTimer(self.window, HINT_TIMER_ID);
+            }
+        }
+    }
+
+    fn hint_tick(&self) {
+        self.with_hints(|hints, presenter, moment| hints.tick(presenter, moment));
+    }
+
+    fn hint_input(&self, input: EngineInput<ScreenAnchor>) {
+        self.with_hints(|hints, presenter, moment| hints.engine_input(presenter, input, moment));
+    }
+
+    fn hint_clicked(&self, id: &str, click: Click) {
+        self.with_hints(|hints, presenter, moment| hints.clicked(presenter, id, click, moment));
+    }
+
+    /// A click on the icon's balloon counts for a hint only while the balloon is the hint's.
+    fn balloon_clicked(&self) {
+        if let Some(id) = self.balloon_hint.take() {
+            self.hint_clicked(id, Click::Text);
+        }
+    }
+
+    fn open_hint(&self, opens: &Opens) {
+        match opens {
+            Opens::Settings { page, setting } => {
+                self.show_page_and_present(page.window_page());
+                if let Some(setting) = setting {
+                    settings_window::mark_setting(setting);
+                }
+            }
+            Opens::Url(url) => settings_window::open_url(url),
+        }
+    }
+
+    fn hints_settings_opened(&self) {
+        self.with_hints(|hints, _, _| hints.settings_opened());
+    }
+
+    fn hint_card_for(&self, page: SettingsPage) -> Option<HintView> {
+        let mut card = None;
+        self.with_hints(|hints, _, moment| card = hints.settings_card(page, moment));
+        card
+    }
+
     fn window_close(&self) {
         if setting_bool(&self.settings, "general.close_to_tray", true) && self.tray.borrow().is_some() {
             self.hide();
@@ -531,6 +667,9 @@ fn host_message(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> O
             if lparam.low::<u32>() == WM_LBUTTONUP || lparam.low::<u32>() == WM_RBUTTONUP {
                 // A primary click opens the same complete menu as the secondary one.
                 with_app(|app| app.show_menu());
+            } else if lparam.low::<u32>() == NIN_BALLOONUSERCLICK {
+                // Posted: the shell can tell this while the program is itself waiting for the shell.
+                post(Box::new(|| with_app(|app| app.balloon_clicked())));
             }
             Some(0)
         }
@@ -553,6 +692,10 @@ fn host_message(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> O
         }
         WM_TIMER if wparam == UPDATE_TIMER_ID => {
             with_app(|app| app.automatic_update_check());
+            Some(0)
+        }
+        WM_TIMER if wparam == HINT_TIMER_ID => {
+            with_app(|app| app.hint_tick());
             Some(0)
         }
         WM_CLOSE => {
@@ -646,6 +789,9 @@ fn engine_builder(
 /// `run_windows_application`: build everything, run the loop until the window is destroyed, and return the status.
 fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) -> i32 {
     let settings = Arc::new(SettingsStore::new(None));
+    // Before anything writes a user file, by which the hints tell a new installation from an update.
+    let hints_started = Instant::now();
+    let hints = Hints::start(settings.clone(), &data_dir(), RUNNING_PLATFORM, &Moment::now(hints_started, 0));
     logsetup::follow_settings(&settings, None);
     let history = Arc::new(HistoryStore::new(
         None,
@@ -679,7 +825,7 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     // The update manager is the updater's; until it is wired in, nothing is ever found.
     let updates: Arc<dyn UpdateController> = match ks_updates::UpdateManager::with_opener(
         VERSION,
-        ks_config::history::data_dir().join("updates"),
+        data_dir().join("updates"),
         Arc::new(crate::winhttp::WinHttpOpener),
     ) {
         Ok(manager) => Arc::new(manager.with_install_request(Arc::new(|path: &std::path::Path| {
@@ -704,6 +850,15 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         catalog: WindowsApplicationCatalog::new(None).ok(),
         autostart_report: Box::new(crate::windows_app::autostart_status),
         host: host_message,
+        hints: HintCards {
+            opened: Box::new(|| with_app(|app| app.hints_settings_opened())),
+            card: Box::new(|page| {
+                let mut card = None;
+                with_app(|app| card = app.hint_card_for(page));
+                card
+            }),
+            clicked: Box::new(|id, click| post(Box::new(move || with_app(|app| app.hint_clicked(id, click))))),
+        },
     };
     let Some(window) = settings_window::create(services) else {
         logsetup::error(LOGGER, "Не удалось создать окно");
@@ -720,6 +875,11 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         keep_inactive: Box::new(move |handle| keep_backend.keep_window_inactive(handle)),
         restore: Box::new(move |handle| restore_backend.restore_window(handle)),
     });
+    let hint_keep_backend = input_backend.clone();
+    let hint_callbacks = Rc::new(hint_card::Callbacks {
+        clicked: Box::new(|id, click| post(Box::new(move || with_app(|app| app.hint_clicked(id, click))))),
+        keep_inactive: Box::new(move |handle| hint_keep_backend.keep_window_inactive(handle)),
+    });
     let app = Rc::new(App {
         window,
         backend,
@@ -734,6 +894,12 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         pending_prompt: RefCell::new(None),
         prompt_callbacks,
         last_update_notification: RefCell::new(String::new()),
+        hints: RefCell::new(hints),
+        hint_callbacks,
+        hints_started,
+        hint_presses: Arc::new(OnceLock::new()),
+        hint_timer_on: Cell::new(false),
+        balloon_hint: Cell::new(None),
     });
     APP.with(|slot| *slot.borrow_mut() = Some(app.clone()));
     WINDOW.store(window.to::<isize>(), Ordering::SeqCst);
@@ -749,7 +915,17 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
     }));
     let anchor_backend = input_backend.clone();
     let request_backend = input_backend;
+    let hint_anchor_backend = anchor_backend.clone();
+    let hint_presses = app.hint_presses.clone();
+    let hint_wants_anchor = app.hints.borrow().caret_anchor_wanted();
     engine.when_built(Box::new(move |engine| {
+        let _ = hint_presses.set(engine.shared.clone());
+        subscribe_hints(
+            &engine.shared,
+            hint_wants_anchor,
+            Arc::new(move || hint_anchor_backend.input_anchor()),
+            Arc::new(|input| post(Box::new(move || with_app(|app| app.hint_input(input))))),
+        );
         engine.subscribe(Arc::new(|snapshot: &EngineSnapshot| {
             let snapshot = snapshot.clone();
             post(Box::new(move || with_app(|app| app.apply_snapshot(snapshot))));

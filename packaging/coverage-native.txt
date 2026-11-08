@@ -13,6 +13,7 @@ crates/ks-mac/src/macos_objc.rs
 crates/ks-mac/src/macos_tray_native.rs
 crates/ks-mac/src/settings_window.rs
 crates/ks-win/src/desktop_app.rs
+crates/ks-win/src/hint_card.rs
 crates/ks-win/src/learning_prompt.rs
 crates/ks-win/src/rule_editor_dialog.rs
 crates/ks-win/src/settings_window.rs
