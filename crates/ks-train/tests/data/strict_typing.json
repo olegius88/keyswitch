@@ -273,7 +273,7 @@
     "tests/e2e_gtk.rs": {
      "expect_roots": 1,
      "literal_compares": 4,
-     "value_tokens": 54
+     "value_tokens": 59
     },
     "tests/e2e_package.rs": {
      "expect_roots": 1,
@@ -287,17 +287,17 @@
      "expect_roots": 1,
      "literal_compares": 8,
      "string_key_index": 19,
-     "value_tokens": 41
+     "value_tokens": 42
     },
     "tests/e2e_x11.rs": {
      "expect_roots": 1,
-     "literal_compares": 2,
-     "value_tokens": 10
+     "literal_compares": 3,
+     "value_tokens": 11
     }
    },
-   "literal_compares": 36,
+   "literal_compares": 37,
    "string_key_index": 19,
-   "value_tokens": 205
+   "value_tokens": 212
   },
   "ks-mac": {
    "expect_roots": 2,
@@ -317,13 +317,14 @@
     },
     "tests/e2e_mac.rs": {
      "expect_roots": 1,
-     "literal_compares": 7,
-     "value_tokens": 6
+     "literal_compares": 10,
+     "string_key_index": 2,
+     "value_tokens": 18
     }
    },
-   "literal_compares": 8,
-   "string_key_index": 0,
-   "value_tokens": 27
+   "literal_compares": 11,
+   "string_key_index": 2,
+   "value_tokens": 39
   },
   "ks-replay": {
    "expect_roots": 5,
@@ -409,12 +410,15 @@
      "string_key_index": 4,
      "value_tokens": 50
     },
+    "tests/review_words.rs": {
+     "value_tokens": 4
+    },
     "tests/sweep.rs": {
      "value_tokens": 42
     },
     "tests/trace_differences.rs": {
-     "string_key_index": 36,
-     "value_tokens": 70
+     "string_key_index": 39,
+     "value_tokens": 71
     },
     "tests/walk.rs": {
      "literal_compares": 1,
@@ -422,8 +426,8 @@
     }
    },
    "literal_compares": 24,
-   "string_key_index": 271,
-   "value_tokens": 649
+   "string_key_index": 274,
+   "value_tokens": 654
   },
   "ks-text": {
    "expect_roots": 2,
@@ -904,6 +908,12 @@
   "ks-ui": {
    "expect_roots": 1,
    "files": {
+    "src/hints/controller.rs": {
+     "value_tokens": 2
+    },
+    "src/hints/store.rs": {
+     "value_tokens": 5
+    },
     "src/lib.rs": {
      "expect_roots": 1
     },
@@ -913,7 +923,7 @@
    },
    "literal_compares": 0,
    "string_key_index": 0,
-   "value_tokens": 33
+   "value_tokens": 40
   },
   "ks-updates": {
    "expect_roots": 2,
@@ -958,12 +968,12 @@
     },
     "tests/e2e_windows.rs": {
      "expect_roots": 1,
-     "value_tokens": 13
+     "value_tokens": 25
     }
    },
    "literal_compares": 6,
    "string_key_index": 0,
-   "value_tokens": 82
+   "value_tokens": 94
   },
   "logcourier": {
    "expect_roots": 2,
