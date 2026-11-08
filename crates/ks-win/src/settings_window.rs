@@ -25,10 +25,11 @@ use ks_config::logsetup::{self, log_directory, log_path, log_status, rotation_su
 use ks_engine::EngineSnapshot;
 use ks_engine::engine_loader::{DeferredEngine, LOADING_ACTION};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_rule};
+use ks_ui::hints::{Click, HintView, Place, SettingsPage};
 use serde_json::{Map, Value, json};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HDC, PAINTSTRUCT};
-use windows_sys::Win32::System::SystemServices::{SS_ENDELLIPSIS, SS_LEFT, SS_NOPREFIX};
+use windows_sys::Win32::System::SystemServices::{SS_ENDELLIPSIS, SS_LEFT, SS_NOPREFIX, SS_NOTIFY};
 use windows_sys::Win32::UI::Controls::{
     DRAWITEMSTRUCT, SetScrollInfo,
     ICC_STANDARD_CLASSES, ICC_UPDOWN_CLASS, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, NM_DBLCLK, NMHDR, NMUPDOWN,
@@ -50,10 +51,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::constants::{SETTINGS_WINDOW_CLASS, PAGE_CLASS, MAIN_WINDOW_WIDTH_PIXELS, MAIN_WINDOW_HEIGHT_PIXELS, SETTINGS_WINDOW_TITLE, BASE_DPI, MAIN_WINDOW_MIN_WIDTH_PIXELS, MAIN_WINDOW_MIN_HEIGHT_PIXELS, DESKTOP_SIDEBAR_WIDTH_PIXELS, SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS, SIDEBAR_ITEM_PADDING_X_PIXELS, SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS, SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS, NAVIGATION_BUTTON_HEIGHT_PIXELS, NAVIGATION_BUTTON_SPACING_PIXELS, SIDEBAR_SEPARATOR_PADDING_Y_PIXELS, SIDEBAR_STATUS_PADDING_TOP_PIXELS, PAGE_CAPTION_PADDING_TOP_PIXELS, PAGE_PADDING_X_PIXELS, PAGE_CONTENT_PADDING_Y_PIXELS, SECTION_BOTTOM_MARGIN_PIXELS, PAGE_SCROLL_STEP_PIXELS, WHEEL_STEPS_PER_NOTCH, WHEEL_DELTA, APPLICATION_CAPTURE_DELAY_MS, SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS, AUTOCORRECTION_COLUMN_GAP_PIXELS, AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT, AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT, SETTING_ROW_PADDING_PIXELS, MODIFIED_MARKER_COLUMN_PIXELS, RESET_BUTTON_COLUMN_PIXELS, DESCRIPTION_INDENT_PIXELS, CHOICE_CONTROL_WIDTH_PIXELS, NUMBER_CONTROL_WIDTH_PIXELS, TEXT_CONTROL_WIDTH_PIXELS, SETTING_CONTROL_PADDING_LEFT_PIXELS, ROW_HEIGHT_PIXELS, UPDOWN_WIDTH_PIXELS, MODIFIED_MARKER_WIDTH_PIXELS, BUTTON_PADDING_X_PIXELS, BUTTON_HEIGHT_PIXELS, CARD_TITLE_GAP_PIXELS, STATUS_LINE_GAP_PIXELS, TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS, MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, STANDARD_GAP_PIXELS, APPLICATION_LIST_HEIGHT_ROWS, GROUP_GAP_PIXELS, WORD_LIST_HEIGHT_ROWS, HISTORY_TIME_COLUMN_WIDTH_PIXELS, HISTORY_WORD_COLUMN_WIDTH_PIXELS, HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS, HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS, HISTORY_TREE_MIN_ROWS, LEARNING_WORD_COLUMN_WIDTH_PIXELS, LEARNING_CONDITION_COLUMN_WIDTH_PIXELS, LEARNING_ACTION_COLUMN_WIDTH_PIXELS, LEARNING_TREE_HEIGHT_ROWS, DIAGNOSTICS_TEXT_HEIGHT_ROWS};
+use crate::hint_layout::settings_page;
 use crate::win32_controls::{self as w32, Brushes, Fonts, MessageKind, Themed, scaled};
 use crate::windows_native::wide;
 use crate::windows_system::{WindowsApplicationCatalog, open_directory};
-use crate::windows_ui_model::{UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
+use crate::windows_ui_model::{PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ID_BASE: usize = 1000;
@@ -76,6 +78,18 @@ pub struct Services {
     pub autostart_report: Box<dyn Fn() -> Value>,
     /// Messages the frame does not handle itself (the tray, the timers of the application, closing).
     pub host: fn(HWND, u32, WPARAM, LPARAM) -> Option<LRESULT>,
+    pub hints: HintCards,
+}
+
+/// What the cards of the hints need from the application.
+pub struct HintCards {
+    /// The window began to show: each page may have a card again.
+    pub opened: Box<dyn Fn()>,
+    /// The card to put on top of a page now being built, if there is one.
+    pub card: Box<dyn Fn(SettingsPage) -> Option<HintView>>,
+    /// What the user did to a card. Said from the message of the button itself, which goes away with the card, so this only
+    /// posts what it does.
+    pub clicked: Box<dyn Fn(&'static str, Click)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -109,6 +123,7 @@ enum Action {
     Setting(usize),
     Reset(usize),
     Button(Button),
+    Hint(&'static str, Click),
     TestField,
     Other,
 }
@@ -120,6 +135,8 @@ enum LabelStyle {
     Error,
     CardTitle,
     CardTitleModified,
+    /// The setting a hint points at.
+    CardTitleHint,
     PageTitle,
     PageSubtitle,
 }
@@ -168,6 +185,8 @@ enum Node {
     Columns { left: Vec<Node>, right: Vec<Node> },
     /// A list with a fixed height, or one that takes what the viewport leaves (`fill`) but not less than `height`.
     List { hwnd: HWND, height: i32, top: i32, fill: bool },
+    /// A hint on top of a page: a section with its text and its two buttons, until one of them is pressed.
+    HintCard { id: &'static str, title: String, children: Vec<Node>, rect: RECT, windows: Vec<HWND> },
 }
 
 struct Page {
@@ -176,6 +195,8 @@ struct Page {
     scroll: Cell<i32>,
     content_height: Cell<i32>,
     styles: RefCell<HashMap<isize, LabelStyle>>,
+    /// The setting a hint points at, marked on the left of its row.
+    marked: RefCell<Option<String>>,
 }
 
 #[derive(Default)]
@@ -430,6 +451,23 @@ pub fn dark() -> bool {
     ui().and_then(|ui| ui.dark.get()).unwrap_or(false)
 }
 
+/// The card of the hint `id` goes away, from whichever page it is on.
+pub fn hide_hint_card(id: &str) {
+    with_ui(|ui| ui.hide_hint_card(id));
+}
+
+/// A hint led here: the setting on the open page is marked and brought into view.
+pub fn mark_setting(path: &str) {
+    with_ui(|ui| ui.mark_setting(path));
+}
+
+/// A hint's page of the web, in the user's browser.
+pub fn open_url(url: &str) {
+    with_ui(|ui| {
+        ui.shell_open(url);
+    });
+}
+
 /// The window the user is looking at is the frame itself.
 #[must_use]
 pub fn frame_window() -> Option<HWND> {
@@ -512,6 +550,7 @@ impl Ui {
         match message {
             WM_SHOWWINDOW => {
                 if wparam != 0 && lparam == 0 {
+                    (self.services.hints.opened)();
                     let theme = self.theme_setting();
                     self.apply_theme(&theme, true);
                     self.build();
@@ -847,8 +886,10 @@ impl Ui {
             scroll: Cell::new(0),
             content_height: Cell::new(0),
             styles: RefCell::new(HashMap::new()),
+            marked: RefCell::new(None),
         });
         self.pages.borrow_mut()[index] = Some(page.clone());
+        let hint = settings_page(index).and_then(|hint_page| (self.services.hints.card)(hint_page));
         let nodes = {
             let mut builder = Builder { ui: self, page: &page, panel };
             let (title, subtitle) = self.page_texts(index);
@@ -856,6 +897,9 @@ impl Ui {
                 builder.label(&title, LabelStyle::PageTitle, 0, 0),
                 builder.label(&subtitle, LabelStyle::PageSubtitle, 0, scaled(PAGE_CAPTION_PADDING_TOP_PIXELS, self.dpi.get())),
             ];
+            if let Some(view) = &hint {
+                nodes.push(builder.hint_card(view));
+            }
             nodes.extend(match PAGE_NAMES[index].0 {
                 "overview" => builder.overview(),
                 "autocorrection" => builder.autocorrection(),
@@ -871,6 +915,9 @@ impl Ui {
             nodes
         };
         *page.nodes.borrow_mut() = nodes;
+        if let Some(HintView { place: Place::Settings { control: Some(control), .. }, .. }) = hint {
+            self.set_marked(&page, Some(control));
+        }
         page
     }
 
@@ -1023,6 +1070,7 @@ impl Ui {
                         LabelStyle::Muted | LabelStyle::PageSubtitle => palette.muted,
                         LabelStyle::Error => palette.error,
                         LabelStyle::CardTitleModified => palette.accent,
+                        LabelStyle::CardTitleHint => PROMPT_BORDER,
                     };
                     w32::set_label_colors(hdc, color.colorref(), palette.content.colorref());
                     return Some(resources.brushes.content.to::<LRESULT>());
@@ -1044,7 +1092,8 @@ impl Ui {
             let scroll = page.scroll.get();
             let dpi = self.dpi.get();
             if let Ok(nodes) = page.nodes.try_borrow() {
-                paint_nodes(&nodes, hdc, &PaintContext { scroll, dpi, palette, frame_font: resources.fonts.frame, settings: self.settings(), controls: &self.settings_controls.borrow() });
+                let marked = page.marked.borrow();
+                paint_nodes(&nodes, hdc, &PaintContext { scroll, dpi, palette, frame_font: resources.fonts.frame, settings: self.settings(), controls: &self.settings_controls.borrow(), marked: marked.as_deref() });
             }
         }
         // SAFETY: ends the paint begun above.
@@ -1085,6 +1134,7 @@ impl Ui {
             }
             Action::Reset(index) if code == BN_CLICKED => self.restore_default(index),
             Action::Button(button) if code == BN_CLICKED => self.button(button),
+            Action::Hint(id, click) if code == BN_CLICKED => (self.services.hints.clicked)(id, click),
             Action::TestField => match code {
                 EN_SETFOCUS => {
                     self.test_focused.set(true);
@@ -1096,7 +1146,7 @@ impl Ui {
                 }
                 _ => {}
             },
-            Action::Navigate(_) | Action::Reset(_) | Action::Button(_) | Action::Other => {}
+            Action::Navigate(_) | Action::Reset(_) | Action::Button(_) | Action::Hint(..) | Action::Other => {}
         }
     }
 
@@ -1377,18 +1427,65 @@ impl Ui {
         }
     }
 
+    fn shell_open(&self, url: &str) -> bool {
+        let verb = wide("open");
+        let target = wide(url);
+        // SAFETY: both strings are NUL-terminated and outlive the call.
+        let result = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(self.window, verb.as_ptr(), target.as_ptr(), null(), null(), 1) };
+        result.to::<isize>() > 32
+    }
+
     fn open_update_release(&self) {
         let url = self.services.updates.snapshot().release_url;
         if url.is_empty() {
             self.show_update_status("Сначала проверьте наличие новой версии");
             return;
         }
-        let verb = wide("open");
-        let target = wide(&url);
-        // SAFETY: both strings are NUL-terminated and outlive the call.
-        let result = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(self.window, verb.as_ptr(), target.as_ptr(), null(), null(), 1) };
-        if result.to::<isize>() <= 32 {
+        if !self.shell_open(&url) {
             self.show_update_status("Не удалось открыть страницу выпуска");
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ the hints
+
+    fn hide_hint_card(&self, id: &str) {
+        let pages: Vec<Rc<Page>> = self.pages.borrow().iter().flatten().cloned().collect();
+        for page in pages {
+            let removed = {
+                let Ok(mut nodes) = page.nodes.try_borrow_mut() else { continue };
+                nodes.iter().position(|node| matches!(node, Node::HintCard { id: shown, .. } if *shown == id)).map(|at| nodes.remove(at))
+            };
+            if let Some(Node::HintCard { windows, .. }) = removed {
+                for window in windows {
+                    w32::destroy(window);
+                }
+                self.set_marked(&page, None);
+                self.relayout(&page);
+            }
+        }
+    }
+
+    /// The setting `path` on `page` gets the mark of a hint, and whatever had it loses it.
+    fn set_marked(&self, page: &Rc<Page>, path: Option<&str>) {
+        if let Some(previous) = page.marked.replace(path.map(str::to_owned)) {
+            self.update_modified(&previous);
+        }
+        if let Some(path) = path {
+            for setting in self.settings_controls.borrow().iter().filter(|setting| setting.spec.path == path && setting.spec.kind != ControlKind::Bool) {
+                page.styles.borrow_mut().insert(setting.title.to::<isize>(), LabelStyle::CardTitleHint);
+                w32::invalidate(setting.title);
+            }
+        }
+        w32::invalidate(page.panel);
+    }
+
+    fn mark_setting(&self, path: &str) {
+        let page = self.pages.borrow()[self.active.get()].clone();
+        let Some(page) = page else { return };
+        self.set_marked(&page, Some(path));
+        let top = page.nodes.try_borrow().ok().and_then(|nodes| setting_top(&nodes, &self.settings_controls.borrow(), path));
+        if let Some(top) = top {
+            self.scroll_to(&page, top - scaled(PAGE_CONTENT_PADDING_Y_PIXELS, self.dpi.get()));
         }
     }
 
@@ -1729,7 +1826,7 @@ fn apply_moves(moves: &[(HWND, i32, i32, i32, i32)], scroll: i32) {
 fn label_font(fonts: &Fonts, style: LabelStyle) -> windows_sys::Win32::Graphics::Gdi::HFONT {
     match style {
         LabelStyle::PageTitle => fonts.title,
-        LabelStyle::CardTitle | LabelStyle::CardTitleModified => fonts.semibold,
+        LabelStyle::CardTitle | LabelStyle::CardTitleModified | LabelStyle::CardTitleHint => fonts.semibold,
         LabelStyle::Normal | LabelStyle::Muted | LabelStyle::Error | LabelStyle::PageSubtitle => fonts.base,
     }
 }
@@ -1764,7 +1861,7 @@ fn layout_nodes(nodes: &mut [Node], x: i32, width: i32, mut y: i32, context: &mu
                 y += height;
             }
             Node::Setting(setting) => y = layout_setting(setting, x, width, y, context),
-            Node::Section { title, children, rect } => {
+            Node::Section { title, children, rect } | Node::HintCard { title, children, rect, .. } => {
                 let _ = title;
                 let title_height = w32::line_height(context.fonts.frame);
                 let inner_x = x + scaled(SECTION_PADDING_X_PIXELS, dpi);
@@ -1857,14 +1954,26 @@ struct PaintContext<'a> {
     frame_font: windows_sys::Win32::Graphics::Gdi::HFONT,
     settings: &'a SettingsStore,
     controls: &'a [SettingControl],
+    marked: Option<&'a str>,
+}
+
+/// The top of the row of the setting `path`, where the page has it.
+fn setting_top(nodes: &[Node], controls: &[SettingControl], path: &str) -> Option<i32> {
+    nodes.iter().find_map(|node| match node {
+        Node::Setting(setting) if controls.get(setting.index).is_some_and(|control| control.spec.path == path) => Some(setting.marker.top),
+        Node::Section { children, .. } | Node::HintCard { children, .. } => setting_top(children, controls, path),
+        Node::Columns { left, right } => setting_top(left, controls, path).or_else(|| setting_top(right, controls, path)),
+        Node::Label(_) | Node::Row { .. } | Node::List { .. } | Node::Setting(_) => None,
+    })
 }
 
 fn paint_nodes(nodes: &[Node], hdc: HDC, context: &PaintContext<'_>) {
     for node in nodes {
         match node {
-            Node::Section { title, children, rect } => {
+            Node::Section { title, children, rect } | Node::HintCard { title, children, rect, .. } => {
                 let shifted = RECT { left: rect.left, top: rect.top - context.scroll, right: rect.right, bottom: rect.bottom - context.scroll };
-                w32::frame_rect(hdc, &shifted, context.palette.line.colorref());
+                let frame = if matches!(node, Node::HintCard { .. }) { PROMPT_BORDER } else { context.palette.line };
+                w32::frame_rect(hdc, &shifted, frame.colorref());
                 let title_text = format!(" {title} ");
                 let mut text_rect = RECT {
                     left: shifted.left + scaled(SECTION_PADDING_X_PIXELS - 6, context.dpi),
@@ -1884,9 +1993,11 @@ fn paint_nodes(nodes: &[Node], hdc: HDC, context: &PaintContext<'_>) {
                 paint_nodes(right, hdc, context);
             }
             Node::Setting(setting) => {
-                let modified = context.controls.get(setting.index).is_some_and(|control| !context.settings.is_default(&control.spec.path));
-                if modified {
-                    let brush = w32::solid_brush(context.palette.accent);
+                let control = context.controls.get(setting.index);
+                let marked = control.is_some_and(|control| context.marked == Some(control.spec.path.as_str()));
+                let modified = control.is_some_and(|control| !context.settings.is_default(&control.spec.path));
+                if marked || modified {
+                    let brush = w32::solid_brush(if marked { PROMPT_BORDER } else { context.palette.accent });
                     let marker = RECT { left: setting.marker.left, top: setting.marker.top - context.scroll, right: setting.marker.right, bottom: setting.marker.bottom - context.scroll };
                     w32::fill_rect(hdc, &marker, brush);
                     w32::delete_object(brush);
@@ -1940,8 +2051,12 @@ impl Builder<'_> {
     }
 
     fn button_cell(&self, text: &str, button: Button, gap: i32) -> (RowCell, HWND) {
+        self.action_button(text, Action::Button(button), gap)
+    }
+
+    fn action_button(&self, text: &str, action: Action, gap: i32) -> (RowCell, HWND) {
         let fonts = self.ui.fonts();
-        let id = self.id(Action::Button(button));
+        let id = self.id(action);
         let hwnd = w32::create_window("BUTTON", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON.to::<u32>(), 0, self.panel, id, (0, 0, 10, 10));
         w32::set_font(hwnd, fonts.base);
         w32::apply_control_theme(hwnd, self.ui.dark.get().unwrap_or(false), Themed::Explorer);
@@ -1990,6 +2105,25 @@ impl Builder<'_> {
         w32::list_view_colors(hwnd, palette.field.colorref(), palette.foreground.colorref());
         let height = rows * (w32::line_height(self.ui.fonts().base) + self.px(6)) + self.px(28);
         (Node::List { hwnd, height, top: self.px(top), fill }, hwnd)
+    }
+
+    /// A hint on top of the page: its text, which leads where the hint leads when it leads anywhere, and its two buttons.
+    fn hint_card(&mut self, view: &HintView) -> Node {
+        let text_id = if view.opens.is_some() { self.id(Action::Hint(view.id, Click::Text)) } else { 0 };
+        let text = w32::create_window("STATIC", &view.text, WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX | SS_NOTIFY, 0, self.panel, text_id, (0, 0, 10, 10));
+        w32::set_font(text, self.ui.fonts().base);
+        self.page.styles.borrow_mut().insert(text.to::<isize>(), LabelStyle::Normal);
+        let (ok, ok_window) = self.action_button(view.ok, Action::Hint(view.id, Click::Ok), 0);
+        let (never, never_window) = self.action_button(view.never, Action::Hint(view.id, Click::Never), STANDARD_GAP_PIXELS);
+        let row = flow_row(vec![ok, never, self.spacer()], self.px(CARD_TITLE_GAP_PIXELS));
+        let children = vec![Node::Label(Label { hwnd: text, style: LabelStyle::Normal, indent: 0, top: 0 }), row];
+        Node::HintCard {
+            id: view.id,
+            title: view.title.to_owned(),
+            children,
+            rect: RECT { left: 0, top: 0, right: 0, bottom: 0 },
+            windows: vec![text, ok_window, never_window],
+        }
     }
 
     fn section(&self, title: &str, children: Vec<Node>) -> Node {

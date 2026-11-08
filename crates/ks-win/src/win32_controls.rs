@@ -474,6 +474,18 @@ pub fn draw_label_text(hdc: *mut c_void, text: &str, rect: &mut RECT, font: HFON
     }
 }
 
+/// `text` wrapped at the width of `rect`, as `wrapped_height` measures it.
+pub fn draw_wrapped_text(hdc: *mut c_void, text: &str, rect: &mut RECT, font: HFONT, color: u32) {
+    // SAFETY: the font is selected into the device context of this paint and put back.
+    unsafe {
+        let old = SelectObject(hdc, font);
+        SetBkMode(hdc, TRANSPARENT.bits::<i32>());
+        SetTextColor(hdc, color);
+        draw_text(hdc, text, rect, DT_WORDBREAK | DT_LEFT | DT_NOPREFIX);
+        SelectObject(hdc, old);
+    }
+}
+
 /// The outline of a section: a one-pixel rectangle.
 pub fn frame_rect(hdc: *mut c_void, rect: &RECT, color: u32) {
     // SAFETY: a pen made and deleted here; a null brush leaves the inside as it is.

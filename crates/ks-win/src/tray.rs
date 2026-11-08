@@ -226,18 +226,24 @@ impl Tray {
         small_icon_side(dpi)
     }
 
-    fn icon_monitor_dpi(&self) -> Option<u32> {
+    /// Where the shell shows the icon, while it shows it: in the notification area, or on the button that opens it.
+    #[must_use]
+    pub fn icon_rect(&self) -> Option<RECT> {
         // SAFETY: NOTIFYICONIDENTIFIER is plain data for which all zeros is a valid value (no GUID).
         let mut identifier: NOTIFYICONIDENTIFIER = unsafe { std::mem::zeroed() };
         identifier.cbSize = (size_of::<NOTIFYICONIDENTIFIER>()).low::<u32>();
         identifier.hWnd = self.window;
         identifier.uID = ICON_ID;
         let mut place = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        // SAFETY: both structures live through the calls, which write only into `place` and the two numbers.
+        // SAFETY: both structures live through the call, which writes only into `place`.
+        let found = unsafe { Shell_NotifyIconGetRect(&raw const identifier, &raw mut place) };
+        (found == S_OK).then_some(place)
+    }
+
+    fn icon_monitor_dpi(&self) -> Option<u32> {
+        let place = self.icon_rect()?;
+        // SAFETY: the rectangle lives through the calls, which write only into the two numbers.
         unsafe {
-            if Shell_NotifyIconGetRect(&raw const identifier, &raw mut place) != S_OK {
-                return None;
-            }
             let monitor = MonitorFromRect(&raw const place, MONITOR_DEFAULTTONEAREST);
             let (mut horizontal, mut vertical) = (0u32, 0u32);
             if GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &raw mut horizontal, &raw mut vertical) != S_OK || horizontal == 0 {

@@ -26,24 +26,35 @@ mod scenario {
     use ks_config::config::SettingsStore;
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
-    use ks_win::constants::{SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
+    use ks_ui::constants::HINT_TYPING_SETTLE_SECONDS;
+    use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
+    use ks_ui::hints::{Click, HINT_NEVER_LABEL, HINT_OK_LABEL};
+    use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
+    use ks_win::hint_card::link_areas;
+    use ks_win::hint_layout::Area;
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
+    use ks_win::windows_app::VERSION;
     use ks_win::windows_native::NativeWindowsAPI;
+    use ks_win::windows_ui_model::{HINTS_SETTING_TITLE, PAGE_NAMES};
     use serde_json::{Value, json};
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM};
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetProcessDpiAwarenessContext};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetKeyboardLayout, INPUT, INPUT_0, INPUT_MOUSE, LoadKeyboardLayoutW, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT, SendInput,
         SetFocus,
     };
+    use windows_sys::Win32::UI::Shell::{NOTIFYICONIDENTIFIER, Shell_NotifyIconGetRect};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AllowSetForegroundWindow, FindWindowExW, GetMenuItemCount, GetMenuItemRect, GetMenuStringW, GetWindowThreadProcessId, HMENU,
-        IsWindowVisible, MF_BYPOSITION, MN_GETHMENU, MenuItemFromPoint, PostMessageW, SPI_GETTHREADLOCALINPUTSETTINGS,
-        SPI_SETTHREADLOCALINPUTSETTINGS, SPIF_SENDCHANGE, SendMessageW, SetCursorPos, SystemParametersInfoW, WM_RBUTTONUP,
+        AllowSetForegroundWindow, BM_CLICK, EnumChildWindows, FindWindowExW, GetCaretPos, GetMenuItemCount, GetMenuItemRect, GetMenuStringW, GetWindowRect,
+        GetWindowThreadProcessId, HMENU, IsWindow, IsWindowVisible, MF_BYPOSITION, MN_GETHMENU, MenuItemFromPoint, PostMessageW,
+        SPI_GETTHREADLOCALINPUTSETTINGS, SPI_SETTHREADLOCALINPUTSETTINGS, SPIF_SENDCHANGE, SendMessageW, SetCursorPos, SystemParametersInfoW,
+        WM_GETTEXT, WM_RBUTTONUP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, ES_AUTOVSCROLL, ES_MULTILINE, ES_WANTRETURN, GetClientRect, GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, IsZoomed, MSG, MoveWindow, PM_REMOVE,
-        PeekMessageW, RegisterClassW, SW_MAXIMIZE, SW_SHOW, ShowWindow, TranslateMessage, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        PeekMessageW, RegisterClassW, SW_MAXIMIZE, SW_SHOW, SetWindowTextW, ShowWindow, TranslateMessage, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
     };
 
     const VK_F24: u32 = 0x87;
@@ -78,6 +89,17 @@ mod scenario {
     /// The line of the tray menu that switches the layout begins so; its end names the layout it switches to.
     const SWITCH_LINE: &str = "Переключить на ";
     const MENU_LINE_CHARACTERS: usize = 128;
+    /// The longest a program restarted takes to load its models, on a runner or a virtual machine with something else to do.
+    const ENGINE_READY: u64 = 60_000;
+    /// A hint at the caret shows once the typing stopped for `HINT_TYPING_SETTLE_SECONDS`; this much longer is enough for
+    /// the check that none shows.
+    const HINT_NOT_SHOWN_MARGIN: u64 = 2_000;
+    /// The first hint of a new installation comes 5 seconds after the engine started, the engine takes its models first.
+    const TRAY_HINT_APPEARS: u64 = 30_000;
+    /// How far the card above the icon may be from it, in pixels of a monitor at any scale.
+    const CARD_NEAR_ICON_PIXELS: i32 = 200;
+    /// A line of text in the test's reads of a child window.
+    const CHILD_TEXT_CHARACTERS: usize = 512;
 
     /// The group of a keyboard layout by its language: 0 English, 1 Russian, -1 another.
     fn group_of_layout(layout: i64) -> i32 {
@@ -166,6 +188,13 @@ mod scenario {
                 let written = GetWindowTextW(self.edit, buffer.as_mut_ptr(), buffer.len().low::<i32>());
                 String::from_utf16_lossy(&buffer[..written.max(0).to::<usize>()])
             }
+        }
+
+        /// The field empty, for a phase that starts its own program: nothing is running to be told.
+        fn empty(&self) {
+            let empty = wide("");
+            // SAFETY: the text is NUL-terminated and outlives the call; the control belongs to this thread.
+            unsafe { SetWindowTextW(self.edit, empty.as_ptr()) };
         }
 
         fn group(&self) -> i32 {
@@ -359,6 +388,8 @@ mod scenario {
             // Synthetic typing has no gaps between keys; prefix switching would race with the burst here.
             ("detection.early_switch", json!(false)),
             ("updates.check_automatically", json!(false)),
+            // The phases about typing run without the cards of the hints; `hints` has phases of its own.
+            ("general.hints", json!(false)),
             // The scenario types with SendInput, which Windows marks as injected by another program; the setting
             // lets the program treat it as typing.
             ("detection.injected_input", json!(true)),
@@ -374,13 +405,24 @@ mod scenario {
     /// A copy left running holds the single instance and its own settings: this one would leave at once and nothing would
     /// answer the keys.
     fn start(binary: &Path, root: &Path) -> Result<Child, String> {
+        launch(binary, root, &["--hidden"])
+    }
+
+    fn launch(binary: &Path, root: &Path, arguments: &[&str]) -> Result<Child, String> {
         let _ = Command::new("taskkill").args(["/IM", "KeySwitch.exe", "/F"]).output();
-        let mut child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
+        let mut child = Command::new(binary).args(arguments).env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
         std::thread::sleep(Duration::from_millis(PROGRAM_SETTLES));
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
             return Err(format!("the program left at once: {status}"));
         }
         Ok(child)
+    }
+
+    /// The log's latest line saying an engine came up. Its time stamp tells a program restarted over the same data from the
+    /// one before, whether or not the start began a new log.
+    fn engine_ready_line(root: &Path) -> Option<String> {
+        let log = std::fs::read_to_string(root.join("data/keyswitch.log")).ok()?;
+        log.lines().rev().find(|line| line.contains("\"engine_initialized\"")).map(str::to_owned)
     }
 
     fn history_of(root: &Path) -> Result<Vec<(String, String)>, String> {
@@ -397,19 +439,23 @@ mod scenario {
         items.into_iter().skip(skip).collect()
     }
 
-    fn corrections(editor: &Editor, root: &Path) -> Result<(), String> {
-        // The hook comes up after the process: the first word is typed again until the engine answers.
+    /// The hook comes up after the process: the first word is typed again until the engine answers.
+    fn first_correction(editor: &Editor) -> Result<(), String> {
         let mut attempt = 0;
         loop {
             attempt += 1;
             editor.prepare(0)?;
             editor.scans(&PRIVET)?;
             match editor.expect("привет", 1, LONG) {
-                Ok(()) => break,
+                Ok(()) => return Ok(()),
                 Err(error) if attempt >= START_ATTEMPTS => return Err(error),
                 Err(_) => editor.pump(PHASE_SETTLE),
             }
         }
+    }
+
+    fn corrections(editor: &Editor, root: &Path) -> Result<(), String> {
+        first_correction(editor)?;
         println!("WINDOWS_EN_TO_RU_E2E_OK");
         editor.pump(PHASE_SETTLE);
         // Another window can take the foreground of a runner in the middle of a correction, and the engine rightly gives
@@ -722,7 +768,288 @@ mod scenario {
         Ok(())
     }
 
+    // ---------------------------------------------------------------------------------------------------- the hints
+
+    fn hint_card(process: u32) -> Option<HWND> {
+        // SAFETY: the window comes from the list of windows just read; a window gone meanwhile is simply not visible.
+        windows_of(process, HINT_CARD_CLASS).into_iter().find(|window| unsafe { IsWindowVisible(*window) } != 0)
+    }
+
+    fn window_rect(window: HWND) -> RECT {
+        let mut place = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: the rectangle is ours; a window gone fails the call and leaves the zeros.
+        unsafe { GetWindowRect(window, &raw mut place) };
+        place
+    }
+
+    fn in_front(editor: &Editor, what: &str) -> Result<(), String> {
+        // SAFETY: takes nothing.
+        if unsafe { GetForegroundWindow() } == editor.window { Ok(()) } else { Err(format!("{what}: the window typed in lost the front")) }
+    }
+
+    fn hints_file(root: &Path) -> Value {
+        std::fs::read_to_string(root.join("data/hints.json")).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or(Value::Null)
+    }
+
+    /// What the file says of a hint that has been drawn: how it left the screen, `shown` while it is on it.
+    fn hint_how(root: &Path, id: &str) -> Option<String> {
+        hints_file(root).get("seen")?.get(id)?.get("how")?.as_str().map(str::to_owned)
+    }
+
+    fn config(root: &Path, path: &[&str]) -> Value {
+        let text = std::fs::read_to_string(root.join("config/config.json")).unwrap_or_default();
+        let mut value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        for key in path {
+            value = value.get(*key).cloned().unwrap_or(Value::Null);
+        }
+        value
+    }
+
+    /// The card is over the caret or below it, never on the line typed: the caret is in the edit control of this thread.
+    fn clear_of_the_caret(editor: &Editor, card: HWND) -> Result<(), String> {
+        let mut point = POINT { x: 0, y: 0 };
+        // SAFETY: both calls write only into the point; the caret and the control belong to this thread.
+        let known = unsafe { GetCaretPos(&raw mut point) != 0 && ClientToScreen(editor.edit, &raw mut point) != 0 };
+        if !known {
+            return Err("the place of the caret is unknown".to_owned());
+        }
+        let place = window_rect(card);
+        if place.bottom > point.y && place.top < point.y {
+            return Err(format!("the card at {}..{} covers the caret at {}", place.top, place.bottom, point.y));
+        }
+        Ok(())
+    }
+
+    /// A click on the card, the way a person makes one: the middle of a link, or the text, by screen coordinates.
+    fn click_on_card(card: HWND, link: Click) -> Result<(), String> {
+        let place = window_rect(card);
+        // SAFETY: a plain query; the card was found visible just before.
+        let dpi = (unsafe { GetDpiForWindow(card) }).bits::<i32>();
+        let size = (place.right - place.left, place.bottom - place.top);
+        let (ok, never) = link_areas(dpi, size, HINT_OK_LABEL, HINT_NEVER_LABEL);
+        let middle = |area: Area| (place.left + i32::midpoint(area.left, area.right), place.top + i32::midpoint(area.top, area.bottom));
+        let (x, y) = match link {
+            Click::Ok => middle(ok),
+            Click::Never => middle(never),
+            Click::Text | Click::Closed => (i32::midpoint(place.left, place.right), i32::midpoint(place.top, place.bottom)),
+        };
+        // SAFETY: a plain call with values.
+        unsafe { SetCursorPos(x, y) };
+        click()
+    }
+
+    /// The window typed in loses nothing to the card, the keys go on arriving, and the card goes when it is clicked.
+    fn caret_hint(editor: &Editor, root: &Path, process: u32, link: Click) -> Result<(), String> {
+        first_correction(editor)?;
+        if !editor.pump_until(LONG, |_| hint_card(process).is_some()) {
+            return Err("no hint appeared after the first correction".to_owned());
+        }
+        let card = hint_card(process).ok_or("the hint card went at once")?;
+        in_front(editor, "the card appeared")?;
+        clear_of_the_caret(editor, card)?;
+        // The file is written right after the card is drawn.
+        if !editor.pump_until(STANDARD, |_| hint_how(root, "first_correction_undo").is_some()) {
+            return Err(format!("the hint on the screen was not written down: {}", hints_file(root)));
+        }
+        // Enter and a key after it go where they would have gone without the card.
+        editor.scans(&[SCAN_ENTER])?;
+        editor.expect("привет\r\n", 1, LONG)?;
+        editor.scans(&[SCAN_SPACE])?;
+        editor.expect("привет\r\n ", 1, LONG)?;
+        in_front(editor, "typing went on under the card")?;
+        if hint_card(process).is_none() {
+            return Err("typing took the card away".to_owned());
+        }
+        click_on_card(card, link)?;
+        // SAFETY: the card is a window of another process; the call takes it by value and fails if it is gone.
+        if !editor.pump_until(STANDARD, |_| unsafe { IsWindow(card) } == 0) {
+            return Err("a click on the card did not take it away".to_owned());
+        }
+        let wanted = match link {
+            Click::Ok => "ok",
+            Click::Never => "forever",
+            Click::Text | Click::Closed => "click",
+        };
+        if !editor.pump_until(STANDARD, |_| hint_how(root, "first_correction_undo").as_deref() == Some(wanted)) {
+            return Err(format!("the click was written down as {:?}, not {wanted}", hint_how(root, "first_correction_undo")));
+        }
+        if link == Click::Text {
+            let window = *windows_of(process, SETTINGS_WINDOW_CLASS).first().ok_or("the program has no settings window")?;
+            // SAFETY: takes the window by value and fails if it is gone.
+            if !editor.pump_until(LONG, |_| unsafe { IsWindowVisible(window) } != 0 && unsafe { GetForegroundWindow() } == window) {
+                return Err("a click on the text did not bring up the settings window".to_owned());
+            }
+            println!("WINDOWS_HINT_OPENS_SETTINGS_E2E_OK");
+        } else {
+            in_front(editor, "a click on the card")?;
+            editor.scans(&[SCAN_SPACE])?;
+            editor.expect("привет\r\n  ", 1, LONG)?;
+        }
+        if link == Click::Never && config(root, &["general", "hints"]) != json!(false) {
+            return Err(format!("«больше не показывать» left the setting at {}", config(root, &["general", "hints"])));
+        }
+        Ok(())
+    }
+
+    /// With the setting off, a correction brings no card and writes down no hint.
+    fn hints_off(editor: &Editor, root: &Path, process: u32) -> Result<(), String> {
+        first_correction(editor)?;
+        editor.pump(HINT_NOT_SHOWN_MARGIN + (HINT_TYPING_SETTLE_SECONDS * 1_000.0).to::<u64>());
+        if hint_card(process).is_some() || hint_how(root, "first_correction_undo").is_some() {
+            return Err("a hint showed with general.hints off".to_owned());
+        }
+        in_front(editor, "the hints are off")
+    }
+
+    /// The first hint of a new installation, near the tray icon: a card over the icon when the shell tells where the icon is,
+    /// its balloon otherwise. Neither takes the front.
+    fn tray_hint(editor: &Editor, root: &Path, process: u32) -> Result<(), String> {
+        editor.activate();
+        if !editor.pump_until(TRAY_HINT_APPEARS, |_| hint_how(root, "first_start").is_some()) {
+            return Err(format!("the hint of the first start never showed: {}", hints_file(root)));
+        }
+        editor.pump(PROGRAM_SETTLES);
+        in_front(editor, "the hint near the tray")?;
+        if let Some(card) = hint_card(process) {
+            let place = window_rect(card);
+            let window = *windows_of(process, SETTINGS_WINDOW_CLASS).first().ok_or("the program has no settings window")?;
+            // SAFETY: plain data, for which all zeros is valid (no GUID).
+            let mut identifier: NOTIFYICONIDENTIFIER = unsafe { std::mem::zeroed() };
+            identifier.cbSize = size_of::<NOTIFYICONIDENTIFIER>().low::<u32>();
+            identifier.hWnd = window;
+            identifier.uID = 1;
+            let mut icon = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            // SAFETY: both structures live through the call.
+            if unsafe { Shell_NotifyIconGetRect(&raw const identifier, &raw mut icon) } == S_OK
+                && (i32::midpoint(place.left, place.right) - i32::midpoint(icon.left, icon.right)).abs() > (place.right - place.left) / 2 + CARD_NEAR_ICON_PIXELS
+            {
+                return Err("the card near the tray is far from the icon".to_owned());
+            }
+            println!("the card near the tray is at {}..{} x {}..{}, the icon at {}..{} x {}..{}", place.left, place.right, place.top, place.bottom, icon.left, icon.right, icon.top, icon.bottom);
+            println!("WINDOWS_HINT_TRAY_CARD_E2E_OK");
+        } else {
+            println!("WINDOWS_HINT_TRAY_BALLOON_E2E_OK");
+        }
+        Ok(())
+    }
+
+    unsafe extern "system" fn collect_child(window: HWND, list: LPARAM) -> windows_sys::core::BOOL {
+        // SAFETY: `list` is the vector `children_of` passes, alive for the whole enumeration.
+        unsafe { (*list.pointer_mut::<Vec<HWND>>()).push(window) };
+        1
+    }
+
+    fn children_of(window: HWND) -> Vec<HWND> {
+        let mut children: Vec<HWND> = Vec::new();
+        // SAFETY: the callback writes into this vector, which outlives the call.
+        unsafe { EnumChildWindows(window, Some(collect_child), (&raw mut children).to::<LPARAM>()) };
+        children
+    }
+
+    /// The text of a child window of another program: `WM_GETTEXT`, as GetWindowText does not reach another process's child.
+    fn child_text(window: HWND) -> String {
+        let mut text = vec![0_u16; CHILD_TEXT_CHARACTERS];
+        // SAFETY: the buffer holds the number of characters given.
+        let length = unsafe { SendMessageW(window, WM_GETTEXT, CHILD_TEXT_CHARACTERS, text.as_mut_ptr().to::<LPARAM>()) };
+        String::from_utf16_lossy(&text[..length.max(0).to::<usize>()])
+    }
+
+    fn children_saying(window: HWND, part: &str) -> Vec<HWND> {
+        children_of(window).into_iter().filter(|child| child_text(*child).contains(part)).collect()
+    }
+
+    fn press_button(button: HWND) {
+        // SAFETY: the message takes no pointers; a button gone just does not answer.
+        unsafe { SendMessageW(button, BM_CLICK, 0, 0) };
+    }
+
+    /// The cards of the settings window: on top of the page it opens on, and on the page of what is news, with its buttons.
+    fn settings_hints(editor: &Editor, root: &Path, process: u32) -> Result<(), String> {
+        let window = *windows_of(process, SETTINGS_WINDOW_CLASS).first().ok_or("the program has no settings window")?;
+        // SAFETY: takes the window by value and fails if it is gone.
+        if !editor.pump_until(LONG, |_| unsafe { IsWindowVisible(window) } != 0) {
+            return Err("the settings window did not open".to_owned());
+        }
+        if !editor.pump_until(LONG, |_| hint_how(root, "hints_intro").is_some() && !children_saying(window, HINTS_SETTING_TITLE).is_empty()) {
+            return Err(format!("no card on the overview page: {}", hints_file(root)));
+        }
+        let ok = *children_saying(window, HINT_OK_LABEL).first().ok_or("the card has no OK button")?;
+        press_button(ok);
+        // SAFETY: as above.
+        if !editor.pump_until(STANDARD, |_| unsafe { IsWindow(ok) } == 0 && children_saying(window, HINTS_SETTING_TITLE).is_empty()) {
+            return Err("OK did not take the card away".to_owned());
+        }
+        if hint_how(root, "hints_intro").as_deref() != Some("ok") {
+            return Err(format!("OK was written down as {:?}", hint_how(root, "hints_intro")));
+        }
+        let hotkeys = *children_saying(window, PAGE_NAMES[3].1).first().ok_or("no navigation button to the hotkeys page")?;
+        press_button(hotkeys);
+        if !editor.pump_until(LONG, |_| children_saying(window, LAYOUT_SWITCH_KEY_TITLE).len() >= 2 && hint_how(root, "new_0_70_switch_layout_key").is_some()) {
+            return Err(format!("no card of the news on the hotkeys page: {}", hints_file(root)));
+        }
+        let never = *children_saying(window, HINT_NEVER_LABEL).first().ok_or("the card has no «never» button")?;
+        press_button(never);
+        if !editor.pump_until(STANDARD, |_| config(root, &["general", "hints"]) == json!(false) && children_saying(window, HINT_NEVER_LABEL).is_empty()) {
+            return Err("«больше не показывать» did not turn the hints off".to_owned());
+        }
+        let system = *children_saying(window, PAGE_NAMES[5].1).first().ok_or("no navigation button to the system page")?;
+        press_button(system);
+        if !editor.pump_until(LONG, |_| !children_saying(window, HINTS_SETTING_TITLE).is_empty()) {
+            return Err("the system page has no checkbox of the hints".to_owned());
+        }
+        Ok(())
+    }
+
+    /// A phase of the hints: a program of its own, with a clean data folder holding `seed` as `hints.json`.
+    fn with_program(
+        editor: &Editor, binary: &Path, name: &str, setting: bool, seed: Option<String>, arguments: &[&str],
+        phase: impl FnOnce(&Editor, &Path, u32) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let root = std::env::temp_dir().join(format!("keyswitch-e2e-hints-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        editor.empty();
+        std::fs::create_dir_all(root.join("data")).map_err(|error| error.to_string())?;
+        configure(&root, &[("general.hints", json!(setting))])?;
+        if let Some(seed) = seed {
+            std::fs::write(root.join("data/hints.json"), seed).map_err(|error| error.to_string())?;
+        }
+        let mut child = launch(binary, &root, arguments)?;
+        let outcome = phase(editor, &root, child.id());
+        let _ = child.kill();
+        let _ = child.wait();
+        if outcome.is_err()
+            && let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log"))
+        {
+            println!("{}", log.lines().rev().take(30).collect::<Vec<&str>>().join("\n"));
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        outcome.map_err(|error| format!("{name}: {error}"))
+    }
+
+    /// Every place a hint shows on Windows, and that the card never takes the front or a key.
+    fn hints(editor: &Editor, binary: &Path) -> Result<(), String> {
+        for (name, link) in [("ok", Click::Ok), ("never", Click::Never), ("text", Click::Text)] {
+            with_program(editor, binary, name, true, None, &["--hidden"], |editor, root, process| caret_hint(editor, root, process, link))?;
+            println!("WINDOWS_HINT_CARET_{}_E2E_OK", name.to_uppercase());
+            editor.activate();
+        }
+        with_program(editor, binary, "off", false, None, &["--hidden"], hints_off)?;
+        println!("WINDOWS_HINTS_OFF_E2E_OK");
+        // The file says this is the first start of a new installation, as a run on a clean system would have written.
+        let fresh = format!("{{\"last_run_version\": \"{VERSION}\", \"fresh_install\": true}}");
+        with_program(editor, binary, "tray", true, Some(fresh), &["--hidden"], tray_hint)?;
+        // The file of a version with no hints: the layout switch key is news.
+        let updated = "{\"last_run_version\": \"0.66.0\"}".to_owned();
+        with_program(editor, binary, "settings", true, Some(updated), &[], settings_hints)?;
+        println!("WINDOWS_HINT_SETTINGS_E2E_OK");
+        Ok(())
+    }
+
     fn run(binary: &Path) -> Result<(), String> {
+        // The links of the hint card are clicked by screen coordinates, and those mean pixels only in a program aware of
+        // the scale of the monitor.
+        // SAFETY: a process-wide switch, set before any window of this process exists.
+        unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         let api = Arc::new(NativeWindowsAPI::new());
         hook(&api)?;
         println!("WINDOWS_HOOK_E2E_OK");
@@ -749,7 +1076,14 @@ mod scenario {
             let _ = child.kill();
             let _ = child.wait();
             configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true)), ("detection.layout_switch_key", json!("Shift_L"))])?;
+            let engine_before = engine_ready_line(&root);
+            let restarted = Instant::now();
             child = start(binary, &root)?;
+            // Here an Enter that comes too early is delivered at once and spends an attempt, so the models are waited for.
+            if !editor.pump_until(ENGINE_READY, |_| engine_ready_line(&root).is_some_and(|line| Some(line) != engine_before)) {
+                return Err("the restarted program never brought its engine up".to_owned());
+            }
+            println!("the restarted engine was up after {} ms", restarted.elapsed().as_millis());
             editor.pump(WINDOW_OPENS);
             // The first word after a start waits for the hook, as above.
             let mut attempt = 0;
@@ -769,6 +1103,7 @@ mod scenario {
         })();
         let _ = child.kill();
         let _ = child.wait();
+        let outcome = outcome.and_then(|()| hints(&editor, binary));
         if outcome.is_err() {
             println!("field={:?} group={}", editor.text(), editor.group());
             if let Ok(log) = std::fs::read_to_string(root.join("data/keyswitch.log")) {

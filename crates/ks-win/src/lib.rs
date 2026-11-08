@@ -25,6 +25,9 @@ pub mod windows_registry;
 pub mod windows_system;
 pub use ks_ui::windows_ui_model;
 #[cfg(windows)]
+pub mod hint_card;
+pub mod hint_layout;
+#[cfg(windows)]
 pub mod learning_prompt;
 #[cfg(windows)]
 pub mod rule_editor_dialog;

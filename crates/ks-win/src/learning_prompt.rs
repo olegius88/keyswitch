@@ -81,7 +81,7 @@ fn register() -> bool {
     registered
 }
 
-fn monitor_dpi(point: POINT) -> i32 {
+pub(crate) fn monitor_dpi(point: POINT) -> i32 {
     let (mut x, mut y) = (0u32, 0u32);
     // SAFETY: the monitor is looked up by value; the call fills two numbers.
     let result = unsafe {
@@ -91,7 +91,7 @@ fn monitor_dpi(point: POINT) -> i32 {
     if result == 0 && x > 0 { x.bits::<i32>() } else { BASE_DPI }
 }
 
-fn virtual_screen() -> (i32, i32, i32, i32) {
+pub(crate) fn virtual_screen() -> (i32, i32, i32, i32) {
     // SAFETY: plain metrics queries.
     unsafe {
         (
