@@ -33,6 +33,9 @@ pub const KEPT_WORDS_TAKEN_ALONG: usize = 2;
 pub const MAX_REMEMBERED_APPLICATION_CONTEXTS: usize = 32;
 pub const MAX_WORD_STROKES: usize = 256;
 pub const NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS: usize = 4;
+/// A token whose end the boundary model could not split is taken as a word and its signs when the other layout spells a
+/// known word of at least this many letters. Shorter ones are as often a word and a sign (`vs.` is `мыю`).
+pub const WHOLE_TOKEN_WORD_MIN_LETTERS: usize = 4;
 pub const NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR: f64 = -0.25;
 pub const PAUSE_TRAILING_MAX_KEYS: usize = 8;
 pub const PAUSE_WORD_START_LETTERS: usize = 2;

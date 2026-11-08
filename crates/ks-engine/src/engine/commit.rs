@@ -254,14 +254,14 @@ impl EngineCore {
             if !trailing.is_empty() || head != 0 {
                 self.log_context_wait("context_wait_cancelled", waiting.as_ref(), if trailing.is_empty() { "literal_head" } else { "literal_tail" }, &[]);
             }
-            // A typo is corrected only in a plain word typed as one, after the early switch has let go (typo_plan).
+            // A typo is corrected only in a plain word typed as one (typo_plan). A word the early switch converted is such a
+            // word: its keys are all still here, and most words typed in the wrong layout go that way.
             let plain = !(head != 0
                 || !trailing.is_empty()
                 || !signs.is_empty()
                 || !mention.is_empty()
                 || shown.is_some()
                 || inside.is_some()
-                || early_switch_origin.is_some()
                 || self.insertion.as_ref().is_some_and(InsertionPoint::inside_word));
             if let Some((plan, found)) = joint {
                 self.pending = Some(Self::_replay_sign_with_word(&plan, &opened));

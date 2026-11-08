@@ -20,6 +20,7 @@ use ks_config::config::SettingsStore;
 use ks_config::history::{HistoryStore, history_limit};
 use ks_config::indicator::normalize_indicator_style;
 use ks_config::logsetup::{self, LocalTime};
+use ks_config::selection_commands::SELECTION_NOTICE_TITLE;
 use ks_engine::context_access::ReaderFactory;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_backend::backend::{InputBackend, ScreenAnchor};
@@ -345,6 +346,14 @@ impl App {
                 logsetup::error(LOGGER, &format!("Не удалось запустить установщик KeySwitch: {error}"));
                 self.updates.installation_failed(&error);
             }
+        }
+    }
+
+    /// A selection hotkey that did nothing says why. It answers a key the user has just pressed, so the setting for the
+    /// notices of corrections does not silence it.
+    fn announce_selection_notice(&self, message: &str) {
+        if let Some(tray) = self.tray.borrow().as_ref() {
+            tray.notify(SELECTION_NOTICE_TITLE, message);
         }
     }
 
@@ -757,6 +766,10 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
         engine.subscribe_corrections(Arc::new(|plan: &CorrectionPlan| {
             let plan = plan.clone();
             post(Box::new(move || with_app(|app| app.announce_correction(&plan))));
+        }));
+        engine.subscribe_selection_notices(Arc::new(|message: &str| {
+            let message = message.to_owned();
+            post(Box::new(move || with_app(|app| app.announce_selection_notice(&message))));
         }));
         engine.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| {
             // The caret is looked for on the engine's thread, while the window the user typed in is still the active one.

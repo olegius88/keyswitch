@@ -16,6 +16,7 @@ use ks_config::config::SettingsStore;
 use ks_config::history::{HistoryStore, history_limit};
 use ks_config::learning::{LearnedRule, LearningStore};
 use ks_config::logsetup;
+use ks_config::selection_commands::SELECTION_NOTICE_TITLE;
 use ks_engine::engine::default_learning_store;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
@@ -506,6 +507,10 @@ impl App {
                 let (case_fix, original, replacement) = (plan.case_fix(), plan.original.clone(), plan.replacement.clone());
                 post_app(move |app| app.announce_correction(case_fix, &original, &replacement));
             }));
+            engine.subscribe_selection_notices(Arc::new(|message: &str| {
+                let message = message.to_owned();
+                post_app(move |app| app.announce_selection_notice(&message));
+            }));
             engine.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| match prompt.cloned() {
                 None => post_app(|app| app.apply_learning_prompt(None, None)),
                 Some(prompt) => {
@@ -676,6 +681,15 @@ impl App {
             tray.set_enabled(snapshot.enabled);
         }
         self.with_window(|window| window.apply_engine_snapshot(snapshot));
+    }
+
+    /// A selection hotkey that did nothing says why. It answers a key the user has just pressed, so the setting for the
+    /// notices of corrections does not silence it.
+    pub fn announce_selection_notice(&self, message: &str) {
+        let notification = gio::Notification::new(SELECTION_NOTICE_TITLE);
+        notification.set_body(Some(message));
+        notification.set_icon(&gio::ThemedIcon::new("keyswitch"));
+        self.application.send_notification(None, &notification);
     }
 
     pub fn announce_correction(&self, case_fix: bool, original: &str, replacement: &str) {

@@ -416,6 +416,7 @@ fn app_calls() {
         app.apply_engine_snapshot(&EngineSnapshot::default());
         app.announce_correction(false, "ghbdtn", "привет");
         app.announce_correction(true, "ПРивет", "Привет");
+        app.announce_selection_notice("Нет выделенного текста");
         let prompt = LearningPrompt { source_group: 0, target_group: 1, original: "ghbdtn".to_owned(), replacement: "привет".to_owned(), application: "app".to_owned(), action: RuleAction::Convert };
         app.apply_learning_prompt(Some(prompt.clone()), Some(PromptAnchor { x: 10, y: 10, window: None }));
         app.apply_learning_prompt(None, None);

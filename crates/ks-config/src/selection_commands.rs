@@ -53,6 +53,9 @@ pub fn refusal_message(reason: RefusalReason) -> String {
     }
 }
 
+/// The title of the notice a selection hotkey that could not do its work leaves.
+pub const SELECTION_NOTICE_TITLE: &str = "Команда для выделенного текста";
+
 /// The command a selection hotkey runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectionCommand {

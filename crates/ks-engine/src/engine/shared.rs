@@ -55,6 +55,7 @@ struct Inbox {
 
 pub(super) type SnapshotCallback = Arc<dyn Fn(&EngineSnapshot) + Send + Sync>;
 pub(super) type CorrectionCallback = Arc<dyn Fn(&CorrectionPlan) + Send + Sync>;
+pub(super) type SelectionNoticeCallback = Arc<dyn Fn(&str) + Send + Sync>;
 pub(super) type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
 pub(super) type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
 
@@ -63,6 +64,7 @@ struct Guarded {
     snapshot: EngineSnapshot,
     callbacks: Vec<SnapshotCallback>,
     correction_callbacks: Vec<CorrectionCallback>,
+    selection_notice_callbacks: Vec<SelectionNoticeCallback>,
     learning_prompt: Option<LearningPrompt>,
     learning_prompt_deadline: Option<f64>,
     learning_prompt_callbacks: Vec<LearningPromptCallback>,
@@ -135,6 +137,7 @@ impl Shared {
                 snapshot,
                 callbacks: Vec::new(),
                 correction_callbacks: Vec::new(),
+                selection_notice_callbacks: Vec::new(),
                 learning_prompt: None,
                 learning_prompt_deadline: None,
                 learning_prompt_callbacks: Vec::new(),
@@ -454,6 +457,14 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
 
     pub fn subscribe_corrections(&self, callback: CorrectionCallback) {
         locked(&self.guarded).correction_callbacks.push(callback);
+    }
+
+    pub fn subscribe_selection_notices(&self, callback: SelectionNoticeCallback) {
+        locked(&self.guarded).selection_notice_callbacks.push(callback);
+    }
+
+    pub fn selection_notice_callbacks(&self) -> Vec<SelectionNoticeCallback> {
+        locked(&self.guarded).selection_notice_callbacks.clone()
     }
 
     pub fn correction_callbacks(&self) -> Vec<CorrectionCallback> {

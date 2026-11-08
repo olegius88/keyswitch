@@ -4,6 +4,11 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A word typed in the wrong layout whose last letter sits on a key that is a sign in that layout is converted on its own: `nehybhf[` is `турнирах`, `cntgtym.` is `степенью`. Such a word used to wait for the next word to bring it along, so typed alone or last it stayed as typed. Of the 33,112 words of six letters or more in the Russian frequency list, 40 stayed in the wrong layout and none do now; 29,346 English words followed by a sign stay as they were.
+- A slip in a word typed in the wrong layout is corrected together with the layout also when the early switch converted the word while it was being typed, as most such words are: `gcb[jkujbb` is `психологии`.
+- A selection hotkey that could not do its work says why in a notification (nothing selected, several lines, characters no layout has, a field that cannot be changed). It used to say so only on the status line of the settings window, and looked as if the hotkey did not work.
+- Windows: the first selection hotkey in a window of Chrome, Edge or an Electron program works. Such a window builds its accessibility tree the first time it is asked, and until then the hotkey found no field in it and did nothing.
+
 ## 0.70.0 — 2026-11-08
 
 - KeySwitch is written in Rust: no Python is left in the program, its packages or its tools. It decides every word as 0.66.2 does: the models and word lists are the same files byte for byte, the recorded real typing (57 200 words over 24 recordings) comes out the same word for word, with the Hunspell dictionaries and without them, and the 892 recorded runs of the old engine's tests replay against the new one in CI (850 compared entry by entry, 0 differ; 2 do not run and 40 are left out where those tests replaced parts of the engine).

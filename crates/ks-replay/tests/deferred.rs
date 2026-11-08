@@ -164,6 +164,7 @@ fn an_engine_starts_once_and_says_why_it_cannot() {
     let sink = heard.clone();
     engine.subscribe(Arc::new(move |snapshot| sink.lock().unwrap().push(snapshot.last_action.clone())));
     engine.subscribe_corrections(Arc::new(|_| {}));
+    engine.subscribe_selection_notices(Arc::new(|_| {}));
     engine.subscribe_learning_prompts(Arc::new(|_| {}));
     engine.subscribe_rule_requests(Arc::new(|_| {}));
     engine.set_test_field_focused(true);

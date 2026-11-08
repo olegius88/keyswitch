@@ -1,5 +1,5 @@
-//! Streams of public words typed through the engine: every word must come out as it did from the last Python build, without
-//! Hunspell and with it.
+//! Streams of public words typed through the engine: every word must come out as the fixtures have it, without Hunspell and
+//! with it. The Python build wrote them; a release that means to change a word writes them again.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;
@@ -43,7 +43,7 @@ fn assert_same(output: &Output) {
 }
 
 #[test]
-fn every_word_comes_out_as_it_did_from_python() {
+fn every_word_comes_out_as_recorded() {
     let folder = std::env::temp_dir().join(format!("ks-battery-{}", std::process::id()));
     std::fs::create_dir_all(&folder).expect("the folder");
     unpacked("battery-public.jsonl", &folder);
@@ -89,7 +89,7 @@ fn pinned_dictionaries() -> Result<(), String> {
 /// replay without it decides otherwise: the replay with `--speller` must answer as the Python's replay whose reference
 /// models spell-check (`reference_models(True)`), not as the one without.
 #[test]
-fn with_hunspell_every_word_comes_out_as_it_did_from_python_with_it() {
+fn with_hunspell_every_word_comes_out_as_recorded_with_it() {
     if let Err(missing) = pinned_dictionaries() {
         eprintln!("{missing}: skipped");
         return;

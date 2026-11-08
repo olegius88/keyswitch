@@ -2110,6 +2110,74 @@ fn without_a_caret_or_an_edit_field_nothing_is_copied() {
     assert!(api.state().caret_windows.iter().all(|&window| window == WINDOWS_FAKE_HWND));
 }
 
+fn chromium_backend(api: &Arc<FakeWindowsAPI>, reader: &SharedScript) -> WindowsBackend {
+    api.state().caret = false;
+    api.state().window_classes.insert(WINDOWS_FAKE_HWND, CHROMIUM_WINDOW_CLASS.to_owned());
+    backend_with(api, FakeClock::stepping(0.0), Arc::clone(reader))
+}
+
+#[test]
+fn a_chromium_window_gets_time_to_build_its_accessibility_tree() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let reader = script(|script| {
+        script.shown = Some("ghbdtn".to_owned());
+        script.late = 3;
+    });
+    let selected = chromium_backend(&api, &reader).read_selection("msedge", SELECTION_FIXTURE_WINDOW).unwrap();
+    assert_eq!(selected, selected_by(SOURCE_UIA, "ghbdtn"));
+    assert_eq!(reader.lock().unwrap().windows.len(), 4);
+    assert!(api.sent().is_empty());
+}
+
+#[test]
+fn a_chromium_window_that_names_its_field_late_is_copied() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let reader = script(|_| {});
+    let looks = Arc::new(AtomicUsize::new(0));
+    let (named, counted) = (Arc::clone(&reader), Arc::clone(&looks));
+    reader.lock().unwrap().on_read = Some(Arc::new(move || {
+        if counted.fetch_add(1, Ordering::SeqCst) == 2 {
+            named.lock().unwrap().editable = Ok(true);
+        }
+    }));
+    let selected = chromium_backend(&api, &reader).read_selection("msedge", SELECTION_FIXTURE_WINDOW).unwrap();
+    assert_eq!(selected, selected_by(SOURCE_CLIPBOARD, "ghbdtn"));
+    assert_eq!(api.sent(), [copy_keys()]);
+}
+
+#[test]
+fn a_chromium_window_with_no_field_is_refused_when_the_wait_is_over() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let reader = script(|_| {});
+    assert_eq!(refusal(&chromium_backend(&api, &reader)), RefusalReason::NoCaret);
+    // Every poll of the wait asked once more; the sum of the polls may land on either side of the deadline.
+    let looks = reader.lock().unwrap().windows.len();
+    assert!((15..=17).contains(&looks), "{looks}");
+    assert!(api.sent().is_empty());
+}
+
+#[test]
+fn what_a_chromium_window_refuses_while_it_is_waited_for_stands() {
+    let api = FakeWindowsAPI::with_clipboard();
+    let reader = script(|_| {});
+    let (refusing, looks) = (Arc::clone(&reader), Arc::new(AtomicUsize::new(0)));
+    reader.lock().unwrap().on_read = Some(Arc::new(move || {
+        if looks.fetch_add(1, Ordering::SeqCst) == 0 {
+            refusing.lock().unwrap().answer = Err(SelectionError::Refused(SelectionRefused::new(RefusalReason::ReadOnly)));
+        }
+    }));
+    assert_eq!(refusal(&chromium_backend(&api, &reader)), RefusalReason::ReadOnly);
+}
+
+#[test]
+fn only_a_chromium_window_is_waited_for() {
+    let api = FakeWindowsAPI::with_clipboard();
+    api.state().caret = false;
+    let reader = script(|_| {});
+    assert_eq!(refusal(&reading_backend(&api, &reader)), RefusalReason::NoCaret);
+    assert_eq!(reader.lock().unwrap().windows.len(), 1);
+}
+
 #[test]
 fn an_edit_field_ui_automation_names_is_copied_without_a_caret() {
     let api = FakeWindowsAPI::with_clipboard();

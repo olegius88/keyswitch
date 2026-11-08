@@ -56,6 +56,22 @@ impl EngineCore {
             || natural_source_boundary)
     }
 
+    /// How many of the last `tail` keys are signs, when the other layout spells a known word with the rest and the keys
+    /// before the signs spell none here: `nehybhf[` is `турнирах` and no sign, `Ljk.?` is `Долю` and a question mark.
+    #[must_use]
+    pub fn signs_after_known_word(&self, strokes: &[Stroke], tail: usize, source_group: i64, target: i64) -> Option<usize> {
+        let stem = LanguageModel::normalize(&text_for_group(&strokes[..strokes.len() - tail], source_group));
+        if self.model(source_group).frequencies.contains(&stem) {
+            return None;
+        }
+        (0..=tail).find(|signs| {
+            let word = text_for_group(&strokes[..strokes.len() - signs], target);
+            pystr::isalpha(&word)
+                && pystr::len(&word) >= WHOLE_TOKEN_WORD_MIN_LETTERS
+                && self.model(target).frequencies.contains(&pystr::casefold(&word))
+        })
+    }
+
     /// The word's keys, the signs split off its end, whether its segmentation is certain, and
     /// whether the boundary model, asked, could not split it (it abstained).
     pub fn completed_word(&mut self, strokes: &[Stroke], source_group: i64) -> (Strokes, Strokes, bool, bool) {
@@ -109,7 +125,11 @@ impl EngineCore {
             "candidates": tail + 1, "observed_characters": strokes.len(),
         );
         match length {
-            None => (whole(), Vec::new(), false, true),
+            // The model could not tell a letter on a sign's key from a sign: a dictionary can.
+            None => match self.signs_after_known_word(strokes, tail, source_group, target) {
+                Some(signs) => (strokes[..strokes.len() - signs].to_vec(), strokes[strokes.len() - signs..].to_vec(), true, false),
+                None => (whole(), Vec::new(), false, true),
+            },
             Some(0) => (whole(), Vec::new(), true, false),
             Some(length) => (strokes[..strokes.len() - length].to_vec(), strokes[strokes.len() - length..].to_vec(), true, false),
         }
