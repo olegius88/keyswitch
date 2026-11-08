@@ -141,6 +141,8 @@ pub const AX_SUCCESS: i32 = 0;
 pub const DISPATCH_TIME_NOW: u64 = 0;
 /// `AXValue` wrapping a `CFRange`, from AXValue.h.
 pub const AX_VALUE_TYPE_CF_RANGE: u32 = 4;
+/// `kAXValueCGRectType` of `AXValue.h`.
+pub const AX_VALUE_TYPE_CG_RECT: u32 = 3;
 /// `NSApplication` presents no dock icon and no menu bar of its own.
 pub const ACTIVATION_POLICY_ACCESSORY: isize = 1;
 /// `NSApplication` with a dock icon and a menu bar, for as long as the settings window is open.
@@ -204,3 +206,42 @@ pub const LAUNCH_AGENTS_DIRECTORY: &str = "Library/LaunchAgents";
 /// The bundle identifier of the application, which also labels its launch agent.
 pub const APP_ID: &str = "io.github.olegius88.KeySwitch";
 pub const BACKEND_LABEL: &str = "CGEventTap + CGEventPost";
+
+// ---- the one-time hints (`hint_place`, `hint_panel`): points of the screen
+/// Between the caret, or the menu bar item, and the panel of a hint.
+pub const HINT_PANEL_GAP_POINTS: f64 = 8.0;
+/// How far a panel keeps from the edge of a display.
+pub const HINT_SCREEN_MARGIN_POINTS: f64 = 8.0;
+/// Around the rows of a card.
+pub const HINT_CARD_PADDING_POINTS: f64 = 12.0;
+pub const HINT_BUTTON_HEIGHT_POINTS: f64 = 28.0;
+/// Between the text of a card and its buttons.
+pub const HINT_BUTTON_ROW_GAP_POINTS: f64 = 10.0;
+/// Between the two buttons of a card, and under its title.
+pub const HINT_CARD_SPACING_POINTS: f64 = 8.0;
+pub const HINT_CARD_TITLE_FONT_POINTS: f64 = 13.0;
+/// How tall a label may ask to be: its width limits it first.
+pub const HINT_LABEL_UNLIMITED_HEIGHT_POINTS: f64 = 10000.0;
+/// How far the frame of a marked control stands from it, how wide it is and how round its corners are.
+pub const HINT_MARKER_INSET_POINTS: f64 = 3.0;
+pub const HINT_MARKER_BORDER_POINTS: f64 = 2.0;
+pub const HINT_MARKER_CORNER_POINTS: f64 = 4.0;
+pub const HINT_CARD_CORNER_POINTS: f64 = 6.0;
+/// The slots of the buttons of a hint (`hint_place`): the panel, then the settings window's pages by index. Tags count the
+/// clicks of one slot before the next slot starts, as one target serves them all.
+pub const PANEL_SLOT: isize = 0;
+pub const HINT_FIRST_PAGE_SLOT: isize = 1;
+pub const HINT_CLICKS_PER_SLOT: isize = 3;
+pub const HINT_CLICK_OK: isize = 0;
+pub const HINT_CLICK_NEVER: isize = 1;
+pub const HINT_CLICK_TEXT: isize = 2;
+/// `NSWindowStyleMaskTitled`.
+pub const WINDOW_STYLE_TITLED: u64 = 1;
+/// `NSWindowCollectionBehaviorCanJoinAllSpaces` and `NSWindowCollectionBehaviorFullScreenAuxiliary`: the panel shows wherever
+/// the user is typing, a full screen program included.
+pub const WINDOW_COLLECTION_ALL_SPACES: u64 = (1 << 0) | (1 << 8);
+/// `NSBoxCustom` and `NSNoTitle`: a card or a marker draws only what is set on it.
+pub const BOX_TYPE_CUSTOM: u64 = 4;
+pub const BOX_TITLE_NONE: u64 = 0;
+/// `NSWindowBelow`: a marker lies under its control, so that the control keeps its clicks.
+pub const WINDOW_ORDER_BELOW: isize = -1;

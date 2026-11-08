@@ -9,13 +9,17 @@ use ks_config::history::data_dir;
 use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
+use ks_ui::hints::{HintView, Place};
 use ks_ui::windows_ui_model::{SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
 use serde_json::{Value, json};
 
-use crate::desktop_app::{Services, awaiting_permission, quit};
+use crate::constants::{BOX_TITLE_NONE, BOX_TYPE_CUSTOM, HINT_CARD_CORNER_POINTS, HINT_MARKER_BORDER_POINTS, HINT_MARKER_CORNER_POINTS, HINT_MARKER_INSET_POINTS, WINDOW_ORDER_BELOW};
+use crate::desktop_app::{self, Services, awaiting_permission, quit};
+use crate::hint_panel::{card_view, hint_target};
+use crate::hint_place::{page_slot, settings_page};
 use crate::macos_app::{PERMISSION_WAIT_STATUS, VERSION};
 use crate::macos_native::run_on_main;
 use crate::macos_system::MacApplicationCatalog;
@@ -24,22 +28,22 @@ use crate::macos_objc::{Id, open_path, string, text_of};
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Point {
-    x: f64,
-    y: f64,
+    pub x: f64,
+    pub y: f64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Size {
-    width: f64,
-    height: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Rect {
-    origin: Point,
-    size: Size,
+    pub origin: Point,
+    pub size: Size,
 }
 
 // SAFETY: the layouts are those of CGPoint, CGSize and CGRect, as their encodings say.
@@ -59,7 +63,8 @@ unsafe impl RefEncode for Rect {
     const ENCODING_REF: Encoding = Encoding::Pointer(&Self::ENCODING);
 }
 
-fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
+#[must_use]
+pub fn rect(x: f64, y: f64, width: f64, height: f64) -> Rect {
     Rect { origin: Point { x, y }, size: Size { width, height } }
 }
 
@@ -68,10 +73,10 @@ const WINDOW_HEIGHT: f64 = 620.0;
 const PAGE_WIDTH: f64 = 700.0;
 const MARGIN: f64 = 16.0;
 const STYLE_TITLED_CLOSABLE_MINIATURIZABLE: u64 = 1 | 2 | 4;
-const STYLE_PANEL_NONACTIVATING: u64 = 1 << 7;
-const BUFFERED: u64 = 2;
+pub const STYLE_PANEL_NONACTIVATING: u64 = 1 << 7;
+pub const BUFFERED: u64 = 2;
 const BUTTON_TYPE_SWITCH: u64 = 3;
-const WINDOW_LEVEL_FLOATING: isize = 3;
+pub const WINDOW_LEVEL_FLOATING: isize = 3;
 
 const PAGES: [(&str, &str); 10] = [
     ("overview", "Обзор"),
@@ -115,6 +120,27 @@ struct Ui {
     rules: Id,
     prompt: Id,
     prompt_text: Id,
+    pages: Vec<PageView>,
+    cards: Vec<HintCard>,
+    /// The control a hint led to when its text was clicked.
+    marked: Id,
+}
+
+/// A tab's scrolling view and how tall it is now.
+struct PageView {
+    identifier: &'static str,
+    document: Id,
+    height: f64,
+}
+
+/// A hint on top of a page: the page's controls moved down by `shift` to make room.
+struct HintCard {
+    id: &'static str,
+    slot: isize,
+    page: usize,
+    view: Id,
+    marker: Id,
+    shift: f64,
 }
 
 thread_local! {
@@ -137,11 +163,18 @@ extern "C-unwind" fn control_changed(_this: &AnyObject, _selector: Sel, sender: 
 /// Closing the window hides it, or ends the program when the setting says so and nothing else is left to reach it.
 extern "C-unwind" fn window_will_close(_this: &AnyObject, _selector: Sel, _notification: *mut AnyObject) {
     run_on_main(Box::new(|| {
+        // A card counts as shown once drawn: the next opening of the window does not bring it back.
+        remove_hint_cards();
         let keep = with_ui(|ui| setting_is_on(ui, "general.close_to_tray") && setting_is_on(ui, "appearance.show_indicator"));
         if keep == Some(false) {
             quit();
         }
     }));
+}
+
+/// Another page is in front: the hints may have something to say on it.
+extern "C-unwind" fn tab_selected(_this: &AnyObject, _selector: Sel, _tabs: *mut AnyObject, _item: *mut AnyObject) {
+    run_on_main(Box::new(show_page_card));
 }
 
 fn setting_is_on(ui: &Ui, path: &str) -> bool {
@@ -169,6 +202,7 @@ fn register_classes() -> Option<&'static AnyClass> {
         target.add_method(sel!(controlChanged:), { let method: extern "C-unwind" fn(_, _, _) = control_changed; method });
         target.add_method(sel!(buttonPressed:), { let method: extern "C-unwind" fn(_, _, _) = button_pressed; method });
         target.add_method(sel!(windowWillClose:), { let method: extern "C-unwind" fn(_, _, _) = window_will_close; method });
+        target.add_method(sel!(tabView:didSelectTabViewItem:), { let method: extern "C-unwind" fn(_, _, _, _) = tab_selected; method });
     }
     Some(target.register())
 }
@@ -447,6 +481,147 @@ impl Ui {
     }
 }
 
+/// A box drawing only a frame, around `control` and under it, so that the control keeps its clicks. Autoreleased.
+fn marker_around(control: Id) -> Id {
+    // SAFETY: messages on the main thread; the box stays alive as a subview of the control's page.
+    unsafe {
+        let frame: Rect = msg_send![control, frame];
+        let allocated: Id = msg_send![class!(NSBox), alloc];
+        let marker: Id = msg_send![allocated, initWithFrame: rect(frame.origin.x - HINT_MARKER_INSET_POINTS, frame.origin.y - HINT_MARKER_INSET_POINTS, frame.size.width + 2.0 * HINT_MARKER_INSET_POINTS, frame.size.height + 2.0 * HINT_MARKER_INSET_POINTS)];
+        let _: Id = msg_send![marker, autorelease];
+        let _: () = msg_send![marker, setBoxType: BOX_TYPE_CUSTOM];
+        let _: () = msg_send![marker, setTitlePosition: BOX_TITLE_NONE];
+        let color: Id = msg_send![class!(NSColor), systemOrangeColor];
+        let _: () = msg_send![marker, setBorderColor: color];
+        let _: () = msg_send![marker, setBorderWidth: HINT_MARKER_BORDER_POINTS];
+        let _: () = msg_send![marker, setCornerRadius: HINT_MARKER_CORNER_POINTS];
+        let parent: Id = msg_send![control, superview];
+        let _: () = msg_send![parent, addSubview: marker, positioned: WINDOW_ORDER_BELOW, relativeTo: control];
+        marker
+    }
+}
+
+fn remove_from_page(view: Id) {
+    if !view.is_null() {
+        // SAFETY: a message on the main thread to a live view; its parent gives up its reference.
+        unsafe {
+            let _: () = msg_send![view, removeFromSuperview];
+        }
+    }
+}
+
+/// Moves every view of a page down by `by`, or up when `by` is negative.
+fn shift_views(document: Id, by: f64) {
+    // SAFETY: messages on the main thread to the page and its live subviews.
+    unsafe {
+        let views: Id = msg_send![document, subviews];
+        let count: usize = msg_send![views, count];
+        for index in 0..count {
+            let view: Id = msg_send![views, objectAtIndex: index];
+            let frame: Rect = msg_send![view, frame];
+            let _: () = msg_send![view, setFrameOrigin: Point { x: frame.origin.x, y: frame.origin.y + by }];
+        }
+    }
+}
+
+impl Ui {
+    /// The page in front, if the window is on screen.
+    fn shown_page(&mut self) -> Option<(usize, &'static str)> {
+        objc2::rc::autoreleasepool(|_| {
+            // SAFETY: messages on the main thread to the window this module owns.
+            unsafe {
+                let visible: bool = msg_send![self.window, isVisible];
+                if !visible {
+                    return None;
+                }
+                let item: Id = msg_send![self.tabs, selectedTabViewItem];
+                let identifier: Id = msg_send![item, identifier];
+                let identifier = text_of(identifier);
+                self.pages.iter().position(|page| page.identifier == identifier).map(|index| (index, self.pages[index].identifier))
+            }
+        })
+    }
+
+    fn control_of(&self, path: &str) -> Option<Id> {
+        self.specs.iter().position(|spec| spec.path == path).and_then(|index| self.controls.get(index).copied())
+    }
+
+    /// Takes the page's views down by the card's height and puts the card on top, the control it is about marked.
+    fn add_hint_card(&mut self, index: usize, view: &HintView) {
+        let Some(target) = hint_target() else { return };
+        let Some(document) = self.pages.get(index).map(|page| page.document) else { return };
+        let width = PAGE_WIDTH - 2.0 * MARGIN;
+        let (card, shift, marker) = objc2::rc::autoreleasepool(|_| {
+            let (content, height) = card_view(view, width, page_slot(index.to::<isize>()), target, Some(view.title));
+            let shift = height + MARGIN;
+            shift_views(document, shift);
+            // SAFETY: messages on the main thread to the page; the card stays alive as its subview.
+            let card = unsafe {
+                let allocated: Id = msg_send![class!(NSBox), alloc];
+                let card: Id = msg_send![allocated, initWithFrame: rect(MARGIN, MARGIN, width, height)];
+                let _: Id = msg_send![card, autorelease];
+                let _: () = msg_send![card, setBoxType: BOX_TYPE_CUSTOM];
+                let _: () = msg_send![card, setTitlePosition: BOX_TITLE_NONE];
+                let _: () = msg_send![card, setContentViewMargins: Size { width: 0.0, height: 0.0 }];
+                let color: Id = msg_send![class!(NSColor), controlAccentColor];
+                let _: () = msg_send![card, setBorderColor: color];
+                let _: () = msg_send![card, setCornerRadius: HINT_CARD_CORNER_POINTS];
+                let _: () = msg_send![card, setContentView: content];
+                card
+            };
+            add(document, card);
+            let marker = if let Place::Settings { control: Some(path), .. } = view.place {
+                self.control_of(path).map_or(std::ptr::null_mut(), marker_around)
+            } else {
+                std::ptr::null_mut()
+            };
+            (card, shift, marker)
+        });
+        self.pages[index].height += shift;
+        self.fit_page(index, document);
+        self.cards.push(HintCard { id: view.id, slot: page_slot(index.to::<isize>()), page: index, view: card, marker, shift });
+        // SAFETY: a message on the main thread to the page; the card stands at its top.
+        unsafe {
+            let _: () = msg_send![document, scrollPoint: Point { x: 0.0, y: 0.0 }];
+        }
+    }
+
+    fn fit_page(&self, index: usize, document: Id) {
+        // SAFETY: a message on the main thread to the page.
+        unsafe {
+            let _: () = msg_send![document, setFrameSize: Size { width: PAGE_WIDTH, height: self.pages[index].height }];
+        }
+    }
+
+    fn take_down(&mut self, card: &HintCard) {
+        remove_from_page(card.view);
+        remove_from_page(card.marker);
+        let document = self.pages[card.page].document;
+        shift_views(document, -card.shift);
+        self.pages[card.page].height -= card.shift;
+        self.fit_page(card.page, document);
+    }
+
+    fn unmark(&mut self) {
+        remove_from_page(self.marked);
+        self.marked = std::ptr::null_mut();
+    }
+
+    /// Brings a setting into view and marks it.
+    fn mark_setting(&mut self, path: &str) {
+        self.unmark();
+        let Some(control) = self.control_of(path) else { return };
+        objc2::rc::autoreleasepool(|_| {
+            self.marked = marker_around(control);
+            // SAFETY: messages on the main thread to a live control of this window.
+            unsafe {
+                let bounds: Rect = msg_send![control, bounds];
+                let _: bool = msg_send![control, scrollRectToVisible: bounds];
+            }
+        });
+    }
+}
+
 fn action(tag: isize) {
     match tag {
         ACTION_SAVE_EXCLUSIONS => {
@@ -517,11 +692,15 @@ pub fn create(services: Arc<Services>) {
                 rules: std::ptr::null_mut(),
                 prompt: std::ptr::null_mut(),
                 prompt_text: std::ptr::null_mut(),
+                pages: Vec::new(),
+                cards: Vec::new(),
+                marked: std::ptr::null_mut(),
             };
             for (identifier, title) in PAGES {
                 let page = new_page();
                 let height = build_page(&mut ui, identifier, page);
                 let _: () = msg_send![page, setFrame: rect(0.0, 0.0, PAGE_WIDTH, height + MARGIN)];
+                ui.pages.push(PageView { identifier, document: page, height: height + MARGIN });
                 let scroll: Id = msg_send![class!(NSScrollView), new];
                 let _: () = msg_send![scroll, setHasVerticalScroller: true];
                 let _: () = msg_send![scroll, setDocumentView: page];
@@ -531,6 +710,8 @@ pub fn create(services: Arc<Services>) {
                 let _: () = msg_send![item, setView: scroll];
                 let _: () = msg_send![tabs, addTabViewItem: item];
             }
+            // After the pages: adding them selects them one by one before anything is on screen.
+            let _: () = msg_send![tabs, setDelegate: target];
             ui.refresh_status();
             ui.refresh_exclusions();
             ui.refresh_rules();
@@ -636,7 +817,9 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
 
 /// Shows the window, on a page when one is named.
 pub fn show(page: Option<&'static str>) {
-    with_ui(|ui| {
+    let opened = with_ui(|ui| {
+        // SAFETY: a message on the main thread to the window this module owns.
+        let was_visible: bool = unsafe { msg_send![ui.window, isVisible] };
         objc2::rc::autoreleasepool(|_| {
             // SAFETY: messages on the main thread to the window this module owns.
             unsafe {
@@ -653,7 +836,54 @@ pub fn show(page: Option<&'static str>) {
         ui.refresh_history();
         ui.refresh_rules();
         ui.load_catalog();
+        !was_visible
     });
+    if opened == Some(true) {
+        desktop_app::hints_settings_opened();
+    }
+    run_on_main(Box::new(show_page_card));
+}
+
+/// The window on `page`, with the setting a hint is about brought into view and marked.
+pub fn show_setting(page: &'static str, setting: Option<&'static str>) {
+    show(Some(page));
+    if let Some(setting) = setting {
+        with_ui(|ui| ui.mark_setting(setting));
+    }
+}
+
+/// The card of the page in front, when the hints have one for it: it counts as shown once asked for, so only a page the
+/// user is looking at asks.
+fn show_page_card() {
+    let Some((index, identifier)) = with_ui(Ui::shown_page).flatten() else { return };
+    let Some(card) = settings_page(identifier).and_then(desktop_app::hint_card) else { return };
+    with_ui(|ui| ui.add_hint_card(index, &card));
+}
+
+/// Takes down the card of hint `id`, if a page shows it.
+pub fn remove_hint_card(id: &str) {
+    with_ui(|ui| {
+        if let Some(position) = ui.cards.iter().position(|card| card.id == id) {
+            let card = ui.cards.remove(position);
+            ui.take_down(&card);
+        }
+    });
+}
+
+/// Takes down every card: the window closed, or the hints were turned off.
+pub fn remove_hint_cards() {
+    with_ui(|ui| {
+        for card in std::mem::take(&mut ui.cards) {
+            ui.take_down(&card);
+        }
+        ui.unmark();
+    });
+}
+
+/// The hint on the card of a button's `slot`.
+#[must_use]
+pub fn hint_card_id(slot: isize) -> Option<&'static str> {
+    with_ui(|ui| ui.cards.iter().find(|card| card.slot == slot).map(|card| card.id)).flatten()
 }
 
 /// The program's windows in the chosen appearance; "system" leaves it to macOS.

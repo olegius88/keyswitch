@@ -7,6 +7,7 @@ crates/ks-linux/src/wayland_access.rs
 crates/ks-linux/src/wayland_native.rs
 crates/ks-linux/src/x11_native.rs
 crates/ks-mac/src/desktop_app.rs
+crates/ks-mac/src/hint_panel.rs
 crates/ks-mac/src/macos_native.rs
 crates/ks-mac/src/macos_objc.rs
 crates/ks-mac/src/macos_tray_native.rs

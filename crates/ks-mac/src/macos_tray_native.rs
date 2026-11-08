@@ -3,7 +3,7 @@
 //! from its own.
 #![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 #[cfg(target_os = "macos")]
-pub use native::StatusItem;
+pub use native::{StatusItem, status_item_frame};
 
 #[cfg(target_os = "macos")]
 mod native {
@@ -16,7 +16,9 @@ mod native {
     use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
     use objc2::{class, msg_send, sel};
 
+    use crate::hint_place::Frame;
     use crate::macos_objc::{Id, string};
+    use crate::settings_window::Rect;
 
     /// `NSVariableStatusItemLength`.
     const VARIABLE_STATUS_ITEM_LENGTH: f64 = -1.0;
@@ -93,6 +95,31 @@ mod native {
             }
         });
         guard.entries = entries;
+    }
+
+    /// Where the item stands on the bar, in `AppKit`'s coordinates: the frame of the window the bar gives its button. None
+    /// without an item, as when its setting is off.
+    #[must_use]
+    pub fn status_item_frame() -> Option<Frame> {
+        let item = locked().item.pointer_mut::<AnyObject>();
+        if item.is_null() {
+            return None;
+        }
+        objc2::rc::autoreleasepool(|_| {
+            // SAFETY: messages on the main thread to the status item this module owns and its button.
+            unsafe {
+                let button: Id = msg_send![item, button];
+                if button.is_null() {
+                    return None;
+                }
+                let window: Id = msg_send![button, window];
+                if window.is_null() {
+                    return None;
+                }
+                let frame: Rect = msg_send![window, frame];
+                Some(Frame { x: frame.origin.x, y: frame.origin.y, width: frame.size.width, height: frame.size.height })
+            }
+        })
     }
 
     /// The item of the menu bar; every method runs on the main thread.

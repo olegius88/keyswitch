@@ -12,7 +12,8 @@ use ks_backend::constants::{ALT_MASK, CONTROL_MASK, LOCK_MASK, SHIFT_MASK};
 use ks_backend::{BackendError, ScreenAnchor};
 use objc2::msg_send;
 
-use crate::constants::{DISPATCH_TIME_NOW, CF_STRING_ENCODING_UTF8, CF_STRING_MAX_BYTES, CF_NUMBER_SINT32_TYPE, UC_MODIFIER_SHIFT, UC_MODIFIER_ALPHA_LOCK, UC_MODIFIER_OPTION, UC_MODIFIER_CONTROL, WINDOW_LIST_ON_SCREEN_ONLY, WINDOW_LIST_EXCLUDE_DESKTOP, NULL_WINDOW_ID, NORMAL_WINDOW_LAYER, EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT, EVENT_LEFT_MOUSE_DOWN, EVENT_RIGHT_MOUSE_DOWN, EVENT_OTHER_MOUSE_DOWN, EVENT_SCROLL_WHEEL, EVENT_SOURCE_USER_DATA_FIELD, KEYBOARD_EVENT_KEYCODE_FIELD, EVENT_FLAGS_CHANGED, EVENT_KEY_DOWN, EVENT_MARK_INJECTED, EVENT_MARK_REPLAYED, MACOS_MAIN_THREAD_WAIT_SECONDS, MACOS_TAP_MAIN_THREAD_WAIT_SECONDS, MACOS_LAYOUT_SWITCH_WAIT_SECONDS, UC_KEY_TRANSLATE_BUFFER_CHARACTERS, UC_KEY_ACTION_DISPLAY, UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, EVENT_FLAG_SHIFT, EVENT_FLAG_DEVICE_LEFT_SHIFT, EVENT_FLAG_COMMAND, EVENT_FLAG_DEVICE_LEFT_COMMAND, SESSION_EVENT_TAP, EVENT_FLAG_ALPHA_SHIFT, EVENT_KEY_UP, HEAD_INSERT_EVENT_TAP, EVENT_TAP_OPTION_DEFAULT, EVENT_TAP_RUN_LOOP_SLICE_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS, AX_SUCCESS, AX_VALUE_TYPE_CF_RANGE};
+use crate::constants::{DISPATCH_TIME_NOW, CF_STRING_ENCODING_UTF8, CF_STRING_MAX_BYTES, CF_NUMBER_SINT32_TYPE, UC_MODIFIER_SHIFT, UC_MODIFIER_ALPHA_LOCK, UC_MODIFIER_OPTION, UC_MODIFIER_CONTROL, WINDOW_LIST_ON_SCREEN_ONLY, WINDOW_LIST_EXCLUDE_DESKTOP, NULL_WINDOW_ID, NORMAL_WINDOW_LAYER, EVENT_TAP_DISABLED_BY_TIMEOUT, EVENT_TAP_DISABLED_BY_USER_INPUT, EVENT_LEFT_MOUSE_DOWN, EVENT_RIGHT_MOUSE_DOWN, EVENT_OTHER_MOUSE_DOWN, EVENT_SCROLL_WHEEL, EVENT_SOURCE_USER_DATA_FIELD, KEYBOARD_EVENT_KEYCODE_FIELD, EVENT_FLAGS_CHANGED, EVENT_KEY_DOWN, EVENT_MARK_INJECTED, EVENT_MARK_REPLAYED, MACOS_MAIN_THREAD_WAIT_SECONDS, MACOS_TAP_MAIN_THREAD_WAIT_SECONDS, MACOS_LAYOUT_SWITCH_WAIT_SECONDS, UC_KEY_TRANSLATE_BUFFER_CHARACTERS, UC_KEY_ACTION_DISPLAY, UC_KEY_TRANSLATE_NO_DEAD_KEYS_MASK, EVENT_FLAG_SHIFT, EVENT_FLAG_DEVICE_LEFT_SHIFT, EVENT_FLAG_COMMAND, EVENT_FLAG_DEVICE_LEFT_COMMAND, SESSION_EVENT_TAP, EVENT_FLAG_ALPHA_SHIFT, EVENT_KEY_UP, HEAD_INSERT_EVENT_TAP, EVENT_TAP_OPTION_DEFAULT, EVENT_TAP_RUN_LOOP_SLICE_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS, AX_SUCCESS, AX_VALUE_TYPE_CF_RANGE, AX_VALUE_TYPE_CG_RECT};
+use crate::hint_place::{BOUNDS_FOR_RANGE_ATTRIBUTE, CaretAccessibilityAPI, Frame};
 use crate::macos_backend::{MacAPI, MacBackendError, MacPasteboardAPI, NativeInput, NativeKeyEvent, PasteboardContents, TapListener, TapReady, modifier_pressed};
 use crate::macos_context::{AccessibilityAPI, SelectionAccessibilityAPI};
 use crate::macos_main_thread::MainThreadRunner;
@@ -95,6 +96,8 @@ unsafe extern "C" {
     fn LSOpenCFURLRef(url: CFRef, launched: *mut CFRef) -> i32;
     fn AXUIElementCreateSystemWide() -> CFRef;
     fn AXUIElementCopyAttributeValue(element: CFRef, name: CFRef, value: *mut CFRef) -> i32;
+    fn AXUIElementCopyParameterizedAttributeValue(element: CFRef, name: CFRef, parameter: CFRef, value: *mut CFRef) -> i32;
+    fn AXValueCreate(kind: u32, input: *const c_void) -> CFRef;
     fn AXValueGetValue(value: CFRef, kind: u32, output: *mut c_void) -> bool;
     fn AXUIElementSetAttributeValue(element: CFRef, name: CFRef, value: CFRef) -> i32;
     fn AXUIElementIsAttributeSettable(element: CFRef, name: CFRef, settable: *mut bool) -> i32;
@@ -797,6 +800,43 @@ impl SelectionAccessibilityAPI for NativeAccessibility {
             let status = AXUIElementSetAttributeValue(element.pointer::<c_void>(), key, created);
             CFRelease(created);
             status == AX_SUCCESS
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct CGRect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl CaretAccessibilityAPI for NativeAccessibility {
+    fn bounds_for_range(&self, element: usize, location: i64, length: i64) -> Option<Frame> {
+        let key = self.name(BOUNDS_FOR_RANGE_ATTRIBUTE);
+        if element == 0 || key.is_null() {
+            return None;
+        }
+        let span = CFRange { location: location.to::<c_long>(), length: length.to::<c_long>() };
+        // SAFETY: the wrapped range is released after the call; the element and the key are valid; the value is ours to
+        // release and its structure is written by the call.
+        unsafe {
+            let parameter = AXValueCreate(AX_VALUE_TYPE_CF_RANGE, (&raw const span).cast());
+            if parameter.is_null() {
+                return None;
+            }
+            let mut value: CFRef = std::ptr::null();
+            let status = AXUIElementCopyParameterizedAttributeValue(element.pointer::<c_void>(), key, parameter, &raw mut value);
+            CFRelease(parameter);
+            if status != AX_SUCCESS || value.is_null() {
+                return None;
+            }
+            let mut rectangle = CGRect::default();
+            let read = AXValueGetValue(value, AX_VALUE_TYPE_CG_RECT, (&raw mut rectangle).cast());
+            CFRelease(value);
+            read.then_some(Frame { x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height })
         }
     }
 }

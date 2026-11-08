@@ -8,6 +8,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 pub mod constants;
+pub mod hint_place;
 pub mod macos_app;
 pub mod macos_backend;
 pub mod macos_context;
@@ -18,6 +19,8 @@ pub mod macos_tray_native;
 
 #[cfg(target_os = "macos")]
 pub mod desktop_app;
+#[cfg(target_os = "macos")]
+pub mod hint_panel;
 #[cfg(target_os = "macos")]
 pub mod macos_native;
 #[cfg(target_os = "macos")]

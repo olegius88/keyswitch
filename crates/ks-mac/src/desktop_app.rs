@@ -3,24 +3,31 @@
 use ks_cast::To as _;
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
+use ks_config::constants::HINTS_SETTING;
 use ks_config::history::{HistoryStore, history_limit};
 use ks_config::indicator::normalize_indicator_style;
 use ks_config::learning::LearningStore;
 use ks_config::logsetup;
-use ks_engine::KeySwitchEngine;
+use ks_engine::constants::MILLISECONDS_PER_SECOND;
+use ks_engine::{KeySwitchEngine, Shared};
 use ks_engine::context_access::ReaderFactory;
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
+use ks_ui::constants::HINT_TICK_INTERVAL_MS;
+use ks_ui::hints::{EngineInput, Hints, HintView, Moment, RUNNING_PLATFORM, SettingsPage, subscribe};
 use ks_ui::tray_model::{TrayAction, TrayState};
 use ks_ui::windows_ui_model::truthy;
 use objc2::{class, msg_send};
 use serde_json::Value;
 
-use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS};
+use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS, PANEL_SLOT};
+use crate::hint_panel::HintPanel;
+use crate::hint_place::{CaretAnchor, click_of};
 use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, SECOND_COPY_MESSAGE, resource_dir};
 use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
@@ -47,11 +54,19 @@ struct App {
     tray: Option<StatusItem>,
     autostart: MacAutostartManager,
     closing: bool,
+    hints: Hints<()>,
+    hint_panel: HintPanel,
+    hint_clock: Instant,
+    /// A tick of the hints is on its way.
+    hint_tick_pending: bool,
 }
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 }
+
+/// How the hints see whether the user is typing: the key presses the engine counts, once it is built.
+static HINT_ENGINE: OnceLock<Arc<Shared>> = OnceLock::new();
 
 /// Whether the program still waits for the Accessibility permission: the menu and the settings window say so meanwhile.
 /// Not a field of `App`, so the settings window can ask while `App` is borrowed.
@@ -112,6 +127,63 @@ fn tray_state(app: &App) -> TrayState {
         indicator_style: normalize_indicator_style(&services.settings.get("appearance.indicator_style").unwrap_or_else(|| Value::String("letters".into()))),
         awaiting_permission: awaiting_permission(),
     }
+}
+
+fn hint_moment(clock: Instant) -> Moment {
+    Moment::now(clock, HINT_ENGINE.get().map_or(0, |engine| engine.typed_presses.load(Ordering::Relaxed)))
+}
+
+/// Something for the hints, on the main thread, and the next tick if they have asked for one.
+fn with_hints(action: impl FnOnce(&mut Hints<()>, &mut HintPanel, &Moment)) {
+    with_app(|app| {
+        let moment = hint_moment(app.hint_clock);
+        action(&mut app.hints, &mut app.hint_panel, &moment);
+    });
+    arm_hint_tick();
+}
+
+/// A tick only while `needs_tick` says so: with nothing waiting and nothing on screen, no timer runs at all.
+fn arm_hint_tick() {
+    let arm = with_app(|app| {
+        let arm = !app.hint_tick_pending && app.hints.needs_tick();
+        app.hint_tick_pending |= arm;
+        arm
+    });
+    if arm == Some(true) {
+        run_on_main_after(f64::from(HINT_TICK_INTERVAL_MS) / MILLISECONDS_PER_SECOND, Box::new(|| {
+            with_app(|app| app.hint_tick_pending = false);
+            with_hints(|hints, panel, moment| hints.tick(panel, moment));
+        }));
+    }
+}
+
+/// A button of a hint was pressed: the panel's, or a card's in the settings window.
+pub fn hint_clicked(tag: isize) {
+    let (slot, click) = click_of(tag);
+    let id = if slot == PANEL_SLOT { with_app(|app| app.hint_panel.shown()).flatten() } else { settings_window::hint_card_id(slot) };
+    if let Some(id) = id {
+        with_hints(|hints, panel, moment| hints.clicked(panel, id, click, moment));
+    }
+}
+
+/// The caret was found for the hint the panel is about to show.
+pub fn place_caret_hint(view: &HintView, anchor: CaretAnchor) {
+    with_app(|app| app.hint_panel.place_at_caret(view, anchor));
+}
+
+/// The settings window opened: each page may show a card again.
+pub fn hints_settings_opened() {
+    with_app(|app| app.hints.settings_opened());
+}
+
+/// The card for `page`, which the window is showing; it counts as shown.
+#[must_use]
+pub fn hint_card(page: SettingsPage) -> Option<HintView> {
+    with_app(|app| {
+        let moment = hint_moment(app.hint_clock);
+        app.hints.settings_card(page, &moment)
+    })
+    .flatten()
 }
 
 fn sync_tray() {
@@ -181,6 +253,10 @@ fn apply_setting(path: &str, value: &Value) {
         }
         _ => {}
     }
+    with_hints(|hints, panel, moment| hints.settings_changed(panel, moment));
+    if path == HINTS_SETTING && !truthy(value) {
+        settings_window::remove_hint_cards();
+    }
     sync_tray();
 }
 
@@ -234,8 +310,18 @@ pub fn quit() {
     });
 }
 
-fn attach_engine(services: &Arc<Services>) {
-    services.engine.when_built(Box::new(|engine: &KeySwitchEngine| {
+fn attach_engine(services: &Arc<Services>, wants_caret: Arc<AtomicBool>) {
+    services.engine.when_built(Box::new(move |engine: &KeySwitchEngine| {
+        let _ = HINT_ENGINE.set(engine.shared.clone());
+        // No anchor is taken on the engine's thread: the Mac asks the field when the hint is about to show (`HintPanel`).
+        subscribe(
+            &engine.shared,
+            wants_caret,
+            Arc::new(|| Some(())),
+            Arc::new(|input: EngineInput<()>| {
+                run_on_main(Box::new(move || with_hints(|hints, panel, moment| hints.engine_input(panel, input, moment))));
+            }),
+        );
         engine.subscribe(Arc::new(|_snapshot| {
             run_on_main(Box::new(|| {
                 sync_tray();
@@ -339,6 +425,9 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     };
     let settings = Arc::new(SettingsStore::new(None));
     logsetup::follow_settings(&settings, None);
+    // Before anything writes a user file: a new installation is told apart from an update by those files.
+    let hint_clock = Instant::now();
+    let hints = Hints::start(settings.clone(), &ks_config::history::data_dir(), RUNNING_PLATFORM, &hint_moment(hint_clock));
     let limit = history_limit(&settings.get("history.limit").unwrap_or(Value::from(ks_config::constants::DEFAULT_HISTORY_LIMIT)));
     let history = Arc::new(HistoryStore::new(None, limit));
     let learning = match LearningStore::new(None, None) {
@@ -373,7 +462,8 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
     let autostart = MacAutostartManager::new(None, None);
-    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), tray: None, autostart, closing: false }));
+    let wants_caret = hints.caret_anchor_wanted();
+    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), tray: None, autostart, closing: false, hints, hint_panel: HintPanel::new(), hint_clock, hint_tick_pending: false }));
     settings_window::create(services.clone());
     let showing = setting_bool(&settings, "appearance.show_indicator", true);
     if showing {
@@ -385,7 +475,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
         run_on_main(Box::new(move || apply_setting(&path, &value)));
     }));
     services.history.subscribe(Arc::new(|| run_on_main(Box::new(settings_window::refresh_history))));
-    attach_engine(&services);
+    attach_engine(&services, wants_caret);
     if !granted {
         ask_for_permission(&backend);
         wait_for_permission(no_engine);
