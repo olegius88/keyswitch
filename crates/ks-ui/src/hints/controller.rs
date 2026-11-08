@@ -508,7 +508,8 @@ mod tests {
         let settings = SettingsStore::new(Some(root.join("config.json")));
         let read = HintSettings::read(&settings);
         assert!(read.enabled && read.notifications && read.keep_history);
-        assert_eq!((read.hotkeys.undo.as_str(), read.hotkeys.convert_last.as_str()), ("", "Pause"));
+        let shipped = if cfg!(target_os = "macos") { "Ctrl+Alt+K" } else { "Pause" };
+        assert_eq!((read.hotkeys.undo.as_str(), read.hotkeys.convert_last.as_str()), ("", shipped));
         assert_eq!(running_version().to_string(), VERSION);
     }
 

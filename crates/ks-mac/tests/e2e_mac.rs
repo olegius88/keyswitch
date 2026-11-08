@@ -26,7 +26,7 @@ mod scenario {
 
     use ks_backend::InputBackend;
     use ks_config::config::SettingsStore;
-    use ks_config::constants::HINTS_SETTING;
+    use ks_config::constants::GENERAL_HINTS;
     use ks_mac::constants::{CF_STRING_ENCODING_UTF8, HINT_PANEL_GAP_POINTS};
     use ks_mac::hint_place::{CaretAnchor, Frame, caret_anchor};
     use ks_mac::macos_app::VERSION;
@@ -35,9 +35,9 @@ mod scenario {
     use ks_mac::macos_native::{NativeAccessibility, NativeMacAPI};
     use ks_mac::macos_objc::frontmost_application;
     use ks_ui::constants::HINT_CARD_WIDTH_PIXELS;
-    use ks_ui::hints::{HINT_NEVER_LABEL, HINT_OK_LABEL};
+    use ks_ui::hints::{HINT_NEVER_LABEL, HINT_OK_LABEL, HintState};
     use ks_ui::windows_ui_model::HINTS_SETTING_TITLE;
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
@@ -516,13 +516,9 @@ mod scenario {
             frontmost_application().1
         }
 
-        fn hints_file(&self) -> Value {
-            std::fs::read_to_string(self.data.borrow().join("hints.json")).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or(Value::Null)
-        }
-
         /// How the hint `id` went away, by the file the hints keep.
         fn how(&self, id: &str) -> String {
-            self.hints_file()["seen"][id]["how"].as_str().unwrap_or("").to_owned()
+            std::fs::read_to_string(self.data.borrow().join("hints.json")).ok().and_then(|text| HintState::parse(&text)).and_then(|state| state.how(id)).unwrap_or_default()
         }
 
         /// Whether the panel went away and the file of the hints says how.
@@ -532,9 +528,9 @@ mod scenario {
     }
 
     /// Writes the file of the hints as an earlier run would have left it.
-    fn seed_hints(data: &Path, content: &Value) -> Result<(), String> {
+    fn seed_hints(data: &Path, content: &str) -> Result<(), String> {
         std::fs::create_dir_all(data).map_err(|error| error.to_string())?;
-        std::fs::write(data.join("hints.json"), content.to_string()).map_err(|error| error.to_string())
+        std::fs::write(data.join("hints.json"), content).map_err(|error| error.to_string())
     }
 
     /// The first correction brought its hint at the caret. It takes the focus from nothing: the editor stays in front, the
@@ -596,7 +592,7 @@ mod scenario {
     /// button turns the hints off where the settings show them.
     fn hint_at_the_item(driver: &Driver, binary: &Path, folder: &Path) -> Result<(), String> {
         let data = folder.join("data");
-        seed_hints(&data, &json!({"last_run_version": VERSION, "fresh_install": true}))?;
+        seed_hints(&data, &format!(r#"{{"last_run_version": "{VERSION}", "fresh_install": true}}"#))?;
         let mut child = start_program(binary, folder, true)?;
         driver.program.set(program_id(&child));
         *driver.data.borrow_mut() = data;
@@ -621,7 +617,7 @@ mod scenario {
             return Ok(());
         };
         driver.click(never);
-        let turned_off = wait_for(HINT_GOES, || (SettingsStore::new(Some(folder.join("config/config.json"))).get(HINTS_SETTING) == Some(Value::Bool(false))).then_some(()));
+        let turned_off = wait_for(HINT_GOES, || (SettingsStore::new(Some(folder.join("config/config.json"))).read(GENERAL_HINTS) == Some(false)).then_some(()));
         driver.check("«Больше не показывать» turns the hints off", driver.went_away("first_start", "forever") && turned_off.is_some(), &format!("{:?}", driver.how("first_start")));
         driver.check("a click on a hint at the item leaves the editor in front", driver.front() == "TextEdit", &driver.front());
         Ok(())
@@ -632,7 +628,7 @@ mod scenario {
     fn hints_in_the_settings_window(driver: &Driver, binary: &Path, folder: &Path) -> Result<(), String> {
         let data = folder.join("data");
         // An update from before the switch key: a card of news waits on the page of hotkeys.
-        seed_hints(&data, &json!({"last_run_version": "0.69.0"}))?;
+        seed_hints(&data, r#"{"last_run_version": "0.69.0"}"#)?;
         let mut child = start_program(binary, folder, false)?;
         driver.program.set(program_id(&child));
         *driver.data.borrow_mut() = data;
@@ -683,7 +679,7 @@ mod scenario {
         driver.check("the setting of the hints in the window", checkbox.is_some(), "");
         if let Some(checkbox) = checkbox {
             ax_press(checkbox);
-            let off = wait_for(HINT_GOES, || (SettingsStore::new(Some(folder.join("config/config.json"))).get(HINTS_SETTING) == Some(Value::Bool(false))).then_some(()));
+            let off = wait_for(HINT_GOES, || (SettingsStore::new(Some(folder.join("config/config.json"))).read(GENERAL_HINTS) == Some(false)).then_some(()));
             driver.check("the checkbox turns the hints off", off.is_some(), "");
         }
     }
@@ -839,7 +835,7 @@ mod scenario {
         let root = std::env::temp_dir().join(format!("keyswitch-e2e-{}", std::process::id()));
         std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         // Seen before: the first correction of this run brings the hint at the caret, and a start of this version no news.
-        seed_hints(&root.join("data"), &json!({"last_run_version": VERSION}))?;
+        seed_hints(&root.join("data"), &format!(r#"{{"last_run_version": "{VERSION}"}}"#))?;
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
         for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;

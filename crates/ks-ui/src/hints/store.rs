@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(state.update(), Some((None, version("0.72.0"))));
         let store = HintStore::in_folder(&folder("round"));
         store.save(&state).unwrap();
-        let written = std::fs::read_to_string(&store.path).unwrap();
+        let written = std::fs::read_to_string(&store.path).unwrap().replace("\r\n", "\n");
         assert!(written.starts_with("{\n  \"schema_version\": 1,\n  \"last_run_version\": \"0.72.0\",\n"), "{written}");
         assert!(written.contains(r#""future": {"a": [1, 2]}"#), "{written}");
         assert!(written.contains(r#""later_hint": {"version": "0.72.0", "extra": true}"#), "{written}");

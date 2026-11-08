@@ -318,13 +318,12 @@
     "tests/e2e_mac.rs": {
      "expect_roots": 1,
      "literal_compares": 10,
-     "string_key_index": 2,
-     "value_tokens": 18
+     "value_tokens": 9
     }
    },
    "literal_compares": 11,
-   "string_key_index": 2,
-   "value_tokens": 39
+   "string_key_index": 0,
+   "value_tokens": 30
   },
   "ks-replay": {
    "expect_roots": 5,
