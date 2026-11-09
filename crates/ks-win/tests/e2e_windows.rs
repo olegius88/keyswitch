@@ -25,7 +25,7 @@ mod scenario {
     use std::time::{Duration, Instant};
 
     use ks_config::config::SettingsStore;
-    use ks_config::constants::ENABLED;
+    use ks_config::constants::{ENABLED, HOTKEYS_TOGGLE};
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
     use ks_ui::constants::HINT_TYPING_SETTLE_SECONDS;
@@ -397,8 +397,6 @@ mod scenario {
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
         let base = [
             ("general.autostart", json!(false)),
-            // The pause hotkey is a function key (`function_key`).
-            ("hotkeys.toggle", json!("F9")),
             ("appearance.show_indicator", json!(true)),
             ("general.notifications", json!(false)),
             ("detection.respect_manual_layout", json!(false)),
@@ -416,6 +414,8 @@ mod scenario {
         for (path, value) in base.iter().cloned().chain(extra.iter().cloned()) {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
         }
+        // The pause hotkey is a function key (`function_key`).
+        settings.write(HOTKEYS_TOGGLE, "F9".to_owned(), true).map_err(|error| format!("{error:?}"))?;
         Ok(())
     }
 

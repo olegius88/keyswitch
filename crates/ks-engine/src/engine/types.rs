@@ -1,6 +1,6 @@
 //! The values the engine passes around: plans, snapshots, words waiting for their neighbours.
 
-use crate::constants::{HOTKEY_MESSAGE_KEY_PLACE, HOTKEY_MODIFIER_KEYS, HOTKEY_NO_KEY_MESSAGE, HOTKEY_SEVERAL_KEYS_MESSAGE, HOTKEY_UNKNOWN_KEY_MESSAGE};
+use crate::constants::{HOTKEY_KEY_ALIASES, HOTKEY_MESSAGE_KEY_PLACE, HOTKEY_MODIFIER_KEYS, HOTKEY_NO_KEY_MESSAGE, HOTKEY_SEVERAL_KEYS_MESSAGE, HOTKEY_UNKNOWN_KEY_MESSAGE};
 use ks_backend::{FieldContext, KeyEvent};
 use ks_config::learning::RuleAction;
 use ks_lang::detector::DetectionDecision;
@@ -324,6 +324,12 @@ fn hotkey_modifier(piece: &str) -> Option<u8> {
     }
 }
 
+/// The names the key of a hotkey goes by, casefolded: its own and those `HOTKEY_KEY_ALIASES` gives it.
+fn key_names(key: &str) -> impl Iterator<Item = &str> {
+    let aliases = HOTKEY_KEY_ALIASES.iter().find(|(name, _)| *name == key).map_or(&[][..], |(_, aliases)| *aliases);
+    std::iter::once(key).chain(aliases.iter().copied())
+}
+
 /// What stops a hotkey typed into the settings from ever firing (`Hotkey::problem`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HotkeyProblem {
@@ -388,8 +394,7 @@ impl Hotkey {
         if HOTKEY_MODIFIER_KEYS.contains(&name.as_str()) {
             return Some(HotkeyProblem::NoKey);
         }
-        // `matches` takes Break for Pause.
-        if key_exists(&name) || (name == "pause" && key_exists("break")) { None } else { Some(HotkeyProblem::UnknownKey(key.to_owned())) }
+        if key_names(&name).any(&key_exists) { None } else { Some(HotkeyProblem::UnknownKey(key.to_owned())) }
     }
 
     #[must_use]
@@ -405,9 +410,6 @@ impl Hotkey {
             return false;
         }
         let key_name = pystr::casefold(&event.key_name);
-        match self.key.as_str() {
-            "pause" => key_name == "pause" || key_name == "break",
-            key => key_name == key,
-        }
+        key_names(&self.key).any(|name| name == key_name)
     }
 }

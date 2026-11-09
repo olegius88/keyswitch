@@ -26,7 +26,7 @@ mod scenario {
 
     use ks_backend::InputBackend;
     use ks_config::config::SettingsStore;
-    use ks_config::constants::{ENABLED, GENERAL_HINTS};
+    use ks_config::constants::{ENABLED, GENERAL_HINTS, HOTKEYS_TOGGLE};
     use ks_mac::constants::{CF_STRING_ENCODING_UTF8, HINT_PANEL_GAP_POINTS};
     use ks_mac::hint_place::{CaretAnchor, Frame, caret_anchor};
     use ks_mac::macos_app::VERSION;
@@ -852,9 +852,11 @@ mod scenario {
         // Seen before: the first correction of this run brings the hint at the caret, and a start of this version no news.
         seed_hints(&root.join("data"), &format!(r#"{{"last_run_version": "{VERSION}"}}"#))?;
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
-        for (path, value) in [("hotkeys.toggle", json!("F13")), ("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
+        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
         }
+        // The pause hotkey is a function key (`function_key`).
+        settings.write(HOTKEYS_TOGGLE, "F13".to_owned(), true).map_err(|error| format!("{error:?}"))?;
         let mut child: Child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
         std::thread::sleep(PROGRAM_STARTS);
         let document = root.join("document.txt").to_string_lossy().into_owned();

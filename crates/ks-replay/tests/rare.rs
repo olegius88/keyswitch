@@ -1006,7 +1006,9 @@ fn a_hotkey_and_a_plan_answer_for_themselves() {
     assert!(!hotkey.matches(&KeyEvent { pressed: false, ..pause }));
     // A hotkey that can never fire says why before the settings store it. One that can has no problem, however it is
     // spelled.
-    let exists = |name: &str| matches!(name, "pause" | "k" | "f9");
+    // A keyboard, by the names of its keys.
+    let keyboard = |names: &'static [&'static str]| move |name: &str| names.contains(&name);
+    let exists = keyboard(&["pause", "k", "f9"]);
     for value in ["Pause", "pause", "F9", "Ctrl+Alt+K", "<Ctrl>+<Alt>+k", " shift + super + f9 "] {
         assert_eq!(Hotkey::problem(value, exists), None, "{value}");
     }
@@ -1019,8 +1021,10 @@ fn a_hotkey_and_a_plan_answer_for_themselves() {
     assert_eq!(Hotkey::problem("Левый Ctrl", exists), Some(HotkeyProblem::UnknownKey("Левый Ctrl".to_owned())));
     assert_eq!(Hotkey::problem("Ctrl+Pausee", exists), Some(HotkeyProblem::UnknownKey("Pausee".to_owned())));
     // Break is Pause where the keyboard names the key so, as `matches` takes it.
-    assert_eq!(Hotkey::problem("Pause", |name| name == "break"), None);
-    assert_eq!(Hotkey::problem("Pause", |_| false), Some(HotkeyProblem::UnknownKey("Pause".to_owned())));
+    assert_eq!(Hotkey::problem("Pause", keyboard(&["break"])), None);
+    assert_eq!(Hotkey::problem("Pause", keyboard(&[])), Some(HotkeyProblem::UnknownKey("Pause".to_owned())));
+    // And a hotkey of Pause fires on the key by either name.
+    assert!(hotkey.matches(&KeyEvent { keycode: PAUSE_KEYCODE, ..named("Break") }));
     assert_eq!(HotkeyProblem::NoKey.message(), "Сочетанию нужна обычная клавиша: одни Ctrl, Alt, Shift и Super не срабатывают. Например, Ctrl+Alt+K");
     assert!(HotkeyProblem::SeveralKeys.message().starts_with("В сочетании может быть только одна обычная клавиша"));
     assert_eq!(

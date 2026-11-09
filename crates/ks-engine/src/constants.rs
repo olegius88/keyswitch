@@ -84,6 +84,9 @@ pub const FIELD_READER_RETRY_DELAYS_SECONDS: [f64; 3] = [5.0, 15.0, 60.0];
 pub const TYPO_ENGLISH_LOCALE: &str = "en_US";
 pub const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 
+/// The other names a key of a hotkey goes by, casefolded: a hotkey of Pause also fires on a key named Break, as in the
+/// Python version (`Hotkey::matches`), and a keyboard with either has the key (`Hotkey::problem`).
+pub const HOTKEY_KEY_ALIASES: [(&str, &[&str]); 1] = [("pause", &["break"])];
 /// The modifier keys by the names every backend gives them, casefolded: none of them is the key of a hotkey
 /// (`Hotkey::problem`).
 pub const HOTKEY_MODIFIER_KEYS: [&str; 10] =

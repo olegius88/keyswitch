@@ -150,9 +150,6 @@
      "literal_compares": 5,
      "value_tokens": 3
     },
-    "src/engine/types.rs": {
-     "literal_compares": 2
-    },
     "src/engine/word_parts.rs": {
      "literal_compares": 2
     },
@@ -160,7 +157,7 @@
      "expect_roots": 1
     }
    },
-   "literal_compares": 96,
+   "literal_compares": 94,
    "string_key_index": 1,
    "value_tokens": 117
   },

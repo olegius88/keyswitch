@@ -43,8 +43,9 @@ const LEFT_BUTTON: u8 = 1;
 /// The window manager the keyboard is tried against, and how long it takes to start.
 pub(crate) const WINDOW_MANAGER: &str = "xfwm4";
 const WINDOW_MANAGER_STARTS: u64 = 10_000;
-/// A group asked of a desktop that keeps it (Cinnamon) is waited for this long.
-const DESKTOP_GROUP_SHOWN: u64 = 1000;
+/// A group asked of a desktop that keeps it (Cinnamon) is waited for this long. Cinnamon took more than a second on a busy
+/// machine; a group locked past it meanwhile is put back at once, and the keys typed then went in the old group.
+const DESKTOP_GROUP_SHOWN: u64 = 5000;
 const STATUS_NOTIFIER_WATCHER: &str = "org.kde.StatusNotifierWatcher";
 const STATUS_NOTIFIER_WATCHER_PATH: &str = "/StatusNotifierWatcher";
 
@@ -149,10 +150,13 @@ impl Typer {
     }
 
     pub(crate) fn switch_group(&self, group: i32) -> Result<(), String> {
-        if self.desktop.as_ref().is_some_and(|desktop| desktop.activate(group.low::<u8>()))
-            && pump_until(DESKTOP_GROUP_SHOWN, || self.current_group() == group)
-        {
-            return Ok(());
+        if self.desktop.as_ref().is_some_and(|desktop| desktop.activate(group.low::<u8>())) {
+            // The desktop took the request: it is waited for, as locking the group past it would only be put back.
+            return if pump_until(DESKTOP_GROUP_SHOWN, || self.current_group() == group) {
+                Ok(())
+            } else {
+                Err(format!("the desktop did not switch to the XKB group {group}"))
+            };
         }
         if !self.api.lock_group(group.low::<u8>()) {
             return Err(format!("cannot switch the XKB group to {group}"));
