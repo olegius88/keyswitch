@@ -2,7 +2,7 @@
 
 ## Русский
 
-Слово после дефиса снова решается отдельно: `proxy-ghbkj;tybt` становится `proxy-приложение`, а не `зкщчн-приложение`. В Linux Mint раскладка снова переключается. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Слово после дефиса снова решается отдельно: `proxy-ghbkj;tybt` становится `proxy-приложение`, а не `зкщчн-приложение`. В Linux Mint раскладка снова переключается. Поле проверки в настройках больше не просит сначала выбрать EN, а буквы значка в трее Windows стали тоньше. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
@@ -24,6 +24,10 @@
 - Слово после дефиса решается как отдельное слово и там, где программа читает поле ввода, то есть в большинстве окон: `proxy-ghbkj;tybt` становится `proxy-приложение`, `docker-j,hfp` — `docker-образ`. Раньше часть до дефиса проверялась по полю, где уже стояло всё слово, проверка отказывала, и меняли всё слово целиком: `зкщчн-приложение`. Из 500 составленных для проверки терминов с русским словом через дефис, набранных целиком в английской раскладке, неверно выходило 325, теперь 8.
 - Раскладка, выбранная вручную, защищает слово только до дефиса: выбрали английскую для `frontend`, а `-магазин` набрали, не переключив обратно, — получится `frontend-магазин`. Раньше всё слово оставалось как набрано. Слова через дефис, набранные правильно в выбранной раскладке (`built-in`, `что-то`), остаются как есть.
 - Linux Mint (Cinnamon, сеанс X11): раскладка переключается через сам Cinnamon, и исправление набирается, когда он её сменил. Cinnamon сразу возвращал раскладку, которую ставила программа, поэтому в Linux Mint 22.3 исправленное слово набиралось наполовину в старой раскладке (`ghbdtn vbh` становилось `ghbdtn vbи`), а раскладка оставалась английской.
+- Английский термин, целиком набранный в русской раскладке, по-прежнему меняется целиком: `црз-куппук` становится `whp-regger`, а не `црз-regger`. Отдельно остаётся только часть до дефиса, набранная в английской раскладке.
+- Поле проверки в окне настроек больше не просит сначала выбрать EN: наберите `ghbdtn`, если сейчас раскладка EN, или `руддщ`, если RU. Слово сразу после ручной смены раскладки программа намеренно оставляет как набрано, поэтому проверка по старой подсказке ничего не меняла.
+- Windows: буквы значка в трее набраны Segoe UI Semibold вместо полужирного и не упираются в края значка.
+- Windows: ошибка «не подтвердило смену раскладки» называет программу, в окне которой раскладка не сменилась.
 
 ### Если нужно вернуться на 0.71.0
 
@@ -37,7 +41,7 @@
 
 ## English
 
-A word after a hyphen is decided on its own again: `proxy-ghbkj;tybt` becomes `proxy-приложение`, not `зкщчн-приложение`. On Linux Mint the layout switches again. Settings, rules, history and personal words are kept on update. The full list is in [CHANGELOG.md](CHANGELOG.md).
+A word after a hyphen is decided on its own again: `proxy-ghbkj;tybt` becomes `proxy-приложение`, not `зкщчн-приложение`. On Linux Mint the layout switches again. The test field in the settings no longer asks to pick EN first, and the letters of the Windows tray icon are thinner. Settings, rules, history and personal words are kept on update. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
@@ -59,6 +63,10 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 - A word after a hyphen is decided as a word of its own also where the program reads the field, as it does in most windows: `proxy-ghbkj;tybt` becomes `proxy-приложение`, `docker-j,hfp` becomes `docker-образ`. The part before the hyphen used to be checked against a field that already showed the whole token, the check refused, and the whole token converted: `зкщчн-приложение`. Of 500 authored terms joined by a hyphen to a Russian word and typed all in the English layout, 325 came out wrong, and 8 do now.
 - A layout picked by hand protects the word only up to a hyphen: picked English for `frontend` and typed `-магазин` without switching back, you get `frontend-магазин`. The whole token used to stay as typed. Words joined by a hyphen and typed right in the picked layout (`built-in`, `что-то`) stay as they are.
 - Linux Mint (Cinnamon on X11): the layout is switched through Cinnamon itself, and a correction is typed once Cinnamon has switched it. Cinnamon put back at once a layout the program set, so on Linux Mint 22.3 a corrected word was typed half in the old layout (`ghbdtn vbh` became `ghbdtn vbи`), and the layout stayed English.
+- An English term typed all in the Russian layout still converts whole: `црз-куппук` becomes `whp-regger`, not `црз-regger`. Only a part before the hyphen typed in the English layout keeps its layout this way.
+- The test field of the settings window no longer asks to pick EN first: type `ghbdtn` if the layout is EN, or `руддщ` if it is RU. The program keeps the word right after a layout switched by hand on purpose, so a test that followed the old hint changed nothing.
+- Windows: the letters of the tray icon are Segoe UI Semibold instead of Bold and no longer touch the sides of the icon.
+- Windows: the error of a layout switch the window did not take names the program whose window kept its layout.
 
 ### Going back to 0.71.0
 
