@@ -412,16 +412,26 @@ jobs:
 
   coverage:
     # Every line and branch of the program ran, on the system it is for. `ks-train coverage-gate` joins the reports.
-    name: Coverage (${{ matrix.os }})
+    # Linux is measured in four parts at once, each with its own report: one runner took an hour and a half for all of it.
+    # packaging/coverage.sh says what each part runs; Windows and macOS measure all of theirs in one job.
+    name: Coverage (${{ matrix.os }}, ${{ matrix.part }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-26.04
-            packages: --workspace
+            part: trainer-1
+          - os: ubuntu-26.04
+            part: trainer-2
+          - os: ubuntu-26.04
+            part: models
+          - os: ubuntu-26.04
+            part: rest
           - os: windows-2025
+            part: all
             packages: -p ks-win -p ks-backend -p ks-config -p ks-updates -p ks-ui -p logcourier
           - os: macos-15
+            part: all
             packages: -p ks-mac -p ks-backend -p ks-config -p ks-updates -p ks-ui -p logcourier
     runs-on: ${{ matrix.os }}
     timeout-minutes: 200
@@ -436,10 +446,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils onboard-data xfwm4
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus at-spi2-core libhunspell-1.7-0 hunspell-en-us hunspell-ru x11-xkb-utils onboard-data xfwm4 jq
       - name: Linux measure
         if: runner.os == 'Linux'
-        run: packaging/coverage.sh coverage-linux.json
+        run: packaging/coverage.sh "coverage-linux-${{ matrix.part }}.json" "${{ matrix.part }}"
       - name: Measure
         if: runner.os != 'Linux'
         shell: bash
@@ -452,7 +462,8 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
-          name: coverage-${{ matrix.os }}
+          # The gate takes every artifact named coverage-*, all into one folder: each report needs a name of its own.
+          name: coverage-${{ matrix.os }}-${{ matrix.part }}
           path: coverage-*.json
           retention-days: 14
       - uses: actions/upload-artifact@v7
@@ -489,7 +500,8 @@ jobs:
     # at it, so it has to be live before the release that hands out that package. A candidate tag (-rcN) stays out of it.
     name: Publish the signed APT repository
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage-gate]
+    # The measure itself, not only its gate: a test that runs only under coverage and fails leaves the gate green.
+    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage, coverage-gate]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -577,7 +589,7 @@ jobs:
     if: >-
       ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
       && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
-    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage-gate, apt-repository]
+    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage, coverage-gate, apt-repository]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
