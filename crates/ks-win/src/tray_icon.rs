@@ -435,8 +435,8 @@ mod tests {
         // Glyphs that never fit, and a label without ink, give none.
         assert_eq!(fitted_ink(SIDE, |_| Some(Ink { width: 99, height: 1, coverage: vec![255; 99] })), None);
         assert_eq!(fitted_ink(SIDE, |_| None), None);
-        // A height the platform cannot draw is passed over.
-        let ink = fitted_ink(SIDE, |font| if font == 40 { None } else { letters(font) }).unwrap();
+        // A height the platform cannot draw is passed over: 37, the first height the box of a 64-pixel canvas tries.
+        let ink = fitted_ink(SIDE, |font| if font == 37 { None } else { letters(font) }).unwrap();
         assert!(ink.width <= 52 && ink.height <= 44);
         // A single tall glyph is held by the height of the box.
         let tall = |font: i32| Some(Ink { width: 4, height: font.to::<usize>(), coverage: vec![255; 4 * font.to::<usize>()] });
