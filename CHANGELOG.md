@@ -6,6 +6,7 @@ All notable changes to KeySwitch are documented in this file.
 
 - A word after a hyphen is decided as a word of its own when the field can be read, as it can in most windows: `proxy-ghbkj;tybt` becomes `proxy-приложение`, not `зкщчн-приложение`. The model was asked about the part before the hyphen in a field that already showed the whole token, the read was refused as a changed field, the part had no answer, and the whole token converted. Of 500 authored terms joined by a hyphen to a Russian word, all typed in the English layout, 325 came out wrong and 8 do now.
 - A layout picked by hand protects the word it was picked for up to a hyphen: picked English for `frontend` and gone on to `-магазин` without switching back, `frontend-vfufpby` becomes `frontend-магазин`. The whole token used to stay as typed (300 of 300 such authored tokens). Words joined by a hyphen and typed right in the picked layout (`built-in`, `что-то`) stay as typed, as before: all 295 such authored tokens.
+- Linux Mint (Cinnamon on X11): the layout is switched through Cinnamon (`org.Cinnamon.ActivateInputSourceIndex`), and a correction is typed once Cinnamon has switched it. Cinnamon keeps the layout group itself and put back at once any group another program locked, so on Linux Mint 22.3 a corrected word was typed half in the old layout (`ghbdtn vbh` became `ghbdtn vbи`), the layout stayed English, and that switch back counted as a layout picked by hand.
 
 ## 0.71.0 — 2026-11-09
 

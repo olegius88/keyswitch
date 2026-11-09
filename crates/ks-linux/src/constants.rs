@@ -26,6 +26,22 @@ pub const KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS: f64 = 2.0;
 /// An X11 injection batch waits at least this long, plus `INJECTION_SECONDS_PER_EVENT` per event, for the keys to come back.
 pub const MIN_INJECTION_DEADLINE_SECONDS: f64 = 1.0;
 pub const INJECTION_SECONDS_PER_EVENT: f64 = 0.02;
+/// A group asked of the desktop is waited for this long before XKB is locked directly.
+pub const DESKTOP_GROUP_WAIT_MS: u64 = 300;
+pub const DESKTOP_GROUP_POLL_MS: u64 = 5;
+
+/// Cinnamon keeps the layout group itself and switches it through its own service.
+pub const CINNAMON_DESKTOP_NAMES: [&str; 2] = ["X-Cinnamon", "Cinnamon"];
+pub const CINNAMON_BUS_NAME: &str = "org.Cinnamon";
+pub const CINNAMON_OBJECT_PATH: &str = "/org/Cinnamon";
+pub const CINNAMON_INTERFACE: &str = "org.Cinnamon";
+pub const CINNAMON_GET_INPUT_SOURCES: &str = "GetInputSources";
+pub const CINNAMON_ACTIVATE_INPUT_SOURCE: &str = "ActivateInputSourceIndex";
+/// The kind of a Cinnamon input source that is an XKB layout, and how many of them one keymap holds (`keyboardManager.js`
+/// leaves one of the four XKB groups free).
+pub const CINNAMON_XKB_SOURCE: &str = "xkb";
+pub const CINNAMON_LAYOUTS_PER_KEYMAP: usize = 3;
+pub const CINNAMON_DBUS_CALL_TIMEOUT_MS: u64 = 1000;
 
 pub const ATSPI_MAX_TRAVERSED_CHILDREN: usize = 64;
 pub const ATSPI_MAX_VISITED_NODES: usize = 128;

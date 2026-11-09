@@ -2,6 +2,7 @@
 # run them (packaging/e2e.sh, packaging/e2e-mac.command, the Windows job); the failures they handle cannot be produced.
 crates/ks-hunspell/src/lib.rs
 crates/ks-linux/src/atspi_bus.rs
+crates/ks-linux/src/cinnamon_native.rs
 crates/ks-linux/src/platform.rs
 crates/ks-linux/src/wayland_access.rs
 crates/ks-linux/src/wayland_native.rs

@@ -185,7 +185,9 @@ pub fn selection_factory() -> SelectionFactory {
 }
 
 pub fn new_backend() -> Arc<X11Backend> {
-    Arc::new(X11Backend::new(Box::new(x11_native::connect), Some(selection_factory())))
+    let backend = Arc::new(X11Backend::new(Box::new(x11_native::connect), Some(selection_factory())));
+    crate::cinnamon_native::attach(&backend);
+    backend
 }
 
 /// The report `--diagnose` prints, and whether the keyboard backend is available.

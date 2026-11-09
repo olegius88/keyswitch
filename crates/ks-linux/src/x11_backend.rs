@@ -26,7 +26,8 @@ use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{
-    BACKSPACE_KEYSYM, INJECTION_SECONDS_PER_EVENT, KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
+    BACKSPACE_KEYSYM, CINNAMON_DESKTOP_NAMES, CINNAMON_LAYOUTS_PER_KEYMAP, CINNAMON_XKB_SOURCE, DESKTOP_GROUP_POLL_MS,
+    DESKTOP_GROUP_WAIT_MS, INJECTION_SECONDS_PER_EVENT, KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LEFT_KEYSYM, MAX_TRACKED_OWN_WINDOWS, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
     MIN_INJECTION_DEADLINE_SECONDS, SHIFT_L_KEYSYM, X11_BUTTON_PRESS, X11_KEY_PRESS, X11_KEY_RELEASE, X11_MAX_KEYCODE,
     X11_MIN_KEYCODE, X11_WHEEL_BUTTONS, XKB_GROUP_STATE_MASK, XKB_GROUP_STATE_SHIFT, XRECORD_EVENT_SIZE_BYTES,
@@ -108,6 +109,33 @@ pub trait X11Api: Send + Sync {
     fn move_raise(&self, window: u32, x: i32, y: i32);
 }
 
+/// A desktop that keeps the layout group itself: Cinnamon puts back at once any group another client locks, so the program
+/// asks it for the group instead (a Linux Mint 22.3 desktop, 09.11.2026).
+pub trait DesktopLayouts: Send + Sync {
+    /// Asks the desktop for the group; false when it cannot (no such layout, no session bus).
+    fn activate(&self, group: u8) -> bool;
+}
+
+/// Whether `XDG_CURRENT_DESKTOP` names Cinnamon, alone or among others (`X-Cinnamon`).
+#[must_use]
+pub fn is_cinnamon_desktop(current_desktop: &str) -> bool {
+    current_desktop.split(':').any(|name| CINNAMON_DESKTOP_NAMES.iter().any(|cinnamon| name.eq_ignore_ascii_case(cinnamon)))
+}
+
+/// The index of the Cinnamon input source to activate for an XKB group, given each source's kind and index in order.
+///
+/// Cinnamon builds the keymap from its keyboard layouts in their order, three at most to one keymap (`keyboardManager.js`
+/// leaves the fourth group for the layout of the interface's language), so the n-th group is its n-th layout. With more
+/// layouts than one keymap holds, a group no longer names one layout, and there is no answer.
+#[must_use]
+pub fn cinnamon_source_for_group(sources: &[(String, i32)], group: u8) -> Option<i32> {
+    let layouts: Vec<i32> = sources.iter().filter(|(kind, _)| kind == CINNAMON_XKB_SOURCE).map(|(_, index)| *index).collect();
+    if layouts.len() > CINNAMON_LAYOUTS_PER_KEYMAP {
+        return None;
+    }
+    layouts.get(usize::from(group)).copied()
+}
+
 /// Opens the X server: the control and data connections.
 pub type Connector = Box<dyn Fn() -> Result<Arc<dyn X11Api>, X11Error> + Send + Sync>;
 /// `window_process_id` as a reader of accessibility needs it.
@@ -168,6 +196,7 @@ struct Shared {
     inject_lock: Mutex<()>,
     xkb_version: Mutex<String>,
     selection_source: Mutex<Option<Box<dyn SelectionSource>>>,
+    desktop: Mutex<Option<Arc<dyn DesktopLayouts>>>,
 }
 
 /// Observe all core keyboard events and inject deterministic corrections.
@@ -200,8 +229,14 @@ impl X11Backend {
                 inject_lock: Mutex::new(()),
                 xkb_version: Mutex::new("—".to_owned()),
                 selection_source: Mutex::new(None),
+                desktop: Mutex::new(None),
             }),
         }
+    }
+
+    /// Switch the layout through the desktop that keeps it (`DesktopLayouts`).
+    pub fn use_desktop_layouts(&self, desktop: Arc<dyn DesktopLayouts>) {
+        *lock(&self.shared.desktop) = Some(desktop);
     }
 
     /// Opens the connections without starting the capture (the Python's `_open`), for a reader of accessibility that only
@@ -554,9 +589,7 @@ impl Shared {
         }
         let Some(api) = self.api() else { return Err(failed("X11 backend не запущен")) };
         let _inject_inner = lock(&self.inject_lock);
-        if !api.lock_group(group.low::<u8>()) {
-            return Err(failed(format!("Не удалось переключить XKB-группу на {group}")));
-        }
+        self.lock_to(&*api, group, "Не удалось переключить XKB-группу на ")?;
         api.flush();
         Ok(())
     }
@@ -628,8 +661,32 @@ impl Shared {
         Ok(())
     }
 
-    fn lock_to(api: &dyn X11Api, group: i32, message: &str) -> Result<(), X11Error> {
-        if api.lock_group(group.low::<u8>()) { Ok(()) } else { Err(failed(format!("{message}{group}"))) }
+    /// Locks the group: through the desktop that keeps it, once the server shows it there, and directly otherwise.
+    fn lock_to(&self, api: &dyn X11Api, group: i32, message: &str) -> Result<(), X11Error> {
+        let wanted = group.low::<u8>();
+        let desktop = lock(&self.desktop).clone();
+        if let Some(desktop) = desktop
+            && desktop.activate(wanted)
+            && Self::group_shown(api, wanted)
+        {
+            return Ok(());
+        }
+        if api.lock_group(wanted) { Ok(()) } else { Err(failed(format!("{message}{group}"))) }
+    }
+
+    /// Whether the server shows the group within `DESKTOP_GROUP_WAIT_MS`: the desktop locks it through its own connection,
+    /// and keys sent before that would be typed in the group before it.
+    fn group_shown(api: &dyn X11Api, group: u8) -> bool {
+        let deadline = Instant::now() + Duration::from_millis(DESKTOP_GROUP_WAIT_MS);
+        loop {
+            if api.xkb_state().is_some_and(|state| state.group == group) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(DESKTOP_GROUP_POLL_MS));
+        }
     }
 
     fn expect(&self, sequences: &[&[(bool, u8)]]) {
@@ -718,16 +775,16 @@ impl Shared {
         self.expect(&[&sequence, target_boundary_sequence, source_boundary_sequence, &kept_sequence, kept_boundary_sequence]);
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {
-            Self::lock_to(&*api, target_group, "Не удалось включить XKB-группу ")?;
+            self.lock_to(&*api, target_group, "Не удалось включить XKB-группу ")?;
             Self::fake(&*api, &sequence)?;
             Self::fake(&*api, target_boundary_sequence)?;
             if !source_boundary_sequence.is_empty() {
-                Self::lock_to(&*api, literal_group, "Не удалось временно включить XKB-группу ")?;
+                self.lock_to(&*api, literal_group, "Не удалось временно включить XKB-группу ")?;
                 Self::fake(&*api, source_boundary_sequence)?;
-                Self::lock_to(&*api, target_group, "Не удалось восстановить XKB-группу ")?;
+                self.lock_to(&*api, target_group, "Не удалось восстановить XKB-группу ")?;
             }
             if kept_tail != 0 {
-                Self::lock_to(&*api, final_group, "Не удалось вернуть XKB-группу ")?;
+                self.lock_to(&*api, final_group, "Не удалось вернуть XKB-группу ")?;
                 Self::fake(&*api, &kept_sequence)?;
                 Self::fake(&*api, kept_boundary_sequence)?;
             }
@@ -812,7 +869,7 @@ impl Shared {
         let outcome = (|| -> Result<(), X11Error> {
             let last = (final_group.unwrap_or(original_group), reselect.clone());
             for (group, events) in runs.iter().chain(std::iter::once(&last)) {
-                Self::lock_to(&*api, *group, "Не удалось включить XKB-группу ")?;
+                self.lock_to(&*api, *group, "Не удалось включить XKB-группу ")?;
                 Self::fake(&*api, events)?;
             }
             api.sync();

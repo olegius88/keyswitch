@@ -461,6 +461,76 @@ fn the_group_is_read_and_switched_inside_the_known_range() {
     assert_eq!(backend.switch_group(1).expect_err("refused").to_string(), "Не удалось переключить XKB-группу на 1");
 }
 
+/// A desktop that keeps the group: it notes each request, and when it takes one the server shows the group, unless it never
+/// gets round to it.
+struct Desktop {
+    fake: Arc<Fake>,
+    takes: bool,
+    shows: bool,
+    asked: Mutex<Vec<u8>>,
+}
+
+impl DesktopLayouts for Desktop {
+    fn activate(&self, group: u8) -> bool {
+        lock(&self.asked).push(group);
+        if self.takes && self.shows {
+            self.fake.with(|state| state.group = group);
+        }
+        self.takes
+    }
+}
+
+fn with_desktop(fake: &Arc<Fake>, takes: bool, shows: bool) -> (X11Backend, Arc<Desktop>) {
+    let backend = opened(fake);
+    let desktop = Arc::new(Desktop { fake: fake.clone(), takes, shows, asked: Mutex::new(Vec::new()) });
+    backend.use_desktop_layouts(desktop.clone());
+    (backend, desktop)
+}
+
+#[test]
+fn a_desktop_that_keeps_the_group_is_asked_for_it_and_xkb_is_left_alone() {
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, true, true);
+    assert!(backend.switch_group(1).is_ok());
+    assert_eq!(backend.current_group(), Ok(1));
+    let boundary = comma(0, SHIFT);
+    let strokes = [stroke(true)];
+    assert_eq!(backend.inject_correction(Injection { source_group: Some(0), ..injection(&strokes, 1, Some(&boundary)) }), Ok(0));
+    // The same switches as through XKB (target, source for the boundary, target), each asked of the desktop.
+    assert_eq!(*lock(&desktop.asked), vec![1, 1, 0, 1]);
+    let mut want = tap(BACKSPACE).to_vec();
+    want.extend(tap(BACKSPACE));
+    want.extend(shifted_tap(A));
+    want.extend(shifted_tap(COMMA));
+    assert_eq!(typing(&fake), want, "no group is locked past the desktop");
+}
+
+#[test]
+fn a_desktop_that_refuses_or_never_shows_the_group_leaves_it_to_xkb() {
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, false, false);
+    assert!(backend.switch_group(1).is_ok());
+    assert_eq!((lock(&desktop.asked).clone(), typing(&fake)), (vec![1], vec![Call::Lock(1)]));
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, true, false);
+    assert!(backend.switch_group(1).is_ok());
+    assert_eq!((lock(&desktop.asked).clone(), typing(&fake)), (vec![1], vec![Call::Lock(1)]));
+}
+
+#[test]
+fn cinnamon_is_known_by_its_name_and_its_layouts_give_the_groups() {
+    assert!(is_cinnamon_desktop("X-Cinnamon"));
+    assert!(is_cinnamon_desktop("ubuntu:cinnamon"));
+    assert!(!is_cinnamon_desktop("ubuntu:GNOME"));
+    assert!(!is_cinnamon_desktop(""));
+    let source = |kind: &str, index: i32| (kind.to_owned(), index);
+    // An input method between two layouts has no group of its own.
+    let sources = [source("xkb", 0), source("ibus", 1), source("xkb", 2)];
+    assert_eq!((0..3).map(|group| cinnamon_source_for_group(&sources, group)).collect::<Vec<_>>(), vec![Some(0), Some(2), None]);
+    let four: Vec<(String, i32)> = (0..4).map(|index| source("xkb", index)).collect();
+    assert_eq!(cinnamon_source_for_group(&four, 0), None, "more layouts than one keymap holds");
+}
+
 // ---------------------------------------------------------------------------------------------------- injection
 
 #[test]
