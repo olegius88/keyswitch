@@ -25,7 +25,7 @@
 - Горячая клавиша, которая не может сработать, больше не сохраняется молча. Сочетанию нужна обычная клавиша кроме Ctrl, Alt, Shift и Super, и такая, какая есть на клавиатуре: `Ctrl`, `Ctrl+Alt` или `Левый Ctrl` в поле «Преобразовать последнее слово» сохранялись как есть и ничего не делали. Теперь окно настроек говорит, что не так, и возвращает в поле прежнее сочетание.
 - Windows и macOS: функциональные клавиши работают в сочетаниях по своим именам — `F9`, `Ctrl+F12` (F1–F24 в Windows, F1–F20 в macOS). Раньше программа знала их только под именами вида `VK_78`, и сочетание `F9` не срабатывало. В Linux эти имена уже были.
 - Флаги в значке трея стали прямоугольными, как настоящие флаги, а не квадратными: 16 на 11 пикселей при обычном масштабе. В Windows полосы и звёзды американского флага ложатся на целые пиксели значка при любом масштабе экрана, а черта на флаге выключенной программы видна и на белой полосе.
-- В заголовке окна настроек видна версия: «KeySwitch 0.71.2» вместо «KeySwitch».
+- В заголовке окна настроек видна версия: «KeySwitch 0.71.2» вместо «KeySwitch». В Linux заголовок теперь виден и в самом окне, раньше там не было названия.
 
 ### Если нужно вернуться на 0.71.1
 
@@ -62,7 +62,7 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 - A hotkey that can never fire is no longer stored without a word. A hotkey needs a key besides Ctrl, Alt, Shift and Super, and one the keyboard has: `Ctrl`, `Ctrl+Alt` or `Левый Ctrl` typed into «Преобразовать последнее слово» (convert the last word) were stored as they were and did nothing. The settings window now says what is wrong and puts the previous hotkey back into the field.
 - Windows and macOS: the function keys work in hotkeys by their names, `F9` or `Ctrl+F12` (F1 to F24 on Windows, F1 to F20 on macOS). The program knew them only by names such as `VK_78`, so a hotkey spelled `F9` never fired. Linux had these names already.
 - The flags of the tray icon are wider than tall, as real flags are, and no longer squares: 16 by 11 pixels at the usual scale. On Windows the stripes and the stars of the American flag fall on whole pixels of the icon at every scale of the screen, and the slash across the flag of a paused program shows on the white band too.
-- The title of the settings window names the version: «KeySwitch 0.71.2» instead of «KeySwitch».
+- The title of the settings window names the version: «KeySwitch 0.71.2» instead of «KeySwitch». On Linux the window itself now shows the title too; it showed no name before.
 
 ### Going back to 0.71.1
 

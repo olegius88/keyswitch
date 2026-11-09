@@ -386,9 +386,10 @@ impl MainWindow {
         let service_switch = gtk::Switch::builder().active(setting_flag(settings, "enabled", true)).valign(gtk::Align::Center).build();
         let sidebar = Self::build_sidebar(&nav_list, &sidebar_detail, &service_switch);
 
+        // The header is the window's title bar: it names the program and the version running, as the title bars of
+        // Windows and macOS do.
         let header = adw::HeaderBar::new();
-        header.set_show_title(false);
-        let header_title = label("Настройки KeySwitch");
+        let header_title = label(&settings_window_title(crate::linux_app::VERSION));
         styled(&header_title, "heading");
         header.set_title_widget(Some(&header_title));
         let menu = gio::Menu::new();
