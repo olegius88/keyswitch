@@ -417,11 +417,10 @@ impl EngineCore {
         } else {
             // The word of a layout picked by hand is not analysed, but it is the context a waiting word waited for.
             // The model is asked with the word alone; the token is typed again whole, a sign after it included (`ожидал,`).
+            let token = strokes_of(&[&strokes, &signs, &trailing]);
             let picked = match waiting.as_ref().filter(|_| manual_layout_protected) {
-                Some(waited) => {
-                    let token = strokes_of(&[&strokes, &signs, &trailing]);
-                    self.decide_before_picked_word(waited, &token, boundary, &original, source_group, &application, analyzable)?
-                }
+                Some(waited) => self.decide_before_picked_word(waited, &token, boundary, &original, source_group, &application, analyzable)?,
+                None if manual_layout_protected => self.take_along_before_picked_word(&kept, &token, boundary, source_group, &application, analyzable)?,
                 None => None,
             };
             if let Some(found) = picked {

@@ -355,6 +355,34 @@ impl EngineCore {
         })))
     }
 
+    /// Words kept at their spaces before a word typed in the layout the user picked for it by hand, the layout they were
+    /// typed out of: they are asked with that word after them, as when the program converts the next word itself
+    /// (`take_along`), the next word being in their other language either way. `f` kept after `github ? ` goes with
+    /// `ожидал` typed after the Russian layout was picked as it goes with `j;blfk` converted (`а ожидал`). The picked
+    /// word stays as typed and the picked layout stays; undo and Pause keep it so (`picked_tail`).
+    pub fn take_along_before_picked_word(
+        &mut self, kept: &[Arc<KeptWord>], strokes: &[Stroke], boundary: &Stroke, picked: i64, application: &str, analyzable: bool,
+    ) -> EngineResult<Option<PlanRef>> {
+        let Some(last) = kept.last() else {
+            return Ok(None);
+        };
+        if !analyzable
+            || self.application_excluded(application)
+            || last.plan.target_group != picked
+            || strokes.is_empty()
+            || strokes.iter().any(|stroke| i64::from(stroke.group) != picked)
+        {
+            return Ok(None);
+        }
+        let typed = text_for_group(strokes, picked);
+        let next = Arc::new(CorrectionPlan {
+            picked_tail: strokes.len(),
+            ..CorrectionPlan::new(strokes.to_vec(), Some(boundary.clone()), last.plan.source_group, picked, typed.clone(), typed.clone(), 0.0, application)
+        });
+        let plan = self.take_along(kept, &next, pystr::len(&typed), application, true)?;
+        Ok((!Arc::ptr_eq(&plan, &next)).then_some(plan))
+    }
+
     /// The correction of a word converted alone before the token after it, which stays as typed.
     ///
     /// A token the other layout types the same (`+`, `=`, `2`) is no text of either language: typed again in the target

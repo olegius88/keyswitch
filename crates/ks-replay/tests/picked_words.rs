@@ -1,12 +1,12 @@
-//! A word the model waited on, then the layout picked by hand and a word typed in it: the picked word stays as typed,
-//! and it is the context the waiting word waited for.
+//! A word the model waited on or kept, then the layout picked by hand and a word typed in it: the picked word stays as
+//! typed, and it is the context the word before it is asked with.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use std::sync::Arc;
 
 use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
-use ks_config::constants::{DETECTION_CONTEXT_POLICY, DETECTION_CONTEXT_READ_FIELD, DIAGNOSTICS_TECHNICAL_LOGGING, EXCLUSIONS_APPLICATIONS};
+use ks_config::constants::{DETECTION_CONTEXT_POLICY, DETECTION_CONTEXT_READ_FIELD, DIAGNOSTICS_TECHNICAL_LOGGING, ENABLED, EXCLUSIONS_APPLICATIONS};
 use ks_engine::engine::{CorrectionPlan, Stroke, Strokes, WaitingContextWord};
 use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 
@@ -85,6 +85,34 @@ fn a_waiting_word_converts_before_a_word_typed_in_the_layout_picked_for_it() {
     for after in [After::Pause, After::Undo] {
         assert_eq!(typed(&mut bundle, 1, &steps, after), ("а что по поводу проблемы, когда написал новый контакт на olegius888 ? z ожидал, ".to_owned(), 1));
     }
+    bundle.clean();
+}
+
+#[test]
+fn a_kept_word_converts_before_a_word_typed_in_the_layout_picked_for_it() {
+    let mut bundle = Bundle::load(None);
+    // `f` is kept at its space after `github ? `, and goes with `ожидал` when that is typed in the English layout
+    // and converted; typed after the Russian layout was picked, it is the same context.
+    let steps = [(None, "yf "), (Some(0), "github ? f "), (Some(1), "j;blfk ")];
+    assert_eq!(typed(&mut bundle, 1, &steps, After::Nothing), ("на github ? а ожидал ".to_owned(), 1));
+    for after in [After::Pause, After::Undo] {
+        assert_eq!(typed(&mut bundle, 1, &steps, after), ("на github ? f ожидал ".to_owned(), 1));
+    }
+    bundle.clean();
+}
+
+#[test]
+fn a_word_left_undecided_otherwise_asks_nothing_of_the_words_before_it() {
+    let mut bundle = Bundle::load(None);
+    // The program paused: no word is analysed, and none picked by hand settles the words before it.
+    let mut session = bundle.session("firefox", 0, Vec::new());
+    session.core.settings.write(ENABLED, false, false).expect("in memory");
+    for character in "ghbdtn vbh ".chars() {
+        press(&mut session, character);
+    }
+    session.idle(3.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "ghbdtn vbh ");
+    bundle.give_back(session);
     bundle.clean();
 }
 
@@ -171,6 +199,41 @@ fn a_waiting_word_is_asked_before_a_picked_word_only_when_all_holds() {
     assert!(declined(core, &waiting, &word, &space, "ожидал", 1, "another"));
     assert!(declined(core, &with_plan(&|plan| plan.strokes.push(stroke('я'))), &word, &space, "ожидал", 1, &application));
     assert!(declined(core, &waiting, &strokes("j;blfk"), &space, "ожидал", 1, &application));
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn kept_words_are_asked_before_a_picked_word_only_when_all_holds() {
+    let mut bundle = Bundle::load(None);
+    let mut session = bundle.session("firefox", 1, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    for character in "yf ".chars() {
+        press(&mut session, character);
+    }
+    session.select_layout(0);
+    for character in "github ? f ".chars() {
+        press(&mut session, character);
+    }
+    let kept = session.core.kept.clone();
+    assert!(!kept.is_empty(), "`f` is kept for the next word");
+    let core = &mut session.core;
+    let (word, space, application) = (strokes("ожидал"), stroke(' '), kept[0].plan.application.clone());
+    let asked = |core: &mut ks_engine::engine::EngineCore, kept: &[Arc<ks_engine::engine::KeptWord>], keys: &Strokes, picked: i64, application: &str, analyzable: bool| {
+        core.take_along_before_picked_word(kept, keys, &space, picked, application, analyzable).expect("no failure")
+    };
+    // Nothing kept, a word that could not be decided at all, a program excluded.
+    assert!(asked(core, &[], &word, 1, &application, true).is_none());
+    assert!(asked(core, &kept, &word, 1, &application, false).is_none());
+    core.settings.write(EXCLUSIONS_APPLICATIONS, vec![application.clone()], false).expect("in memory");
+    assert!(asked(core, &kept, &word, 1, &application, true).is_none());
+    core.settings.write(EXCLUSIONS_APPLICATIONS, Vec::new(), false).expect("in memory");
+    // The layout picked away from the kept word's other reading, no keys, keys of the other layout.
+    assert!(asked(core, &kept, &word, 0, &application, true).is_none());
+    assert!(asked(core, &kept, &Vec::new(), 1, &application, true).is_none());
+    assert!(asked(core, &kept, &strokes("j;blfk"), 1, &application, true).is_none());
+    // As typed so far the text ends before the picked word: the model is not asked, and nothing is taken.
+    assert!(asked(core, &kept, &word, 1, &application, true).is_none());
     bundle.give_back(session);
     bundle.clean();
 }
