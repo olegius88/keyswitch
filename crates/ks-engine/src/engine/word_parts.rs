@@ -3,7 +3,9 @@
 use super::decide::WordOptions;
 use super::logging::technical_event;
 use super::*;
+use crate::constants::MANUAL_LAYOUT_KEPT_REASON;
 use ks_context::context_action_features::digit_dot_question;
+use ks_context::context_policy::ends_with_typed;
 use ks_lang::boundary_model::MAX_SUFFIX;
 use ks_lang::detector::DecideOptions as DetectorOptions;
 use ks_lang::intent_model::CorrectionTrigger;
@@ -283,8 +285,24 @@ impl EngineCore {
         let mut head_action: Option<&'static str> = None;
         if decision.should_convert && whole.should_convert {
             let head_alternatives: Alternatives = targets.iter().map(|group| (*group, text_for_group(head, *group))).collect();
-            self.decide_word(&text_for_group(head, source_group), &head_alternatives, source_group, application, CorrectionTrigger::Punctuation, WordOptions {
-                boundary_text: strokes[split - 1].character.clone(),
+            let head_text = text_for_group(head, source_group);
+            let joiner = strokes[split - 1].character.clone();
+            // The head is asked with the caret right after it, in the field its part was decided in. Read again, the
+            // field shows the whole token, not the head, and the read was refused as a changed field: the head had no
+            // answer and the whole token converted, `proxy-ghbkj;tybt` became `зкщчн-приложение` (the owner's
+            // typing, 09.11.2026).
+            let field_override = parted.as_ref().and_then(|asked| asked.field.as_ref()).map(|field| {
+                let typed = format!("{head_text}{joiner}");
+                let before = if ends_with_typed(&field.before, &typed) {
+                    pystr::slice(&field.before, None, Some(-pystr::len(&typed).to::<i64>())).to_owned()
+                } else {
+                    String::new()
+                };
+                field_with(field, before, String::new())
+            });
+            self.decide_word(&head_text, &head_alternatives, source_group, application, CorrectionTrigger::Punctuation, WordOptions {
+                boundary_text: joiner,
+                field_override,
                 ..WordOptions::default()
             })?;
             head_action = Some(
@@ -305,6 +323,22 @@ impl EngineCore {
         self.context_result = parted;
         self.last_baseline = parted_baseline;
         Ok(Some((split, decision)))
+    }
+
+    /// The part after the last joining sign of a token typed right after the user picked its layout by hand.
+    ///
+    /// The pick protects the word it was made for, and a joining sign ends that word: picked English for
+    /// `frontend` and gone on to `-магазин` without switching back, the user typed `frontend-vfufpby`, and the
+    /// whole token stayed as a protected word (09.11.2026). The head stays as typed, whatever the model says of
+    /// it; the part after the sign is asked as any word (`decide_joined_part`, with the whole kept).
+    pub fn protected_joined_part(
+        &mut self, strokes: &[Stroke], signs: &[Stroke], source_group: i64, targets: &[i64], application: &str, trigger: CorrectionTrigger,
+        boundary: &Stroke,
+    ) -> EngineResult<Option<(usize, DetectionDecision)>> {
+        let original = text_for_group(strokes, source_group);
+        let score = self.model(source_group).score(&original);
+        let kept = DetectionDecision::new(false, &original, &original, source_group, source_group, 0.0, MANUAL_LAYOUT_KEPT_REASON, score.clone(), score);
+        self.decide_joined_part(strokes, signs, source_group, targets, application, trigger, Some(boundary), &kept)
     }
 
     /// A head segment is settled when nothing suggests it needs conversion.

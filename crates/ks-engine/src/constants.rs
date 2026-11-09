@@ -28,6 +28,8 @@ pub const DOUBLE_CAPITALS_MIN_LETTERS: usize = 4;
 pub const EARLY_SWITCH_CONFIDENCE: f64 = 15.0;
 pub const ENGINE_EVENT_QUEUE_MAX_SIZE: usize = 4096;
 pub const JOINED_PART_MIN_LETTERS: usize = 2;
+/// Why a token typed right after a layout picked by hand stays as typed up to its last joining sign.
+pub const MANUAL_LAYOUT_KEPT_REASON: &str = "раскладка выбрана вручную";
 pub const KEPT_WORD_PROSE_MIN_COUNT: u64 = 500;
 pub const KEPT_WORDS_TAKEN_ALONG: usize = 2;
 pub const MAX_REMEMBERED_APPLICATION_CONTEXTS: usize = 32;

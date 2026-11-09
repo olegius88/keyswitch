@@ -870,6 +870,29 @@ fn a_decision_asked_where_it_cannot_be_made_says_so() {
     bundle.clean();
 }
 
+#[test]
+fn the_head_of_a_joined_token_is_asked_in_the_field_its_part_was_read_in() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    core.settings.write(ks_config::constants::DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    let token = keys("proxy-ghbkj;tybt");
+    let score = core.models[0].score("proxy-ghbkj;tybt");
+    let whole = DetectionDecision::new(true, "proxy-ghbkj;tybt", "зкщчн-приложение", 0, 1, 0.9, "test", score.clone(), score);
+    // The field shows the part after other text, not after the head: the head is asked with nothing before it, and
+    // it is still the model that answers about it.
+    let reader = Fixed::new("текст ghbkj;tybt", "");
+    core.context_policy.reader = Some(reader.clone());
+    let parted = core.decide_joined_part(&token, &[], 0, &[1], "firefox", CorrectionTrigger::Space, Some(&key(' ')), &whole).expect("no failure");
+    assert_eq!(parted.map(|(split, part)| (split, part.replacement)), Some((6, "приложение".to_owned())));
+    // The field shows the head before the part, as the program reads it.
+    reader.show(Some(field("текст proxy-ghbkj;tybt", "")));
+    let parted = core.decide_joined_part(&token, &[], 0, &[1], "firefox", CorrectionTrigger::Space, Some(&key(' ')), &whole).expect("no failure");
+    assert_eq!(parted.map(|(split, _)| split), Some(6));
+    bundle.give_back(session);
+    bundle.clean();
+}
+
 fn baseline_of(core: &EngineCore, original: &str) -> DetectionDecision {
     let score = core.models[0].score(original);
     DetectionDecision::new(false, original, original, 1, 0, 0.0, "test", score.clone(), score)

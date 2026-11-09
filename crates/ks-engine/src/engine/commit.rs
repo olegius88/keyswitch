@@ -105,21 +105,33 @@ impl EngineCore {
         let trigger_enabled = self.boundary_enabled(boundary);
         let caret_unknown = self.caret_unknown();
         self.caret_moved = false;
-        let should_analyze = enabled && trigger_enabled && !manual_layout_protected && segmentation_certain && !caret_unknown;
         let mut excluded = self.application_excluded(&application);
+        let trigger = Self::_trigger_for_boundary(boundary);
+        // The layout picked by hand protects the word it was picked for, up to a joining sign (protected_joined_part).
+        let analyzable = enabled && trigger_enabled && segmentation_certain && !caret_unknown;
+        let protected_part = if manual_layout_protected && analyzable && !excluded && head == 0 && trailing.is_empty() {
+            let targets: Vec<i64> = alternatives.iter().map(|entry| entry.0).collect();
+            self.protected_joined_part(&strokes, &signs, source_group, &targets, &application, trigger, boundary)?
+        } else {
+            None
+        };
+        let should_analyze = (analyzable && !manual_layout_protected) || protected_part.is_some();
         let mut decision: Option<DetectionDecision> = None;
         let waiting = self.context_waiting.take();
         let provisional = self.provisional.take();
         let paused = self.paused_conversion.take();
         let mut kept = std::mem::take(&mut self.kept);
-        let trigger = Self::_trigger_for_boundary(boundary);
         if should_analyze && !excluded {
-            let inside = if !trailing.is_empty() || head != 0 || !signs.is_empty() {
+            let inside = if protected_part.is_some() || !trailing.is_empty() || head != 0 || !signs.is_empty() {
                 None
             } else {
                 self.decide_inside_word(&strokes, source_group, &alternatives, &application, trigger, Some(boundary))?
             };
-            let mut decided = if let Some(inside) = inside.clone() { inside } else {
+            let mut decided = if let Some((_, part)) = protected_part.clone() {
+                part
+            } else if let Some(inside) = inside.clone() {
+                inside
+            } else {
                 let closing = strokes_of(&[&trailing, &signs, std::slice::from_ref(boundary)]);
                 let following = alternatives.iter().map(|(group, _)| (*group, text_for_group(&closing, *group))).collect();
                 self.decide_word(&original, &alternatives, source_group, &application, trigger, WordOptions {
@@ -131,7 +143,7 @@ impl EngineCore {
             };
             let stem = strokes.clone();
             let stem_signs = signs.clone();
-            if !signs.is_empty() && !decided.should_convert {
+            if protected_part.is_none() && !signs.is_empty() && !decided.should_convert {
                 // The tail is split off only for a word the model converts without it (replayed_signs);
                 // otherwise the token is judged whole, as before: `'nb/` is `эти.` at p=0.9998 and
                 // `'nb` alone only at 0.978, while `ntrcn` is `текст` at 0.99999 and `ntrcn/` at 0.59.
@@ -147,16 +159,22 @@ impl EngineCore {
                     ..WordOptions::default()
                 })?;
             }
-            if inside.is_none() && trailing.is_empty() && head == 0 && signs.is_empty()
+            if protected_part.is_none()
+                && inside.is_none()
+                && trailing.is_empty()
+                && head == 0
+                && signs.is_empty()
                 && let Some(origin) = early_switch_origin
             {
                 decided = self.settle_early_switch(decided, &strokes, source_group, origin, &application, trigger, &boundary.character)?;
             }
             if inside.is_none() && head == 0 && trailing.is_empty() {
                 let targets: Vec<i64> = alternatives.iter().map(|entry| entry.0).collect();
-                if let Some((split, part)) =
-                    self.decide_joined_part(&stem, &stem_signs, source_group, &targets, &application, trigger, Some(boundary), &decided)?
-                {
+                let joined = match protected_part.clone() {
+                    Some(found) => Some(found),
+                    None => self.decide_joined_part(&stem, &stem_signs, source_group, &targets, &application, trigger, Some(boundary), &decided)?,
+                };
+                if let Some((split, part)) = joined {
                     // `mongo-cthdbcf` converts after its hyphen: `mongo-сервиса`.
                     head = split;
                     decided = part;
