@@ -70,6 +70,16 @@ fn the_part_after_a_hyphen_converts_alone_while_the_field_shows_the_whole_token(
 }
 
 #[test]
+fn a_term_typed_all_in_the_russian_layout_converts_whole_though_the_model_keeps_its_head_alone() {
+    let mut bundle = Bundle::load(None);
+    // The model converts `црз-куппук` whole and, asked about `црз` alone, keeps it: the head typed in the Russian layout
+    // does not override the whole token (`црз-regger` in the owner's typing), as `мгу` for `vue` does not.
+    assert_eq!(typed(&mut bundle, 1, "whp-regger ", None, as_shipped), "whp-regger ");
+    assert_eq!(typed(&mut bundle, 1, "vue-email ", None, as_shipped), "vue-email ");
+    bundle.clean();
+}
+
+#[test]
 fn a_layout_picked_by_hand_keeps_the_word_up_to_the_hyphen() {
     let mut bundle = Bundle::load(None);
     // Russian, then English picked for a term and the Russian word after its hyphen typed on in English.

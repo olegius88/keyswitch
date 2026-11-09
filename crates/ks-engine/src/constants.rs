@@ -28,6 +28,15 @@ pub const DOUBLE_CAPITALS_MIN_LETTERS: usize = 4;
 pub const EARLY_SWITCH_CONFIDENCE: f64 = 15.0;
 pub const ENGINE_EVENT_QUEUE_MAX_SIZE: usize = 4096;
 pub const JOINED_PART_MIN_LETTERS: usize = 2;
+/// The layout a head has to be typed in for the parts of a token the model converts whole to be split
+/// (`decide_joined_part`): the English one. An English term before a Russian word is common prose, typed with the term's
+/// layout (`mongo-cthdbcf` is `mongo-сервиса`, 13.10.2026; `proxy-ghbkj;tybt` is `proxy-приложение`, 09.11.2026). A head
+/// typed in the Russian layout that the model keeps when asked alone is mostly a short reading of an English term
+/// (`црз-куппук` is `whp-regger` in the owner's typing, 09.11.2026; `мгу` is `vue`), and the whole token was right: there
+/// the model's decision on the whole token stands.
+pub const JOINED_HEAD_KEPT_GROUP: i64 = 0;
+/// The head action logged when the head is not asked because the whole token's decision stands.
+pub const JOINED_HEAD_UNASKED_ACTION: &str = "unasked";
 /// Why a token typed right after a layout picked by hand stays as typed up to its last joining sign.
 pub const MANUAL_LAYOUT_KEPT_REASON: &str = "раскладка выбрана вручную";
 pub const KEPT_WORD_PROSE_MIN_COUNT: u64 = 500;

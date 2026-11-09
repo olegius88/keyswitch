@@ -3,7 +3,7 @@
 use super::decide::WordOptions;
 use super::logging::technical_event;
 use super::*;
-use crate::constants::MANUAL_LAYOUT_KEPT_REASON;
+use crate::constants::{JOINED_HEAD_KEPT_GROUP, JOINED_HEAD_UNASKED_ACTION, MANUAL_LAYOUT_KEPT_REASON};
 use ks_context::context_action_features::digit_dot_question;
 use ks_context::context_policy::ends_with_typed;
 use ks_lang::boundary_model::MAX_SUFFIX;
@@ -283,7 +283,10 @@ impl EngineCore {
         let parted = self.context_result.clone();
         let parted_baseline = self.last_baseline.clone();
         let mut head_action: Option<&'static str> = None;
-        if decision.should_convert && whole.should_convert {
+        if decision.should_convert && whole.should_convert && source_group != JOINED_HEAD_KEPT_GROUP {
+            // The model converts the whole token, and only a head typed in the English layout may override it.
+            head_action = Some(JOINED_HEAD_UNASKED_ACTION);
+        } else if decision.should_convert && whole.should_convert {
             let head_alternatives: Alternatives = targets.iter().map(|group| (*group, text_for_group(head, *group))).collect();
             let head_text = text_for_group(head, source_group);
             let joiner = strokes[split - 1].character.clone();
