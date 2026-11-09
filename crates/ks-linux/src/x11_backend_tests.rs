@@ -518,6 +518,17 @@ fn a_sign_that_keeps_its_glyph_is_typed_in_the_target_layout_where_the_desktop_k
     want.extend(shifted_tap(A));
     want.extend(shifted_tap(SLASH));
     assert_eq!(typing(&fake), want);
+    // The period of the Russian layout is the same key without Shift.
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, true, true);
+    let period = KeyEvent { character: ".".to_owned(), characters: vec![".".to_owned(), "ю".to_owned()], ..comma(0, 0) };
+    assert_eq!(backend.inject_correction(Injection { source_group: Some(0), ..injection(&strokes, 1, Some(&period)) }), Ok(0));
+    assert_eq!(*lock(&desktop.asked), vec![1]);
+    let mut want = tap(BACKSPACE).to_vec();
+    want.extend(tap(BACKSPACE));
+    want.extend(shifted_tap(A));
+    want.extend(tap(SLASH));
+    assert_eq!(typing(&fake), want);
     // A sign of two characters has no one key: the layout is switched for it, a moment after the keys before it.
     let fake = Fake::new();
     let (backend, desktop) = with_desktop(&fake, true, true);
