@@ -804,7 +804,7 @@ fn the_focused_window_is_own_by_the_pid_of_it_or_of_a_parent_and_the_verdict_is_
         state.pids.insert(100, std::process::id());
     });
     let focus = backend.focused_window().expect("a window");
-    assert_eq!((focus.window, focus.own, focus.isolated_layout), (300, true, false));
+    assert_eq!((focus.window, focus.own, focus.isolated_layout), (100, true, false), "the window is the one that names its program");
     let queries = fake.with(|state| state.pid_queries);
     assert!(backend.focused_window().expect("again").own);
     assert_eq!(fake.with(|state| state.pid_queries), queries, "the verdict is cached");
@@ -815,6 +815,37 @@ fn the_focused_window_is_own_by_the_pid_of_it_or_of_a_parent_and_the_verdict_is_
     assert!(!backend.focused_window().expect("foreign").own);
     assert_eq!(backend.window_process_id(300), std::process::id());
     assert_eq!(backend.window_process_id(-5), 0);
+}
+
+#[test]
+fn the_focus_moving_between_a_window_and_its_child_stays_in_the_one_window() {
+    let fake = Fake::new();
+    let backend = opened(&fake);
+    let window = |focus: u32| {
+        fake.with(|state| state.focus = Some(focus));
+        backend.focused_window().expect("a window").window
+    };
+    fake.with(|state| {
+        // GTK 4: the top-level window carries the process and the class, the child that takes the focus carries nothing.
+        state.pids.insert(500, std::process::id() + 1);
+        state.classes.insert(500, (String::new(), String::new()));
+        state.parents.insert(501, 500);
+        state.parents.insert(500, 1);
+        // A program that names itself by its class alone.
+        state.classes.insert(610, ("xterm".to_owned(), "XTerm".to_owned()));
+        state.parents.insert(611, 610);
+        // Nothing up the tree names a program, the tree loops, or it is deeper than the walk goes.
+        state.parents.insert(700, 701);
+        state.parents.insert(710, 0);
+        state.parents.insert(800, 800);
+        for deep in 900..940u32 {
+            state.parents.insert(deep, deep + 1);
+        }
+        state.pids.insert(939, 7);
+    });
+    assert_eq!((window(501), window(500), window(501)), (500, 500, 500));
+    assert_eq!((window(611), window(610)), (610, 610));
+    assert_eq!((window(700), window(710), window(800), window(900)), (700, 710, 800, 900), "the focused window itself");
 }
 
 #[test]
@@ -1100,14 +1131,14 @@ fn keys_of_rare_keysyms_read_as_what_they_type() {
 }
 
 #[test]
-fn the_list_of_own_windows_is_kept_short() {
+fn the_list_of_focused_windows_is_kept_short() {
     let fake = Fake::new();
     let backend = opened(&fake);
-    for window in 0..u32::try_from(MAX_TRACKED_OWN_WINDOWS).unwrap() + 2 {
+    for window in 0..u32::try_from(MAX_TRACKED_FOCUS_WINDOWS).unwrap() + 2 {
         fake.with(|state| state.focus = Some(window + 1000));
         let _ = backend.focused_window();
     }
-    assert!(lock(&backend.shared.own_windows).len() <= MAX_TRACKED_OWN_WINDOWS);
+    assert!(lock(&backend.shared.focus_windows).len() <= MAX_TRACKED_FOCUS_WINDOWS);
 }
 
 #[test]

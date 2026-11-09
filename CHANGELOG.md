@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Linux on X11: the word being typed is no longer forgotten when a program moves the keyboard between its window and a child of that window. A GTK 4 window in Cinnamon does so after a layout switch, and the program took it for a move to another window: on Linux Mint 22.3 a second Pause right after a word was converted switched the layout instead of offering a rule, in 4 of 8 runs of the package test, and in none of 8 now.
+
 ## 0.71.1 — 2026-11-10
 
 - A word after a hyphen is decided as a word of its own when the field can be read, as it can in most windows: `proxy-ghbkj;tybt` becomes `proxy-приложение`, not `зкщчн-приложение`. The model was asked about the part before the hyphen in a field that already showed the whole token, the read was refused as a changed field, the part had no answer, and the whole token converted. Of 500 authored terms joined by a hyphen to a Russian word, all typed in the English layout, 325 came out wrong and 8 do now. Only a part before the hyphen typed in the English layout can keep its layout this way: an English term typed all in the Russian layout still converts whole, `црз-куппук` is `whp-regger`, not `црз-regger`.

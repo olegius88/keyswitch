@@ -28,7 +28,7 @@ use ks_text::russian_text::{SECONDS, quantity};
 use crate::constants::{
     BACKSPACE_KEYSYM, CINNAMON_DESKTOP_NAMES, CINNAMON_LAYOUTS_PER_KEYMAP, CINNAMON_XKB_SOURCE, DESKTOP_GROUP_POLL_MS, DESKTOP_SWITCH_SETTLE_MS,
     DESKTOP_GROUP_WAIT_MS, INJECTION_SECONDS_PER_EVENT, KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
-    LEFT_KEYSYM, MAX_TRACKED_OWN_WINDOWS, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
+    LEFT_KEYSYM, MAX_TRACKED_FOCUS_WINDOWS, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
     MIN_INJECTION_DEADLINE_SECONDS, SHIFT_L_KEYSYM, X11_BUTTON_PRESS, X11_KEY_PRESS, X11_KEY_RELEASE, X11_MAX_KEYCODE,
     X11_MIN_KEYCODE, X11_WHEEL_BUTTONS, XKB_GROUP_STATE_MASK, XKB_GROUP_STATE_SHIFT, XRECORD_EVENT_SIZE_BYTES,
     XRECORD_EVENT_TYPE_MASK, XRECORD_FROM_SERVER, XRECORD_START_OF_DATA,
@@ -184,8 +184,8 @@ struct Shared {
     connector: Connector,
     selection_factory: Option<SelectionFactory>,
     api: Mutex<Option<Arc<dyn X11Api>>>,
-    /// Own-window verdicts by X window id; ids of another client can never collide with ours.
-    own_windows: Mutex<HashMap<u32, bool>>,
+    /// By the X window id that had the focus: the window the user works in, and whether it is ours.
+    focus_windows: Mutex<HashMap<u32, (u32, bool)>>,
     context: Mutex<u32>,
     thread: Mutex<Option<(JoinHandle<()>, Arc<Event>)>>,
     listener: Mutex<Option<KeyListener>>,
@@ -220,7 +220,7 @@ impl X11Backend {
                 connector,
                 selection_factory,
                 api: Mutex::new(None),
-                own_windows: Mutex::new(HashMap::new()),
+                focus_windows: Mutex::new(HashMap::new()),
                 context: Mutex::new(0),
                 thread: Mutex::new(None),
                 listener: Mutex::new(None),
@@ -528,20 +528,38 @@ impl Shared {
             // None or PointerRoot: nobody has the focus.
             return None;
         }
-        Some(FocusInfo { window: i64::from(focus), own: self.window_is_own(&*api, focus), isolated_layout: false })
+        let (window, own) = self.client_window(&*api, focus);
+        Some(FocusInfo { window: i64::from(window), own, isolated_layout: false })
     }
 
-    fn window_is_own(&self, api: &dyn X11Api, window: u32) -> bool {
-        if let Some(cached) = lock(&self.own_windows).get(&window) {
+    /// The window the user works in while `focus` has the keyboard, and whether it is one of ours. A toolkit gives the focus
+    /// now to the top-level window, now to a child of it that carries no properties of its own: GTK 4 in Cinnamon moves it
+    /// from one to the other when the layout is switched, and the word being typed must not be dropped as if the user had
+    /// gone to another window. The window is the nearest of `focus` and its parents that names its program by
+    /// `_NET_WM_PID` or `WM_CLASS`, or `focus` itself when none does. Both answers are cached by `focus`.
+    fn client_window(&self, api: &dyn X11Api, focus: u32) -> (u32, bool) {
+        if let Some(cached) = lock(&self.focus_windows).get(&focus) {
             return *cached;
         }
-        let own = Self::process_id_of(api, window) == std::process::id();
-        let mut windows = lock(&self.own_windows);
-        if windows.len() >= MAX_TRACKED_OWN_WINDOWS {
+        let mut client = focus;
+        let mut current = focus;
+        for _ in 0..MAX_WINDOW_ANCESTOR_DEPTH {
+            if api.window_pid(current) != 0 || api.class_hint(current).is_some() {
+                client = current;
+                break;
+            }
+            match api.parent_window(current) {
+                Some(parent) if parent != 0 && parent != current => current = parent,
+                _ => break,
+            }
+        }
+        let answer = (client, Self::process_id_of(api, focus) == std::process::id());
+        let mut windows = lock(&self.focus_windows);
+        if windows.len() >= MAX_TRACKED_FOCUS_WINDOWS {
             windows.clear();
         }
-        windows.insert(window, own);
-        own
+        windows.insert(focus, answer);
+        answer
     }
 
     fn window_process_id(&self, window: i64) -> u32 {
