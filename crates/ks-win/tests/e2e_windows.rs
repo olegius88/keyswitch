@@ -25,12 +25,13 @@ mod scenario {
     use std::time::{Duration, Instant};
 
     use ks_config::config::SettingsStore;
+    use ks_config::constants::ENABLED;
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
     use ks_ui::constants::HINT_TYPING_SETTLE_SECONDS;
     use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
     use ks_ui::hints::{Click, HINT_NEVER_LABEL, HINT_OK_LABEL};
-    use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
+    use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
     use ks_win::hint_card::link_areas;
     use ks_win::hint_layout::Area;
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
@@ -69,6 +70,8 @@ mod scenario {
     const SCAN_L: u32 = 0x26;
     const SCAN_O: u32 = 0x18;
     const SCAN_SPACE: u32 = 0x39;
+    /// F9, the pause hotkey of this test: the function keys follow F1 one by one.
+    const VK_F9: u32 = VK_F1 + 8;
     const SCAN_ENTER: u32 = 0x1C;
     const SCAN_LEFT_SHIFT: u32 = 0x2A;
     const SCAN_RIGHT_SHIFT: u32 = 0x36;
@@ -394,6 +397,8 @@ mod scenario {
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
         let base = [
             ("general.autostart", json!(false)),
+            // The pause hotkey is a function key (`function_key`).
+            ("hotkeys.toggle", json!("F9")),
             ("appearance.show_indicator", json!(true)),
             ("general.notifications", json!(false)),
             ("detection.respect_manual_layout", json!(false)),
@@ -748,6 +753,22 @@ mod scenario {
             return Err(format!("Enter submitted an uncorrected or duplicate message: {:?}", editor.text()));
         }
         println!("WINDOWS_CORRECT_BEFORE_ENTER_E2E_OK");
+        Ok(())
+    }
+
+    /// A function key is a hotkey by its name: F9 pauses the program here, and F9 again lets it go on.
+    fn function_key(editor: &Editor, root: &Path) -> Result<(), String> {
+        let enabled = |wanted: bool| SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted);
+        editor.activate();
+        editor.virtual_key(VK_F9)?;
+        if !editor.pump_until(LONG, |_| enabled(false)) {
+            return Err("F9 did not pause the program".to_owned());
+        }
+        editor.virtual_key(VK_F9)?;
+        if !editor.pump_until(LONG, |_| enabled(true)) {
+            return Err("F9 did not let the program go on".to_owned());
+        }
+        println!("WINDOWS_FUNCTION_KEY_E2E_OK");
         Ok(())
     }
 
@@ -1111,7 +1132,8 @@ mod scenario {
                     }
                 }
             }
-            layout_key(&editor)
+            layout_key(&editor)?;
+            function_key(&editor, &root)
         })();
         let _ = child.kill();
         let _ = child.wait();

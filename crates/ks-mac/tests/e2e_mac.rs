@@ -26,7 +26,7 @@ mod scenario {
 
     use ks_backend::InputBackend;
     use ks_config::config::SettingsStore;
-    use ks_config::constants::GENERAL_HINTS;
+    use ks_config::constants::{ENABLED, GENERAL_HINTS};
     use ks_mac::constants::{CF_STRING_ENCODING_UTF8, HINT_PANEL_GAP_POINTS};
     use ks_mac::hint_place::{CaretAnchor, Frame, caret_anchor};
     use ks_mac::macos_app::VERSION;
@@ -109,6 +109,8 @@ mod scenario {
     const OPTION: u16 = 0x3A;
     const COMMAND: u16 = 0x37;
     const BACKSPACE: u16 = 0x33;
+    /// `kVK_F13`: the pause hotkey of this test.
+    const F13: u16 = 0x69;
     const KEY_PAUSE: Duration = Duration::from_millis(50);
     const AFTER_KEY: Duration = Duration::from_millis(60);
     const SETTLED: Duration = Duration::from_millis(2500);
@@ -831,13 +833,26 @@ mod scenario {
         Ok(())
     }
 
+    /// A function key is a hotkey by its name: F13 pauses the program here, and F13 again lets it go on.
+    fn function_key(driver: &Driver, root: &Path) -> Result<(), String> {
+        let enabled = |wanted: bool| wait_for(CHANGE_DEADLINE, || (SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted)).then_some(())).is_some();
+        driver.key(F13, true)?;
+        driver.key(F13, false)?;
+        let paused = enabled(false);
+        driver.key(F13, true)?;
+        driver.key(F13, false)?;
+        let resumed = enabled(true);
+        driver.check("a function key as a hotkey", paused && resumed, &format!("paused {paused}, resumed {resumed}"));
+        Ok(())
+    }
+
     fn run(binary: &Path) -> Result<(), String> {
         let root = std::env::temp_dir().join(format!("keyswitch-e2e-{}", std::process::id()));
         std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
         // Seen before: the first correction of this run brings the hint at the caret, and a start of this version no news.
         seed_hints(&root.join("data"), &format!(r#"{{"last_run_version": "{VERSION}"}}"#))?;
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
-        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
+        for (path, value) in [("hotkeys.toggle", json!("F13")), ("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
         }
         let mut child: Child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
@@ -858,6 +873,7 @@ mod scenario {
             words(&driver)?;
             conversion(&driver)?;
             layout_key(&driver)?;
+            function_key(&driver, &root)?;
             driver.release_modifiers()?;
             let _ = child.kill();
             let _ = child.wait();
