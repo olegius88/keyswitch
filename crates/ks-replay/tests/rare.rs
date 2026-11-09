@@ -893,6 +893,25 @@ fn the_head_of_a_joined_token_is_asked_in_the_field_its_part_was_read_in() {
     bundle.clean();
 }
 
+/// A word kept in a layout picked by hand while an early switch still waits to be finished: the slip and the capitals of
+/// the word are not fixed over the correction under way.
+#[test]
+fn a_word_in_a_layout_picked_by_hand_leaves_a_pending_early_switch_alone() {
+    let mut bundle = Bundle::load(None);
+    let mut session = session(&mut bundle);
+    session.select_layout(1);
+    session.select_layout(0);
+    for character in "ghbdtn".chars() {
+        session.tap((*key(character)).clone());
+    }
+    let early = Arc::new(CorrectionPlan { mode: "early", ..(*plan("ghbdtn", "привет", None)).clone() });
+    session.core.pending = Some(early);
+    session.core.handle_inner(key(' ')).expect("no failure");
+    assert_eq!(session.core.pending.as_ref().map(|pending| pending.mode), Some("early"));
+    bundle.give_back(session);
+    bundle.clean();
+}
+
 fn baseline_of(core: &EngineCore, original: &str) -> DetectionDecision {
     let score = core.models[0].score(original);
     DetectionDecision::new(false, original, original, 1, 0, 0.0, "test", score.clone(), score)
