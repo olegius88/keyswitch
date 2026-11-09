@@ -151,7 +151,7 @@ impl EngineCore {
         if !self.in_models(source_group)
             || !self.flag("detection.protect_code", true)
             || !self.flag("detection.context_aware", true)
-            || self.text_setting("detection.context_policy", "assist") != "assist"
+            || !self.context_assists()
             || self.context_policy.model.is_none()
         {
             return 0;
@@ -200,7 +200,7 @@ impl EngineCore {
     /// the contextual model is asked.
     pub fn joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
         if !self.flag("detection.context_aware", true)
-            || self.text_setting("detection.context_policy", "assist") != "assist"
+            || !self.context_assists()
             || self.context_policy.model.is_none()
         {
             return 0;

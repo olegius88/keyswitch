@@ -2,7 +2,7 @@
 
 ## Русский
 
-Набранное слово больше не теряется в Linux Mint и в программах на GTK 4, когда фокус ввода переходит внутри одного окна. Окно настроек сразу говорит, почему горячая клавиша не сработает, флаги в трее стали прямоугольными, а в заголовке окна видна версия. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
+Набранное слово больше не теряется в Linux Mint и в программах на GTK 4, когда фокус ввода переходит внутри одного окна, а отложенное короткое слово исправляется и после ручной смены раскладки. Окно настроек сразу говорит, почему горячая клавиша не сработает, флаги в трее стали прямоугольными, а в заголовке окна видна версия. Настройки, правила, история и личные слова сохраняются при обновлении. Полный перечень — в [CHANGELOG.md](CHANGELOG.md).
 
 ### Файлы выпуска
 
@@ -21,6 +21,7 @@
 
 ### Что изменилось
 
+- Короткое слово, которое программа отложила до следующего слова, теперь исправляется и тогда, когда раскладку переключили вручную и следующее слово набрали уже в ней: после `olegius888 ? z ` и ручной смены на русскую `ожидал,` получится `я ожидал,`, а не `z ожидал,`. Слово, набранное после ручной смены, и сама выбранная раскладка остаются как были; Pause сразу после исправления или отмена возвращают текст как он был набран.
 - Linux (сеанс X11): набранное слово больше не забывается, когда программа переносит фокус ввода между своим окном и его внутренней частью. Так делают окна на GTK 4 в Cinnamon после смены раскладки, и KeySwitch принимал это за переход в другое окно. В Linux Mint 22.3 второе нажатие Pause сразу после преобразования слова переключало раскладку вместо того, чтобы предложить правило: в 4 прогонах проверки из 8, теперь ни в одном из 8.
 - Горячая клавиша, которая не может сработать, больше не сохраняется молча. Сочетанию нужна обычная клавиша кроме Ctrl, Alt, Shift и Super, и такая, какая есть на клавиатуре: `Ctrl`, `Ctrl+Alt` или `Левый Ctrl` в поле «Преобразовать последнее слово» сохранялись как есть и ничего не делали. Теперь окно настроек говорит, что не так, и возвращает в поле прежнее сочетание.
 - Windows и macOS: функциональные клавиши работают в сочетаниях по своим именам — `F9`, `Ctrl+F12` (F1–F24 в Windows, F1–F20 в macOS). Раньше программа знала их только под именами вида `VK_78`, и сочетание `F9` не срабатывало. В Linux эти имена уже были.
@@ -39,7 +40,7 @@
 
 ## English
 
-A word being typed is no longer lost on Linux Mint and in GTK 4 programs when the keyboard focus moves inside one window. The settings window says at once why a hotkey will not fire, the flags in the tray are wider than tall, and the window title names the version. Settings, rules, history and personal words are kept through the update. The full list is in [CHANGELOG.md](CHANGELOG.md).
+A word being typed is no longer lost on Linux Mint and in GTK 4 programs when the keyboard focus moves inside one window, and a waiting short word is converted also after a layout switched by hand. The settings window says at once why a hotkey will not fire, the flags in the tray are wider than tall, and the window title names the version. Settings, rules, history and personal words are kept through the update. The full list is in [CHANGELOG.md](CHANGELOG.md).
 
 ### Release files
 
@@ -58,6 +59,7 @@ Exactly one Mac archive is needed: the Apple silicon build does not run on Intel
 
 ### Changed
 
+- A short word the program left waiting for the next word is now converted also when the layout is switched by hand and the next word is typed in it: after `olegius888 ? z ` and a switch to Russian by hand, `ожидал,` gives `я ожидал,`, not `z ожидал,`. The word typed after the switch and the layout picked stay as they were; Pause right after the correction or the undo hotkey give the text back as it was typed.
 - Linux (X11 session): the word being typed is no longer forgotten when a program moves the keyboard focus between its window and an inner part of it. GTK 4 windows do so in Cinnamon after a layout switch, and KeySwitch took it for a move to another window. On Linux Mint 22.3 a second Pause right after a word was converted switched the layout instead of offering a rule: in 4 runs of the check out of 8, and in none of 8 now.
 - A hotkey that can never fire is no longer stored without a word. A hotkey needs a key besides Ctrl, Alt, Shift and Super, and one the keyboard has: `Ctrl`, `Ctrl+Alt` or `Левый Ctrl` typed into «Преобразовать последнее слово» (convert the last word) were stored as they were and did nothing. The settings window now says what is wrong and puts the previous hotkey back into the field.
 - Windows and macOS: the function keys work in hotkeys by their names, `F9` or `Ctrl+F12` (F1 to F24 on Windows, F1 to F20 on macOS). The program knew them only by names such as `VK_78`, so a hotkey spelled `F9` never fired. Linux had these names already.

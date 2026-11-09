@@ -55,7 +55,7 @@ impl EngineCore {
             && head == 0
             && !boundary.deferred
             && !Self::_reads_alike(plan)
-            && self.text_setting("detection.context_policy", "assist") == "assist"
+            && self.context_assists()
         {
             self.context_wait_sequence += 1;
             // A word waits as long as the text around it stays context. The wait
@@ -85,6 +85,12 @@ impl EngineCore {
         false
     }
 
+    /// Whether the context model may settle words with their neighbours (`detection.context_policy` is `assist`).
+    #[must_use]
+    pub fn context_assists(&self) -> bool {
+        self.text_setting("detection.context_policy", "assist") == "assist"
+    }
+
     pub fn cancel_context_wait(&mut self, reason: &str) {
         self.log_context_wait("context_wait_cancelled", self.context_waiting.as_ref(), reason, &[]);
         self.context_waiting = None;
@@ -103,7 +109,7 @@ impl EngineCore {
         &mut self, waiting: Option<&WaitingContextWord>, strokes: &[Stroke], boundary: Option<&Stroke>, decision: &DetectionDecision,
         application: &str, alternatives: &Alternatives, switched: bool,
     ) -> EngineResult<Option<(PlanRef, DetectionDecision)>> {
-        if waiting.is_none() || self.text_setting("detection.context_policy", "assist") != "assist" {
+        if waiting.is_none() || !self.context_assists() {
             self.log_context_wait("context_wait_cancelled", waiting, "policy_disabled", &[]);
             return Ok(None);
         }
@@ -268,6 +274,85 @@ impl EngineCore {
             "next_word_kept": true,
         );
         Ok(Some(self.word_before_kept(&previous, strokes, boundary, group, &alternative, &decision.original, result.decision.confidence, application)))
+    }
+
+    /// A waiting word whose next word was typed in the layout the user picked for it by hand, the layout the waiting
+    /// word was suspected to belong to.
+    ///
+    /// The picked layout keeps its word as typed, and that word is the very context the waiting word waited for:
+    /// `olegius888 ? z ` waits on `z`, the Russian layout is picked, and `ожидал` is typed in it (field typing,
+    /// 10.11.2026), where `z ` stayed for good because the wait was dropped with the analysis of the protected word. The
+    /// model is asked the question it is asked when the program converts the next word itself (`resolve_context_wait`):
+    /// the next word is in the waiting word's other language either way. A conversion it is sure of replaces the
+    /// waiting word alone; the picked word is typed again as it was, and the picked layout stays.
+    ///
+    /// `strokes` are the keys of the whole picked token, a sign after the word included; `word` is the word alone, what the
+    /// model is asked with. `analyzable` says the word could be decided at all (the program on, its boundary a trigger,
+    /// the caret where the engine saw it): only the layout picked for it held its analysis back.
+    pub fn decide_before_picked_word(
+        &mut self, waiting: &WaitingContextWord, strokes: &[Stroke], boundary: &Stroke, word: &str, picked: i64, application: &str,
+        analyzable: bool,
+    ) -> EngineResult<Option<PlanRef>> {
+        let previous = waiting.plan.clone();
+        let Some(previous_boundary) = previous.boundary.clone().filter(|boundary| boundary.character == " ") else {
+            return Ok(None);
+        };
+        let new_features = self.context_policy.model.as_ref().is_some_and(|model| model.feature_version == CONTEXT_ACTION_FEATURE_VERSION.to::<i64>());
+        if !analyzable
+            || self.application_excluded(application)
+            || !new_features
+            || waiting.converted
+            || !self.context_assists()
+            || previous.target_group != picked
+            || boundary.deferred
+            || word.is_empty()
+            || word.chars().any(char_isspace)
+            || self.monotonic() > waiting.deadline
+            || waiting.window != self.focus_or_zero()
+            || previous.application != application
+            || previous.strokes.iter().any(|stroke| i64::from(stroke.group) != previous.source_group)
+            || strokes.iter().any(|stroke| i64::from(stroke.group) != picked)
+        {
+            return Ok(None);
+        }
+        let following = text_for_group(strokes, picked);
+        let original = format!("{}{}{following}", previous.original, previous_boundary.character);
+        if !self.context_policy.stream.text.ends_with(&format!("{original}{}", boundary.character)) {
+            return Ok(None);
+        }
+        let group = previous.target_group;
+        let alternative = text_for_group(&previous.strokes, group);
+        let baseline = self.planned_baseline(&previous.original, &vec![(group, alternative.clone())], previous.source_group, word, group)?;
+        let result = self.context_policy.decide(&baseline, &alternative, group, &self.detector, "space", "assist", &PolicyOptions {
+            after: word,
+            field_override: Some(waiting.field.clone()),
+            boundary_text: &previous_boundary.character,
+            after_origin: Self::_neighbour_origin(&previous.original),
+            ..PolicyOptions::default()
+        })?;
+        if !result.decision.should_convert {
+            // The caller logs the wait dropped with the analysis of the picked word, as it always did.
+            return Ok(None);
+        }
+        technical_event!(
+            self.shared, "context_wait_resolved", "wait_id": waiting.diagnostic_id,
+            "previous_characters": pystr::len(&previous.original), "next_characters": pystr::len(word),
+            "next_word_picked": true,
+        );
+        // The picked token's keys are in the target layout already: typed again in it they are what they were, and the
+        // layout picked for them stays.
+        let mut keys = previous.strokes.clone();
+        keys.push(previous_boundary.clone());
+        keys.extend(strokes.iter().cloned());
+        Ok(Some(Arc::new(CorrectionPlan {
+            mode: "context_word",
+            context_field: self.context_field_id(),
+            picked_tail: strokes.len(),
+            ..CorrectionPlan::new(
+                keys, Some(boundary.clone()), previous.source_group, group, original,
+                format!("{alternative}{}{following}", previous_boundary.character), result.decision.confidence, application,
+            )
+        })))
     }
 
     /// The correction of a word converted alone before the token after it, which stays as typed.
@@ -443,7 +528,7 @@ impl EngineCore {
         let Some(provisional) = provisional else {
             return Ok(None);
         };
-        if !decision.should_convert || self.text_setting("detection.context_policy", "assist") != "assist" {
+        if !decision.should_convert || !self.context_assists() {
             return Ok(None);
         }
         let applied = provisional.plan.clone();
@@ -601,7 +686,7 @@ impl EngineCore {
     pub fn take_along(
         &mut self, kept: &[Arc<KeptWord>], plan: &PlanRef, first_characters: usize, application: &str, switched: bool,
     ) -> EngineResult<PlanRef> {
-        if self.text_setting("detection.context_policy", "assist") != "assist" {
+        if !self.context_assists() {
             return Ok(plan.clone());
         }
         let start = plan.clone();

@@ -633,6 +633,7 @@ impl EngineCore {
         self.last_committed = Some(Arc::new(CorrectionPlan {
             automatic: false,
             trailing: plan.trailing.clone(),
+            kept_tail: plan.picked_tail,
             ..CorrectionPlan::new(
                 plan.strokes.clone(), plan.boundary.clone(), plan.target_group, plan.source_group, plan.replacement.clone(),
                 if plan.typed.is_empty() { plan.original.clone() } else { plan.typed.clone() },

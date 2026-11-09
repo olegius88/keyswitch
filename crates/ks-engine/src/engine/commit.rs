@@ -415,7 +415,23 @@ impl EngineCore {
             }
             decision = Some(decided);
         } else {
-            self.log_context_wait("context_wait_cancelled", waiting.as_ref(), "analysis_skipped", &[]);
+            // The word of a layout picked by hand is not analysed, but it is the context a waiting word waited for.
+            // The model is asked with the word alone; the token is typed again whole, a sign after it included (`ожидал,`).
+            let picked = match waiting.as_ref().filter(|_| manual_layout_protected) {
+                Some(waited) => {
+                    let token = strokes_of(&[&strokes, &signs, &trailing]);
+                    self.decide_before_picked_word(waited, &token, boundary, &original, source_group, &application, analyzable)?
+                }
+                None => None,
+            };
+            if let Some(found) = picked {
+                self.log_pending_dropped("superseded_by_boundary");
+                self.pending = Some(found);
+                self.learning_prompt_after = None;
+                self.pending_trigger_keycode = i64::from(boundary.keycode);
+            } else {
+                self.log_context_wait("context_wait_cancelled", waiting.as_ref(), "analysis_skipped", &[]);
+            }
             let remembered = strokes_of(&[&typed[..head], &strokes]);
             self.remember_context(&application, source_group, &remembered);
             if chosen_layout

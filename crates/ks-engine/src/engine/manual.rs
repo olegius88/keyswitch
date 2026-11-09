@@ -27,6 +27,8 @@ impl EngineCore {
         }
         let mut mode = "manual";
         let mut trailing: Strokes = Vec::new();
+        // The keys at the end of the last correction that stay in the layout they were typed in (`picked_tail`).
+        let mut kept_tail = 0;
         let mut strokes: Strokes;
         let mut source_group;
         let boundary;
@@ -62,6 +64,7 @@ impl EngineCore {
             application = committed.application.clone();
             source = "last_committed";
             trailing.clone_from(&committed.trailing);
+            kept_tail = committed.kept_tail;
         } else {
             self.switch_layout_only(trigger_keycode);
             return;
@@ -76,13 +79,22 @@ impl EngineCore {
         // typed takes back all of it (`mongo-service`, converted whole, is `ьщтпщ-ыукмшсу` again).
         let restores = self.last_correction.as_ref().is_some_and(|previous| strokes == previous.strokes && source_group == previous.target_group);
         let kept_head = if mode == "manual" && !restores { self.joined_split(&strokes, source_group) } else { 0 };
+        // Only Pause on what a correction typed takes it back with the tail it kept.
+        let kept_tail = if restores { kept_tail } else { 0 };
         strokes.drain(..kept_head);
         let original = text_for_group(&strokes, source_group);
         let replacement = text_for_group(&strokes, target);
+        let replacement = if kept_tail == 0 {
+            replacement
+        } else {
+            let (converted, kept) = strokes.split_at(strokes.len() - kept_tail);
+            format!("{}{}", text_for_group(converted, target), text_for_group(kept, source_group))
+        };
         let plan = Arc::new(CorrectionPlan {
             automatic: false,
             mode,
             trailing: trailing.clone(),
+            kept_tail,
             ..CorrectionPlan::new(strokes, boundary, source_group, target, original.clone(), replacement.clone(), UNSCORED_CORRECTION_CONFIDENCE, &application)
         });
         // Pause right after a correction converts the same keys back. That
@@ -560,6 +572,8 @@ impl EngineCore {
             automatic: false,
             mode: "undo",
             trailing,
+            // A word picked by hand after the converted one stays in the layout it was typed in.
+            kept_tail: previous.picked_tail,
             replaced,
             replaced_strokes,
             ..CorrectionPlan::new(

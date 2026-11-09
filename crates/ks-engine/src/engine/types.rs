@@ -98,6 +98,10 @@ pub struct CorrectionPlan {
     // before its next word, which is typed again as it was (decide_with_kept_neighbour). The
     // layout stays `source_group`.
     pub kept_tail: usize,
+    // The last strokes of `strokes` typed in `target_group` already, in a layout the user picked by hand for them
+    // (decide_before_picked_word): converted with the rest they stay as typed, and the plans that put the text back
+    // (undo, Pause right after) keep them as their `kept_tail`, typed again in the layout they were typed in.
+    pub picked_tail: usize,
     // The keys on screen that `strokes` replace when they are other keys: a typo correction
     // (mode "typo", typo_plan) types the corrected word over the keys typed, and its undo types
     // those back. Empty: `strokes` are the keys on screen, as for every other correction.
@@ -133,6 +137,7 @@ impl CorrectionPlan {
             sign_replayed: false,
             typed: String::new(),
             kept_tail: 0,
+            picked_tail: 0,
             replaced_strokes: Vec::new(),
             replaced: Vec::new(),
         }

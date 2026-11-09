@@ -39,7 +39,7 @@ impl EngineCore {
             || now < last + settle_after
             || self.last_committed_stale
             || waiting.window != self.focus_or_zero()
-            || self.text_setting("detection.context_policy", "assist") != "assist"
+            || !self.context_assists()
             || !self.flag("enabled", true)
             || !self.flag("detection.correct_on_pause", true)
         {
@@ -99,7 +99,7 @@ impl EngineCore {
             || self.pending.is_some()
             || self.last_committed_stale
             || waiting.window != self.focus_or_zero()
-            || self.text_setting("detection.context_policy", "assist") != "assist"
+            || !self.context_assists()
             || !self.flag("enabled", true)
             || !self.boundary_enabled(event)
         {
