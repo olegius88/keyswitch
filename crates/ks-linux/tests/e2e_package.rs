@@ -14,7 +14,7 @@ use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_linux::tray::{ITEM_INTERFACE, MENU_INTERFACE, MENU_PATH, OBJECT_PATH};
 use serde_json::json;
-use support::{Case, IDLE_PAUSE, CONTEXT_RESOLUTION, dbus_call, Watcher, Typer, pump_until, pump, judge, INTER_CASE, GRACE, PAUSE_KEYSYM, SETTLE, RETURN_KEYSYM, LEARNING_CONFIRMATION, entry_window};
+use support::{click_into, Case, IDLE_PAUSE, CONTEXT_RESOLUTION, dbus_call, Watcher, Typer, pump_until, pump, judge, INTER_CASE, GRACE, PAUSE_KEYSYM, SETTLE, RETURN_KEYSYM, LEARNING_CONFIRMATION, entry_window};
 
 const TRAY_READY_TO_TYPING: u64 = 300;
 const WARMUP_DEADLINE: u64 = 6000;
@@ -111,7 +111,7 @@ fn scenario(root: &Path, child: &mut Child, watcher: &Watcher, entry: &gtk::Entr
     let mut exited = None;
     let registered = pump_until(APPLICATION_WAIT, || {
         exited = child.try_wait().ok().flatten();
-        exited.is_some() || watcher.service().is_some()
+        exited.is_some() || watcher.service(&destination).is_some()
     });
     if let Some(status) = exited {
         return Err(format!("the program exited early with {status}"));
@@ -119,14 +119,15 @@ fn scenario(root: &Path, child: &mut Child, watcher: &Watcher, entry: &gtk::Entr
     if !registered {
         return Err("the panel icon did not register".to_owned());
     }
-    if watcher.service().as_deref() != Some(OBJECT_PATH) {
-        return Err(format!("unexpected registered tray path {:?}", watcher.service()));
+    if watcher.service(&destination).as_deref() != Some(OBJECT_PATH) {
+        return Err(format!("unexpected registered tray path {:?}", watcher.service(&destination)));
     }
     tray_checks(&destination)?;
     pump(TRAY_READY_TO_TYPING);
     let group = || typer.current_group();
     let type_case = |case: &Case| -> Result<(), String> {
         typer.switch_group(case.1)?;
+        click_into(typer, window)?;
         entry.grab_focus();
         typer.clear_field()?;
         typer.type_keys(case.2)
@@ -157,6 +158,7 @@ fn scenario(root: &Path, child: &mut Child, watcher: &Watcher, entry: &gtk::Entr
     // A double press: the first converts the word, the second offers a rule.
     typer.switch_group(0)?;
     window.present();
+    click_into(typer, window)?;
     entry.grab_focus();
     typer.clear_field()?;
     typer.type_keys("hello")?;
@@ -182,6 +184,7 @@ fn scenario(root: &Path, child: &mut Child, watcher: &Watcher, entry: &gtk::Entr
     }
     typer.switch_group(0)?;
     window.present();
+    click_into(typer, window)?;
     entry.grab_focus();
     typer.clear_field()?;
     typer.type_keys("hello ")?;
@@ -190,6 +193,7 @@ fn scenario(root: &Path, child: &mut Child, watcher: &Watcher, entry: &gtk::Entr
         return Err(format!("manual layout did not override the packaged learned rule: text={:?} group={}", entry.text().as_str(), group()));
     }
     window.present();
+    click_into(typer, window)?;
     entry.grab_focus();
     typer.clear_field()?;
     typer.type_keys("hello ")?;

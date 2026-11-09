@@ -7,6 +7,8 @@ use ks_backend::selected_text::SelectionError;
 
 const A: u8 = 38;
 const COMMA: u8 = 59;
+/// The key of `/` in the US layout and of `.` and `,` in the Russian one.
+const SLASH: u8 = 61;
 const SPACE: u8 = 65;
 const BACKSPACE: u8 = 22;
 const SHIFT_L: u8 = 50;
@@ -38,6 +40,7 @@ fn keymap() -> KeyMap {
     };
     put(A, 0, 2, 2, sym(&[0x61, 0x41, 0x6c6, 0x6e6]));
     put(COMMA, 2, 2, 2, sym(&[0x2c, 0x3c, 0x6c2, 0x6e2]));
+    put(SLASH, 2, 2, 2, sym(&[0x2f, 0x3f, 0x2e, 0x2c]));
     put(SPACE, 1, 1, 1, sym(&[0x20]));
     put(BACKSPACE, 1, 1, 1, sym(&[0xff08]));
     put(SHIFT_L, 1, 1, 1, sym(&[0xffe1]));
@@ -493,16 +496,36 @@ fn a_desktop_that_keeps_the_group_is_asked_for_it_and_xkb_is_left_alone() {
     let (backend, desktop) = with_desktop(&fake, true, true);
     assert!(backend.switch_group(1).is_ok());
     assert_eq!(backend.current_group(), Ok(1));
-    let boundary = comma(0, SHIFT);
+    let strokes = [stroke(true)];
+    assert_eq!(backend.inject_correction(Injection { source_group: Some(0), ..injection(&strokes, 1, None) }), Ok(0));
+    assert_eq!(*lock(&desktop.asked), vec![1, 1]);
+    let mut want = tap(BACKSPACE).to_vec();
+    want.extend(shifted_tap(A));
+    assert_eq!(typing(&fake), want, "no group is locked past the desktop");
+}
+
+#[test]
+fn a_sign_that_keeps_its_glyph_is_typed_in_the_target_layout_where_the_desktop_keeps_the_group() {
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, true, true);
+    let boundary = comma(0, 0);
     let strokes = [stroke(true)];
     assert_eq!(backend.inject_correction(Injection { source_group: Some(0), ..injection(&strokes, 1, Some(&boundary)) }), Ok(0));
-    // The same switches as through XKB (target, source for the boundary, target), each asked of the desktop.
-    assert_eq!(*lock(&desktop.asked), vec![1, 1, 0, 1]);
+    // One switch: the comma of the Russian layout is Shift and the key of `/`.
+    assert_eq!(*lock(&desktop.asked), vec![1]);
     let mut want = tap(BACKSPACE).to_vec();
     want.extend(tap(BACKSPACE));
     want.extend(shifted_tap(A));
-    want.extend(shifted_tap(COMMA));
-    assert_eq!(typing(&fake), want, "no group is locked past the desktop");
+    want.extend(shifted_tap(SLASH));
+    assert_eq!(typing(&fake), want);
+    // A sign of two characters has no one key: the layout is switched for it, a moment after the keys before it.
+    let fake = Fake::new();
+    let (backend, desktop) = with_desktop(&fake, true, true);
+    let wide = KeyEvent { character: ",,".to_owned(), ..comma(0, 0) };
+    let started = Instant::now();
+    assert_eq!(backend.inject_correction(Injection { source_group: Some(0), ..injection(&strokes, 1, Some(&wide)) }), Ok(0));
+    assert_eq!(*lock(&desktop.asked), vec![1, 0, 1]);
+    assert!(started.elapsed() >= Duration::from_millis(DESKTOP_SWITCH_SETTLE_MS), "the keys before a switch are given time");
 }
 
 #[test]

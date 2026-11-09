@@ -26,7 +26,7 @@ use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{
-    BACKSPACE_KEYSYM, CINNAMON_DESKTOP_NAMES, CINNAMON_LAYOUTS_PER_KEYMAP, CINNAMON_XKB_SOURCE, DESKTOP_GROUP_POLL_MS,
+    BACKSPACE_KEYSYM, CINNAMON_DESKTOP_NAMES, CINNAMON_LAYOUTS_PER_KEYMAP, CINNAMON_XKB_SOURCE, DESKTOP_GROUP_POLL_MS, DESKTOP_SWITCH_SETTLE_MS,
     DESKTOP_GROUP_WAIT_MS, INJECTION_SECONDS_PER_EVENT, KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS,
     LEFT_KEYSYM, MAX_TRACKED_OWN_WINDOWS, MAX_WINDOW_ANCESTOR_DEPTH, MAX_XKB_GROUPS,
     MIN_INJECTION_DEADLINE_SECONDS, SHIFT_L_KEYSYM, X11_BUTTON_PRESS, X11_KEY_PRESS, X11_KEY_RELEASE, X11_MAX_KEYCODE,
@@ -197,6 +197,8 @@ struct Shared {
     xkb_version: Mutex<String>,
     selection_source: Mutex<Option<Box<dyn SelectionSource>>>,
     desktop: Mutex<Option<Arc<dyn DesktopLayouts>>>,
+    /// When the backend last sent keys.
+    last_keys: Mutex<Option<Instant>>,
 }
 
 /// Observe all core keyboard events and inject deterministic corrections.
@@ -230,6 +232,7 @@ impl X11Backend {
                 xkb_version: Mutex::new("—".to_owned()),
                 selection_source: Mutex::new(None),
                 desktop: Mutex::new(None),
+                last_keys: Mutex::new(None),
             }),
         }
     }
@@ -652,7 +655,10 @@ impl Shared {
         tables
     }
 
-    fn fake(api: &dyn X11Api, events: &[(bool, u8)]) -> Result<(), X11Error> {
+    fn fake(&self, api: &dyn X11Api, events: &[(bool, u8)]) -> Result<(), X11Error> {
+        if !events.is_empty() {
+            *lock(&self.last_keys) = Some(Instant::now());
+        }
         for &(pressed, keycode) in events {
             if !api.fake_key(pressed, keycode) {
                 return Err(failed(format!("XTest отклонил keycode {keycode}")));
@@ -661,17 +667,49 @@ impl Shared {
         Ok(())
     }
 
+    fn desktop(&self) -> Option<Arc<dyn DesktopLayouts>> {
+        lock(&self.desktop).clone()
+    }
+
     /// Locks the group: through the desktop that keeps it, once the server shows it there, and directly otherwise.
     fn lock_to(&self, api: &dyn X11Api, group: i32, message: &str) -> Result<(), X11Error> {
         let wanted = group.low::<u8>();
-        let desktop = lock(&self.desktop).clone();
-        if let Some(desktop) = desktop
-            && desktop.activate(wanted)
-            && Self::group_shown(api, wanted)
-        {
-            return Ok(());
+        if let Some(desktop) = self.desktop() {
+            // Cinnamon switches the IBus engine with the layout: keys sent just before were lost or came out in the next
+            // layout (`ghbdtn,` became `ghbdtnб` and `,` on Linux Mint 22.3).
+            let sent = *lock(&self.last_keys);
+            if let Some(remaining) = sent.and_then(|sent| Duration::from_millis(DESKTOP_SWITCH_SETTLE_MS).checked_sub(sent.elapsed())) {
+                thread::sleep(remaining);
+            }
+            if desktop.activate(wanted) && Self::group_shown(api, wanted) {
+                return Ok(());
+            }
         }
         if api.lock_group(wanted) { Ok(()) } else { Err(failed(format!("{message}{group}"))) }
+    }
+
+    /// The keys that type each sign of `literal` in `group` itself, when there are such keys for all of them.
+    fn signs_in_group(&self, api: &dyn X11Api, literal: &[&KeyEvent], group: i32) -> Option<Vec<(bool, u8)>> {
+        let tables = self.typing_tables(api);
+        let table = tables.get(group.to::<usize>())?;
+        let shift_keycode = api.keycode_for_keysym(SHIFT_L_KEYSYM);
+        let mut events = Vec::new();
+        for stroke in literal {
+            let mut characters = stroke.character.chars();
+            let (Some(sign), None) = (characters.next(), characters.next()) else {
+                return None;
+            };
+            let &(keycode, shifted) = table.get(&sign)?;
+            if shifted {
+                events.push((true, shift_keycode));
+            }
+            events.push((true, keycode.low::<u8>()));
+            events.push((false, keycode.low::<u8>()));
+            if shifted {
+                events.push((false, shift_keycode));
+            }
+        }
+        Some(events)
     }
 
     /// Whether the server shows the group within `DESKTOP_GROUP_WAIT_MS`: the desktop locks it through its own connection,
@@ -766,6 +804,17 @@ impl Shared {
         for stroke in &literal {
             tap(&mut boundary_sequence, stroke.keycode.low::<u8>(), shifted(stroke, literal_group));
         }
+        // A desktop that keeps the group is asked for it once: a sign that keeps its glyph goes in the target layout, by the
+        // key that types it there (`,` is Shift and the key of `.` in the Russian layout).
+        let signs_in_target = if preserve_boundary_layout && kept_tail == 0 && self.desktop().is_some() {
+            self.signs_in_group(&*api, &literal, target_group)
+        } else {
+            None
+        };
+        let (boundary_sequence, preserve_boundary_layout) = match signs_in_target {
+            Some(keys) => (keys, false),
+            None => (boundary_sequence, preserve_boundary_layout),
+        };
         let none: Vec<(bool, u8)> = Vec::new();
         let target_boundary_sequence = if preserve_boundary_layout || kept_tail != 0 { &none } else { &boundary_sequence };
         let source_boundary_sequence = if preserve_boundary_layout && kept_tail == 0 { &boundary_sequence } else { &none };
@@ -776,19 +825,19 @@ impl Shared {
         api.grab_control(true);
         let outcome = (|| -> Result<(), X11Error> {
             self.lock_to(&*api, target_group, "Не удалось включить XKB-группу ")?;
-            Self::fake(&*api, &sequence)?;
-            Self::fake(&*api, target_boundary_sequence)?;
+            self.fake(&*api, &sequence)?;
+            self.fake(&*api, target_boundary_sequence)?;
             if !source_boundary_sequence.is_empty() {
                 self.lock_to(&*api, literal_group, "Не удалось временно включить XKB-группу ")?;
-                Self::fake(&*api, source_boundary_sequence)?;
+                self.fake(&*api, source_boundary_sequence)?;
                 self.lock_to(&*api, target_group, "Не удалось восстановить XKB-группу ")?;
             }
             if kept_tail != 0 {
                 self.lock_to(&*api, final_group, "Не удалось вернуть XKB-группу ")?;
-                Self::fake(&*api, &kept_sequence)?;
-                Self::fake(&*api, kept_boundary_sequence)?;
+                self.fake(&*api, &kept_sequence)?;
+                self.fake(&*api, kept_boundary_sequence)?;
             }
-            Self::fake(&*api, &late_sequence)?;
+            self.fake(&*api, &late_sequence)?;
             api.sync();
             Ok(())
         })();
@@ -870,7 +919,7 @@ impl Shared {
             let last = (final_group.unwrap_or(original_group), reselect.clone());
             for (group, events) in runs.iter().chain(std::iter::once(&last)) {
                 self.lock_to(&*api, *group, "Не удалось включить XKB-группу ")?;
-                Self::fake(&*api, events)?;
+                self.fake(&*api, events)?;
             }
             api.sync();
             Ok(())

@@ -665,7 +665,7 @@ fn packaged(binary: &Path, desktop: &str) -> Result<(), String> {
             return Err("the program did not register its panel icon".to_owned());
         }
         if let Some(watcher) = &watcher
-            && watcher.service().is_none() {
+            && watcher.service(&destination).is_none() {
                 return Err("the watcher did not receive the icon's registration".to_owned());
             }
         let menu = dbus_call(&destination, MENU_PATH, &format!("{MENU_INTERFACE}.GetLayout"), &["0", "1", "[]"])?;

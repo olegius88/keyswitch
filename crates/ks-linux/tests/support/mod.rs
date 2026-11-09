@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use gtk::glib;
 use gtk::prelude::{EditableExt as _, GtkWindowExt as _, WidgetExt as _};
-use ks_linux::x11_backend::X11Api;
+use ks_linux::cinnamon_native::CinnamonLayouts;
+use ks_linux::x11_backend::{DesktopLayouts, X11Api, is_cinnamon_desktop};
 use ks_linux::x11_native;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ConnectionExt as _, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
@@ -42,12 +43,18 @@ const LEFT_BUTTON: u8 = 1;
 /// The window manager the keyboard is tried against, and how long it takes to start.
 pub(crate) const WINDOW_MANAGER: &str = "xfwm4";
 const WINDOW_MANAGER_STARTS: u64 = 10_000;
+/// A group asked of a desktop that keeps it (Cinnamon) is waited for this long.
+const DESKTOP_GROUP_SHOWN: u64 = 1000;
+const STATUS_NOTIFIER_WATCHER: &str = "org.kde.StatusNotifierWatcher";
+const STATUS_NOTIFIER_WATCHER_PATH: &str = "/StatusNotifierWatcher";
 
 /// Physical US-layout keys, independent of any input method.
 pub(crate) struct Typer {
     connection: RustConnection,
     root: u32,
     api: Arc<dyn X11Api>,
+    /// On a desktop that keeps the layout group itself (Cinnamon), the group is asked of it, as the program asks it.
+    desktop: Option<CinnamonLayouts>,
 }
 
 impl Typer {
@@ -55,7 +62,8 @@ impl Typer {
         let (connection, screen) = x11rb::connect(None).map_err(|error| format!("cannot open DISPLAY: {error}"))?;
         let root = connection.setup().roots[screen].root;
         let api = x11_native::connect().map_err(|error| format!("{error:?}"))?;
-        Ok(Typer { connection, root, api })
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| is_cinnamon_desktop(&desktop)).then(CinnamonLayouts::default);
+        Ok(Typer { connection, root, api, desktop })
     }
 
     fn event(&self, kind: u8, keycode: u8, delay: u32) -> Result<(), String> {
@@ -141,6 +149,11 @@ impl Typer {
     }
 
     pub(crate) fn switch_group(&self, group: i32) -> Result<(), String> {
+        if self.desktop.as_ref().is_some_and(|desktop| desktop.activate(group.low::<u8>()))
+            && pump_until(DESKTOP_GROUP_SHOWN, || self.current_group() == group)
+        {
+            return Ok(());
+        }
         if !self.api.lock_group(group.low::<u8>()) {
             return Err(format!("cannot switch the XKB group to {group}"));
         }
@@ -197,6 +210,19 @@ pub(crate) fn entry_window(title: &str) -> (gtk::Window, gtk::Entry) {
     (window, entry)
 }
 
+/// A click in the middle of the window, which gives it the keyboard where a window manager keeps a new window of a program
+/// in the background from taking it (Cinnamon's Muffin).
+pub(crate) fn click_into(typer: &Typer, window: &gtk::Window) -> Result<(), String> {
+    use gtk::prelude::{Cast as _, NativeExt as _};
+    let xid = window
+        .surface()
+        .and_then(|surface| surface.downcast::<gdk_x11::X11Surface>().ok())
+        .and_then(|surface| u32::try_from(surface.xid()).ok())
+        .ok_or("the window has no X11 window")?;
+    let (x, y) = typer.window_origin(xid)?;
+    typer.click_at(x + WINDOW_WIDTH / 2, y + WINDOW_HEIGHT / 2)
+}
+
 /// One typed case: the layout selected before, the keys, the text and layout expected, the earliest moment to judge them.
 pub(crate) struct Case(pub &'static str, pub i32, pub &'static str, pub &'static str, pub i32, pub u64);
 
@@ -210,10 +236,11 @@ pub(crate) fn judge(entry: &gtk::Entry, group: &dyn Fn() -> i32, case: &Case, gr
     if reached { Ok(()) } else { Err(format!("wrong correction in {:?}", case.0)) }
 }
 
-/// The minimal host a panel icon registers with.
+/// The host a panel icon registers with: a minimal one of the test's own on a private bus, or the desktop's (Cinnamon's
+/// `xapp-sn-watcher`) when a desktop session runs one already.
 pub(crate) struct Watcher {
     pub registered: Arc<Mutex<Option<String>>>,
-    _connection: zbus::blocking::Connection,
+    connection: Option<zbus::blocking::Connection>,
 }
 
 struct WatcherObject {
@@ -231,17 +258,35 @@ impl WatcherObject {
 impl Watcher {
     pub(crate) fn new() -> Result<Watcher, String> {
         let registered = Arc::new(Mutex::new(None));
+        let owned = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", &[STATUS_NOTIFIER_WATCHER])?;
+        if owned.contains("true") {
+            return Ok(Watcher { registered, connection: None });
+        }
         let object = WatcherObject { registered: registered.clone() };
         let connection = zbus::blocking::connection::Builder::session()
-            .and_then(|builder| builder.name("org.kde.StatusNotifierWatcher"))
-            .and_then(|builder| builder.serve_at("/StatusNotifierWatcher", object))
+            .and_then(|builder| builder.name(STATUS_NOTIFIER_WATCHER))
+            .and_then(|builder| builder.serve_at(STATUS_NOTIFIER_WATCHER_PATH, object))
             .and_then(zbus::blocking::connection::Builder::build)
             .map_err(|error| error.to_string())?;
-        Ok(Watcher { registered, _connection: connection })
+        Ok(Watcher { registered, connection: Some(connection) })
     }
 
-    pub(crate) fn service(&self) -> Option<String> {
-        self.registered.lock().expect("the watcher's state").clone()
+    /// What the icon of `destination` registered: the object path it gave the test's own host, or the path the desktop's
+    /// host lists after the icon's connection.
+    pub(crate) fn service(&self, destination: &str) -> Option<String> {
+        if self.connection.is_some() {
+            return self.registered.lock().expect("the watcher's state").clone();
+        }
+        let owner = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.GetNameOwner", &[destination]).ok()?;
+        let owner = owner.split('\'').nth(1)?.to_owned();
+        let items = dbus_call(
+            STATUS_NOTIFIER_WATCHER,
+            STATUS_NOTIFIER_WATCHER_PATH,
+            "org.freedesktop.DBus.Properties.Get",
+            &[STATUS_NOTIFIER_WATCHER, "RegisteredStatusNotifierItems"],
+        )
+        .ok()?;
+        items.split('\'').find_map(|item| item.strip_prefix(&owner).filter(|path| path.starts_with('/')).map(str::to_owned))
     }
 }
 

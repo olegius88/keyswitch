@@ -29,6 +29,10 @@ pub const INJECTION_SECONDS_PER_EVENT: f64 = 0.02;
 /// A group asked of the desktop is waited for this long before XKB is locked directly.
 pub const DESKTOP_GROUP_WAIT_MS: u64 = 300;
 pub const DESKTOP_GROUP_POLL_MS: u64 = 5;
+/// Keys sent less than this long before a group is asked of the desktop are given the rest of it first: Cinnamon
+/// switches the IBus engine with the layout, and keys still on their way were lost or came out in the next layout (no loss
+/// from 150 ms on in 25 switches on Linux Mint 22.3, losses below 100 ms).
+pub const DESKTOP_SWITCH_SETTLE_MS: u64 = 250;
 
 /// Cinnamon keeps the layout group itself and switches it through its own service.
 pub const CINNAMON_DESKTOP_NAMES: [&str; 2] = ["X-Cinnamon", "Cinnamon"];

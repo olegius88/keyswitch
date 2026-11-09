@@ -21,14 +21,14 @@ fn run() -> Result<(), String> {
     let sender = std::sync::Mutex::new(sender);
     let item = StatusNotifierItem::new(Arc::new(move |action| { let _ = sender.lock().expect("the channel").send(action); }), Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources").as_path())?;
     item.set_layout(1);
+    let destination = format!("io.github.olegius88.KeySwitch.StatusNotifierItem.p{}", std::process::id());
     let deadline = Instant::now() + REGISTRATION_WAIT;
-    while watcher.service().is_none() && Instant::now() < deadline {
+    while watcher.service(&destination).is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
-    if watcher.service().as_deref() != Some(OBJECT_PATH) {
-        return Err(format!("the icon registered an unexpected object path: {:?}", watcher.service()));
+    if watcher.service(&destination).as_deref() != Some(OBJECT_PATH) {
+        return Err(format!("the icon registered an unexpected object path: {:?}", watcher.service(&destination)));
     }
-    let destination = format!("io.github.olegius88.KeySwitch.StatusNotifierItem.p{}", std::process::id());
     let properties = "org.freedesktop.DBus.Properties.Get";
     let item_is_menu = dbus_call(&destination, OBJECT_PATH, properties, &[ITEM_INTERFACE, "ItemIsMenu"])?;
     let menu_path = dbus_call(&destination, OBJECT_PATH, properties, &[ITEM_INTERFACE, "Menu"])?;
