@@ -1295,10 +1295,11 @@ fn a_switch_timeout_and_an_already_selected_group() {
     assert_eq!(
         error,
         BackendError::LayoutSwitchUnconfirmed {
-            message: "Приложение не подтвердило смену раскладки".to_owned(),
+            message: "Приложение Notepad не подтвердило смену раскладки".to_owned(),
             group: 1,
         }
     );
+    assert_eq!(unconfirmed_message(""), "Приложение не подтвердило смену раскладки");
 }
 
 // ----------------------------------------------------------------------------------- a layout chosen in the tray menu

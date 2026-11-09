@@ -2242,7 +2242,7 @@ impl Builder<'_> {
         let enabled = self.setting(&autocorrection_settings()[0]);
         let state = self.section("Состояние", vec![status_node, layout_node, count_node, last_node, error_node, enabled]);
         let hint = self.label(
-            "Выберите EN и напечатайте ghbdtn: после паузы появится «привет». Можно также нажать пробел. Потом проверьте обратное направление.",
+            "Напечатайте ghbdtn, если сейчас раскладка EN, или руддщ, если RU: после паузы появится «привет» или hello. Можно также нажать пробел. Раскладку перед проверкой не переключайте: первое слово после ручной смены программа оставляет как набрано.",
             LabelStyle::Normal,
             0,
             0,

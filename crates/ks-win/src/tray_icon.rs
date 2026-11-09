@@ -12,9 +12,9 @@ pub const SUPERSAMPLING: usize = 4;
 /// The side of the picture the lengths below are given on.
 const DESIGN_SIDE_PIXELS: usize = 64;
 const BADGE_CORNER_RADIUS_PIXELS: usize = 13;
-/// The box the letters are fitted into, centred on the badge: at 16 pixels it leaves a pixel of badge at each side of
-/// the two letters, and room above and below them.
-const BADGE_TEXT_WIDTH_PIXELS: usize = 56;
+/// The box the letters are fitted into, centred on the badge: at 16 pixels it leaves a pixel and a half of badge at each
+/// side of the two letters, two pixels from 20 on, and room above and below them.
+const BADGE_TEXT_WIDTH_PIXELS: usize = 52;
 const BADGE_TEXT_HEIGHT_PIXELS: usize = 44;
 /// How many font heights that fit are tried, from the largest down, for letters a whole number of icon pixels tall.
 const FONT_FIT_CANDIDATES: usize = 6;
@@ -414,11 +414,11 @@ mod tests {
     #[test]
     fn the_letters_fill_the_width_and_prefer_whole_icon_pixels() {
         let (width, height) = text_box(SIDE);
-        assert_eq!((width, height), (56, 44));
+        assert_eq!((width, height), (52, 44));
         let ink = fitted_ink(SIDE, letters).unwrap();
-        // 28 pixels tall and 56 wide fill the width and are seven icon pixels.
-        assert_eq!((ink.width, ink.height), (56, 28));
-        // At 80 pixels the box is 70 by 55: 35 tall would fit, 32 is the tallest whole number of icon pixels.
+        // 26 pixels tall would fill the width; 24 tall and 48 wide is the tallest whole number of icon pixels near it.
+        assert_eq!((ink.width, ink.height), (48, 24));
+        // At 80 pixels the box is 65 by 55: 32 tall fills its width and is eight icon pixels.
         let ink = fitted_ink(80, letters).unwrap();
         assert_eq!((ink.width, ink.height), (64, 32));
     }
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(fitted_ink(SIDE, |_| None), None);
         // A height the platform cannot draw is passed over.
         let ink = fitted_ink(SIDE, |font| if font == 40 { None } else { letters(font) }).unwrap();
-        assert!(ink.width <= 56 && ink.height <= 44);
+        assert!(ink.width <= 52 && ink.height <= 44);
         // A single tall glyph is held by the height of the box.
         let tall = |font: i32| Some(Ink { width: 4, height: font.to::<usize>(), coverage: vec![255; 4 * font.to::<usize>()] });
         assert_eq!(fitted_ink(SIDE, tall).unwrap().height, 44);

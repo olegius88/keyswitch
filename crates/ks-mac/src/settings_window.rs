@@ -744,7 +744,7 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
             }
             add(page, ui.status);
             y += 100.0;
-            y += label(page, "Проверка в реальном поле: выберите EN и напечатайте ghbdtn — после пробела появится «привет».", y, false) + 6.0;
+            y += label(page, "Проверка в реальном поле: напечатайте ghbdtn, если сейчас раскладка EN, или руддщ, если RU, — после пробела появится «привет» или hello. Раскладку перед проверкой не переключайте: первое слово после ручной смены программа оставляет как набрано.", y, false) + 6.0;
             // SAFETY: as above.
             unsafe {
                 let field: Id = msg_send![class!(NSTextField), textFieldWithString: string("")];

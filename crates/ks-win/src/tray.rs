@@ -33,8 +33,10 @@ use crate::tray_model::{TrayAction, TrayState, menu_entries};
 use crate::windows_native::wide;
 
 const ICON_ID: u32 = 1;
-const FONT_FACE: &str = "Segoe UI";
-const FONT_WEIGHT_BOLD: i32 = 700;
+/// The badge's letters are Segoe UI Semibold: the bold face filled the badge to its sides, its strokes heavy on a large
+/// screen. GDI keeps the semibold weight a face of its own, which is asked for at the normal weight.
+const FONT_FACE: &str = "Segoe UI Semibold";
+const FONT_WEIGHT_NORMAL: i32 = 400;
 const DEFAULT_SMALL_ICON_PIXELS: i32 = 16;
 /// The glyphs are drawn on a bitmap this many canvases wide, so that a font height tried while fitting them is measured
 /// whole even when its ink would not fit the canvas.
@@ -93,7 +95,7 @@ fn glyph_ink(text: &str, font_height: i32, size: usize) -> Option<Ink> {
             0,
             0,
             0,
-            FONT_WEIGHT_BOLD,
+            FONT_WEIGHT_NORMAL,
             0,
             0,
             0,

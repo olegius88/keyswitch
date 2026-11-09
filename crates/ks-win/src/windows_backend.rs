@@ -1730,7 +1730,17 @@ impl Inner {
             }
             self.clock.sleep(LAYOUT_SWITCH_POLL_SECONDS);
         }
-        Err(BackendError::LayoutSwitchUnconfirmed { message: "Приложение не подтвердило смену раскладки".to_owned(), group })
+        Err(BackendError::LayoutSwitchUnconfirmed { message: unconfirmed_message(&self.api.active_application()), group })
+    }
+}
+
+/// The error of a layout the window in front did not take, naming its program: the status line shows it, and a user's
+/// picture of it says where to look.
+fn unconfirmed_message(application: &str) -> String {
+    if application.is_empty() {
+        "Приложение не подтвердило смену раскладки".to_owned()
+    } else {
+        format!("Приложение {application} не подтвердило смену раскладки")
     }
 }
 
