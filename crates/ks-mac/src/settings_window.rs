@@ -8,9 +8,10 @@ use std::sync::Arc;
 use ks_config::history::data_dir;
 use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
+use ks_engine::engine::Hotkey;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
+use ks_ui::windows_ui_model::{is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -21,6 +22,7 @@ use crate::desktop_app::{self, Services, awaiting_permission, quit};
 use crate::hint_panel::{card_view, hint_target};
 use crate::hint_place::{page_slot, settings_page};
 use crate::macos_app::{PERMISSION_WAIT_STATUS, VERSION};
+use crate::macos_backend::key_name_exists;
 use crate::macos_native::run_on_main;
 use crate::macos_system::MacApplicationCatalog;
 use crate::macos_objc::{Id, open_path, string, text_of};
@@ -393,7 +395,16 @@ impl Ui {
                     ControlKind::Text => {
                         let shown: Id = msg_send![control, stringValue];
                         let text = text_of(shown);
-                        (!text.trim().is_empty()).then(|| json!(text))
+                        let problem = if is_hotkey_setting(&spec.path) && !text.trim().is_empty() { Hotkey::problem(&text, key_name_exists) } else { None };
+                        if let Some(problem) = problem {
+                            // A hotkey that can never fire is not stored: the field takes back what it had, and an
+                            // alert says why once the field has finished with its change.
+                            let _: () = msg_send![control, setStringValue: string(&control_text(&spec, settings.get(&spec.path).as_ref()))];
+                            alert_later(problem.message());
+                            None
+                        } else {
+                            (!text.trim().is_empty()).then(|| json!(text))
+                        }
                     }
                 }
             }

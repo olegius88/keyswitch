@@ -753,6 +753,11 @@ fn layout_languages_pair_selection_and_key_names() {
     assert_eq!(key_name(u32::from(b'7')), "7");
     assert_eq!(key_name(0xFE), "VK_FE");
     assert_eq!(key_name(0x07), "VK_07");
+    // The function keys by their own names, as on the other systems: `F9` in a hotkey is this key.
+    assert_eq!((key_name(VK_F1), key_name(VK_F1 + 8), key_name(VK_F24)), ("F1".to_owned(), "F9".to_owned(), "F24".to_owned()));
+    assert_eq!(key_name(VK_F24 + 1), "VK_88");
+    assert!(key_name_exists("f9") && key_name_exists("pause") && key_name_exists("k") && key_name_exists("scroll_lock"));
+    assert!(!key_name_exists("левый ctrl") && !key_name_exists("pausee") && !key_name_exists(""));
     // Punctuation keys carry the X11 keysym names, so a log line reads "comma", never "VK_BC".
     assert_eq!(key_name(VK_OEM_COMMA), "comma");
     assert_eq!(key_name(VK_OEM_PERIOD), "period");

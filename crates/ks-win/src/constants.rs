@@ -140,6 +140,11 @@ pub const VK_V: u32 = 0x56;
 pub const VK_Z: u32 = 0x5A;
 /// Scroll Lock, whose name a hotkey can use (Punto Switcher transliterates the selection with Alt+Scroll Lock).
 pub const VK_SCROLL: u32 = 0x91;
+/// The function keys run from F1 to F24 without a gap; the backend names them as X11 does (`F9`).
+pub const VK_F1: u32 = 0x70;
+pub const VK_F24: u32 = 0x87;
+/// The largest virtual-key code.
+pub const VK_LAST: u32 = 0xFF;
 /// UI Automation `TextPattern` id. `GetCurrentPattern` answers `S_OK` with a null pointer when the element does not support
 /// it: a field without text is an ordinary answer.
 pub const UIA_TEXT_PATTERN_ID: i32 = 10014;

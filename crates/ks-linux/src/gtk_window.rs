@@ -28,7 +28,7 @@ use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
 use ks_engine::EngineSnapshot;
-use ks_engine::engine::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
+use ks_engine::engine::{Hotkey, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
 use ks_engine::constants::{
     CONFIDENCE_SETTING_MAX, CONFIDENCE_SETTING_MIN, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, FIELD_CATCH_UP_CHOICES, MINIMUM_WORD_LENGTH_SETTING_MAX, MINIMUM_WORD_LENGTH_SETTING_MIN,
@@ -43,7 +43,8 @@ use serde_json::{Value, json};
 
 use crate::gtk_app;
 use crate::gtk_hint::{HintClicked, hint_content};
-use crate::gtk_model::{with_live, GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
+use crate::keysym_names::key_name_exists;
+use crate::gtk_model::{with_live, HOTKEY_EMPTY_MESSAGE, HOTKEY_PROBLEM_CSS_CLASS, GTK_STANDARD_SPACING_PIXELS, PAGE_CONTENT_SPACING_PIXELS, GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS, GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS, GTK_SIDEBAR_WIDTH_PIXELS, BRAND_MARGIN_OUTER_PIXELS, BRAND_MARGIN_BOTTOM_PIXELS, BRAND_MARGIN_END_PIXELS, BRAND_ICON_SIZE_PIXELS, GTK_COMPACT_SPACING_PIXELS, NAVIGATION, SIDEBAR_PRIVACY_MARGIN_START_PIXELS, SIDEBAR_PRIVACY_MARGIN_BOTTOM_PIXELS, engine_view, SPIN_VALUE_EPSILON, index_of, CONTEXT_MODES, CONTEXT_MODE_OFF_INDEX, GTK_HISTORY_PAGE_ENTRIES, format_time, plural_entries, DASHBOARD_RECENT_HISTORY_COUNT, learning_summary, CHECKSUM_DISPLAY_LENGTH_CHARACTERS, APPLICATION_CAPTURE_DELAY_MS, APPLICATION_PICKER_DIALOG_SIDE_PIXELS, DIALOG_CONTENT_MARGIN_PIXELS, ReportContext, os_description, diagnostics_report, counted, STAT_CARD_SPACING_PIXELS, TEXT_EDITOR_PADDING_PIXELS, WORDS_EDITOR_HEIGHT_PIXELS, TEXT_SAVE_DEBOUNCE_MS, HOTKEY_ENTRY_WIDTH_CHARACTERS, HERO_TOP_ROW_SPACING_PIXELS, HERO_COPY_SPACING_PIXELS, HERO_SUBTITLE, TEST_ENTRY_WIDTH_CHARACTERS, table_text, FIELD_CATCH_UP_LABELS, FIELD_CATCH_UP_TITLE, FIELD_CATCH_UP_DESCRIPTION, SELECTION_HOTKEY_TITLES, SELECTION_HOTKEY_DESCRIPTIONS, MANUAL_APP_ENTRY_WIDTH_CHARACTERS, THEMES, INDICATOR_STYLES, UPDATE_BUTTONS_SPACING_PIXELS, group_text};
 use crate::system::AutostartManager;
 
 const CONFIDENCE_SETTING_STEP: f64 = 0.1;
@@ -1235,13 +1236,15 @@ impl Builder<'_> {
         let row = action_row(title, subtitle);
         let entry = gtk::Entry::builder().text(setting_text(&self.services.settings, path, "").as_str()).width_chars(HOTKEY_ENTRY_WIDTH_CHARACTERS).valign(gtk::Align::Center).build();
         let (settings, key) = (self.settings(), path.to_owned());
+        // The row says under its title what is wrong with a hotkey that was not stored, and its own words again once one is.
+        let said = Rc::new(HotkeyRow { row: row.downgrade(), subtitle: subtitle.to_owned() });
         entry.connect_activate({
-            let (settings, key) = (settings.clone(), key.clone());
-            move |entry| save_hotkey(&settings, &key, entry)
+            let (settings, key, said) = (settings.clone(), key.clone(), said.clone());
+            move |entry| save_hotkey(&settings, &key, entry, &said)
         });
         let focus = gtk::EventControllerFocus::new();
         let weak = entry.downgrade();
-        focus.connect_leave(move |_| with_live(&weak, |entry| save_hotkey(&settings, &key, &entry)));
+        focus.connect_leave(move |_| with_live(&weak, |entry| save_hotkey(&settings, &key, &entry, &said)));
         entry.add_controller(focus);
         row.add_suffix(&entry);
         row
@@ -1777,13 +1780,41 @@ fn choose_value(settings: &SettingsStore, key: &str, keys: &[String], selected: 
     }
 }
 
-fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry) {
+/// The row of a hotkey and the words it carries under its title.
+struct HotkeyRow {
+    row: glib::WeakRef<adw::ActionRow>,
+    subtitle: String,
+}
+
+impl HotkeyRow {
+    /// The row says `problem` in the colour of an error, or its own words again.
+    fn say(&self, problem: Option<&str>) {
+        with_live(&self.row, |row| {
+            row.set_subtitle(problem.unwrap_or(&self.subtitle));
+            if problem.is_some() {
+                row.add_css_class(HOTKEY_PROBLEM_CSS_CLASS);
+            } else {
+                row.remove_css_class(HOTKEY_PROBLEM_CSS_CLASS);
+            }
+        });
+    }
+}
+
+fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry, said: &HotkeyRow) {
     let value = entry.text().trim().to_owned();
-    if value.is_empty() {
-        gtk_app::with_window(|window| window.toast("Комбинация не может быть пустой"));
-        entry.set_text(&setting_text(settings, path, ""));
+    let stored = setting_text(settings, path, "");
+    if value == stored {
+        // Nothing was changed: the field was only passed through, or it holds what a refused hotkey gave way to.
         return;
     }
+    let problem = if value.is_empty() { Some(HOTKEY_EMPTY_MESSAGE.to_owned()) } else { Hotkey::problem(&value, key_name_exists).map(|problem| problem.message()) };
+    if let Some(problem) = problem {
+        // A hotkey that can never fire is not stored: the row says why, and the field takes back what it had.
+        said.say(Some(&problem));
+        entry.set_text(&stored);
+        return;
+    }
+    said.say(None);
     store(settings, path, json!(value));
     gtk_app::with_window(|window| window.toast("Горячая клавиша сохранена"));
 }

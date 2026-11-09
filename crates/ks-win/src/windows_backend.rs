@@ -42,8 +42,8 @@ use crate::constants::{
     LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
     PRIMARY_LANGID_MASK, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
-    UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
-    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
+    UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
+    VK_HOME, VK_INSERT, VK_LAST, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
@@ -328,7 +328,17 @@ pub fn key_name(virtual_key: u32) -> String {
         // The digits and capital letters of ASCII: the casefold of each is its lower case.
         return char::from_u32(virtual_key).map_or_else(String::new, |key| key.to_ascii_lowercase().to_string());
     }
+    if (VK_F1..=VK_F24).contains(&virtual_key) {
+        return format!("F{}", virtual_key - VK_F1 + 1);
+    }
     format!("VK_{virtual_key:02X}")
+}
+
+/// Whether the keyboard has a key of this name: `name` is casefolded, as a hotkey of the settings holds it
+/// (`Hotkey::problem`).
+#[must_use]
+pub fn key_name_exists(name: &str) -> bool {
+    (0..=VK_LAST).any(|virtual_key| pystr::casefold(&key_name(virtual_key)) == name)
 }
 
 /// A thread the system refused.

@@ -293,6 +293,11 @@ fn keys_are_named_by_position_then_by_their_english_letter() {
     assert_eq!(key_name(0x2B, ","), "VK_2B");
     assert_eq!(key_name(0x7F, ""), "VK_7F");
     assert_eq!(key_name(0x2B, "я"), "VK_2B");
+    // The function keys by their own names, as on the other systems: `F13` in a hotkey is this key.
+    assert_eq!((key_name(MAC_VK_F1, ""), key_name(MAC_VK_F13, ""), key_name(MAC_VK_F20, "")), ("F1".to_owned(), "F13".to_owned(), "F20".to_owned()));
+    assert!(key_name_exists("f13") && key_name_exists("k") && key_name_exists("7") && key_name_exists("page_up") && key_name_exists("vk_2b"));
+    assert!(!key_name_exists("левый ctrl") && !key_name_exists("pause") && !key_name_exists("я") && !key_name_exists("kk"));
+    assert!(!key_name_exists("vk_zz") && !key_name_exists("vk_2") && !key_name_exists("-") && !key_name_exists(""));
 }
 
 #[test]

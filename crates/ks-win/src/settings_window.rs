@@ -23,6 +23,7 @@ use ks_config::history::{HistoryStore, data_dir};
 use ks_config::indicator::layout_label;
 use ks_config::logsetup::{self, log_directory, log_path, log_status, rotation_summary};
 use ks_engine::EngineSnapshot;
+use ks_engine::engine::Hotkey;
 use ks_engine::engine_loader::{DeferredEngine, LOADING_ACTION};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_rule};
 use ks_ui::hints::{Click, HintView, Place, SettingsPage};
@@ -53,9 +54,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::constants::{SETTINGS_WINDOW_CLASS, PAGE_CLASS, MAIN_WINDOW_WIDTH_PIXELS, MAIN_WINDOW_HEIGHT_PIXELS, BASE_DPI, MAIN_WINDOW_MIN_WIDTH_PIXELS, MAIN_WINDOW_MIN_HEIGHT_PIXELS, DESKTOP_SIDEBAR_WIDTH_PIXELS, SIDEBAR_PADDING_X_PIXELS, SIDEBAR_PADDING_Y_PIXELS, SIDEBAR_ITEM_PADDING_X_PIXELS, SIDEBAR_BRAND_PADDING_BOTTOM_PIXELS, SIDEBAR_SUBTITLE_PADDING_BOTTOM_PIXELS, NAVIGATION_BUTTON_HEIGHT_PIXELS, NAVIGATION_BUTTON_SPACING_PIXELS, SIDEBAR_SEPARATOR_PADDING_Y_PIXELS, SIDEBAR_STATUS_PADDING_TOP_PIXELS, PAGE_CAPTION_PADDING_TOP_PIXELS, PAGE_PADDING_X_PIXELS, PAGE_CONTENT_PADDING_Y_PIXELS, SECTION_BOTTOM_MARGIN_PIXELS, PAGE_SCROLL_STEP_PIXELS, WHEEL_STEPS_PER_NOTCH, WHEEL_DELTA, APPLICATION_CAPTURE_DELAY_MS, SECTION_PADDING_X_PIXELS, SECTION_PADDING_Y_PIXELS, AUTOCORRECTION_COLUMN_GAP_PIXELS, AUTOCORRECTION_PRIMARY_COLUMN_WEIGHT, AUTOCORRECTION_SECONDARY_COLUMN_WEIGHT, SETTING_ROW_PADDING_PIXELS, MODIFIED_MARKER_COLUMN_PIXELS, RESET_BUTTON_COLUMN_PIXELS, DESCRIPTION_INDENT_PIXELS, CHOICE_CONTROL_WIDTH_PIXELS, NUMBER_CONTROL_WIDTH_PIXELS, TEXT_CONTROL_WIDTH_PIXELS, SETTING_CONTROL_PADDING_LEFT_PIXELS, ROW_HEIGHT_PIXELS, UPDOWN_WIDTH_PIXELS, MODIFIED_MARKER_WIDTH_PIXELS, BUTTON_PADDING_X_PIXELS, BUTTON_HEIGHT_PIXELS, CARD_TITLE_GAP_PIXELS, STATUS_LINE_GAP_PIXELS, TEST_ENTRY_PADDING_TOP_PIXELS, TEST_ENTRY_PADDING_BOTTOM_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_TOP_PIXELS, LAYOUT_LANGUAGE_LABEL_PADDING_BOTTOM_PIXELS, MANUAL_SWITCH_NOTE_PADDING_TOP_PIXELS, STANDARD_GAP_PIXELS, APPLICATION_LIST_HEIGHT_ROWS, GROUP_GAP_PIXELS, WORD_LIST_HEIGHT_ROWS, HISTORY_TIME_COLUMN_WIDTH_PIXELS, HISTORY_WORD_COLUMN_WIDTH_PIXELS, HISTORY_APPLICATION_COLUMN_WIDTH_PIXELS, HISTORY_CONFIDENCE_COLUMN_WIDTH_PIXELS, HISTORY_TREE_MIN_ROWS, LEARNING_WORD_COLUMN_WIDTH_PIXELS, LEARNING_CONDITION_COLUMN_WIDTH_PIXELS, LEARNING_ACTION_COLUMN_WIDTH_PIXELS, LEARNING_TREE_HEIGHT_ROWS, DIAGNOSTICS_TEXT_HEIGHT_ROWS};
 use crate::hint_layout::settings_page;
 use crate::win32_controls::{self as w32, Brushes, Fonts, MessageKind, Themed, scaled};
+use crate::windows_backend::key_name_exists;
 use crate::windows_native::wide;
 use crate::windows_system::{WindowsApplicationCatalog, open_directory};
-use crate::windows_ui_model::{settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
+use crate::windows_ui_model::{is_hotkey_setting, settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ID_BASE: usize = 1000;
@@ -63,6 +65,8 @@ const IDOK: usize = 1;
 const BN_CLICKED: u32 = 0;
 const TIMER_CAPTURE: usize = 4;
 const WM_APP_REFRESH_RULES: u32 = 0x8000 + 40;
+/// The window tells itself to say why a hotkey was not stored, once the field that held it has let the keyboard go.
+const WM_APP_HOTKEY_PROBLEM: u32 = 0x8000 + 41;
 
 // ------------------------------------------------------------------------------------------------------- the model
 
@@ -256,6 +260,8 @@ struct Ui {
     pages: RefCell<Vec<Option<Rc<Page>>>>,
     controls: RefCell<Controls>,
     settings_controls: RefCell<Vec<SettingControl>>,
+    /// Why the hotkey just typed was not stored, until the window has said it.
+    hotkey_problem: RefCell<Option<String>>,
     actions: RefCell<Vec<Action>>,
     state: RefCell<State>,
     built: Cell<bool>,
@@ -368,6 +374,7 @@ pub fn create(services: Services) -> Option<HWND> {
         pages: RefCell::new((0..PAGE_NAMES.len()).map(|_| None).collect()),
         controls: RefCell::new(Controls::default()),
         settings_controls: RefCell::new(Vec::new()),
+        hotkey_problem: RefCell::new(None),
         actions: RefCell::new(Vec::new()),
         state: RefCell::new(state),
         built: Cell::new(false),
@@ -621,6 +628,13 @@ impl Ui {
             }
             WM_APP_REFRESH_RULES => {
                 self.refresh_learning();
+                Some(0)
+            }
+            WM_APP_HOTKEY_PROBLEM => {
+                let problem = self.hotkey_problem.borrow_mut().take();
+                if let Some(problem) = problem {
+                    w32::message_box(self.window, "Горячая клавиша не сохранена", &problem, MessageKind::Information);
+                }
                 Some(0)
             }
             _ => None,
@@ -1265,7 +1279,20 @@ impl Ui {
             ControlKind::Text => {
                 let value = w32::text_of(control);
                 let value = ks_text::pystr::strip(&value);
-                if value.is_empty() { None } else { Some(Value::String(value.to_owned())) }
+                let problem = if is_hotkey_setting(&spec.path) && !value.is_empty() { Hotkey::problem(value, key_name_exists) } else { None };
+                if let Some(problem) = problem {
+                    // A hotkey that can never fire is not stored: the field takes back what it had, and the window says
+                    // why once this field has let the keyboard go (a box opened from inside the loss of focus fights it).
+                    w32::set_text(control, &control_text(&spec, self.settings().get(&spec.path).as_ref()));
+                    *self.hotkey_problem.borrow_mut() = Some(problem.message());
+                    // SAFETY: a message posted to this window, which lives as long as the program.
+                    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.window, WM_APP_HOTKEY_PROBLEM, 0, 0) };
+                    None
+                } else if value.is_empty() {
+                    None
+                } else {
+                    Some(Value::String(value.to_owned()))
+                }
             }
         };
         if let Some(value) = stored {

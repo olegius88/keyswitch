@@ -40,6 +40,10 @@ use crate::constants::{
     MAC_VK_PAGE_UP, MAC_VK_RETURN, MAC_VK_RIGHT_ARROW, MAC_VK_RIGHT_COMMAND, MAC_VK_RIGHT_CONTROL, MAC_VK_RIGHT_OPTION,
     MAC_VK_RIGHT_SHIFT, MAC_VK_SHIFT, MAC_VK_SPACE, MAC_VK_TAB, MAC_VK_UP_ARROW, MACOS_PASTE_RESTORE_DELAY_SECONDS,
 };
+use crate::constants::{
+    HEXADECIMAL, MAC_VK_F1, MAC_VK_F2, MAC_VK_F3, MAC_VK_F4, MAC_VK_F5, MAC_VK_F6, MAC_VK_F7, MAC_VK_F8, MAC_VK_F9, MAC_VK_F10,
+    MAC_VK_F11, MAC_VK_F12, MAC_VK_F13, MAC_VK_F14, MAC_VK_F15, MAC_VK_F16, MAC_VK_F17, MAC_VK_F18, MAC_VK_F19, MAC_VK_F20, UNNAMED_KEY_CODE_DIGITS, UNNAMED_KEY_PREFIX,
+};
 use crate::macos_context::{MacSelectionAccess, SelectionAccess, SelectionAfter, selection_after};
 
 pub type MacBackendError = BackendError;
@@ -53,7 +57,7 @@ fn refused(reason: RefusalReason) -> SelectionError {
 }
 
 /// The engine speaks X11 key names on every platform; the Windows backend translates into the same vocabulary.
-const KEY_NAMES: [(u32, &str); 26] = [
+const KEY_NAMES: [(u32, &str); 46] = [
     (MAC_VK_RETURN, "Return"),
     (MAC_VK_KEYPAD_ENTER, "KP_Enter"),
     (MAC_VK_TAB, "Tab"),
@@ -80,6 +84,26 @@ const KEY_NAMES: [(u32, &str); 26] = [
     (MAC_VK_RIGHT_ARROW, "Right"),
     (MAC_VK_UP_ARROW, "Up"),
     (MAC_VK_DOWN_ARROW, "Down"),
+    (MAC_VK_F1, "F1"),
+    (MAC_VK_F2, "F2"),
+    (MAC_VK_F3, "F3"),
+    (MAC_VK_F4, "F4"),
+    (MAC_VK_F5, "F5"),
+    (MAC_VK_F6, "F6"),
+    (MAC_VK_F7, "F7"),
+    (MAC_VK_F8, "F8"),
+    (MAC_VK_F9, "F9"),
+    (MAC_VK_F10, "F10"),
+    (MAC_VK_F11, "F11"),
+    (MAC_VK_F12, "F12"),
+    (MAC_VK_F13, "F13"),
+    (MAC_VK_F14, "F14"),
+    (MAC_VK_F15, "F15"),
+    (MAC_VK_F16, "F16"),
+    (MAC_VK_F17, "F17"),
+    (MAC_VK_F18, "F18"),
+    (MAC_VK_F19, "F19"),
+    (MAC_VK_F20, "F20"),
 ];
 
 /// A pointer event carries no key; the engine recognises it by this name.
@@ -239,6 +263,15 @@ pub fn key_name(keycode: u32, character: &str) -> String {
         return character.to_lowercase();
     }
     format!("VK_{keycode:02X}")
+}
+
+/// Whether the keyboard has a key of this name: `name` is casefolded, as a hotkey of the settings holds it
+/// (`Hotkey::problem`). A key `key_name` has no name for is `VK_` and its code in two hexadecimal digits.
+#[must_use]
+pub fn key_name_exists(name: &str) -> bool {
+    KEY_NAMES.iter().any(|(_, known)| pystr::casefold(known) == name)
+        || (name.chars().count() == 1 && pystr::isascii(name) && pystr::isalnum(name))
+        || name.strip_prefix(UNNAMED_KEY_PREFIX).is_some_and(|code| code.len() == UNNAMED_KEY_CODE_DIGITS && u32::from_str_radix(code, HEXADECIMAL).is_ok())
 }
 
 fn lock<T: ?Sized>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {

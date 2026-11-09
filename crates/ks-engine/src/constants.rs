@@ -83,3 +83,17 @@ pub const UNDO_AVAILABLE_WINDOW_SECONDS: f64 = 10.0;
 pub const FIELD_READER_RETRY_DELAYS_SECONDS: [f64; 3] = [5.0, 15.0, 60.0];
 pub const TYPO_ENGLISH_LOCALE: &str = "en_US";
 pub const MILLISECONDS_PER_SECOND: f64 = 1000.0;
+
+/// The modifier keys by the names every backend gives them, casefolded: none of them is the key of a hotkey
+/// (`Hotkey::problem`).
+pub const HOTKEY_MODIFIER_KEYS: [&str; 10] =
+    ["shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r", "super_l", "super_r", "meta_l", "meta_r"];
+/// What the settings window says of a hotkey that can never fire (`HotkeyProblem::message`).
+pub const HOTKEY_NO_KEY_MESSAGE: &str =
+    "Сочетанию нужна обычная клавиша: одни Ctrl, Alt, Shift и Super не срабатывают. Например, Ctrl+Alt+K";
+pub const HOTKEY_SEVERAL_KEYS_MESSAGE: &str =
+    "В сочетании может быть только одна обычная клавиша, остальные — Ctrl, Alt, Shift и Super. Например, Ctrl+Alt+K";
+/// `HOTKEY_MESSAGE_KEY_PLACE` stands for the key as it was typed.
+pub const HOTKEY_UNKNOWN_KEY_MESSAGE: &str =
+    "Клавиши «{key}» программа не знает. Буквы и цифры пишутся латиницей, например Ctrl+Alt+K";
+pub const HOTKEY_MESSAGE_KEY_PLACE: &str = "{key}";

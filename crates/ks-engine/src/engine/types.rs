@@ -1,5 +1,6 @@
 //! The values the engine passes around: plans, snapshots, words waiting for their neighbours.
 
+use crate::constants::{HOTKEY_MESSAGE_KEY_PLACE, HOTKEY_MODIFIER_KEYS, HOTKEY_NO_KEY_MESSAGE, HOTKEY_SEVERAL_KEYS_MESSAGE, HOTKEY_UNKNOWN_KEY_MESSAGE};
 use ks_backend::{FieldContext, KeyEvent};
 use ks_config::learning::RuleAction;
 use ks_lang::detector::DetectionDecision;
@@ -312,6 +313,41 @@ const HOTKEY_ALT: u8 = 2;
 const HOTKEY_SHIFT: u8 = 4;
 const HOTKEY_SUPER: u8 = 8;
 
+/// The bit of a modifier as a hotkey of the settings names it, the name casefolded; None for the name of a key.
+fn hotkey_modifier(piece: &str) -> Option<u8> {
+    match piece {
+        "ctrl" | "control" => Some(HOTKEY_CTRL),
+        "alt" => Some(HOTKEY_ALT),
+        "shift" => Some(HOTKEY_SHIFT),
+        "super" | "meta" => Some(HOTKEY_SUPER),
+        _ => None,
+    }
+}
+
+/// What stops a hotkey typed into the settings from ever firing (`Hotkey::problem`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HotkeyProblem {
+    /// No key besides the modifiers, or a modifier key in the key's place: `Ctrl`, `Ctrl+Alt`, `Shift_L`. A modifier key
+    /// alone is no hotkey: it would fire, where it fired at all, on every press that begins `Ctrl+C`.
+    NoKey,
+    /// More keys than one besides the modifiers: `Ctrl+A+B`.
+    SeveralKeys,
+    /// A key by a name this system's keyboard has none of, as it was typed: `Левый Ctrl`, `Pausee`.
+    UnknownKey(String),
+}
+
+impl HotkeyProblem {
+    /// The problem in the words the settings window shows.
+    #[must_use]
+    pub fn message(&self) -> String {
+        match self {
+            HotkeyProblem::NoKey => HOTKEY_NO_KEY_MESSAGE.to_owned(),
+            HotkeyProblem::SeveralKeys => HOTKEY_SEVERAL_KEYS_MESSAGE.to_owned(),
+            HotkeyProblem::UnknownKey(key) => HOTKEY_UNKNOWN_KEY_MESSAGE.replace(HOTKEY_MESSAGE_KEY_PLACE, key),
+        }
+    }
+}
+
 /// A hotkey of the settings. The set of modifiers is held as bits, `control` and `meta` under their other names.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hotkey {
@@ -330,15 +366,30 @@ impl Hotkey {
                 continue;
             }
             let piece = pystr::casefold(pystr::strip(piece));
-            match piece.as_str() {
-                "ctrl" | "control" => modifiers |= HOTKEY_CTRL,
-                "alt" => modifiers |= HOTKEY_ALT,
-                "shift" => modifiers |= HOTKEY_SHIFT,
-                "super" | "meta" => modifiers |= HOTKEY_SUPER,
-                _ => key = piece,
+            match hotkey_modifier(&piece) {
+                Some(modifier) => modifiers |= modifier,
+                None => key = piece,
             }
         }
         Hotkey { modifiers, key }
+    }
+
+    /// What stops `value` from ever firing as a hotkey, for the settings window to say before it is stored; None for a
+    /// hotkey that can fire. `key_exists` says whether the keyboard of this system has a key of a name, given as a hotkey
+    /// holds it (casefolded). The window never stored an empty hotkey and does not ask about one.
+    pub fn problem(value: &str, key_exists: impl Fn(&str) -> bool) -> Option<HotkeyProblem> {
+        let text = value.replace('<', "").replace('>', "+");
+        let mut keys = text.split('+').map(pystr::strip).filter(|piece| !piece.is_empty() && hotkey_modifier(&pystr::casefold(piece)).is_none());
+        let Some(key) = keys.next() else { return Some(HotkeyProblem::NoKey) };
+        if keys.next().is_some() {
+            return Some(HotkeyProblem::SeveralKeys);
+        }
+        let name = pystr::casefold(key);
+        if HOTKEY_MODIFIER_KEYS.contains(&name.as_str()) {
+            return Some(HotkeyProblem::NoKey);
+        }
+        // `matches` takes Break for Pause.
+        if key_exists(&name) || (name == "pause" && key_exists("break")) { None } else { Some(HotkeyProblem::UnknownKey(key.to_owned())) }
     }
 
     #[must_use]

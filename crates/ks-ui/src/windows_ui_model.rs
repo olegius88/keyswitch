@@ -80,6 +80,8 @@ pub const SELECTION_HOTKEY_DESCRIPTIONS: [(&str, &str); 3] = [
 ];
 /// The titles of the settings the hints name, in every settings window.
 pub const EARLY_SWITCH_TITLE: &str = "Ранняя смена раскладки";
+/// The settings under this prefix are the hotkeys.
+pub const HOTKEY_SETTINGS_PREFIX: &str = "hotkeys.";
 pub const HINTS_SETTING_TITLE: &str = "Показывать подсказки о возможностях";
 pub const HINTS_SETTING_DESCRIPTION: &str =
     "Короткие пояснения у курсора и у значка: что умеет программа и что нового в выпуске. Каждое показывается один раз";
@@ -581,6 +583,12 @@ pub fn catalog_label(name: &str, identifier: &str) -> String {
 
 // --------------------------------------------------------------------------------------------- status and listings
 
+/// Whether a setting is a hotkey: its text is checked before it is stored (`ks_engine::engine::Hotkey::problem`).
+#[must_use]
+pub fn is_hotkey_setting(path: &str) -> bool {
+    path.starts_with(HOTKEY_SETTINGS_PREFIX)
+}
+
 /// The title of the settings window on every system: the name of the program and the version running, so that the window,
 /// the taskbar and a screenshot of either say which version it is.
 #[must_use]
@@ -880,6 +888,12 @@ mod tests {
 
     fn status_of_nothing() -> LogStatus {
         LogStatus { path: "x.log".to_owned(), installed: false, level: "WARNING", size: -1, technical: false }
+    }
+
+    #[test]
+    fn the_hotkeys_are_the_settings_under_their_prefix() {
+        assert!(hotkey_settings().iter().filter(|spec| spec.kind == Text).all(|spec| is_hotkey_setting(&spec.path)));
+        assert!(is_hotkey_setting("hotkeys.convert_last") && !is_hotkey_setting("detection.layout_switch_key") && !is_hotkey_setting("hotkeys"));
     }
 
     #[test]

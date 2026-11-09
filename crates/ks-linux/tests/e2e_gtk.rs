@@ -97,12 +97,18 @@ fn change(widget: &gtk::Widget) {
         row.set_text(&text);
     } else if let Some(entry) = widget.downcast_ref::<gtk::Entry>() {
         let text = entry.text();
+        // No key of this name: a hotkey row says so and takes back what it had.
         entry.set_text("ghbdtn");
         entry.emit_activate();
-        // Nothing typed: a hotkey row says it cannot be empty and takes back what it had.
+        // Nothing typed: the row says a hotkey cannot be empty.
         entry.set_text("");
         entry.emit_activate();
+        // A hotkey that can fire is stored, and the row says its own words again; the same one again changes nothing.
+        entry.set_text("Ctrl+Alt+K");
+        entry.emit_activate();
+        entry.emit_activate();
         entry.set_text(&text);
+        entry.emit_activate();
     } else if let Some(search) = widget.downcast_ref::<gtk::SearchEntry>() {
         search.set_text("no such program at all");
         search.emit_by_name::<()>("search-changed", &[]);

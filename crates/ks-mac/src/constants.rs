@@ -65,6 +65,31 @@ pub const MAC_VK_LEFT_ARROW: u32 = 0x7B;
 pub const MAC_VK_RIGHT_ARROW: u32 = 0x7C;
 pub const MAC_VK_DOWN_ARROW: u32 = 0x7D;
 pub const MAC_VK_UP_ARROW: u32 = 0x7E;
+/// The function keys (`kVK_F1` .. `kVK_F20` of HIToolbox's Events.h): their codes follow no order.
+pub const MAC_VK_F1: u32 = 0x7A;
+pub const MAC_VK_F2: u32 = 0x78;
+pub const MAC_VK_F3: u32 = 0x63;
+pub const MAC_VK_F4: u32 = 0x76;
+pub const MAC_VK_F5: u32 = 0x60;
+pub const MAC_VK_F6: u32 = 0x61;
+pub const MAC_VK_F7: u32 = 0x62;
+pub const MAC_VK_F8: u32 = 0x64;
+pub const MAC_VK_F9: u32 = 0x65;
+pub const MAC_VK_F10: u32 = 0x6D;
+pub const MAC_VK_F11: u32 = 0x67;
+pub const MAC_VK_F12: u32 = 0x6F;
+pub const MAC_VK_F13: u32 = 0x69;
+pub const MAC_VK_F14: u32 = 0x6B;
+pub const MAC_VK_F15: u32 = 0x71;
+pub const MAC_VK_F16: u32 = 0x6A;
+pub const MAC_VK_F17: u32 = 0x40;
+pub const MAC_VK_F18: u32 = 0x4F;
+pub const MAC_VK_F19: u32 = 0x50;
+pub const MAC_VK_F20: u32 = 0x5A;
+/// A key `key_name` has no name for, as a hotkey of the settings holds it: `vk_` and its code in two hexadecimal digits.
+pub const UNNAMED_KEY_PREFIX: &str = "vk_";
+pub const UNNAMED_KEY_CODE_DIGITS: usize = 2;
+pub const HEXADECIMAL: u32 = 16;
 
 /// The event tap reports these instead of a key when the system disabled it.
 pub const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;

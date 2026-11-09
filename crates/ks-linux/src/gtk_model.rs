@@ -29,6 +29,10 @@ pub const STAT_CARD_SPACING_PIXELS: i32 = 3;
 pub const CONTEXT_MODE_OFF_INDEX: u32 = 2;
 pub const CHECKSUM_DISPLAY_LENGTH_CHARACTERS: usize = 12;
 pub const HOTKEY_ENTRY_WIDTH_CHARACTERS: i32 = 20;
+/// What the row of a hotkey says of an emptied field, and the style class of a row that says why its hotkey was not
+/// stored (libadwaita's colour of an error).
+pub const HOTKEY_EMPTY_MESSAGE: &str = "Комбинация не может быть пустой";
+pub const HOTKEY_PROBLEM_CSS_CLASS: &str = "error";
 pub const MANUAL_APP_ENTRY_WIDTH_CHARACTERS: i32 = 22;
 pub const WORDS_EDITOR_HEIGHT_PIXELS: i32 = 100;
 pub const TEXT_EDITOR_PADDING_PIXELS: i32 = 10;

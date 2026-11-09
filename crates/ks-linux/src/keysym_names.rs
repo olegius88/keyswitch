@@ -199,10 +199,23 @@ pub fn keysym_name(keysym: u32) -> Option<String> {
     KEYSYM_NAMES.binary_search_by_key(&keysym, |entry| entry.0).ok().map(|index| KEYSYM_NAMES[index].1.to_owned())
 }
 
+/// Whether a keyboard has a key of this name: `name` is casefolded, as a hotkey of the settings holds it
+/// (`Hotkey::problem`).
+#[must_use]
+pub fn key_name_exists(name: &str) -> bool {
+    KEYSYM_NAMES.iter().any(|(_, known)| ks_text::pystr::casefold(known) == name)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_is_known_by_its_name_in_any_case() {
+        assert!(key_name_exists("pause") && key_name_exists("f9") && key_name_exists("scroll_lock") && key_name_exists("k"));
+        assert!(!key_name_exists("левый ctrl") && !key_name_exists("pausee") && !key_name_exists(""));
+    }
 
     #[test]
     fn a_keysym_of_a_unicode_character_is_named_by_its_number() {
