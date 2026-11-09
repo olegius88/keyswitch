@@ -10,7 +10,7 @@ use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
+use ks_ui::windows_ui_model::{settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -672,7 +672,7 @@ pub fn create(services: Arc<Services>) {
             let window: Id = msg_send![allocated, initWithContentRect: rect(200.0, 200.0, WINDOW_WIDTH, WINDOW_HEIGHT), styleMask: STYLE_TITLED_CLOSABLE_MINIATURIZABLE, backing: BUFFERED, defer: true];
             let _: () = msg_send![window, setReleasedWhenClosed: false];
             let _: () = msg_send![window, setDelegate: target];
-            let _: () = msg_send![window, setTitle: string("KeySwitch")];
+            let _: () = msg_send![window, setTitle: string(&settings_window_title(VERSION))];
             let allocated: Id = msg_send![class!(NSTabView), alloc];
             let tabs: Id = msg_send![allocated, initWithFrame: rect(0.0, 0.0, WINDOW_WIDTH, WINDOW_HEIGHT)];
             let _: () = msg_send![window, setContentView: tabs];

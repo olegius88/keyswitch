@@ -23,7 +23,7 @@ use ks_config::logsetup::{LogStatus, log_directory, log_path, log_status, rotati
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
 use ks_config::constants::HINTS_SETTING;
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE};
+use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE, settings_window_title};
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
@@ -371,7 +371,7 @@ impl MainWindow {
     #[must_use]
     pub fn new(application: &adw::Application, services: Rc<Services>) -> Rc<MainWindow> {
         install_css(&services.resource_dir);
-        let window = adw::ApplicationWindow::builder().application(application).title("KeySwitch").build();
+        let window = adw::ApplicationWindow::builder().application(application).title(settings_window_title(crate::linux_app::VERSION)).build();
         window.set_default_size(GTK_WINDOW_DEFAULT_WIDTH_PIXELS, GTK_WINDOW_DEFAULT_HEIGHT_PIXELS);
         window.set_size_request(GTK_WINDOW_MIN_WIDTH_PIXELS, GTK_WINDOW_MIN_HEIGHT_PIXELS);
         window.add_css_class("keyswitch-window");

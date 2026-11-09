@@ -581,6 +581,13 @@ pub fn catalog_label(name: &str, identifier: &str) -> String {
 
 // --------------------------------------------------------------------------------------------- status and listings
 
+/// The title of the settings window on every system: the name of the program and the version running, so that the window,
+/// the taskbar and a screenshot of either say which version it is.
+#[must_use]
+pub fn settings_window_title(version: &str) -> String {
+    format!("KeySwitch {version}")
+}
+
 /// The engine's status line (`_apply_snapshot`).
 #[must_use]
 pub fn status_line(enabled: bool, running: bool) -> &'static str {
@@ -873,6 +880,11 @@ mod tests {
 
     fn status_of_nothing() -> LogStatus {
         LogStatus { path: "x.log".to_owned(), installed: false, level: "WARNING", size: -1, technical: false }
+    }
+
+    #[test]
+    fn the_settings_window_names_its_version() {
+        assert_eq!(settings_window_title("0.71.2"), "KeySwitch 0.71.2");
     }
 
     #[test]

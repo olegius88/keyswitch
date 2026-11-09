@@ -344,7 +344,6 @@ pub const SETTINGS_BUTTON_WIDTH_PIXELS: i32 = 220;
 pub const SETTINGS_BUTTON_HEIGHT_PIXELS: i32 = 30;
 pub const SETTINGS_FONT_HEIGHT_PIXELS: i32 = 15;
 pub const SETTINGS_OPEN_FOLDER_LABEL: &str = "Открыть папку настроек";
-pub const SETTINGS_WINDOW_TITLE: &str = "KeySwitch";
 /// The unit of the device's DPI at which sizes are written.
 pub const BASE_DPI: i32 = 96;
 pub const BACKEND_LABEL: &str = "Win32 hook + SendInput";

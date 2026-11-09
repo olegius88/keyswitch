@@ -791,6 +791,8 @@ fn hints(app: &Rc<gtk_app::App>) {
     let typer = support::Typer::new().unwrap();
     let mut manager = support::start_window_manager(&typer).unwrap();
     let window = gtk_app::with_app_window().and_then(|window| window.downcast::<gtk::Window>().ok()).expect("the settings window");
+    // The title says which version runs.
+    assert_eq!(window.title().as_deref(), Some(format!("KeySwitch {}", ks_linux::linux_app::VERSION).as_str()));
     let settings_window = window.surface().and_then(|surface| surface.downcast::<gdk_x11::X11Surface>().ok()).map(|surface| i64::try_from(surface.xid()).unwrap());
     window.present();
     let focused = (0..600).any(|_| {

@@ -4,6 +4,7 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- The title of the settings window names the version running: «KeySwitch 0.71.2» instead of «KeySwitch», on Windows, Linux and macOS, so the window, the taskbar and a screenshot say which version it is.
 - The flags of the tray icon are wider than tall, as flags are, and no longer squares: 16 by 11 pixels at the usual scale, centred in the icon, with a thin edge that keeps the white of the Russian flag visible on a light taskbar. On Windows the stripes and the stars of the American flag fall on whole pixels of the icon at every scale of the screen (they blurred into pink at 100 % and 125 %), and the slash across a switched-off flag has a dark rim, so it shows on the white band too. On Linux the two pictures are drawn on the same 16-pixel grid.
 - Linux on X11: the word being typed is no longer forgotten when a program moves the keyboard between its window and a child of that window. A GTK 4 window in Cinnamon does so after a layout switch, and the program took it for a move to another window: on Linux Mint 22.3 a second Pause right after a word was converted switched the layout instead of offering a rule, in 4 of 8 runs of the package test, and in none of 8 now.
 
