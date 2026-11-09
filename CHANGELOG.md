@@ -4,7 +4,7 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
-## 0.71.1 — 2026-11-09
+## 0.71.1 — 2026-11-10
 
 - A word after a hyphen is decided as a word of its own when the field can be read, as it can in most windows: `proxy-ghbkj;tybt` becomes `proxy-приложение`, not `зкщчн-приложение`. The model was asked about the part before the hyphen in a field that already showed the whole token, the read was refused as a changed field, the part had no answer, and the whole token converted. Of 500 authored terms joined by a hyphen to a Russian word, all typed in the English layout, 325 came out wrong and 8 do now. Only a part before the hyphen typed in the English layout can keep its layout this way: an English term typed all in the Russian layout still converts whole, `црз-куппук` is `whp-regger`, not `црз-regger`.
 - A layout picked by hand protects the word it was picked for up to a hyphen: picked English for `frontend` and gone on to `-магазин` without switching back, `frontend-vfufpby` becomes `frontend-магазин`. The whole token used to stay as typed (300 of 300 such authored tokens). Words joined by a hyphen and typed right in the picked layout (`built-in`, `что-то`) stay as typed, as before: all 295 such authored tokens.
