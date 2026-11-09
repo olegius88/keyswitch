@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Drawn on a 16-pixel grid, 8 units a pixel, as the Windows tray draws it at 16 pixels: 16 by 11, bands of 4, 3 and 4. -->
   <defs>
-    <clipPath id="rounded-ru"><rect x="5" y="5" width="118" height="118" rx="25"/></clipPath>
+    <clipPath id="flag-ru"><rect x="0" y="16" width="128" height="88" rx="8"/></clipPath>
   </defs>
-  <g clip-path="url(#rounded-ru)">
-    <rect x="5" y="5" width="118" height="40" fill="#fff"/>
-    <rect x="5" y="45" width="118" height="39" fill="#2855a5"/>
-    <rect x="5" y="84" width="118" height="39" fill="#d52b3f"/>
+  <g clip-path="url(#flag-ru)">
+    <rect x="0" y="16" width="128" height="32" fill="#fff"/>
+    <rect x="0" y="48" width="128" height="24" fill="#0039a6"/>
+    <rect x="0" y="72" width="128" height="32" fill="#d52b1e"/>
   </g>
-  <rect x="7" y="7" width="114" height="114" rx="23" fill="none" stroke="#667085" stroke-width="4"/>
+  <rect x="1.5" y="17.5" width="125" height="85" rx="6.5" fill="none" stroke="#667085" stroke-width="3"/>
 </svg>

@@ -5,6 +5,10 @@
 //! coverage mask (`Ink`), since the font is Windows'.
 
 use ks_cast::To as _;
+use crate::constants::{
+    FLAG_CORNER_RADIUS_ICON_PIXELS, FLAG_EDGE_RGBA, FLAG_HEIGHT_DENOMINATOR, FLAG_HEIGHT_NUMERATOR, FLAG_SLASH_RIM_PIXELS, FLAG_SLASH_RIM_RGBA,
+    US_FLAG_STAR_FIRST_ROW, US_FLAG_STAR_STEP,
+};
 use crate::tray_model::TrayState;
 
 /// How many canvas pixels make one pixel of the icon, along each side.
@@ -39,16 +43,6 @@ const US_FLAG_CANTON_WIDTH_NUMERATOR: usize = 2;
 const US_FLAG_CANTON_WIDTH_DENOMINATOR: usize = 5;
 const US_FLAG_CANTON_HEIGHT_STRIPES: usize = 7;
 const US_FLAG_CANTON_RGBA: Rgba = [60, 59, 110, 255];
-const US_FLAG_STAR_ROWS: i32 = 5;
-const US_FLAG_STARS_PER_LONG_ROW: i32 = 4;
-const US_FLAG_STARS_PER_SHORT_ROW: i32 = 3;
-const US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS: i32 = 3;
-const US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS: i32 = 6;
-const US_FLAG_STAR_GRID_SPACING_PIXELS: i32 = 6;
-const US_FLAG_STAR_TOP_MARGIN_PIXELS: i32 = 3;
-/// A star is the pixels whose centre is this far from its own, on the 64-pixel picture: the pixel and its four
-/// neighbours, the ellipse of a 3 by 3 box that Pillow drew.
-const US_FLAG_STAR_RADIUS_PIXELS: f64 = 1.0;
 /// The middle of a pixel, from its corner.
 const PIXEL_CENTRE: f64 = 0.5;
 const WHITE: Rgba = [255, 255, 255, 255];
@@ -115,6 +109,25 @@ impl Canvas {
         }
     }
 
+    /// Leaves the picture inside the rounded rectangle and clears the rest; the pixels along its inside edge become `edge`.
+    fn frame(&mut self, bounds: (i32, i32, i32, i32), radius: i32, edge: Rgba) {
+        let (left, top, right, bottom) = bounds;
+        let inside = |x: i32, y: i32| {
+            let dx = (left + radius - x).max(x - (right - radius)).max(0);
+            let dy = (top + radius - y).max(y - (bottom - radius)).max(0);
+            x >= left && x <= right && y >= top && y <= bottom && dx * dx + dy * dy <= radius * radius
+        };
+        for y in 0..self.size.low::<i32>() {
+            for x in 0..self.size.low::<i32>() {
+                if !inside(x, y) {
+                    self.put(x, y, [0, 0, 0, 0]);
+                } else if !(inside(x - 1, y) && inside(x + 1, y) && inside(x, y - 1) && inside(x, y + 1)) {
+                    self.put(x, y, edge);
+                }
+            }
+        }
+    }
+
     /// `draw.line(..., width=...)`: pixels whose centre is within half the width of the segment.
     fn line(&mut self, from: (f64, f64), to: (f64, f64), width: f64, color: Rgba) {
         let (dx, dy) = (to.0 - from.0, to.1 - from.1);
@@ -125,20 +138,6 @@ impl Canvas {
                 let along = ((px * dx + py * dy) / length_squared).clamp(0.0, 1.0);
                 let (ox, oy) = (px - along * dx, py - along * dy);
                 if (ox * ox + oy * oy).sqrt() <= width / 2.0 {
-                    self.put(x, y, color);
-                }
-            }
-        }
-    }
-
-    /// The pixels whose centre is within `radius` of `centre`.
-    fn disc(&mut self, centre: (f64, f64), radius: f64, color: Rgba) {
-        let (left, right) = ((centre.0 - radius).floor().to::<i32>(), (centre.0 + radius).ceil().to::<i32>());
-        let (top, bottom) = ((centre.1 - radius).floor().to::<i32>(), (centre.1 + radius).ceil().to::<i32>());
-        for y in top..=bottom {
-            for x in left..=right {
-                let (dx, dy) = (x.to::<f64>() + PIXEL_CENTRE - centre.0, y.to::<f64>() + PIXEL_CENTRE - centre.1);
-                if dx * dx + dy * dy <= radius * radius {
                     self.put(x, y, color);
                 }
             }
@@ -166,33 +165,51 @@ impl Canvas {
     }
 }
 
+/// The flag's rectangle on a canvas of `size` pixels, both corners in it: the whole width, `FLAG_HEIGHT_NUMERATOR /
+/// FLAG_HEIGHT_DENOMINATOR` of it tall, centred, with its top and bottom on the edges of the icon's pixels.
+#[must_use]
+pub fn flag_bounds(size: usize) -> (i32, i32, i32, i32) {
+    let icon = (size / SUPERSAMPLING).max(1);
+    let height = (icon * FLAG_HEIGHT_NUMERATOR + FLAG_HEIGHT_DENOMINATOR / 2) / FLAG_HEIGHT_DENOMINATOR;
+    let top = (icon - height) / 2 * SUPERSAMPLING;
+    (0, top.low::<i32>(), size.low::<i32>() - 1, (top + height * SUPERSAMPLING).low::<i32>() - 1)
+}
+
 fn draw_flag(canvas: &mut Canvas, group: i64) {
-    let size = canvas.size;
-    let last = size.low::<i32>() - 1;
+    let (left, top, right, bottom) = flag_bounds(canvas.size);
+    let (width, height) = ((right - left + 1).to::<usize>(), (bottom - top + 1).to::<usize>());
     if group == 1 {
-        let first_edge = (size / RUSSIAN_FLAG_BAND_COUNT).low::<i32>();
-        let second_edge = (size * RUSSIAN_FLAG_SECOND_BAND_NUMERATOR / RUSSIAN_FLAG_BAND_COUNT).low::<i32>();
-        canvas.rectangle(0, 0, last, first_edge - 1, WHITE);
-        canvas.rectangle(0, first_edge, last, second_edge - 1, RUSSIAN_FLAG_BLUE_RGBA);
-        canvas.rectangle(0, second_edge, last, last, RUSSIAN_FLAG_RED_RGBA);
+        // The bands end on icon pixels: 4, 3 and 4 of the 11 at 16 pixels.
+        let rows = height / SUPERSAMPLING;
+        let edge = |numerator: usize| top + ((rows * numerator + RUSSIAN_FLAG_BAND_COUNT / 2) / RUSSIAN_FLAG_BAND_COUNT * SUPERSAMPLING).low::<i32>();
+        let (first_edge, second_edge) = (edge(1), edge(RUSSIAN_FLAG_SECOND_BAND_NUMERATOR));
+        canvas.rectangle(left, top, right, first_edge - 1, WHITE);
+        canvas.rectangle(left, first_edge, right, second_edge - 1, RUSSIAN_FLAG_BLUE_RGBA);
+        canvas.rectangle(left, second_edge, right, bottom, RUSSIAN_FLAG_RED_RGBA);
         return;
     }
-    for index in 0..US_FLAG_STRIPE_COUNT {
-        let top = (index * size / US_FLAG_STRIPE_COUNT).low::<i32>();
-        let bottom = ((index + 1) * size / US_FLAG_STRIPE_COUNT).low::<i32>() - 1;
-        canvas.rectangle(0, top, last, bottom, if index % 2 == 0 { US_FLAG_STRIPE_RED_RGBA } else { WHITE });
+    // Each stripe is a whole number of icon pixels, or the stripes blur into pink: thirteen where the flag has the rows
+    // for them, and as many as it has (an odd number, red at both edges) where it has fewer, 11 at 16 pixels.
+    let rows = height / SUPERSAMPLING;
+    let stripes = US_FLAG_STRIPE_COUNT.min(rows - (1 - rows % 2));
+    let stripe_edge = |index: usize| top + ((rows * index + stripes / 2) / stripes * SUPERSAMPLING).low::<i32>();
+    for index in 0..stripes {
+        canvas.rectangle(left, stripe_edge(index), right, stripe_edge(index + 1) - 1, if index % 2 == 0 { US_FLAG_STRIPE_RED_RGBA } else { WHITE });
     }
-    let canton_right = (size * US_FLAG_CANTON_WIDTH_NUMERATOR / US_FLAG_CANTON_WIDTH_DENOMINATOR).low::<i32>() - 1;
-    let canton_bottom = (size * US_FLAG_CANTON_HEIGHT_STRIPES / US_FLAG_STRIPE_COUNT).low::<i32>() - 1;
-    canvas.rectangle(0, 0, canton_right, canton_bottom, US_FLAG_CANTON_RGBA);
-    for row in 0..US_FLAG_STAR_ROWS {
-        let long_row = row % 2 == 0;
-        let stars = if long_row { US_FLAG_STARS_PER_LONG_ROW } else { US_FLAG_STARS_PER_SHORT_ROW };
-        let offset = if long_row { US_FLAG_STAR_OFFSET_LONG_ROW_PIXELS } else { US_FLAG_STAR_OFFSET_SHORT_ROW_PIXELS };
-        for column in 0..stars {
-            let centre_x = (offset + column * US_FLAG_STAR_GRID_SPACING_PIXELS).to::<f64>() + PIXEL_CENTRE;
-            let centre_y = (US_FLAG_STAR_TOP_MARGIN_PIXELS + row * US_FLAG_STAR_GRID_SPACING_PIXELS).to::<f64>() + PIXEL_CENTRE;
-            canvas.disc((scaled(centre_x, size), scaled(centre_y, size)), scaled(US_FLAG_STAR_RADIUS_PIXELS, size), WHITE);
+    let columns = width / SUPERSAMPLING;
+    let canton_columns = (columns * US_FLAG_CANTON_WIDTH_NUMERATOR + US_FLAG_CANTON_WIDTH_DENOMINATOR / 2) / US_FLAG_CANTON_WIDTH_DENOMINATOR;
+    let canton_width = canton_columns * SUPERSAMPLING;
+    let canton_stripes = (stripes * US_FLAG_CANTON_HEIGHT_STRIPES + US_FLAG_STRIPE_COUNT / 2) / US_FLAG_STRIPE_COUNT;
+    let canton_height = (stripe_edge(canton_stripes) - top).to::<usize>();
+    canvas.rectangle(left, top, left + canton_width.low::<i32>() - 1, top + canton_height.low::<i32>() - 1, US_FLAG_CANTON_RGBA);
+    // A star is one icon pixel, in every other row of the canton and every other column, the rows staggered: a dot drawn
+    // smaller than a pixel only greys the blue.
+    let star = SUPERSAMPLING.low::<i32>();
+    for row in (US_FLAG_STAR_FIRST_ROW..canton_height / SUPERSAMPLING).step_by(US_FLAG_STAR_STEP) {
+        let first_column = if row % (2 * US_FLAG_STAR_STEP) == US_FLAG_STAR_FIRST_ROW { US_FLAG_STAR_FIRST_ROW } else { US_FLAG_STAR_STEP };
+        for column in (first_column..canton_columns).step_by(US_FLAG_STAR_STEP) {
+            let (x, y) = (left + (column * SUPERSAMPLING).low::<i32>(), top + (row * SUPERSAMPLING).low::<i32>());
+            canvas.rectangle(x, y, x + star - 1, y + star - 1, WHITE);
         }
     }
 }
@@ -249,14 +266,22 @@ pub fn render(state: &TrayState, ink: Option<&Ink>, side: usize) -> Canvas {
     let mut canvas = Canvas::new(side);
     if is_flag(state) {
         draw_flag(&mut canvas, state.group);
+        let bounds = flag_bounds(side);
         if !state.enabled {
-            canvas.line(
-                (scaled(DISABLED_SLASH_NEAR_PIXELS, side), scaled(DISABLED_SLASH_FAR_PIXELS, side)),
-                (scaled(DISABLED_SLASH_FAR_PIXELS, side), scaled(DISABLED_SLASH_NEAR_PIXELS, side)),
-                scaled(DISABLED_SLASH_WIDTH_PIXELS, side),
-                DISABLED_SLASH_RGBA,
+            // The slash crosses the flag as it crossed the square one, squeezed to the flag's height.
+            let (top, height) = (bounds.1.to::<f64>(), (bounds.3 - bounds.1 + 1).to::<f64>());
+            let across = |length: f64| top + height * length / DESIGN_SIDE_PIXELS.to::<f64>();
+            let ends = (
+                (scaled(DISABLED_SLASH_NEAR_PIXELS, side), across(DISABLED_SLASH_FAR_PIXELS)),
+                (scaled(DISABLED_SLASH_FAR_PIXELS, side), across(DISABLED_SLASH_NEAR_PIXELS)),
             );
+            // A dark rim first, so that the white slash still shows where it crosses the white of a flag.
+            let width = scaled(DISABLED_SLASH_WIDTH_PIXELS, side);
+            canvas.line(ends.0, ends.1, width + scaled(FLAG_SLASH_RIM_PIXELS, side), FLAG_SLASH_RIM_RGBA);
+            canvas.line(ends.0, ends.1, width, DISABLED_SLASH_RGBA);
         }
+        let radius = (FLAG_CORNER_RADIUS_ICON_PIXELS * SUPERSAMPLING).low::<i32>();
+        canvas.frame(bounds, radius, FLAG_EDGE_RGBA);
     } else {
         let background = if !state.enabled {
             BADGE_DISABLED_RGBA
@@ -361,19 +386,41 @@ mod tests {
     }
 
     #[test]
+    fn a_flag_is_wider_than_tall_in_the_middle_of_the_icon() {
+        // 16 icon pixels: 16 by 11, two pixels clear above it and three below.
+        assert_eq!(flag_bounds(SIDE), (0, 8, 63, 51));
+        // 20 and 24 icon pixels: 14 and 17 rows.
+        assert_eq!(flag_bounds(80), (0, 12, 79, 67));
+        assert_eq!(flag_bounds(96), (0, 12, 95, 79));
+        let canvas = render(&TrayState { group: 1, indicator_style: "flags", ..TrayState::default() }, None, SIDE);
+        let at = |x: usize, y: usize| canvas.pixels[y * SIDE + x];
+        // Nothing above or below the flag, and nothing in its rounded corners.
+        assert_eq!((at(32, 7)[3], at(32, 52)[3], at(0, 8)[3], at(63, 51)[3]), (0, 0, 0, 0));
+        // Bands of 4, 3 and 4 icon pixels.
+        assert_eq!((at(32, 23), at(32, 24)), (WHITE, RUSSIAN_FLAG_BLUE_RGBA));
+        assert_eq!((at(32, 35), at(32, 36)), (RUSSIAN_FLAG_BLUE_RGBA, RUSSIAN_FLAG_RED_RGBA));
+        // The edge runs along all four sides.
+        assert_eq!((at(32, 8), at(32, 51), at(0, 30), at(63, 30)), (FLAG_EDGE_RGBA, FLAG_EDGE_RGBA, FLAG_EDGE_RGBA, FLAG_EDGE_RGBA));
+    }
+
+    #[test]
     fn flags_and_the_slash() {
         let state = TrayState { group: 1, indicator_style: "flags", enabled: false, ..TrayState::default() };
         let canvas = render(&state, None, SIDE);
-        assert_eq!(canvas.pixels[5 * 64 + 5], WHITE);
-        assert_eq!(canvas.pixels[63 * 64], RUSSIAN_FLAG_RED_RGBA);
-        assert_eq!(canvas.pixels[32 * 64 + 32], DISABLED_SLASH_RGBA);
+        assert_eq!(canvas.pixels[12 * 64 + 5], WHITE);
+        assert_eq!(canvas.pixels[45 * 64 + 5], RUSSIAN_FLAG_RED_RGBA);
+        // The slash through the middle of the flag, and its dark rim beside it.
+        assert_eq!(canvas.pixels[30 * 64 + 32], DISABLED_SLASH_RGBA);
+        assert_eq!(canvas.pixels[33 * 64 + 34], FLAG_SLASH_RIM_RGBA);
+        assert_eq!(canvas.pixels[0][3], 0, "the slash stays in the flag");
         let us = render(&TrayState { group: 0, indicator_style: "flags", ..TrayState::default() }, None, SIDE);
-        assert_eq!(us.pixels[63 * 64 + 63], US_FLAG_STRIPE_RED_RGBA);
-        // A star of the 64-pixel flag is the pixel and its four neighbours, as Pillow drew it.
-        assert_eq!(us.pixels[3 * 64 + 3], WHITE);
-        assert_eq!(us.pixels[3 * 64 + 4], WHITE);
-        assert_eq!(us.pixels[4 * 64 + 3], WHITE);
-        assert_eq!(us.pixels[4 * 64 + 4], US_FLAG_CANTON_RGBA);
+        let at = |x: usize, y: usize| us.pixels[y * SIDE + x];
+        // Eleven stripes of one icon pixel, red at both edges.
+        assert_eq!((at(40, 9), at(40, 13), at(40, 49)), (US_FLAG_STRIPE_RED_RGBA, WHITE, US_FLAG_STRIPE_RED_RGBA));
+        // The canton is six icon pixels each way, a star in every other pixel of it and the rows staggered.
+        assert_eq!((at(5, 13), at(9, 13), at(21, 13)), (WHITE, US_FLAG_CANTON_RGBA, WHITE));
+        assert_eq!((at(5, 21), at(9, 21)), (US_FLAG_CANTON_RGBA, WHITE));
+        assert_eq!((at(23, 26), at(24, 26)), (US_FLAG_CANTON_RGBA, US_FLAG_STRIPE_RED_RGBA));
     }
 
     #[test]
@@ -391,10 +438,14 @@ mod tests {
     fn a_flag_scales_with_its_canvas() {
         let us = render(&TrayState { group: 0, indicator_style: "flags", ..TrayState::default() }, None, 2 * SIDE);
         assert_eq!(us.pixels.len(), 4 * SIDE * SIDE);
-        // The star of the 64-pixel picture at (3, 3) is a disc around (7, 7) here.
-        assert_eq!(us.pixels[7 * 128 + 7], WHITE);
-        assert_eq!(us.pixels[7 * 128 + 8], WHITE);
-        assert_eq!(us.pixels[9 * 128 + 9], US_FLAG_CANTON_RGBA);
+        assert_eq!(flag_bounds(2 * SIDE), (0, 20, 127, 107));
+        // 22 rows hold all thirteen stripes, each one or two icon pixels: the first is two, the second one.
+        assert_eq!((us.pixels[25 * 128 + 100], us.pixels[29 * 128 + 100], us.pixels[33 * 128 + 100]), (US_FLAG_STRIPE_RED_RGBA, WHITE, US_FLAG_STRIPE_RED_RGBA));
+        // A star is still one icon pixel.
+        assert_eq!((us.pixels[25 * 128 + 5], us.pixels[25 * 128 + 9]), (WHITE, US_FLAG_CANTON_RGBA));
+        // 14 rows, an even number, hold thirteen as well, and the last one is red.
+        let us = render(&TrayState { group: 0, indicator_style: "flags", ..TrayState::default() }, None, 80);
+        assert_eq!((us.pixels[61 * 80 + 40], us.pixels[65 * 80 + 40]), (WHITE, US_FLAG_STRIPE_RED_RGBA));
     }
 
     #[test]

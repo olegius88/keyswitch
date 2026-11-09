@@ -404,7 +404,7 @@ impl Tray {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::tray_icon::DISABLED_LETTERS_RGBA;
+    use crate::tray_icon::{DISABLED_LETTERS_RGBA, flag_bounds};
     use std::io::Write as _;
     use std::path::Path;
 
@@ -478,6 +478,34 @@ mod tests {
     fn the_icon_grows_with_the_scale_of_the_screen() {
         for (dpi, side) in SCALES {
             assert_eq!(small_icon_side(dpi), side, "at {dpi} DPI");
+        }
+    }
+
+    /// The flags at every scale: as wide as the icon and 11/16 of it tall, with clear rows above and below. With
+    /// `KS_TRAY_ICON_DIR` set, each picture is written there as a PNG at its own size.
+    #[test]
+    fn a_flag_is_wider_than_tall_at_every_scale() {
+        let folder = std::env::var_os("KS_TRAY_ICON_DIR");
+        for (name, state) in [
+            ("us", TrayState { group: 0, indicator_style: "flags", ..TrayState::default() }),
+            ("ru", TrayState { group: 1, indicator_style: "flags", ..TrayState::default() }),
+            ("ru-disabled", TrayState { group: 1, indicator_style: "flags", enabled: false, ..TrayState::default() }),
+        ] {
+            for (_, side) in SCALES {
+                let pixels = icon_pixels(&state, side);
+                let drawn: Vec<(usize, usize)> =
+                    pixels.chunks(4).enumerate().filter(|(_, pixel)| pixel[3] != 0).map(|(index, _)| (index % side, index / side)).collect();
+                let columns = drawn.iter().map(|(x, _)| *x).max().unwrap() + 1 - drawn.iter().map(|(x, _)| *x).min().unwrap();
+                let rows = drawn.iter().map(|(_, y)| *y).max().unwrap() + 1 - drawn.iter().map(|(_, y)| *y).min().unwrap();
+                let (_, top, _, bottom) = flag_bounds(side * SUPERSAMPLING);
+                let flag_rows = (bottom - top + 1).to::<usize>() / SUPERSAMPLING;
+                assert!(flag_rows < side, "{name} at {side}: the flag is as tall as the icon");
+                assert_eq!((columns, rows), (side, flag_rows), "{name} at {side}");
+                if let Some(folder) = &folder {
+                    std::fs::create_dir_all(folder).unwrap();
+                    std::fs::write(Path::new(folder).join(format!("flag-{name}-{side}.png")), png(side, side, &pixels)).unwrap();
+                }
+            }
         }
     }
 

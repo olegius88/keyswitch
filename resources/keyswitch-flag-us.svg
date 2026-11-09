@@ -1,17 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Drawn on a 16-pixel grid, 8 units a pixel, as the Windows tray draws it at 16 pixels: 16 by 11, eleven stripes and a
+       canton of 6 by 6 with a star in every other pixel. -->
   <defs>
-    <clipPath id="rounded-us"><rect x="5" y="5" width="118" height="118" rx="25"/></clipPath>
+    <clipPath id="flag-us"><rect x="0" y="16" width="128" height="88" rx="8"/></clipPath>
   </defs>
-  <g clip-path="url(#rounded-us)">
-    <rect x="5" y="5" width="118" height="118" fill="#fff"/>
-    <path d="M5 5h118v10H5zm0 20h118v10H5zm0 20h118v10H5zm0 20h118v10H5zm0 20h118v10H5zm0 20h118v10H5z" fill="#c8293e"/>
-    <rect x="5" y="5" width="57" height="60" fill="#21468b"/>
-    <g fill="#fff">
-      <circle cx="16" cy="17" r="3"/><circle cx="33" cy="17" r="3"/><circle cx="50" cy="17" r="3"/>
-      <circle cx="24" cy="29" r="3"/><circle cx="41" cy="29" r="3"/><circle cx="56" cy="29" r="3"/>
-      <circle cx="16" cy="41" r="3"/><circle cx="33" cy="41" r="3"/><circle cx="50" cy="41" r="3"/>
-      <circle cx="24" cy="53" r="3"/><circle cx="41" cy="53" r="3"/><circle cx="56" cy="53" r="3"/>
-    </g>
+  <g clip-path="url(#flag-us)">
+    <rect x="0" y="16" width="128" height="88" fill="#fff"/>
+    <path d="M0 16h128v8H0zM0 32h128v8H0zM0 48h128v8H0zM0 64h128v8H0zM0 80h128v8H0zM0 96h128v8H0z" fill="#b22234"/>
+    <rect x="0" y="16" width="48" height="48" fill="#3c3b6e"/>
+    <g fill="#fff"><rect x="8" y="24" width="8" height="8"/><rect x="24" y="24" width="8" height="8"/><rect x="40" y="24" width="8" height="8"/><rect x="16" y="40" width="8" height="8"/><rect x="32" y="40" width="8" height="8"/><rect x="8" y="56" width="8" height="8"/><rect x="24" y="56" width="8" height="8"/><rect x="40" y="56" width="8" height="8"/></g>
   </g>
-  <rect x="7" y="7" width="114" height="114" rx="23" fill="none" stroke="#667085" stroke-width="4"/>
+  <rect x="1.5" y="17.5" width="125" height="85" rx="6.5" fill="none" stroke="#667085" stroke-width="3"/>
 </svg>

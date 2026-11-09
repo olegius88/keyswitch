@@ -460,3 +460,21 @@ pub use ks_ui::constants::{
     APPLICATION_CAPTURE_DELAY_MS, CONFIDENCE_SETTING_STEP, HISTORY_LIMIT_SETTING_MAX, HISTORY_LIMIT_SETTING_MIN,
     HISTORY_LIMIT_SETTING_STEP, NUMBER_DISPLAY_DECIMAL_PLACES, PAUSE_DELAY_SETTING_STEP_SECONDS, UPDATE_CHECK_INTERVAL_MS,
 };
+
+// ------------------------------------------------------------------------------------------ tray_icon.rs: the flag
+
+/// A flag is as wide as the icon and 11/16 of it tall, centred: wider than tall, as a flag is (2:3 for Russia, 10:19 for
+/// the United States), and not the square of a badge. At 16 pixels that is 16 by 11, with whole pixels for the bands.
+pub const FLAG_HEIGHT_NUMERATOR: usize = 11;
+pub const FLAG_HEIGHT_DENOMINATOR: usize = 16;
+/// The corners of a flag are rounded by one icon pixel.
+pub const FLAG_CORNER_RADIUS_ICON_PIXELS: usize = 1;
+/// The edge of a flag, one canvas pixel wide (a quarter of an icon pixel): the white of the Russian flag keeps its outline
+/// on a light taskbar.
+pub const FLAG_EDGE_RGBA: [u8; 4] = [96, 96, 96, 255];
+/// The dark rim of the slash across a switched-off flag, this much wider than the slash on the 64-pixel picture.
+pub const FLAG_SLASH_RIM_PIXELS: f64 = 3.0;
+pub const FLAG_SLASH_RIM_RGBA: [u8; 4] = [64, 64, 64, 255];
+/// The stars of the canton, in icon pixels: the first row and column of them, and the step between them.
+pub const US_FLAG_STAR_FIRST_ROW: usize = 1;
+pub const US_FLAG_STAR_STEP: usize = 2;
