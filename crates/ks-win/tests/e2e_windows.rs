@@ -34,7 +34,7 @@ mod scenario {
     use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
     use ks_win::hint_card::link_areas;
     use ks_win::hint_layout::Area;
-    use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI};
+    use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI, WindowsSelectionAPI};
     use ks_win::windows_app::VERSION;
     use ks_win::windows_native::NativeWindowsAPI;
     use ks_win::windows_ui_model::{HINTS_SETTING_TITLE, PAGE_NAMES};
@@ -244,6 +244,13 @@ mod scenario {
                 self.pump(SURFACE_CLOSES);
             }
             Ok(())
+        }
+
+        /// The program and the window class in front, for a failure that finds this window behind another one.
+        fn front(&self) -> String {
+            // SAFETY: takes nothing.
+            let window = unsafe { GetForegroundWindow() };
+            format!("{:?} ({:?})", self.api.active_application(), self.api.window_class((window.to::<isize>()).to::<i64>()))
         }
 
         fn activate(&self) {
@@ -682,7 +689,11 @@ mod scenario {
         if !switched {
             // SAFETY: takes nothing.
             let front = unsafe { GetForegroundWindow() } == editor.window;
-            return Err(format!("after {line:?} the field's layout is {}, and the field is {}in front", editor.group(), if front { "" } else { "not " }));
+            return Err(format!(
+                "after {line:?} the field's layout is {}, and the field is {}",
+                editor.group(),
+                if front { "in front".to_owned() } else { format!("behind {}", editor.front()) }
+            ));
         }
         Ok(())
     }
@@ -817,7 +828,7 @@ mod scenario {
 
     fn in_front(editor: &Editor, what: &str) -> Result<(), String> {
         // SAFETY: takes nothing.
-        if unsafe { GetForegroundWindow() } == editor.window { Ok(()) } else { Err(format!("{what}: the window typed in lost the front")) }
+        if unsafe { GetForegroundWindow() } == editor.window { Ok(()) } else { Err(format!("{what}: the window typed in lost the front to {}", editor.front())) }
     }
 
     fn hints_file(root: &Path) -> Value {
