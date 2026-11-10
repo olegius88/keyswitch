@@ -233,3 +233,17 @@ fn an_engine_built_from_its_settings_takes_what_it_is_given() {
     let engine = KeySwitchEngine::new(settings, history, Arc::new(Backend::new("app", 0, Vec::new())), learning, "test", Some(Arc::new(UnreadField)), None, &resources, clock.read());
     assert!(engine.is_ok());
 }
+
+/// The worker takes the core while it runs; what the handle says of the models stays.
+#[test]
+fn a_running_engine_still_reports_its_models() {
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("app", 0, Vec::new());
+    let engine = KeySwitchEngine::of(session.core);
+    let before = engine.models().clone();
+    engine.start().unwrap();
+    assert!(engine.core().is_none(), "the worker holds the core");
+    assert_eq!(engine.models(), &before);
+    engine.stop();
+    bundle.clean();
+}
