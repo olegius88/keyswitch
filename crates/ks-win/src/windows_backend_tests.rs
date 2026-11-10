@@ -18,7 +18,6 @@ const SCAN_CODE_A: u32 = 30;
 const SCAN_CODE_ENTER: u32 = 0x1C;
 const SCAN_CODE_SEMICOLON: u32 = 39;
 const SCAN_CODE_LEFT_ALT: u32 = 0x38;
-const SCAN_CODE_LEFT_SHIFT: u32 = 42;
 const SCAN_CODE_PAUSE: u32 = 0x45;
 const LATE_KEY_SCAN_CODE: u32 = 31;
 const HELD_KEY_SCAN_CODE: u32 = 32;
@@ -1025,10 +1024,10 @@ fn a_correction_deletes_switches_replays_shift_and_boundary() {
     assert_eq!(
         sent[1],
         [
-            NativeInput::key(true, VK_SHIFT),
+            NativeInput::scan(true, SCAN_CODE_LEFT_SHIFT),
             NativeInput::scan(true, SCAN_CODE_A),
             NativeInput::scan(false, SCAN_CODE_A),
-            NativeInput::key(false, VK_SHIFT),
+            NativeInput::scan(false, SCAN_CODE_LEFT_SHIFT),
         ]
     );
     // The boundary keeps its own layout: typed after a switch back.
@@ -1550,12 +1549,12 @@ fn caps_state_changes_only_replay_case_not_punctuation() {
             for shift_then in [false, true] {
                 let state = if caps_then { LOCK_MASK } else { 0 } | if shift_then { SHIFT_MASK } else { 0 };
                 let letter = KeyEvent { state, ..key_event() };
-                let events = subject.inner.stroke_inputs(&letter, true, Some(1));
-                let shifted = events.iter().any(|item| item.virtual_key == VK_SHIFT);
+                let events = subject.inner.stroke_inputs(&letter, true, Some(1), None);
+                let shifted = events.iter().any(|item| item.scan_code == SCAN_CODE_LEFT_SHIFT);
                 assert_eq!(shifted, shift_then ^ caps_then ^ caps_now);
                 let punctuation = KeyEvent { characters: vec![".".to_owned(), ".".to_owned()], ..letter };
-                let events = subject.inner.stroke_inputs(&punctuation, true, Some(1));
-                assert_eq!(events.iter().any(|item| item.virtual_key == VK_SHIFT), shift_then);
+                let events = subject.inner.stroke_inputs(&punctuation, true, Some(1), None);
+                assert_eq!(events.iter().any(|item| item.scan_code == SCAN_CODE_LEFT_SHIFT), shift_then);
             }
         }
     }
@@ -3007,4 +3006,33 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
         let _ = subject.complete_action(false);
         let _ = subject.release_input();
     }
+}
+
+#[test]
+fn a_shift_the_user_holds_is_neither_pressed_again_for_a_capital_nor_left_down_for_a_small_letter() {
+    let subject = backend(&FakeWindowsAPI::plain());
+    let capital = KeyEvent { state: SHIFT_MASK, ..key_event() };
+    let small = key_event();
+    let keys = |events: &[NativeInput]| events.iter().map(|item| (item.pressed, item.scan_code)).collect::<Vec<_>>();
+    let key = key_event().keycode;
+    for (held, scan_code) in [(VK_LSHIFT, SCAN_CODE_LEFT_SHIFT), (VK_SHIFT, SCAN_CODE_LEFT_SHIFT), (VK_RSHIFT, SCAN_CODE_RIGHT_SHIFT)] {
+        lock(&subject.inner.hook).pressed.insert(held);
+        let held_now = subject.inner.held_shift();
+        assert_eq!(held_now, Some(scan_code));
+        // The capital takes the held Shift as it is.
+        assert_eq!(keys(&subject.inner.stroke_inputs(&capital, true, Some(1), held_now)), [(true, key), (false, key)]);
+        // The small letter has that very Shift let go for it, and pressed again after it.
+        assert_eq!(
+            keys(&subject.inner.stroke_inputs(&small, true, Some(1), held_now)),
+            [(false, scan_code), (true, key), (false, key), (true, scan_code)]
+        );
+        lock(&subject.inner.hook).pressed.remove(held);
+    }
+    assert_eq!(subject.inner.held_shift(), None);
+    // With no Shift held, a capital gets a Shift of its own, as a keyboard sends it, and a small letter none.
+    assert_eq!(
+        keys(&subject.inner.strokes_inputs([&capital].into_iter(), true, Some(1))),
+        [(true, SCAN_CODE_LEFT_SHIFT), (true, key), (false, key), (false, SCAN_CODE_LEFT_SHIFT)]
+    );
+    assert_eq!(keys(&subject.inner.strokes_inputs([&small].into_iter(), true, Some(1))), [(true, key), (false, key)]);
 }

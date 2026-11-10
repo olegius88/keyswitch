@@ -40,7 +40,7 @@ use crate::constants::{
     ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK, HOOK_SILENCE_MS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
     LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
-    PRIMARY_LANGID_MASK, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+    PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
     UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
     VK_HOME, VK_INSERT, VK_LAST, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
@@ -1427,10 +1427,28 @@ impl Inner {
         synthetic: bool,
         group: Option<i32>,
     ) -> Vec<NativeInput> {
-        strokes.flat_map(|stroke| self.stroke_inputs(stroke, synthetic, group)).collect()
+        let held = self.held_shift();
+        strokes.flat_map(|stroke| self.stroke_inputs(stroke, synthetic, group, held)).collect()
     }
 
-    fn stroke_inputs(&self, stroke: &KeyEvent, synthetic: bool, group: Option<i32>) -> Vec<NativeInput> {
+    /// The Shift the user holds now by the hook's books, as the scan code of its key. The key-up of a Shift let go while a
+    /// correction is typed is held back with the other keys, so the books still show it down until it is typed again.
+    fn held_shift(&self) -> Option<u32> {
+        let hook = lock(&self.hook);
+        if hook.pressed.contains(VK_RSHIFT) {
+            Some(SCAN_CODE_RIGHT_SHIFT)
+        } else if hook.pressed.contains(VK_LSHIFT) || hook.pressed.contains(VK_SHIFT) {
+            Some(SCAN_CODE_LEFT_SHIFT)
+        } else {
+            None
+        }
+    }
+
+    /// The keys of one stroke. A capital typed while the user still holds Shift takes that Shift; a Shift of KeySwitch's own
+    /// pressed and let go around it reached the window as extra Shift presses and let the held one go for it, and through a
+    /// remote session (TeamViewer) the editor on the other computer opened its command palette in the middle of the word.
+    /// A small letter typed under the held Shift has that very key let go for it and pressed again after it.
+    fn stroke_inputs(&self, stroke: &KeyEvent, synthetic: bool, group: Option<i32>, held: Option<u32>) -> Vec<NativeInput> {
         let marks = |input: NativeInput| NativeInput { synthetic, replayed: !synthetic, ..input };
         let mut result = Vec::with_capacity(4);
         let rendered_group = group.unwrap_or(stroke.group);
@@ -1438,13 +1456,19 @@ impl Inner {
         if pystr::isalpha(stroke.character_for(rendered_group)) {
             shifted ^= stroke.caps_lock() != self.caps_lock.load(Ordering::Relaxed);
         }
-        if shifted {
-            result.push(marks(NativeInput::key(true, VK_SHIFT)));
+        // Around the key: the Shift pressed before it, and its state after it.
+        let around = match (shifted, held) {
+            (true, None) => Some((true, SCAN_CODE_LEFT_SHIFT)),
+            (false, Some(scan_code)) => Some((false, scan_code)),
+            _ => None,
+        };
+        if let Some((pressed, scan_code)) = around {
+            result.push(marks(NativeInput::scan(pressed, scan_code)));
         }
         result.push(marks(NativeInput::scan(true, stroke.keycode)));
         result.push(marks(NativeInput::scan(false, stroke.keycode)));
-        if shifted {
-            result.push(marks(NativeInput::key(false, VK_SHIFT)));
+        if let Some((pressed, scan_code)) = around {
+            result.push(marks(NativeInput::scan(!pressed, scan_code)));
         }
         result
     }
