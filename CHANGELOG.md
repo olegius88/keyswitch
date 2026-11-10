@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.71.2 — 2026-11-10
+
 - A hotkey that can never fire is no longer stored without a word. A hotkey needs a key besides Ctrl, Alt, Shift and Super, and the key has to be one the keyboard has: `Ctrl`, `Ctrl+Alt` and `Левый Ctrl` typed into «Преобразовать последнее слово» were stored as they were and did nothing. The settings window now says what is wrong (no key, more keys than one, a key it does not know), and the field takes back what it had: under the row on Linux, in a message on Windows and macOS.
 - Windows and macOS: the function keys work in a hotkey by their names, `F9` or `Ctrl+F12` (F1 to F24 on Windows, F1 to F20 on macOS). The program knew them only as `VK_78` and the like, so a hotkey spelled `F9` never fired; Linux had the names already.
 - The title of the settings window names the version running: «KeySwitch 0.71.2» instead of «KeySwitch», on Windows, Linux and macOS, so the window, the taskbar and a screenshot say which version it is. On Linux the header bar of the window shows it too; it showed no title before.

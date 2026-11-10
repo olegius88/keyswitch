@@ -267,7 +267,7 @@
   ],
   "passed": true,
   "provenance": {
-    "Cargo.lock": "0ea016e0eb0b04749a8b303cdd08b788ef9adae233780bf10d14536117ca8ba6",
+    "Cargo.lock": "a751d7b28d46ac3d68b3dbe079325ee31ac6fcd90ca5d8064a0ec41c64313fb9",
     "crates/ks-backend/src/backend.rs": "33cb0791cc6ea061a0a4a5288c399f8e79aacd6b34812a3fa0a0ced267c4b28d",
     "crates/ks-backend/src/constants.rs": "7892905347d58bcfe1451546d953e7b63c00b466dc28ea47154f5d2a2d51ae6c",
     "crates/ks-backend/src/field_context.rs": "899bef09828f3e05f4d4be1d696fb1a5aa06b760aeeaba673664023d44d83c31",
@@ -301,7 +301,7 @@
     "crates/ks-context/src/prefix_model.rs": "4277e4f4e3ad8fc3c9471c9c0a74e35b951af9d6d4a89b249e4a8fcf8cfb6317",
     "crates/ks-context/src/prefix_schema.rs": "fd45e5cddaeead587ebe84c8584b837767f674cb6032989a841faf010be44529",
     "crates/ks-context/src/typo_correction.rs": "185d391a32a2e03b2c225b781e486b66c0cc637ca33e3a77163726dd993584c3",
-    "crates/ks-engine/src/constants.rs": "442512b1210c28e4405fdab4ac414b60c3f7bbc604a4edd4d8f7585fc530828f",
+    "crates/ks-engine/src/constants.rs": "ec705385824ce511f2bbd8165038849cff2c8709a180aef8db586b3f2894bb3e",
     "crates/ks-engine/src/context_access.rs": "5d7cd5db884537ad9bb8ada7a5929ac6b95944ebe90aaf24d710cda025cbfdc7",
     "crates/ks-engine/src/engine/commit.rs": "a0d0e6f2bb8bbe917cbf2b72f6b6a21d9a53ed10d8a99d21688bd940f2cdc7fc",
     "crates/ks-engine/src/engine/decide.rs": "0930971d1bcf673550a795348c628b4bc7ac0d5e4d11429b61c00a3db31f8b07",
@@ -319,7 +319,7 @@
     "crates/ks-engine/src/engine/selection.rs": "a28964dc114704b1b7b729c88601b240f4e76b29fbcf236b419d82e940c99772",
     "crates/ks-engine/src/engine/shared.rs": "a23abef4ce88cf8035c92ab9caea5419af819f7a555507004a32390897966d85",
     "crates/ks-engine/src/engine/state.rs": "11978c4a276284ce85780ae46d6ca29cc1dcd5a12f348311eff619aa4a115ac7",
-    "crates/ks-engine/src/engine/types.rs": "8d54b0641f8d6b0683f1f3fe759b36e72f462b01c37111570d865c420ec1ebae",
+    "crates/ks-engine/src/engine/types.rs": "a350bad8c102df6582e276120ba0510b23429108549402329aa4210431c2f514",
     "crates/ks-engine/src/engine/word_parts.rs": "f4e7deb3b05183cea26930ecdb6513420d1a8343c5dfb4b3431d5f9df1711440",
     "crates/ks-engine/src/engine_loader.rs": "ebdec49bdaacec9a8de5083875fd73d4f3185cfd661665464575385a03c74762",
     "crates/ks-engine/src/lib.rs": "804f78ed408d5dc44065879c794739abdc6ed2bf42a48028fa035bfd6db5c363",
@@ -539,8 +539,8 @@
     }
   },
   "runtime_regression": {
-    "previous_report": "model/prefix_v1/engine-history/8983e62fe08ecf26d427d0379db4bca41f19657e503f257f892ad0789db8a4a3.json",
-    "previous_sha256": "8983e62fe08ecf26d427d0379db4bca41f19657e503f257f892ad0789db8a4a3"
+    "previous_report": "model/prefix_v1/engine-history/2e7c2f36aa8382a22db3de36afd4be8af3cd1cdf9d262dbc4e2aa38422dc1065.json",
+    "previous_sha256": "2e7c2f36aa8382a22db3de36afd4be8af3cd1cdf9d262dbc4e2aa38422dc1065"
   },
   "schema_version": 1,
   "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",
