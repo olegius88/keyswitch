@@ -1163,11 +1163,21 @@ impl Inner {
             return false;
         }
         if !native.injected && !native.replayed {
-            let consumed_scan_code = lock(&self.hook).consumed_keys.contains(native.scan_code);
+            let (consumed_scan_code, down) = {
+                let hook = lock(&self.hook);
+                (hook.consumed_keys.contains(native.scan_code), hook.pressed.contains(native.virtual_key))
+            };
             let mut hold = lock(&self.hold);
             let prior_release = !native.pressed && hold.action_prior_keys.contains(native.virtual_key);
             let action_key = hold.deferred_action.is_some() && consumed_scan_code;
-            if hold.holding && !prior_release && !action_key {
+            // A key-up of a key never seen going down is no keystroke of the user's to keep back. Windows sends one of Ctrl
+            // to the window whose layout a correction has just switched: kept back, it reached that window only after the
+            // correction's keys, and a remote session (TeamViewer) then took the correction's capitals for Ctrl+Shift
+            // shortcuts on the other computer, while the layout switched by hand, with nothing held, never did that.
+            let orphan_release = !native.pressed
+                && !down
+                && !hold.held.iter().any(|item| item.pressed && item.virtual_key == native.virtual_key);
+            if hold.holding && !prior_release && !action_key && !orphan_release {
                 hold.held.push_back(native);
                 return true;
             }
