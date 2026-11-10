@@ -8,10 +8,10 @@ use std::sync::Arc;
 use ks_config::history::data_dir;
 use ks_config::learning::{RuleAction, RuleMatch};
 use ks_engine::LearningPrompt;
-use ks_engine::engine::Hotkey;
+use ks_engine::engine::{Hotkey, single_key_conflict};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
+use ks_ui::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -380,7 +380,16 @@ impl Ui {
                     }
                     ControlKind::Choice => {
                         let title: Id = msg_send![control, titleOfSelectedItem];
-                        Some(json!(choice_value(&spec, &text_of(title))))
+                        let chosen = choice_value(&spec, &text_of(title));
+                        if let Some(problem) = single_key_conflict(&settings, &spec.path, &chosen) {
+                            // A key the other setting of a lone tap has is not stored: the list takes back what it had,
+                            // and an alert says why once the list has finished with its change.
+                            let _: () = msg_send![control, selectItemWithTitle: string(&control_text(&spec, settings.get(&spec.path).as_ref()))];
+                            alert_later(problem);
+                            None
+                        } else {
+                            Some(json!(chosen))
+                        }
                     }
                     ControlKind::Int | ControlKind::Float => {
                         let shown: Id = msg_send![control, stringValue];
@@ -400,7 +409,7 @@ impl Ui {
                             // A hotkey that can never fire is not stored: the field takes back what it had, and an
                             // alert says why once the field has finished with its change.
                             let _: () = msg_send![control, setStringValue: string(&control_text(&spec, settings.get(&spec.path).as_ref()))];
-                            alert_later(problem.message());
+                            alert_later(hotkey_problem_text(&spec.path, &problem));
                             None
                         } else {
                             (!text.trim().is_empty()).then(|| json!(text))

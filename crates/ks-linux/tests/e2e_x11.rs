@@ -15,6 +15,7 @@ use std::time::Instant;
 use gtk::prelude::*;
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
+use ks_config::constants::DETECTION_CONVERT_LAST_KEY;
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
@@ -27,7 +28,7 @@ use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, 
 use ks_linux::linux_app::{engine_builder, new_backend};
 use ks_ui::hints::{Click, EngineInput, Hints, Moment, RUNNING_PLATFORM, subscribe};
 use serde_json::json;
-use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, pump_until, start_window_manager, WINDOW_MANAGER, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, ESCAPE_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, dbus_call};
+use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, pump_until, start_window_manager, WINDOW_MANAGER, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, ESCAPE_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, CONTROL_R_KEYSYM, dbus_call};
 
 const CASES: [Case; 15] = [
     Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),
@@ -65,6 +66,8 @@ const EXPECTED_HISTORY: [(&str, &str); 13] = [
 ];
 
 const OFFER_POSITION: i32 = 100;
+/// Between the two taps of a double tap, as a person makes one.
+const DOUBLE_TAP_GAP: u64 = 150;
 /// The longest a hint takes to appear after a correction: the typing settles for a second, then the next timer tick.
 const HINT_APPEARS: u64 = 3000;
 /// How long a window manager takes to focus a window.
@@ -311,6 +314,36 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
             return Err(format!("layout key: text={:?} group={}", entry.text().as_str(), group()));
         }
         println!("LAYOUT_KEY_TAP_E2E_OK");
+        // The conversion key: a lone Right Ctrl converts the word just typed, as Pause does, and a second tap right after
+        // offers a rule for it; Right Ctrl held over another key converts nothing. The word is not `hello`, which a rule of
+        // the phase above converts by itself.
+        let convert_key = |key: &str| settings.write(DETECTION_CONVERT_LAST_KEY, key.to_owned(), false).map_err(|error| format!("{error:?}"));
+        convert_key("Control_R")?;
+        prepare(0, "world")?;
+        typer.tap_keysym(CONTROL_R_KEYSYM)?;
+        settle(SETTLE);
+        if (entry.text().as_str(), group()) != ("цщкдв", 1) {
+            return Err(format!("conversion key: text={:?} group={}", entry.text().as_str(), group()));
+        }
+        prepare(0, "world")?;
+        typer.tap_keysym(CONTROL_R_KEYSYM)?;
+        settle(DOUBLE_TAP_GAP);
+        typer.tap_keysym(CONTROL_R_KEYSYM)?;
+        settle(SETTLE);
+        if (entry.text().as_str(), group()) != ("цщкдв", 1) || engine.learning_prompt().is_none() {
+            return Err(format!("conversion key twice: text={:?} group={} offered={}", entry.text().as_str(), group(), engine.learning_prompt().is_some()));
+        }
+        typer.tap_keysym(ESCAPE_KEYSYM)?;
+        settle(LEARNING_CONFIRMATION);
+        typer.hold_keysym(CONTROL_R_KEYSYM, true)?;
+        typer.type_keys("c")?;
+        typer.hold_keysym(CONTROL_R_KEYSYM, false)?;
+        settle(SETTLE);
+        if (entry.text().as_str(), group()) != ("цщкдв", 1) || engine.learning_prompt().is_some() {
+            return Err(format!("conversion key with a letter: text={:?} group={} offered={}", entry.text().as_str(), group(), engine.learning_prompt().is_some()));
+        }
+        convert_key("")?;
+        println!("CONVERT_KEY_TAP_E2E_OK");
         let names = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames", &[])?;
         if names.contains("org.freedesktop.portal.Desktop") || names.contains("org.freedesktop.portal.Documents") {
             return Err("GUI tests unexpectedly activated a desktop or document portal".to_owned());

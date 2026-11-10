@@ -16,19 +16,22 @@ use gtk::{gdk, gio, glib, pango};
 use ks_backend::{BackendProbe, InputBackend};
 use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS};
+use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DETECTION_CONVERT_LAST_KEY};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::{LogStatus, log_directory, log_path, log_status, rotation_summary};
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
 use ks_config::constants::HINTS_SETTING;
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE, settings_window_title};
+use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE, hotkey_problem_text, settings_window_title};
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
 use ks_engine::EngineSnapshot;
-use ks_engine::engine::{Hotkey, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
+use ks_engine::engine::{
+    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_TITLE, Hotkey, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE,
+    single_key_conflict,
+};
 use ks_engine::constants::{
     CONFIDENCE_SETTING_MAX, CONFIDENCE_SETTING_MIN, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
     EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, FIELD_CATCH_UP_CHOICES, MINIMUM_WORD_LENGTH_SETTING_MAX, MINIMUM_WORD_LENGTH_SETTING_MIN,
@@ -1233,12 +1236,28 @@ impl Builder<'_> {
         view
     }
 
+    /// The list of a key tapped alone (`detection.layout_switch_key`, `detection.convert_last_key`): the keys the layout
+    /// switch key offers, and a key the other such setting has is refused (`choose_single_key`).
+    fn single_key_row(&self, path: &str, title: &str, subtitle: &str) -> adw::ComboRow {
+        let names: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(key, _)| *key).collect();
+        let labels: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(_, label)| *label).collect();
+        let current = setting_text(&self.services.settings, path, DEFAULT_LAYOUT_SWITCH_KEY);
+        let row = adw::ComboRow::builder().title(title).subtitle(subtitle).model(&gtk::StringList::new(&labels)).build();
+        row.set_selected(index_of(&names, &current, 0));
+        let (settings, key) = (self.settings(), path.to_owned());
+        let keys: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+        let said = SaidRow { row: row.upcast_ref::<adw::ActionRow>().downgrade(), subtitle: subtitle.to_owned() };
+        row.connect_selected_notify(move |row| choose_single_key(&settings, &key, &keys, row, &said));
+        self.register(path, Control::Combo(row.clone()));
+        row
+    }
+
     fn hotkey_row(&self, path: &str, title: &str, subtitle: &str) -> adw::ActionRow {
         let row = action_row(title, subtitle);
         let entry = gtk::Entry::builder().text(setting_text(&self.services.settings, path, "").as_str()).width_chars(HOTKEY_ENTRY_WIDTH_CHARACTERS).valign(gtk::Align::Center).build();
         let (settings, key) = (self.settings(), path.to_owned());
         // The row says under its title what is wrong with a hotkey that was not stored, and its own words again once one is.
-        let said = Rc::new(HotkeyRow { row: row.downgrade(), subtitle: subtitle.to_owned() });
+        let said = Rc::new(SaidRow { row: row.downgrade(), subtitle: subtitle.to_owned() });
         entry.connect_activate({
             let (settings, key, said) = (settings.clone(), key.clone(), said.clone());
             move |entry| save_hotkey(&settings, &key, entry, &said)
@@ -1511,22 +1530,12 @@ impl Builder<'_> {
     fn hotkeys(&mut self) {
         let page = self.pages.page("hotkeys", "Горячие клавиши", "Комбинации распознаются глобально. Нажмите Enter после редактирования поля.");
         let switching = group("Смена раскладки");
-        let keys: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(key, _)| *key).collect();
-        let labels: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(_, label)| *label).collect();
-        let current = setting_text(&self.services.settings, "detection.layout_switch_key", DEFAULT_LAYOUT_SWITCH_KEY);
-        switching.add(&self.combo_row(
-            "detection.layout_switch_key",
-            LAYOUT_SWITCH_KEY_TITLE,
-            LAYOUT_SWITCH_KEY_DESCRIPTION,
-            &labels,
-            keys.iter().map(|key| (*key).to_owned()).collect(),
-            index_of(&keys, &current, 0),
-            true,
-        ));
+        switching.add(&self.single_key_row("detection.layout_switch_key", LAYOUT_SWITCH_KEY_TITLE, LAYOUT_SWITCH_KEY_DESCRIPTION));
         page.append(&switching);
         let commands = group("Команды");
         commands.add(&self.hotkey_row("hotkeys.toggle", "Пауза / продолжение", "Временно выключает автоматические исправления"));
         commands.add(&self.hotkey_row("hotkeys.convert_last", "Преобразовать последнее слово", "Меняет раскладку принудительно, без решения словаря"));
+        commands.add(&self.single_key_row(DETECTION_CONVERT_LAST_KEY.path(), CONVERT_LAST_KEY_TITLE, CONVERT_LAST_KEY_DESCRIPTION));
         commands.add(&self.hotkey_row(
             "hotkeys.undo",
             "Отменить исправление",
@@ -1770,6 +1779,25 @@ impl Builder<'_> {
     }
 }
 
+/// A key chosen in the list of a key tapped alone. A key the other such setting has is not stored: the row says why under
+/// its title, and the list goes back to the key stored.
+fn choose_single_key(settings: &SettingsStore, path: &str, keys: &[String], row: &adw::ComboRow, said: &SaidRow) {
+    let stored = setting_text(settings, path, DEFAULT_LAYOUT_SWITCH_KEY);
+    let Some(key) = keys.get(row.selected().to::<usize>()).filter(|key| **key != stored) else {
+        // Nothing chosen, as a list being rebuilt reports for a moment, or the key stored: the list taken back to it after a
+        // refusal, which the row goes on saying.
+        return;
+    };
+    let problem = single_key_conflict(settings, path, key);
+    said.say(problem.as_deref());
+    if problem.is_some() {
+        let names: Vec<&str> = keys.iter().map(String::as_str).collect();
+        row.set_selected(index_of(&names, &stored, 0));
+        return;
+    }
+    choose_value(settings, path, keys, row.selected());
+}
+
 /// The value of the row chosen in a list; a list with nothing chosen changes nothing.
 fn choose_value(settings: &SettingsStore, key: &str, keys: &[String], selected: u32) {
     if let Some(value) = keys.get(selected.to::<usize>()) {
@@ -1781,13 +1809,13 @@ fn choose_value(settings: &SettingsStore, key: &str, keys: &[String], selected: 
     }
 }
 
-/// The row of a hotkey and the words it carries under its title.
-struct HotkeyRow {
+/// A row whose value is checked before it is stored, and the words it carries under its title: a hotkey, a key tapped alone.
+struct SaidRow {
     row: glib::WeakRef<adw::ActionRow>,
     subtitle: String,
 }
 
-impl HotkeyRow {
+impl SaidRow {
     /// The row says `problem` in the colour of an error, or its own words again.
     fn say(&self, problem: Option<&str>) {
         with_live(&self.row, |row| {
@@ -1801,14 +1829,14 @@ impl HotkeyRow {
     }
 }
 
-fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry, said: &HotkeyRow) {
+fn save_hotkey(settings: &SettingsStore, path: &str, entry: &gtk::Entry, said: &SaidRow) {
     let value = entry.text().trim().to_owned();
     let stored = setting_text(settings, path, "");
     if value == stored {
         // Nothing was changed: the field was only passed through, or it holds what a refused hotkey gave way to.
         return;
     }
-    let problem = if value.is_empty() { Some(HOTKEY_EMPTY_MESSAGE.to_owned()) } else { Hotkey::problem(&value, key_name_exists).map(|problem| problem.message()) };
+    let problem = if value.is_empty() { Some(HOTKEY_EMPTY_MESSAGE.to_owned()) } else { Hotkey::problem(&value, key_name_exists).map(|problem| hotkey_problem_text(path, &problem)) };
     if let Some(problem) = problem {
         // A hotkey that can never fire is not stored: the row says why, and the field takes back what it had.
         said.say(Some(&problem));
