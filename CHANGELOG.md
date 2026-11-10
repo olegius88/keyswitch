@@ -10,6 +10,7 @@ All notable changes to KeySwitch are documented in this file.
 - Linux and macOS: the update check reads where a response really came from. `curl` writes the headers of every response it receives, and the address a redirect led to is checked as on Windows; before, the address asked for was taken for the address the file came from.
 - For developers: CI fails a tag whose macOS bundle cannot be notarized for want of the signing identity or the notary key; it used to skip the notarization.
 - Windows: a correction no longer holds back the key-up of Ctrl that Windows sends to a window whose layout it switches, since that Ctrl was never pressed; held, the key-up reached the window only after the correction's keys, and in a TeamViewer window the capitals of the correction (`КГИ` becoming `RUB`) opened the command palette of the editor on the controlled computer and the first letter was lost. A key the user presses while a correction is typed is still held and typed after it.
+- Windows: the diagnostics of the About page show the models the program works with. While the program ran they always read «Загрузка языковых моделей…», with the models marked unavailable, whatever the refresh button did: the page asked the engine's state, which its worker holds for as long as it runs. The engine now keeps what it has of its models with its handle.
 
 ## 0.71.2 — 2026-11-10
 
