@@ -11,7 +11,8 @@ use ks_engine::LearningPrompt;
 use ks_engine::engine::Hotkey;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings};
+use ks_ui::windows_ui_model::{is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings, update_view};
+use ks_updates::UpdateSnapshot;
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::{class, msg_send, sel};
@@ -25,6 +26,7 @@ use crate::macos_app::{PERMISSION_WAIT_STATUS, VERSION};
 use crate::macos_backend::key_name_exists;
 use crate::macos_native::run_on_main;
 use crate::macos_system::MacApplicationCatalog;
+use crate::macos_update::mac_update_settings;
 use crate::macos_objc::{Id, open_path, string, text_of};
 
 #[repr(C)]
@@ -97,8 +99,10 @@ const PAGES: [(&str, &str); 10] = [
 const ACTION_SAVE_EXCLUSIONS: isize = 1;
 const ACTION_REFRESH_HISTORY: isize = 2;
 const RELEASES_PAGE: &str = "https://github.com/olegius88/keyswitch/releases";
-const UPDATES_NOTE: &str = "На macOS обновление ставится вручную: скачайте архив со страницы выпусков и замените им приложение в папке «Программы». Разрешение на управление компьютером при этом сохранится.";
+const UPDATES_NOTE: &str = "Обновления берутся только из выпусков KeySwitch на GitHub: архив сверяется по SHA-256, новая версия — по подписи разработчика, поэтому разрешение «Универсальный доступ» сохраняется. Если новая версия не запустится, вернётся прежняя.";
 const ACTION_OPEN_RELEASES: isize = 3;
+const ACTION_CHECK_UPDATES: isize = 11;
+const ACTION_INSTALL_UPDATE: isize = 12;
 const ACTION_ADD_RULE: isize = 4;
 const ACTION_CLEAR_RULES: isize = 5;
 const ACTION_OPEN_LOGS: isize = 6;
@@ -126,6 +130,14 @@ struct Ui {
     cards: Vec<HintCard>,
     /// The control a hint led to when its text was clicked.
     marked: Id,
+    /// The Updates page: what the manager says, the version found, the download, and the buttons that depend on them.
+    update_status: Id,
+    update_version: Id,
+    update_progress: Id,
+    update_check: Id,
+    update_install: Id,
+    update_release: Id,
+    release_url: String,
 }
 
 /// A tab's scrolling view and how tall it is now.
@@ -231,6 +243,30 @@ fn label(parent: Id, text: &str, y: f64, small: bool) -> f64 {
         let _: () = msg_send![field, setFrame: rect(MARGIN, y, PAGE_WIDTH - 2.0 * MARGIN, fitted.height)];
         add(parent, field);
         fitted.height
+    }
+}
+
+/// A label whose text changes, `height` tall.
+fn changing_label(parent: Id, y: f64, height: f64, small: bool) -> Id {
+    // SAFETY: messages on the main thread; the label stays alive as a subview of its parent.
+    unsafe {
+        let field: Id = msg_send![class!(NSTextField), wrappingLabelWithString: string("")];
+        if small {
+            let color: Id = msg_send![class!(NSColor), secondaryLabelColor];
+            let _: () = msg_send![field, setTextColor: color];
+        }
+        let _: () = msg_send![field, setFrame: rect(MARGIN, y, PAGE_WIDTH - 2.0 * MARGIN, height)];
+        add(parent, field);
+        field
+    }
+}
+
+fn set_enabled(control: Id, enabled: bool) {
+    if !control.is_null() {
+        // SAFETY: a message on the main thread to a live control.
+        unsafe {
+            let _: () = msg_send![control, setEnabled: enabled];
+        }
     }
 }
 
@@ -645,8 +681,21 @@ fn action(tag: isize) {
             with_ui(|ui| ui.refresh_history());
         }
         ACTION_OPEN_RELEASES => {
-            if let Err(error) = std::process::Command::new("open").arg(RELEASES_PAGE).status() {
+            let page = with_ui(|ui| ui.release_url.clone()).filter(|url| !url.is_empty()).unwrap_or_else(|| RELEASES_PAGE.to_owned());
+            if let Err(error) = std::process::Command::new("open").arg(page).status() {
                 alert_later(format!("Страница выпусков не открылась: {error}"));
+            }
+        }
+        ACTION_CHECK_UPDATES => {
+            let Some(updates) = with_ui(|ui| ui.services.updates.clone()) else { return };
+            if !updates.check(false, false) {
+                alert_later("Проверка или установка обновления уже идёт".to_owned());
+            }
+        }
+        ACTION_INSTALL_UPDATE => {
+            let Some(updates) = with_ui(|ui| ui.services.updates.clone()) else { return };
+            if !updates.install_available() {
+                alert_later("Сначала проверьте, есть ли новая версия".to_owned());
             }
         }
         ACTION_ADD_RULE => rule_editor(None),
@@ -706,6 +755,13 @@ pub fn create(services: Arc<Services>) {
                 pages: Vec::new(),
                 cards: Vec::new(),
                 marked: std::ptr::null_mut(),
+                update_status: std::ptr::null_mut(),
+                update_version: std::ptr::null_mut(),
+                update_progress: std::ptr::null_mut(),
+                update_check: std::ptr::null_mut(),
+                update_install: std::ptr::null_mut(),
+                update_release: std::ptr::null_mut(),
+                release_url: String::new(),
             };
             for (identifier, title) in PAGES {
                 let page = new_page();
@@ -799,9 +855,18 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
         }
         "updates" => {
             y += label(page, &format!("Установлена версия {VERSION}"), y, false) + 6.0;
+            ui.update_status = changing_label(page, y, 36.0, false);
+            y += 40.0;
+            ui.update_version = changing_label(page, y, 18.0, false);
+            y += 20.0;
+            ui.update_progress = changing_label(page, y, 18.0, true);
+            y += 26.0;
+            y = ui.add_specs(page, &mac_update_settings(), y);
+            ui.update_check = button(page, target, "Проверить сейчас", ACTION_CHECK_UPDATES, MARGIN, y, 170.0);
+            ui.update_install = button(page, target, "Установить сейчас", ACTION_INSTALL_UPDATE, MARGIN + 180.0, y, 170.0);
+            ui.update_release = button(page, target, "Открыть страницу выпуска", ACTION_OPEN_RELEASES, MARGIN + 360.0, y, 230.0);
+            y += 40.0;
             y += label(page, UPDATES_NOTE, y, true) + 10.0;
-            button(page, target, "Открыть страницу выпусков", ACTION_OPEN_RELEASES, MARGIN, y, 240.0);
-            y += 36.0;
         }
         "maintenance" => {
             y += label(page, "Правила переключения", y, false) + 4.0;
@@ -952,6 +1017,31 @@ pub fn apply_setting(path: &str, value: &Value) {
 
 pub fn refresh_history() {
     with_ui(|ui| ui.refresh_history());
+}
+
+/// The Updates page shows what the update manager says now.
+pub fn apply_update_snapshot(snapshot: &UpdateSnapshot) {
+    let view = update_view(snapshot);
+    with_ui(|ui| {
+        set_label(ui.update_status, &view.status);
+        set_label(ui.update_version, &view.version);
+        set_label(ui.update_progress, &view.progress);
+        set_enabled(ui.update_check, view.check_enabled);
+        set_enabled(ui.update_install, view.install_enabled);
+        set_enabled(ui.update_release, true);
+        ui.release_url.clone_from(&snapshot.release_url);
+    });
+}
+
+/// Whether the settings window is on screen: the program an update starts shows it again.
+#[must_use]
+pub fn window_shown() -> bool {
+    with_ui(|ui| {
+        // SAFETY: a message on the main thread to the window this module owns.
+        let visible: bool = unsafe { msg_send![ui.window, isVisible] };
+        visible
+    })
+    .unwrap_or(false)
 }
 
 pub fn refresh_status() {

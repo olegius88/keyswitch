@@ -223,8 +223,24 @@ same as on Windows. The manual conversion of a word and the double press that
 offers a rule are on `Control+Option+K`: a Mac has no `Pause` key. A setting that
 still holds `Pause` takes this shortcut once; another key you chose stays.
 
-macOS has no automatic updates yet: download a new version from the
-[releases page](https://github.com/olegius88/keyswitch/releases).
+KeySwitch updates itself on a Mac as on Windows: the Updates page has the automatic
+check and the automatic install, both on by default. 30 seconds after the start and
+then every six hours the program reads the latest stable release, downloads the
+archive for its processor and checks its size and SHA-256 against the GitHub API.
+The new version is unpacked beside the application and installed only if it is
+signed by the same developer as the installed one, names the expected version and
+starts. It then takes the place of the old one, the Accessibility permission stays,
+and KeySwitch starts again minimized (with the settings window, if it was open). If
+the new version does not start, the old one comes back, and the program does not
+install that version by itself again; the Install now («Установить сейчас») button
+installs it again.
+
+If you cannot write to the folder of the application (another user installed
+KeySwitch, or the account has no administrator rights), macOS asks for an
+administrator's password. An automatic check then only tells of the new version,
+and the install starts with the Install now button. An application macOS runs from
+a temporary copy (as it does when it is opened right where the archive was unpacked,
+or from a disk image) does not update itself: move it to Applications.
 
 ## Quick start on Ubuntu
 
@@ -767,7 +783,6 @@ target/train/ks-release --version X.Y.Z --field-root <tree with the typing> --fi
 - The 32-bit Windows build is tested, keystrokes included, on 64-bit Windows,
   where 32-bit programs run through WOW64: CI has no machine with 32-bit Windows.
 - The published Windows 0.71.2 Setup EXE is not signed with a publisher certificate.
-- The macOS builds do not update themselves (see [Install on macOS](#install-on-macos)).
 - macOS: the spelling autocorrection (in TextEdit, for example) can change a word
   at the space before KeySwitch does; KeySwitch then does not write over that
   edit and the word stays as it is. Turning autocorrection off in such an
@@ -780,13 +795,15 @@ it runs. Typed text, switching rules, history and logs are not sent anywhere.
 
 The only network requests KeySwitch makes are update checks against the GitHub
 Releases of this repository: `api.github.com`, plus `github.com` and
-`release-assets.githubusercontent.com` when an installer is downloaded. The
+`release-assets.githubusercontent.com` when a Windows installer or a macOS archive
+is downloaded. The
 requests identify only the installed KeySwitch version
 (`User-Agent: KeySwitch/<version>`). GitHub receives the IP address, as with any
 web request, and the
 [GitHub privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)
 applies. Automatic checking and automatic installation are described in
-[Install on Windows](#install-on-windows) and can be turned off on the Updates
+[Install on Windows](#install-on-windows) and [Install on macOS](#install-on-macos)
+and can be turned off on the Updates
 page; a check then runs only on the Check now («Проверить сейчас») button. The
 Debian package adds an APT source for <https://olegius88.github.io/keyswitch/>,
 which the system package manager contacts on its own schedule

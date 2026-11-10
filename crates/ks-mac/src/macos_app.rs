@@ -1,5 +1,5 @@
 //! The macOS application entry point: the command line, the permission and the diagnostics.
-use crate::constants::SOURCE_AX;
+use crate::constants::{FINISH_UPDATE_ARGUMENT, SOURCE_AX};
 use std::path::{Path, PathBuf};
 
 use ks_backend::InputBackend;
@@ -78,6 +78,10 @@ pub fn diagnose() -> i32 {
 
 #[must_use]
 pub fn main(arguments: &[String]) -> i32 {
+    // The helper an update starts from the old bundle: it finishes the update and ends, with no window of its own.
+    if arguments.first().map(String::as_str) == Some(FINISH_UPDATE_ARGUMENT) {
+        return finish_update(arguments.get(1..).unwrap_or_default());
+    }
     let (mut hidden, mut wants_diagnose, mut no_engine) = (false, false, false);
     for argument in arguments {
         match argument.as_str() {
@@ -110,6 +114,21 @@ fn run(hidden: bool, wants_diagnose: bool, no_engine: bool) -> i32 {
         return diagnose();
     }
     crate::desktop_app::run(hidden, no_engine)
+}
+
+#[cfg(target_os = "macos")]
+#[cfg_attr(coverage_nightly, coverage(off))] // The helper of an update: the live test of the update runs it.
+fn finish_update(arguments: &[String]) -> i32 {
+    crate::desktop_app::install_platform();
+    let _ = ks_config::logsetup::configure_logging(None);
+    let files = crate::macos_update::UpdateFiles::new(&ks_config::history::data_dir());
+    crate::macos_update::finish_main(&crate::macos_update::SystemCommands, &files, arguments, std::process::id())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn finish_update(_arguments: &[String]) -> i32 {
+    eprintln!("Эта сборка работает только в macOS");
+    1
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -161,6 +180,13 @@ mod tests {
         let executable = Path::new("/A.app/Contents/MacOS/KeySwitch");
         assert_eq!(resource_dir_from(executable, &|_| true), Path::new("/A.app/Contents/MacOS/../Resources/resources"));
         assert_eq!(resource_dir_from(executable, &|_| false), Path::new("/A.app/Contents/MacOS/resources"));
+    }
+
+    #[test]
+    fn the_helper_of_an_update_is_told_by_its_first_argument() {
+        // Off macOS it says where it runs; on macOS a command line without its values is refused.
+        let expected = if cfg!(target_os = "macos") { 2 } else { 1 };
+        assert_eq!(main(&[FINISH_UPDATE_ARGUMENT.to_owned()]), expected);
     }
 
     #[test]

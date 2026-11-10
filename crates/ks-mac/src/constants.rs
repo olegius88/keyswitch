@@ -270,3 +270,58 @@ pub const BOX_TYPE_CUSTOM: u64 = 4;
 pub const BOX_TITLE_NONE: u64 = 0;
 /// `NSWindowBelow`: a marker lies under its control, so that the control keeps its clicks.
 pub const WINDOW_ORDER_BELOW: isize = -1;
+
+// ------------------------------------------------------------------------------------------- updates (`macos_update`)
+
+/// The file whose lock says a copy of the program runs, in the data folder. The helper of an update reads who holds it.
+pub const INSTANCE_LOCK_FILE: &str = "keyswitch.lock";
+/// The folders an update works in, beside the application and in the folder of the downloads; the start of the program
+/// removes those an update left.
+pub const UPDATE_WORK_PREFIX: &str = ".KeySwitch-update.";
+/// Inside the work folder: the unpacked new version, and the old bundle set aside until the new one has started.
+pub const UPDATE_NEW_FOLDER: &str = "new";
+pub const UPDATE_PREVIOUS_FOLDER: &str = "previous";
+pub const UPDATE_FAILED_FOLDER: &str = "failed";
+/// The application inside the archive of a release, as `packaging/build-rust-macos.sh` packs it.
+pub const ARCHIVE_BUNDLE_NAME: &str = "KeySwitch.app";
+/// The executable and the property list inside a bundle.
+pub const BUNDLE_EXECUTABLE: &str = "Contents/MacOS/KeySwitch";
+pub const BUNDLE_INFO_PLIST: &str = "Contents/Info.plist";
+/// A program macOS runs from a random read-only copy (App Translocation) has this in its path.
+pub const TRANSLOCATION_MARKER: &str = "/AppTranslocation/";
+/// The argument that starts the program as the helper that finishes an update.
+pub const FINISH_UPDATE_ARGUMENT: &str = "--finish-update";
+/// The tools of the system an update runs, by their full paths.
+pub const CODESIGN_TOOL: &str = "/usr/bin/codesign";
+pub const DITTO_TOOL: &str = "/usr/bin/ditto";
+pub const PLIST_BUDDY_TOOL: &str = "/usr/libexec/PlistBuddy";
+pub const OSASCRIPT_TOOL: &str = "/usr/bin/osascript";
+pub const OPEN_TOOL: &str = "/usr/bin/open";
+pub const LSOF_TOOL: &str = "/usr/sbin/lsof";
+pub const KILL_TOOL: &str = "/bin/kill";
+pub const ID_TOOL: &str = "/usr/bin/id";
+/// How long the helper waits for the old copy to end, for the new copy to take the lock, and how long the new copy has
+/// to keep it to count as started.
+pub const UPDATE_OLD_COPY_EXIT_TIMEOUT_SECONDS: u64 = 30;
+pub const UPDATE_START_TIMEOUT_SECONDS: u64 = 15;
+pub const UPDATE_SETTLE_SECONDS: u64 = 10;
+/// How often the helper looks.
+pub const UPDATE_POLL_INTERVAL_MS: u64 = 500;
+/// An update still under way is younger than this; the folders of an older one are leftovers.
+pub const UPDATE_PENDING_STALE_SECONDS: u64 = 300;
+/// The records of updates in the folder of the downloads: the versions that did not start, the outcome of the last
+/// update for the next start to tell, and the time an update began.
+pub const UPDATE_FAILED_VERSIONS_FILE: &str = "failed-versions.txt";
+pub const UPDATE_RESULT_FILE: &str = "update-result.txt";
+pub const UPDATE_PENDING_FILE: &str = "update-pending.txt";
+/// The folder of the downloads of updates, in the data folder.
+pub const UPDATE_DOWNLOADS_FOLDER: &str = "updates";
+/// The owner's write bit of a file's mode.
+pub const OWNER_WRITE_PERMISSION: u32 = 0o200;
+/// The words of the helper's command line: whether the settings window was open, whether the swap ran as root.
+pub const FINISH_WINDOW_SHOWN: &str = "shown";
+pub const FINISH_WINDOW_HIDDEN: &str = "hidden";
+pub const FINISH_RIGHTS_ADMINISTRATOR: &str = "administrator";
+pub const FINISH_RIGHTS_USER: &str = "user";
+/// How long an update waits for the main thread to say whether the settings window is open.
+pub const UPDATE_WINDOW_QUERY_TIMEOUT_SECONDS: f64 = 1.0;

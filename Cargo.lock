@@ -1034,6 +1034,7 @@ dependencies = [
  "ks-lang",
  "ks-text",
  "ks-ui",
+ "ks-updates",
  "objc2",
  "serde_json",
 ]
