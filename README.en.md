@@ -74,6 +74,8 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   Caramba: the left or right `Shift` or `Ctrl`, pressed and released with no
   other key, switches the layout (see
   [Which keys switch the layout](#which-keys-switch-the-layout));
+- manual conversion with a lone tap of a modifier: another of these keys can do
+  what `Pause` does (see the same section);
 - undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
@@ -139,7 +141,8 @@ KDE whatever the keyboard layout settings say), on macOS `Control+Space` or the
 `Fn`/🌐 key. KeySwitch adds three ways to them:
 
 - `Pause` with nothing to convert only switches the layout (`Control+Option+K` on
-  macOS);
+  macOS), and so does the key of the setting «Преобразовать последнее слово
+  одной клавишей» (below);
 - the «Переключить на …» (switch to …) item of the tray menu;
 - the setting «Переключать раскладку одной клавишей» (switch the layout with a
   single key) on the «Горячие клавиши» (hotkeys) page: the left or right `Shift`
@@ -153,6 +156,17 @@ KDE whatever the keyboard layout settings say), on macOS `Control+Space` or the
   on, a tap that comes from a remote computer switches the layout too. On
   Wayland KeySwitch notices a touchpad scroll by the touch: a scroll whose
   fingers were down before the key does not end the tap.
+
+The setting «Преобразовать последнее слово одной клавишей» (convert the last
+word with a single key) on the same page offers the same keys, and a tap counts
+there as it does here, but such a tap does what `Pause` does (`Control+Option+K`
+on macOS): it converts the last word, or switches the layout when there is
+nothing to convert, and a second tap right after the first offers a switching
+rule for the word. It works while autocorrection is paused and in excluded
+applications, as `Pause` does. It is off by default. One key cannot both switch
+the layout and convert: the settings window does not let one setting take a key
+the other one has, and where a settings file edited by hand names one key in
+both, the key only switches the layout.
 
 ## Install on Windows
 
