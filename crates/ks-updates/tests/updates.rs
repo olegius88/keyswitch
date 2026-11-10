@@ -147,7 +147,11 @@ fn versions_targets_and_platform_detection() {
     assert_eq!(UpdateTarget::WindowsArm64.asset_name(version), "KeySwitch-Setup-2.3.4-arm64.exe");
     assert_eq!(UpdateTarget::WindowsX86.asset_name(version), "KeySwitch-Setup-2.3.4-x86.exe");
     assert_eq!(UpdateTarget::UbuntuAmd64.asset_name(version), "keyswitch_2.3.4_amd64.deb");
+    assert_eq!(UpdateTarget::MacArm64.asset_name(version), "KeySwitch-2.3.4-macos-arm64.zip");
+    assert_eq!(UpdateTarget::MacX86_64.asset_name(version), "KeySwitch-2.3.4-macos-x86_64.zip");
     assert!(UpdateTarget::WindowsX64.windows_installer() && !UpdateTarget::UbuntuAmd64.windows_installer());
+    assert!(!UpdateTarget::MacArm64.windows_installer() && UpdateTarget::MacArm64.installs_itself());
+    assert!(UpdateTarget::WindowsX86.installs_itself() && !UpdateTarget::UbuntuAmd64.installs_itself());
     for (platform, target) in [
         ("win-amd64", UpdateTarget::WindowsX64),
         ("win-arm64", UpdateTarget::WindowsArm64),
@@ -161,13 +165,19 @@ fn versions_targets_and_platform_detection() {
     assert_eq!(detect_update_target("Linux", "x86_64", ""), Some(UpdateTarget::UbuntuAmd64));
     assert_eq!(detect_update_target("Linux", "amd64", ""), Some(UpdateTarget::UbuntuAmd64));
     assert_eq!(detect_update_target("Linux", "aarch64", ""), None);
-    assert_eq!(detect_update_target("Darwin", "x86_64", ""), None);
+    // A Mac updates with the archive of the processor it was built for.
+    assert_eq!(detect_update_target("Darwin", "x86_64", ""), Some(UpdateTarget::MacX86_64));
+    assert_eq!(detect_update_target("macos", "x86_64", ""), Some(UpdateTarget::MacX86_64));
+    assert_eq!(detect_update_target("macos", "aarch64", ""), Some(UpdateTarget::MacArm64));
+    assert_eq!(detect_update_target("Darwin", "arm64", ""), Some(UpdateTarget::MacArm64));
+    assert_eq!(detect_update_target("macos", "powerpc", ""), None);
+    assert_eq!(detect_update_target("FreeBSD", "x86_64", ""), None);
 }
 
 #[test]
 fn success_validates_request_and_platform_assets() {
     let content = b"package";
-    for target in [UpdateTarget::WindowsX64, UpdateTarget::WindowsArm64, UpdateTarget::WindowsX86, UpdateTarget::UbuntuAmd64] {
+    for target in [UpdateTarget::WindowsX64, UpdateTarget::WindowsArm64, UpdateTarget::WindowsX86, UpdateTarget::UbuntuAmd64, UpdateTarget::MacArm64, UpdateTarget::MacX86_64] {
         let opener = FakeOpener::with(vec![json_response(&release_payload("1.0.0", target, content))]);
         let release = GitHubReleaseClient::new("0.4.0", opener.clone()).latest_release(target).unwrap();
         assert_eq!(release.version.to_string(), "1.0.0");
@@ -746,6 +756,8 @@ fn names_of_targets_and_phases() {
         (UpdateTarget::WindowsArm64, "windows-arm64"),
         (UpdateTarget::WindowsX86, "windows-x86"),
         (UpdateTarget::UbuntuAmd64, "ubuntu-amd64"),
+        (UpdateTarget::MacArm64, "macos-arm64"),
+        (UpdateTarget::MacX86_64, "macos-x86_64"),
     ] {
         assert_eq!(target.value(), name);
     }
@@ -907,4 +919,105 @@ fn only_earlier_installers_are_removed() {
     remove_previous_installers(&directory, "none").expect("removed");
     assert!(!directory.join("KeySwitch-Setup-1.0.0-x64.exe").exists());
     assert!(directory.join("keep.txt").exists());
+}
+
+#[test]
+fn a_download_removes_the_archives_of_earlier_mac_updates() {
+    let content = b"new";
+    let release = checked_release("1.0.0", UpdateTarget::MacArm64, content);
+    let directory = temp_dir("mac-archives");
+    let doomed = ["KeySwitch-0.9.0-macos-arm64.zip", "KeySwitch-0.9.0-macos-x86_64.zip", "KeySwitch-Setup-0.9.0-x64.exe"];
+    let kept = [
+        "KeySwitch-0.9.0-macos-ppc.zip",
+        "KeySwitch-0.9-macos-arm64.zip",
+        "KeySwitch-0.9.0-windows-x64.zip",
+        "KeySwitch-0.9.0-macos-arm64.zip.part",
+        "Other-0.9.0-macos-arm64.zip",
+    ];
+    for name in doomed.iter().chain(&kept) {
+        std::fs::write(directory.join(name), b"old").unwrap();
+    }
+    let (response, _) = FakeResponse::new(content, DOWNLOAD_URL);
+    let client = GitHubReleaseClient::new("0.4.0", FakeOpener::with(vec![Ok(response)]));
+    let archive = client.download(&release, &directory, &mut |_, _| {}).unwrap();
+    assert_eq!(archive, directory.join("KeySwitch-1.0.0-macos-arm64.zip"));
+    for name in doomed {
+        assert!(!directory.join(name).exists(), "{name}");
+    }
+    for name in kept {
+        assert!(directory.join(name).exists(), "{name}");
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn the_manager_stays_busy_while_an_update_installs() {
+    let client = FakeReleaseClient::new(checked_release("1.0.0", UpdateTarget::MacX86_64, b"zip"));
+    let (request, installed) = recording_installer();
+    let update = manager("0.4.0", client, UpdateTarget::MacX86_64).with_install_request(request);
+    assert!(update.check(true, true));
+    assert_eq!(update.snapshot().phase, UpdatePhase::Installing);
+    assert!(!update.check(false, false), "a check would race the install for its files");
+    assert!(!update.install_available());
+    update.installation_failed(&"the new version was not installed");
+    assert_eq!(update.snapshot().phase, UpdatePhase::Error);
+    assert!(update.check(false, false));
+    assert!(update.install_available());
+    assert_eq!(installed.lock().unwrap().len(), 2);
+}
+
+#[test]
+fn a_gate_keeps_an_automatic_install_for_the_user() {
+    for target in [UpdateTarget::MacArm64, UpdateTarget::MacX86_64] {
+        let client = FakeReleaseClient::new(checked_release("1.0.0", target, b"zip"));
+        let (request, installed) = recording_installer();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let gate: AutomaticInstallGate = Arc::new(move |release: &UpdateRelease| {
+            sink.lock().unwrap().push(release.version.to_string());
+            Some(format!("Для установки версии {} нужен пароль администратора", release.version))
+        });
+        let update = manager("0.4.0", client.clone(), target).with_install_request(request.clone()).with_automatic_install_gate(gate);
+        assert!(update.check(true, true));
+        let snapshot = update.snapshot();
+        assert_eq!(snapshot.phase, UpdatePhase::Available);
+        assert_eq!(snapshot.message, "Для установки версии 1.0.0 нужен пароль администратора");
+        assert_eq!(snapshot.available_version, "1.0.0");
+        assert_eq!(client.downloads.load(Ordering::SeqCst), 0);
+        assert!(installed.lock().unwrap().is_empty());
+        // Asked only by an automatic install: the user's own check and install go by it.
+        assert!(update.check(false, true));
+        assert!(update.install_available());
+        assert_eq!(installed.lock().unwrap().len(), 1);
+        assert_eq!(*seen.lock().unwrap(), ["1.0.0"]);
+
+        let open: AutomaticInstallGate = Arc::new(|_| None);
+        let free = manager("0.4.0", client, target).with_install_request(request).with_automatic_install_gate(open);
+        assert!(free.check(true, true));
+        assert_eq!(free.snapshot().phase, UpdatePhase::Installing);
+    }
+}
+
+#[test]
+fn checks_of_a_build_that_installs_itself_ask_the_install_setting_each_time() {
+    let controller = Arc::new(CountingController::default());
+    let installs = Arc::new(AtomicUsize::new(0));
+    let asked = installs.clone();
+    let checks = UpdateChecks::installing_with(
+        controller.clone(),
+        || true,
+        move || asked.fetch_add(1, Ordering::SeqCst).is_multiple_of(2),
+        Duration::from_millis(1),
+        Duration::from_millis(20),
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    checks.stop();
+    let calls = controller.checks.lock().unwrap().clone();
+    assert!(calls.len() >= 2, "{calls:?}");
+    assert_eq!(calls[0], (true, true));
+    assert_eq!(calls[1], (true, false));
+    assert!(UpdateChecks::installing(controller.clone(), || false, || true).is_none());
+    let default = UpdateChecks::installing(controller, || true, || true).unwrap();
+    default.stop();
 }

@@ -772,7 +772,8 @@ pub struct UpdateView {
 
 #[must_use]
 pub fn update_view(snapshot: &UpdateSnapshot) -> UpdateView {
-    let busy = matches!(snapshot.phase, UpdatePhase::Checking | UpdatePhase::Downloading);
+    // The manager takes no check while an update installs either: the button would do nothing.
+    let busy = matches!(snapshot.phase, UpdatePhase::Checking | UpdatePhase::Downloading | UpdatePhase::Installing);
     UpdateView {
         status: snapshot.message.clone(),
         version: if snapshot.available_version.is_empty() {
@@ -1063,6 +1064,9 @@ mod tests {
         assert!(!view.check_enabled && !view.install_enabled && view.release_enabled);
         snapshot.phase = UpdatePhase::Available;
         assert!(update_view(&snapshot).install_enabled);
+        snapshot.phase = UpdatePhase::Installing;
+        let view = update_view(&snapshot);
+        assert!(!view.check_enabled && !view.install_enabled);
     }
 
     #[test]
