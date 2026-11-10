@@ -119,8 +119,11 @@ fn run(hidden: bool, wants_diagnose: bool, no_engine: bool) -> i32 {
 #[cfg(target_os = "macos")]
 #[cfg_attr(coverage_nightly, coverage(off))] // The helper of an update: the live test of the update runs it.
 fn finish_update(arguments: &[String]) -> i32 {
-    crate::desktop_app::install_platform();
-    let _ = ks_config::logsetup::configure_logging(None);
+    // Only a helper with its whole command line writes to the program's log: a test that gives none writes nowhere.
+    if crate::macos_update::Finish::parse(arguments).is_some() {
+        crate::desktop_app::install_platform();
+        let _ = ks_config::logsetup::configure_logging(None);
+    }
     let files = crate::macos_update::UpdateFiles::new(&ks_config::history::data_dir());
     crate::macos_update::finish_main(&crate::macos_update::SystemCommands, &files, arguments, std::process::id())
 }
