@@ -77,6 +77,8 @@ mod scenario {
         fn CGEventCreateKeyboardEvent(source: *const c_void, keycode: u16, down: bool) -> *const c_void;
         fn CGEventCreateMouseEvent(source: *const c_void, kind: u32, position: CGPoint, button: u32) -> *const c_void;
         fn CGEventPost(tap: u32, event: *const c_void);
+        fn CGEventSetType(event: *const c_void, kind: u32);
+        fn CGEventSetFlags(event: *const c_void, flags: u64);
         fn CGWindowListCopyWindowInfo(option: u32, window: u32) -> *const c_void;
         fn CGRectMakeWithDictionaryRepresentation(dictionary: *const c_void, rectangle: *mut CGRect) -> bool;
     }
@@ -109,6 +111,11 @@ mod scenario {
     const OPTION: u16 = 0x3A;
     const COMMAND: u16 = 0x37;
     const BACKSPACE: u16 = 0x33;
+    /// `kVK_Function`, the Fn key.
+    const FUNCTION: u16 = 0x3F;
+    /// `kCGEventFlagsChanged`.
+    const FLAGS_CHANGED: u32 = 12;
+    const NO_FLAGS: u64 = 0;
     /// `kVK_F13`: the pause hotkey of this test.
     const F13: u16 = 0x69;
     const KEY_PAUSE: Duration = Duration::from_millis(50);
@@ -240,10 +247,22 @@ mod scenario {
             Ok(())
         }
 
+        /// Every modifier up, and the modifier flags the system holds cleared. A posted F-key sets the Fn flag
+        /// (`kCGEventFlagMaskSecondaryFn`) and its release leaves it set: after `function_key` every key of the next run
+        /// went with Fn, and Fn brought the Emoji palette and Dictation over the editor, which then took no keys.
         fn release_modifiers(&self) -> Result<(), String> {
             for code in [SHIFT, CONTROL, OPTION, COMMAND] {
                 self.key(code, false)?;
             }
+            // SAFETY: the source lives as long as the driver; the event is released after it is posted.
+            unsafe {
+                let event = CGEventCreateKeyboardEvent(self.source, FUNCTION, false);
+                CGEventSetType(event, FLAGS_CHANGED);
+                CGEventSetFlags(event, NO_FLAGS);
+                CGEventPost(HID_TAP, event);
+                CFRelease(event);
+            }
+            std::thread::sleep(KEY_PAUSE);
             Ok(())
         }
 
