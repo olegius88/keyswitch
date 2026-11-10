@@ -762,6 +762,8 @@ fn a_tap_made_while_the_word_waits_to_be_converted_is_answered_after_it() {
         };
         field.handle(press);
         for key in queued(&field) {
+            // The hook passes each key on to the window as it queues it.
+            field.backend.type_key(&key);
             assert!(field.core.shared.put_nowait(QueueItem::Key(Arc::new(key))));
         }
         field.handle(release);
@@ -778,6 +780,12 @@ fn a_tap_made_while_the_word_waits_to_be_converted_is_answered_after_it() {
     let tap_again = |field: &Session| vec![modifier(field, CONVERT_KEY, true), modifier(field, CONVERT_KEY, false)];
     assert_eq!(converted_with(Asked::Hotkey, &hotkey_again), ("руддщ".to_owned(), true));
     assert_eq!(converted_with(Asked::Tap(0), &tap_again), ("руддщ".to_owned(), true));
+    // A letter typed after them goes with the word and comes back after it, as after the hotkey.
+    let hotkey_then_letter = |field: &Session| [hotkey_again(field), vec![letter_event(field, 'a', true)]].concat();
+    let tap_then_letter = |field: &Session| [tap_again(field), vec![letter_event(field, 'a', true)]].concat();
+    let by_hotkey = converted_with(Asked::Hotkey, &hotkey_then_letter);
+    assert_eq!(converted_with(Asked::Tap(0), &tap_then_letter), by_hotkey);
+    assert!(by_hotkey.0.starts_with("руддщ"), "{by_hotkey:?}");
     // The conversion key still down, or another modifier: the word is left alone, as with any modifier behind a correction.
     let still_down = |field: &Session| vec![modifier(field, CONVERT_KEY, true)];
     let another = |field: &Session| vec![modifier(field, "Shift_L", true), modifier(field, "Shift_L", false)];
