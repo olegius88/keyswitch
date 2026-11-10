@@ -1,5 +1,9 @@
 //! Streams of public words typed through the engine: every word must come out as the fixtures have it, without Hunspell and
-//! with it. The Python build wrote them; a release that means to change a word writes them again.
+//! with it. The Python build wrote them; a change that means to change a word writes them again (`ks-replay
+//! battery-public.jsonl <report> [--speller]`, the report gzipped as the fixture). The upper-case head wrote them on
+//! 10.11.2026 with the installed pair, which has no weights for it yet: the lone-word and short-message heads no longer
+//! answer a token in capitals, and 7 rows (4 with Hunspell) came out otherwise; a pair with the head installed writes them
+//! again.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;

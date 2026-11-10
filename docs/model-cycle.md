@@ -63,7 +63,7 @@
 
 ## Сообщения для обучения
 
-`ks-train messages` строит сообщения из дампа ru.stackoverflow, Tatoeba и UD Russian-Taiga. `terms`, `alnum`, `short` считают частоты, `select` отбирает сообщения одного класса, `capture` записывает вопросы движка, `sources` пишет авторов, `devchat-messages` собирает комментарии для чат-стенда. Файлы частей `test` не печатаются и не открываются для чтения глазами.
+`ks-train messages` строит сообщения из дампа ru.stackoverflow, Tatoeba и UD Russian-Taiga. `terms`, `alnum`, `short` считают частоты, `capitals` — как часто токен пишется заглавными (списки слов Leipzig и учебная часть ru.stackoverflow, коды валют ISO 4217 по закреплённому списку, заглавные формы словаря `ru_RU.lm`; `resources/models/context-capitals-frequency.json`), `select` отбирает сообщения одного класса (с `--leipzig` — из предложений корпусов Leipzig), `capture` записывает вопросы движка, `sources` пишет авторов, `devchat-messages` собирает комментарии для чат-стенда. Файлы частей `test` не печатаются и не открываются для чтения глазами.
 
 ## Выпуск
 

@@ -23,6 +23,7 @@ ks-engine.workspace = true
 ks-hunspell.workspace = true
 ks-replay.workspace = true
 indexmap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 flate2.workspace = true
@@ -38,8 +39,6 @@ md-5 = "0.10"
 
 [dev-dependencies]
 flate2.workspace = true
-# tests/strict_typing.rs reads its record into typed structs.
-serde.workspace = true
 
 [lints]
 workspace = true

@@ -14,17 +14,17 @@ use crate::constants::{
     ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX, ALNUM_FEATURE_PREFIX, BOUNDARY_MISSING_LETTERS, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_DOUBTFUL_KEEP_PROBABILITY, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, CONTEXT_TYPO_MIN_CHARACTERS, CYRLETTER_FEATURE_PREFIX,
     DIGIT_DOT_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, MAX_CONTEXT_ACTION_MODEL_BYTES,
-    MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_FEATURE_NAME_CHARACTERS, MAX_CONTEXT_MODEL_BYTES,
-    MAX_CONTEXT_MODEL_VERSION_CHARACTERS, MAX_CONTEXT_SHORT_FREQUENCY_BYTES, MAX_CONTEXT_TERM_FREQUENCY_BYTES,
-    MAX_CONTEXT_WEIGHT_MAGNITUDE, MIN_CONTEXT_CONVERSION_THRESHOLD, RESUME_FEATURE_PREFIX, SHORT_FEATURE_PREFIX,
-    VARIABLE_FEATURE_PREFIX,
+    MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES,
+    MAX_CONTEXT_FEATURE_NAME_CHARACTERS, MAX_CONTEXT_MODEL_BYTES, MAX_CONTEXT_MODEL_VERSION_CHARACTERS, MAX_CONTEXT_SHORT_FREQUENCY_BYTES,
+    MAX_CONTEXT_TERM_FREQUENCY_BYTES, MAX_CONTEXT_WEIGHT_MAGNITUDE, MIN_CONTEXT_CONVERSION_THRESHOLD, RESUME_FEATURE_PREFIX,
+    SHORT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
 };
 use crate::context_action_features::{extract_action_features, FeatureMap};
 use crate::flat_table::{load_artifact, load_term_frequency, CountTable, CountTables, WeightSpec, WeightTable, ACTION_COUNT};
 use ks_lang::{py_sum, LanguageModel, LoadError, WordScore};
 use ks_text::{pystr, ucd};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -100,6 +100,8 @@ pub const TERM_EDGE_SIGNS: &str = ".,!?:;\"'()[]{}<>«»-";
 pub const TERM_FREQUENCY_FILE: &str = "context-term-frequency.json";
 pub const ALNUM_FREQUENCY_FILE: &str = "context-alnum-frequency.json";
 pub const SHORT_FREQUENCY_FILE: &str = "context-short-frequency.json";
+/// The table of tokens spelled in capitals the upper-case head reads, in the `models` folder.
+pub const CAPITALS_FREQUENCY_FILE: &str = "context-capitals-frequency.json";
 pub const ARTIFACT_FILE: &str = "context_policy_v1.json";
 /// The schema of the frozen baseline model the sealed tests compare a candidate with.
 pub const BASELINE_FEATURE_VERSION: i64 = 2;
@@ -280,14 +282,111 @@ impl AffixCounts {
     }
 }
 
+/// The file of tokens spelled in capitals (`CAPITALS_FREQUENCY_FILE`), as `ks-train capitals` writes it: each source apart,
+/// a token by its capital spelling. Its scope and its sources are read and set aside: they say where the counts come from.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapitalsFile {
+    #[serde(rename = "scope")]
+    _scope: String,
+    #[serde(rename = "sources")]
+    _sources: serde::de::IgnoredAny,
+    minimum_count: u64,
+    web_cyrillic: BTreeMap<String, u64>,
+    web_latin: BTreeMap<String, u64>,
+    technical_cyrillic: BTreeMap<String, u64>,
+    technical_latin: BTreeMap<String, u64>,
+    iso4217: Vec<String>,
+    lexicon_capitals: Vec<String>,
+}
+
+/// How often a token is spelled in capitals: in Russian web and news text (the Leipzig word lists) and in Russian
+/// technical text (ru.stackoverflow 2023), each for Cyrillic and Latin tokens apart; whether a Latin token is a currency
+/// code of ISO 4217; whether the Russian lexicon writes a Cyrillic one in capitals. A token is looked up by its capital
+/// spelling; one the file does not hold is counted nought times.
+#[derive(Default)]
+pub struct CapitalCounts {
+    web: HashMap<String, u64>,
+    technical: HashMap<String, u64>,
+    currencies: HashSet<String>,
+    lexicon: HashSet<String>,
+}
+
+impl CapitalCounts {
+    /// How often Russian web and news text spells the token so.
+    #[must_use]
+    pub fn web(&self, capitals: &str) -> u64 {
+        self.web.get(capitals).copied().unwrap_or(0)
+    }
+
+    /// How often Russian technical text spells the token so.
+    #[must_use]
+    pub fn technical(&self, capitals: &str) -> u64 {
+        self.technical.get(capitals).copied().unwrap_or(0)
+    }
+
+    /// Whether the token is a currency code of ISO 4217.
+    #[must_use]
+    pub fn currency(&self, capitals: &str) -> bool {
+        self.currencies.contains(capitals)
+    }
+
+    /// The currency codes of ISO 4217, in order.
+    #[must_use]
+    pub fn currencies(&self) -> Vec<&str> {
+        let mut codes: Vec<&str> = self.currencies.iter().map(String::as_str).collect();
+        codes.sort_unstable();
+        codes
+    }
+
+    /// Whether the Russian lexicon writes the token in capitals.
+    #[must_use]
+    pub fn lexicon(&self, capitals: &str) -> bool {
+        self.lexicon.contains(capitals)
+    }
+
+    /// The file read and checked: every token letters of one script in capitals, every count at least the file's
+    /// minimum; a Latin token among the Cyrillic ones, or the other way round, is refused with the rest.
+    pub fn load(path: &Path) -> Result<CapitalCounts, LoadError> {
+        let invalid = || LoadError::value("invalid capitals frequency table");
+        let length = std::fs::metadata(path).map_err(|error| LoadError::os(&error, path))?.len();
+        if length > MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES.to::<u64>() {
+            return Err(LoadError::value("capitals frequency table is too large"));
+        }
+        let bytes = std::fs::read(path).map_err(|error| LoadError::os(&error, path))?;
+        let file: CapitalsFile = ks_text::json::loads(&bytes).map_err(|error| LoadError { name: "JSONDecodeError", message: error.to_string() })?;
+        let spelled = |token: &str, latin: bool| pystr::isalpha(token) && pystr::isupper(token) && (if latin { token.is_ascii() } else { !token.chars().any(|c| c.is_ascii()) });
+        let mut counts = CapitalCounts::default();
+        for (table, latin, into_web) in [(&file.web_cyrillic, false, true), (&file.web_latin, true, true), (&file.technical_cyrillic, false, false), (&file.technical_latin, true, false)] {
+            for (token, &count) in table {
+                if !spelled(token, latin) || count < file.minimum_count.max(1) {
+                    return Err(invalid());
+                }
+                let target = if into_web { &mut counts.web } else { &mut counts.technical };
+                target.insert(token.clone(), count);
+            }
+        }
+        for (list, latin, target) in [(&file.iso4217, true, &mut counts.currencies), (&file.lexicon_capitals, false, &mut counts.lexicon)] {
+            for token in list {
+                if !spelled(token, latin) {
+                    return Err(invalid());
+                }
+                target.insert(token.clone());
+            }
+        }
+        Ok(counts)
+    }
+}
+
 /// How often plain words occur (schemas 7 and 3), read as a model that counts them loads: `latin` and `cyrillic` count
-/// words inside Russian text, `english` and `russian` words in text of their own language. The letters-and-digits and
-/// short-token tables are read on first use, as the Python reads them.
+/// words inside Russian text, `english` and `russian` words in text of their own language. The letters-and-digits,
+/// short-token and capitals tables are read on first use, as the Python reads them.
 pub struct TermTables {
     dir: PathBuf,
     term: CountTables,
     alnum: OnceLock<Result<CountTables, LoadError>>,
     short: OnceLock<Result<CountTables, LoadError>>,
+    capitals: OnceLock<Result<CapitalCounts, LoadError>>,
     endings: OnceLock<AffixCounts>,
     starts: OnceLock<AffixCounts>,
 }
@@ -296,7 +395,7 @@ impl TermTables {
     /// `term_frequency()`: read at once, before the keyboard hook starts.
     pub fn load(models_dir: &Path) -> Result<TermTables, LoadError> {
         let term = load_term_frequency(&models_dir.join(TERM_FREQUENCY_FILE), &TERM_ALPHABETS, MAX_CONTEXT_TERM_FREQUENCY_BYTES)?;
-        Ok(TermTables { dir: models_dir.to_path_buf(), term, alnum: OnceLock::new(), short: OnceLock::new(), endings: OnceLock::new(), starts: OnceLock::new() })
+        Ok(TermTables { dir: models_dir.to_path_buf(), term, alnum: OnceLock::new(), short: OnceLock::new(), capitals: OnceLock::new(), endings: OnceLock::new(), starts: OnceLock::new() })
     }
 
     /// `term_frequency()[alphabet]`.
@@ -318,6 +417,11 @@ impl TermTables {
             .get_or_init(|| load_term_frequency(&self.dir.join(SHORT_FREQUENCY_FILE), &SHORT_ALPHABETS, MAX_CONTEXT_SHORT_FREQUENCY_BYTES))
             .as_ref()
             .map_err(Clone::clone)
+    }
+
+    /// The capitals table (`CAPITALS_FREQUENCY_FILE`), read on the first token in capitals the upper-case head is asked about.
+    pub fn capitals(&self) -> Result<&CapitalCounts, LoadError> {
+        self.capitals.get_or_init(|| CapitalCounts::load(&self.dir.join(CAPITALS_FREQUENCY_FILE))).as_ref().map_err(Clone::clone)
     }
 
     /// `_russian_endings()`: built on the first term the head is asked about.
@@ -496,6 +600,10 @@ impl ContextModel {
             // The short-token head asks its table about many a short word typed after Russian text: it is read here,
             // before the keyboard hook starts, as the term table is.
             tables.short()?;
+        }
+        if table.names().any(|name| name.starts_with(UPPER_FEATURE_PREFIX)) {
+            // The upper-case head asks its table about every token in capitals: read before the hook starts too.
+            tables.capitals()?;
         }
         let mut model = ContextModel::new(table, version, threshold, std::sync::Arc::new(tables));
         model.feature_version = feature_version;

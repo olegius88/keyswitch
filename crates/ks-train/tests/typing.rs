@@ -12,7 +12,7 @@ use std::sync::LazyLock;
 use support::{chat_messages, digest, recipe, scratch, small_tree, trainer, tree};
 
 /// Messages of the kinds a person types: Russian with terms, signs, digits, a word of capitals, a line with a mention.
-const MIXED: [&str; 24] = [
+const MIXED: [&str; 25] = [
     "привет как дела сегодня",
     "запусти git status и покажи вывод",
     "открой файл config.yaml и поправь порт",
@@ -37,8 +37,9 @@ const MIXED: [&str; 24] = [
     "в логе ERROR, потом WARN",
     "пятый шаг: make test",
     "итог: 3 из 5 прошли",
+    "3. TLV в самом SNMP",
 ];
-const RUSSIAN: [&str; 6] = ["просто обычный текст", "мы пошли домой вечером", "хорошая погода сегодня", "книга лежит на столе", "надо купить хлеба", "он читает новую книгу"];
+const RUSSIAN: [&str; 7] = ["просто обычный текст", "мы пошли домой вечером", "хорошая погода сегодня", "книга лежит на столе", "надо купить хлеба", "он читает новую книгу", "ответ пришёл из МВД вчера"];
 
 fn gz(lines: &[String]) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
@@ -73,7 +74,7 @@ static BENCH: LazyLock<Bench> = LazyLock::new(|| {
 });
 
 fn base_recipe() -> Value {
-    json!({"seed": "typing-test", "kinds": ["comment"], "count": 24, "russian_share": 0.25})
+    json!({"seed": "typing-test", "kinds": ["comment"], "count": 25, "russian_share": 0.28})
 }
 
 fn typed(recipe: &Value, name: &str) -> Value {
@@ -91,7 +92,7 @@ fn every_mode_types_every_message() {
         assert!(summary["summary"][mode]["n"].as_i64().expect("a count") > 0, "{mode}");
     }
     let mut more = base_recipe();
-    more["modes"] = json!(["slip", "slip_letter", "slip_letter_back", "unprotected", "us_signs"]);
+    more["modes"] = json!(["slip", "slip_letter", "slip_letter_back", "slip_capitals", "unprotected", "us_signs"]);
     let summary = typed(&more, "more-modes");
     assert!(summary["summary"].as_object().expect("a table").len() >= 4);
     let mut edit = base_recipe();
@@ -176,7 +177,7 @@ fn manifest(folder: &Path, schema: i64, classes: &[Option<&str>]) -> PathBuf {
 fn a_capture_keeps_the_questions_a_recipe_names_and_verifies_against_its_files() {
     let bench = &*BENCH;
     let folder = scratch("capture");
-    let classes = [None, Some("variable"), Some("dotted"), Some("alnum"), Some("hypothesis"), Some("short"), Some("slip"), Some("sign"), Some("resume"), Some("cyrletter"), Some("dash"), Some("digitdot"), Some("quote")];
+    let classes = [None, Some("variable"), Some("dotted"), Some("alnum"), Some("hypothesis"), Some("short"), Some("slip"), Some("sign"), Some("resume"), Some("cyrletter"), Some("dash"), Some("digitdot"), Some("quote"), Some("upper")];
     let path = manifest(&folder, 2, &classes);
     let results = capture(&bench.resources, &path, &bench.folder, &bench.model, None, false, 2).expect("captured");
     assert_eq!(results.as_object().expect("a table").len(), classes.len());

@@ -1,6 +1,7 @@
 //! The model files as a loader may find them: damaged, cut, or written for another schema. Every such file is refused with its reason.
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
+use std::collections::BTreeMap;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,7 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ks_context::constants::{
     MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_MODEL_BYTES, MAX_CONTEXT_MODEL_FEATURES, MAX_PREFIX_WEIGHTS, TYPO_ALPHABETS, TYPO_COUNT_LOG_SCALE, TYPO_FREQUENCY_SCHEMA_VERSION,
 };
-use ks_context::context_model::{BeforeOrigin, ContextModel};
+use ks_context::context_model::{BeforeOrigin, CapitalCounts, ContextModel, TermTables, CAPITALS_FREQUENCY_FILE};
+use ks_context::constants::{MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES, UPPER_FEATURE_PREFIX};
 use ks_context::flat_table::{WeightSpec, load_artifact};
 use ks_context::prefix_schema::{VersionedPrefixModel, prefix_diagnostics};
 use ks_context::typo_correction::{TypoLexicon, keyboard_neighbours, packaged_lexicon};
@@ -29,7 +31,7 @@ fn written(text: &[u8]) -> PathBuf {
 }
 
 /// The checksum a table of weights has, as the loader computes it.
-fn digest(weights: &Value) -> String {
+fn digest(weights: &impl serde::Serialize) -> String {
     let spec = WeightSpec {
         max_entries: usize::MAX,
         max_name_characters: usize::MAX,
@@ -356,4 +358,116 @@ fn a_corrector_knows_the_keys_beside_each_key_of_its_languages() {
     let lexicon = packaged_lexicon(&resources, "ru_RU").expect("the shipped list");
     let corrector = TypoCorrector::new(vec![("ru_RU".to_owned(), lexicon)], TypoPolicy::default()).expect("a corrector");
     assert!(!corrector.neighbours_of("ru_RU").is_empty());
+}
+
+/// A capitals table of the shape `ks-train capitals` writes; `extra` stands for a field the loader does not know.
+#[derive(serde::Serialize)]
+struct CapitalsTable {
+    scope: String,
+    sources: BTreeMap<String, String>,
+    minimum_count: u64,
+    web_cyrillic: BTreeMap<String, i64>,
+    web_latin: BTreeMap<String, i64>,
+    technical_cyrillic: BTreeMap<String, i64>,
+    technical_latin: BTreeMap<String, i64>,
+    iso4217: Vec<String>,
+    lexicon_capitals: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<i64>,
+}
+
+/// Counts of tokens, as a table section holds them.
+fn counted(pairs: &[(&str, i64)]) -> BTreeMap<String, i64> {
+    pairs.iter().map(|&(token, count)| (token.to_owned(), count)).collect()
+}
+
+/// Tokens, as a list section holds them.
+fn listed(tokens: &[&str]) -> Vec<String> {
+    tokens.iter().map(|&token| token.to_owned()).collect()
+}
+
+/// A capitals table of the shape `ks-train capitals` writes, with one change.
+fn capitals_table(change: impl FnOnce(&mut CapitalsTable)) -> PathBuf {
+    let mut table = CapitalsTable {
+        scope: "a test".to_owned(),
+        sources: BTreeMap::from([("web".to_owned(), "a test".to_owned())]),
+        minimum_count: 5,
+        web_cyrillic: counted(&[("США", 94523)]),
+        web_latin: counted(&[("USD", 467)]),
+        technical_cyrillic: counted(&[("НЕ", 2762)]),
+        technical_latin: counted(&[("API", 900)]),
+        iso4217: listed(&["USD", "KZT"]),
+        lexicon_capitals: listed(&["СССР"]),
+        extra: None,
+    };
+    change(&mut table);
+    written(ks_text::json::dumps(&table, &ks_text::JsonOptions::default()).as_bytes())
+}
+
+#[test]
+fn a_table_of_capitals_answers_by_source_and_refuses_another_shape() {
+    let counts = CapitalCounts::load(&capitals_table(|_| ())).expect("it loads");
+    assert_eq!((counts.web("США"), counts.web("USD"), counts.web("НЕ"), counts.technical("НЕ"), counts.technical("API"), counts.technical("USD")), (94523, 467, 0, 2762, 900, 0));
+    assert_eq!(counts.currencies(), ["KZT", "USD"]);
+    assert!(counts.currency("KZT") && !counts.currency("ЛЯЕ") && counts.lexicon("СССР") && !counts.lexicon("CCCH"));
+    let refused = |change: fn(&mut CapitalsTable)| CapitalCounts::load(&capitals_table(change)).err().expect("refused").message;
+    assert_eq!(refused(|table| table.web_latin = counted(&[("usd", 467)])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.web_latin = counted(&[("U2", 9)])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.web_cyrillic = counted(&[("USD", 467)])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.technical_latin = counted(&[("США", 9)])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.technical_cyrillic = counted(&[("НЕ", 4)])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.iso4217 = listed(&["Usd"])), "invalid capitals frequency table");
+    assert_eq!(refused(|table| table.lexicon_capitals = listed(&["CCCP"])), "invalid capitals frequency table");
+    assert!(refused(|table| table.extra = Some(1)).contains("unknown field"));
+    assert!(refused(|table| table.web_latin = counted(&[("USD", -1)])).contains("invalid value"));
+    let large = capitals_table(|table| table.scope = " ".repeat(MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES));
+    assert_eq!(CapitalCounts::load(&large).err().expect("refused").message, "capitals frequency table is too large");
+    assert_eq!(CapitalCounts::load(&PathBuf::from("/nonexistent/table.json")).err().expect("refused").name, "FileNotFoundError");
+}
+
+/// A folder of models whose capitals table is `table`: the packaged term tables beside it.
+fn models_with_capitals(table: Option<&Path>) -> PathBuf {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let folder = std::env::temp_dir().join(format!("ks-loaders-models-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&folder).expect("the folder");
+    for name in ["context-term-frequency.json", "context-alnum-frequency.json", "context-short-frequency.json"] {
+        std::fs::copy(models().join(name), folder.join(name)).expect("a packaged table");
+    }
+    if let Some(table) = table {
+        std::fs::copy(table, folder.join(CAPITALS_FREQUENCY_FILE)).expect("the capitals table");
+    }
+    folder
+}
+
+/// A context artifact of the trainer's shape with the weights it is given.
+#[derive(serde::Serialize)]
+struct Artifact {
+    feature_version: i64,
+    actions: [&'static str; 4],
+    weights: BTreeMap<String, [f64; 4]>,
+    weights_sha256: String,
+    version: &'static str,
+    conversion_threshold: f64,
+}
+
+#[test]
+fn a_model_with_the_upper_case_head_reads_its_table_before_the_first_word() {
+    let weights = BTreeMap::from([(format!("{UPPER_FEATURE_PREFIX}bias:direction:0"), [0.5, -0.5, 0.0, 0.0]), ("f0".to_owned(), [0.5, -0.5, 0.0, 0.0])]);
+    let artifact = Artifact {
+        feature_version: 3,
+        actions: ["keep", "convert", "wait", "suggest"],
+        weights_sha256: digest(&weights),
+        weights,
+        version: "context-v3-test",
+        conversion_threshold: 0.99,
+    };
+    let path = written(ks_text::json::dumps(&artifact, &ks_text::JsonOptions::default()).as_bytes());
+    let good = models_with_capitals(Some(&capitals_table(|_| ())));
+    assert!(ContextModel::load_artifact(&path, &good).is_ok());
+    let missing = models_with_capitals(None);
+    assert_eq!(ContextModel::load_artifact(&path, &missing).err().expect("refused").name, "FileNotFoundError");
+    // A model without the head reads the table on the first token in capitals, and a table that does not load is no answer.
+    assert!(ContextModel::load_artifact(&written(context_artifact().to_string().as_bytes()), &missing).is_ok());
+    let tables = TermTables::load(&missing).expect("the term tables");
+    assert!(tables.capitals().is_err());
 }

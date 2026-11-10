@@ -51,10 +51,13 @@ fn a_recipe_that_cannot_be_is_refused_before_anything_is_written() {
     let mut warm = recipe();
     warm["warm_base"] = warm["frozen_base"].clone();
     refused(&fitted(&run, "warm", &warm), "without kept-neighbour weights");
-    let mut capitals = recipe();
+    // A frozen base with no head to fit keeps every weight of the word decided at its own boundary.
+    let mut headless = recipe();
+    headless["frozen_base"]["heads"] = json!({});
+    let mut capitals = headless.clone();
     capitals["english_capital_curriculum"]["words_by_length"]["3"] = json!(5);
     refused(&fitted(&run, "capitals", &capitals), "English-capital");
-    let mut counted = recipe();
+    let mut counted = headless;
     counted["counted_token_curriculum"]["term_frames"] = json!(5);
     refused(&fitted(&run, "counted", &counted), "counted-token");
     // A folder that is there already is never written over.

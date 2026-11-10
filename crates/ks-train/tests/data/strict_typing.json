@@ -87,12 +87,12 @@
     "tests/loaders.rs": {
      "expect_roots": 1,
      "string_key_index": 52,
-     "value_tokens": 68
+     "value_tokens": 67
     }
    },
    "literal_compares": 32,
    "string_key_index": 135,
-   "value_tokens": 240
+   "value_tokens": 239
   },
   "ks-engine": {
    "expect_roots": 1,
@@ -492,7 +492,7 @@
     },
     "src/curricula.rs": {
      "literal_compares": 2,
-     "value_tokens": 48
+     "value_tokens": 49
     },
     "src/deb_check.rs": {
      "literal_compares": 4,
@@ -599,7 +599,7 @@
     "src/messages.rs": {
      "literal_compares": 4,
      "string_key_index": 19,
-     "value_tokens": 76
+     "value_tokens": 77
     },
     "src/mixed.rs": {
      "literal_compares": 17,
@@ -788,8 +788,8 @@
     },
     "tests/fit_small.rs": {
      "expect_roots": 1,
-     "string_key_index": 58,
-     "value_tokens": 36
+     "string_key_index": 60,
+     "value_tokens": 37
     },
     "tests/fit_whole.rs": {
      "expect_roots": 1,
@@ -898,8 +898,8 @@
     }
    },
    "literal_compares": 259,
-   "string_key_index": 2948,
-   "value_tokens": 3816
+   "string_key_index": 2950,
+   "value_tokens": 3819
   },
   "ks-ui": {
    "expect_roots": 1,

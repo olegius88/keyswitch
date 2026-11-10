@@ -1,0 +1,201 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-upper-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "4000 messages with Latin words and 4000 Russian ones, each holding a token of two to five letters in capitals opening it or after a Russian word, every developer-chat question left out (ks-train select --class capitals); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "so-capitals-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 1.0,
+    "seed": "capture-upper-so-train",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "1b217c2a8c6171701e643b6c76afd7ab1df5f6445d85b89247be6c614b2ef2f3",
+   "rows": 28277,
+   "unique": 15554
+  },
+  {
+   "file": "leipzig-upper-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019 and Wikipedia 2021 (1M sentences each)",
+   "typing": "4000 sentences with Latin words and 4000 Russian ones, each holding a token of two to five letters in capitals opening it or after a Russian word (ks-train select --leipzig --class capitals); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "leipzig-capitals-train.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 1.0,
+    "seed": "capture-upper-leipzig-train",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "b51848f298d0486676457776af3fcb898c090313911f8afa5a1bd2d6d97817b2",
+   "rows": 35312,
+   "unique": 17835
+  },
+  {
+   "file": "tatoeba-upper-train.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "every listed sentence holding a token of two to five letters in capitals opening it or after a Russian word, English ones among them (ks-train select --class capitals --only-ids); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-capitals-train.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 114,
+    "russian_share": 1.0,
+    "seed": "capture-upper-tatoeba-train",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "d6b569e35211515e1c75ae7b4ae3eeb9101e4a707b5e9b10f10a8ece54c06c9a",
+   "rows": 376,
+   "unique": 191
+  },
+  {
+   "file": "so-upper-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "1000 messages with Latin words and 1000 Russian ones, each holding a token of two to five letters in capitals opening it or after a Russian word, every developer-chat question left out (ks-train select --class capitals); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "so-capitals-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-upper-so-dev",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "020f9ea3ed3f52fef68b4926c7024934d96d112d9d2b1a53733f28a03bf1f008",
+   "rows": 6966,
+   "unique": 3941
+  },
+  {
+   "file": "leipzig-upper-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY 4.0 (Leipzig Corpora Collection)",
+   "origin": "Leipzig Corpora Collection, Russian news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019 and Wikipedia 2021 (1M sentences each)",
+   "typing": "1000 sentences with Latin words and 1000 Russian ones, each holding a token of two to five letters in capitals opening it or after a Russian word (ks-train select --leipzig --class capitals); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "leipzig-capitals-dev.jsonl.gz",
+    "kinds": [
+     "prose"
+    ],
+    "count": 1000,
+    "russian_share": 1.0,
+    "seed": "capture-upper-leipzig-dev",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "d26ee79a2d9aaa6dc118cbc5a36af728104195a4ba2ebdfdcc6ad192c365fa49",
+   "rows": 8813,
+   "unique": 4531
+  },
+  {
+   "file": "tatoeba-upper-dev.jsonl.xz",
+   "weight": 1.0,
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR; messages above them: Tatoeba sentences)",
+   "origin": "Tatoeba sentence exports rus/eng of 2026-09-26, only sentences listed in model/context_v1/captured/tatoeba-authors.tsv.xz",
+   "typing": "every listed sentence holding a token of two to five letters in capitals opening it or after a Russian word, English ones among them (ks-train select --class capitals --only-ids); typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word with no switch by hand (slip_capitals), and as meant with the manual-layout protection off; the upper-case head's questions alone",
+   "recipe": {
+    "messages": "tatoeba-capitals-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba"
+    ],
+    "count": 25,
+    "russian_share": 1.0,
+    "seed": "capture-upper-tatoeba-dev",
+    "modes": [
+     "correct",
+     "forget_en",
+     "forget_ru",
+     "start_wrong",
+     "slip_capitals",
+     "unprotected"
+    ],
+    "questions": "upper"
+   },
+   "sha256": "5b9fb9a52369d95145fef4270b15ac6f6d5ef070c6ac067b02b3842c9c790ec0",
+   "rows": 84,
+   "unique": 45
+  }
+ ]
+}

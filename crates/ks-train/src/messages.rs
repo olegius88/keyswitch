@@ -10,13 +10,14 @@ use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use indexmap::IndexMap;
-use ks_context::constants::{ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS};
+use ks_context::constants::{ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS, UPPER_HEAD_MAX_LETTERS, UPPER_HEAD_MIN_LETTERS};
 use ks_context::context_action_features::{dotted_question, letters_and_digits, sign_token_asked};
 use ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
 use ks_lang::Resources;
 use ks_text::{Indent, JsonOptions, json_dumps, pystr};
 use regex::Regex;
 use serde_json::{Map, Value, json};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -51,6 +52,16 @@ const DEVCHAT_SIGN_RUN: usize = 3;
 const SO_NAMESPACE: &str = "keyswitch:research-2026-09-29:ru_stackoverflow";
 const TATOEBA_NAMESPACE: &str = "keyswitch:research-2026-09-29:tatoeba";
 const ENTITIES: &str = include_str!("../data/html-entities.json");
+/// The ISO 4217 code list the capitals table reads its currency codes from: SIX Financial Information's list one, published
+/// 2026-09-17 and fetched 2026-11-10 from ISO_4217_LIST_URL. SIX publishes no signature: the digest is the only pin.
+pub const ISO_4217_LIST_SHA256: &str = "33139b438657d1cee116ba737807ea71d19d6de4b90f799a09c56f0cc6a1b0ff";
+const ISO_4217_LIST_URL: &str = "https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml";
+const ISO_4217_RETRIEVED: &str = "2026-11-10";
+/// A Leipzig sentence's question number: the corpus's place in the sorted list of corpora times this, plus its sentence
+/// number (a corpus holds a million sentences).
+const LEIPZIG_QUESTION_STRIDE: i64 = 10_000_000;
+const LEIPZIG_KIND: &str = "prose";
+const LEXICON_PATH: &str = "model/intent_v1/sources/ru_RU.lm";
 
 fn regex(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
@@ -68,6 +79,8 @@ static LATIN_PAIR: LazyLock<Regex> = LazyLock::new(|| regex(r"[A-Za-z]{2}"));
 static DASH_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^-{1,2}(?:[A-Za-z]+|[а-яёА-ЯЁ]+)[0-9]*$"));
 static DIGIT_DOT_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9]+[.,][0-9]*$"));
 static DIGIT_LETTER_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9]+б$"));
+static CURRENCY_CODE: LazyLock<Regex> = LazyLock::new(|| regex(r"<Ccy>([A-Z]{3})</Ccy>"));
+static PUBLISHED: LazyLock<Regex> = LazyLock::new(|| regex(r#"<ISO_4217 Pblshd="([0-9-]+)""#));
 static SIGN_RUN: LazyLock<Regex> = LazyLock::new(|| regex(&format!(r"[!-/:-@\[-`{{-~]{{{DEVCHAT_SIGN_RUN},}}")));
 
 struct Entities {
@@ -587,24 +600,38 @@ pub fn build_alnum(messages: &Path, members: &[PathBuf]) -> Result<Value, String
     Ok(json!({"cyrillic": frequent(cyrillic), "latin": frequent(latin)}))
 }
 
-/// `build_short`: tokens of two or three Russian letters in the Leipzig word lists unpacked under the directory.
-pub fn build_short(leipzig: &Path) -> Result<Value, String> {
+/// The files ending in `suffix` of the Leipzig corpora unpacked under the directory, each in a folder `x-<corpus>`, in
+/// sorted order: in the folder itself (`nested` false) or one level down, as each archive unpacked.
+fn leipzig_files(leipzig: &Path, suffix: &str, nested: bool) -> Result<Vec<PathBuf>, String> {
     let mut paths: Vec<PathBuf> = Vec::new();
+    let listed = |folder: &Path, paths: &mut Vec<PathBuf>| -> Result<(), String> {
+        for file in std::fs::read_dir(folder).map_err(|error| error.to_string())?.flatten() {
+            if file.path().is_file() && file.file_name().to_string_lossy().ends_with(suffix) {
+                paths.push(file.path());
+            }
+        }
+        Ok(())
+    };
     for outer in std::fs::read_dir(leipzig).map_err(|error| error.to_string())?.flatten() {
         if !outer.file_name().to_string_lossy().starts_with("x-") || !outer.path().is_dir() {
             continue;
         }
+        if !nested {
+            listed(&outer.path(), &mut paths)?;
+        }
         for inner in std::fs::read_dir(outer.path()).map_err(|error| error.to_string())?.flatten() {
             if inner.path().is_dir() {
-                for file in std::fs::read_dir(inner.path()).map_err(|error| error.to_string())?.flatten() {
-                    if file.file_name().to_string_lossy().ends_with("-words.txt") {
-                        paths.push(file.path());
-                    }
-                }
+                listed(&inner.path(), &mut paths)?;
             }
         }
     }
     paths.sort();
+    Ok(paths)
+}
+
+/// `build_short`: tokens of two or three Russian letters in the Leipzig word lists unpacked under the directory.
+pub fn build_short(leipzig: &Path) -> Result<Value, String> {
+    let paths = leipzig_files(leipzig, "-words.txt", true)?;
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
     for path in paths {
         let text = String::from_utf8_lossy(&std::fs::read(&path).map_err(|error| error.to_string())?).into_owned();
@@ -620,6 +647,211 @@ pub fn build_short(leipzig: &Path) -> Result<Value, String> {
         }
     }
     Ok(json!({"cyrillic": Value::Object(counts.into_iter().filter(|(_, count)| *count >= TERM_FREQUENCY_LEAST).map(|(token, count)| (token, json!(count))).collect())}))
+}
+
+/// A token the upper-case head may be asked about, spelled as written: `UPPER_HEAD_MIN_LETTERS` to `UPPER_HEAD_MAX_LETTERS`
+/// letters, all capitals, all Latin or all Cyrillic.
+fn capital_token(token: &str) -> bool {
+    (UPPER_HEAD_MIN_LETTERS..=UPPER_HEAD_MAX_LETTERS).contains(&token.chars().count())
+        && pystr::isalpha(token)
+        && pystr::isupper(token)
+        && (pystr::isascii(token) || token.chars().all(is_cyrillic_letter))
+}
+
+/// The counts of a table at least `minimum`, sorted by token.
+fn at_least(counts: BTreeMap<String, i64>, minimum: i64) -> BTreeMap<String, i64> {
+    counts.into_iter().filter(|(_, count)| *count >= minimum).collect()
+}
+
+/// The capitals table `ks-train capitals` writes (`context-capitals-frequency.json`): each source a section of its own.
+#[derive(Serialize, Debug)]
+pub struct CapitalsTable {
+    pub scope: String,
+    pub sources: CapitalsSources,
+    pub minimum_count: i64,
+    pub web_cyrillic: BTreeMap<String, i64>,
+    pub web_latin: BTreeMap<String, i64>,
+    pub technical_cyrillic: BTreeMap<String, i64>,
+    pub technical_latin: BTreeMap<String, i64>,
+    pub iso4217: Vec<String>,
+    pub lexicon_capitals: Vec<String>,
+}
+
+/// Where each section of the capitals table comes from.
+#[derive(Serialize, Debug)]
+pub struct CapitalsSources {
+    pub web: WebSource,
+    pub technical: TechnicalSource,
+    pub iso4217: CurrencySource,
+    pub lexicon: LexiconSource,
+}
+
+/// The Leipzig word lists the web counts are read from, each with its digest.
+#[derive(Serialize, Debug)]
+pub struct WebSource {
+    pub origin: String,
+    pub license: String,
+    pub word_lists_sha256: BTreeMap<String, String>,
+}
+
+/// The training messages of ru.stackoverflow the technical counts are read from.
+#[derive(Serialize, Debug)]
+pub struct TechnicalSource {
+    pub origin: String,
+    pub license: String,
+    pub file: String,
+    pub sha256: String,
+    pub questions_left_out: usize,
+}
+
+/// The ISO 4217 list the currency codes are read from.
+#[derive(Serialize, Debug)]
+pub struct CurrencySource {
+    pub origin: String,
+    pub published: String,
+    pub retrieved: String,
+    pub sha256: String,
+    pub codes: usize,
+}
+
+/// The Russian lexicon whose capital forms the table lists.
+#[derive(Serialize, Debug)]
+pub struct LexiconSource {
+    pub file: String,
+    pub sha256: String,
+}
+
+/// A message of a source as the capitals table reads it: its question and its text.
+#[derive(Deserialize)]
+struct QuestionText {
+    qid: i64,
+    text: String,
+}
+
+/// A Leipzig sentence as a message: the fields of a message of ru.stackoverflow that `select` reads and writes.
+#[derive(Serialize)]
+struct SentenceMessage<'a> {
+    qid: i64,
+    kind: &'a str,
+    mix: &'a str,
+    text: String,
+}
+
+/// What `build_capitals` reads.
+pub struct CapitalsRequest<'a> {
+    pub root: &'a Path,
+    pub leipzig: &'a Path,
+    pub messages: &'a Path,
+    pub members: &'a [PathBuf],
+    pub iso4217: &'a Path,
+    /// The digest the list must have: `ISO_4217_LIST_SHA256`.
+    pub iso4217_sha256: &'a str,
+    pub minimum: i64,
+}
+
+/// `capitals`: how often each token of the upper-case head's shape is spelled in capitals in Russian web and news text (the
+/// Leipzig word lists, which keep a word's case) and in Russian technical text (the ru.stackoverflow training messages,
+/// every developer-chat question left out), Cyrillic and Latin tokens apart, at least `minimum` times; the currency codes
+/// of the pinned ISO 4217 list; the forms of two to five letters the Russian lexicon writes in capitals. Each source stays a
+/// section of its own.
+pub fn build_capitals(request: &CapitalsRequest<'_>) -> Result<CapitalsTable, String> {
+    let words = leipzig_files(request.leipzig, "-words.txt", false)?;
+    let (mut web_latin, mut web_cyrillic): (BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
+    let mut word_files = BTreeMap::new();
+    for path in &words {
+        let text = String::from_utf8_lossy(&std::fs::read(path).map_err(|error| error.to_string())?).into_owned();
+        for line in universal_lines(&text) {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < LEIPZIG_WORDS_COLUMNS || !capital_token(parts[1]) {
+                continue;
+            }
+            let count = parts[2].trim().parse::<i64>().map_err(|_| "a count")?;
+            *(if pystr::isascii(parts[1]) { &mut web_latin } else { &mut web_cyrillic }).entry(parts[1].to_owned()).or_insert(0) += count;
+        }
+        word_files.insert(path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), checksum(path)?);
+    }
+    let left_out = excluded_questions(request.members)?;
+    let (mut technical_latin, mut technical_cyrillic): (BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
+    let so = request.messages.join("so-train.jsonl.gz");
+    for line in gz_text(&so)?.lines() {
+        let row: QuestionText = ks_text::json::loads(line).map_err(|error| error.to_string())?;
+        if left_out.contains(&row.qid) {
+            continue;
+        }
+        for token in pystr::split(&row.text) {
+            let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
+            if capital_token(core) {
+                *(if pystr::isascii(core) { &mut technical_latin } else { &mut technical_cyrillic }).entry(core.to_owned()).or_insert(0) += 1;
+            }
+        }
+    }
+    let list = std::fs::read_to_string(request.iso4217).map_err(|error| error.to_string())?;
+    if checksum(request.iso4217)? != request.iso4217_sha256 {
+        return Err("the ISO 4217 list differs from the pinned one".to_owned());
+    }
+    let currencies: BTreeSet<String> = CURRENCY_CODE.captures_iter(&list).map(|captures| captures[1].to_owned()).collect();
+    let published = PUBLISHED.captures(&list).map(|captures| captures[1].to_owned()).ok_or("the list names no publication date")?;
+    let lexicon_path = request.root.join(LEXICON_PATH);
+    let lexicon_text = std::fs::read_to_string(&lexicon_path).map_err(|error| error.to_string())?;
+    let lexicon: BTreeSet<String> =
+        crate::tools::arpa_unigrams(&lexicon_text).into_iter().filter(|word| capital_token(word) && !pystr::isascii(word)).map(str::to_owned).collect();
+    let minimum = request.minimum;
+    let scope = format!(
+        "How often Russian text spells each token of {UPPER_HEAD_MIN_LETTERS} to {UPPER_HEAD_MAX_LETTERS} letters in capitals, all Latin or all Cyrillic: \
+         web_cyrillic and web_latin in the Leipzig word lists of Russian news, web and Wikipedia text, which keep a word's case; technical_cyrillic and \
+         technical_latin among the tokens of the ru.stackoverflow training messages, edge signs stripped, every developer-chat question left out. \
+         A count under {minimum} is cut: below it a spelling is chance (`ВШМ` 2, `DIV` 4). iso4217: the alphabetic codes of ISO 4217 list one. \
+         lexicon_capitals: the forms the Russian lexicon of the intent model writes in capitals. The upper-case head reads each section apart \
+         (ks-train capitals)."
+    );
+    Ok(CapitalsTable {
+        scope,
+        sources: CapitalsSources {
+            web: WebSource {
+                origin: "Leipzig Corpora Collection, Russian corpora of 1M sentences each: news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019, Wikipedia 2021".to_owned(),
+                license: "CC BY (the Leipzig Corpora Collection's terms for downloaded corpora)".to_owned(),
+                word_lists_sha256: word_files,
+            },
+            technical: TechnicalSource {
+                origin: "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5, the training split of ks-train messages".to_owned(),
+                license: "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)".to_owned(),
+                file: "so-train.jsonl.gz".to_owned(),
+                sha256: checksum(&so)?,
+                questions_left_out: left_out.len(),
+            },
+            iso4217: CurrencySource { origin: ISO_4217_LIST_URL.to_owned(), published, retrieved: ISO_4217_RETRIEVED.to_owned(), sha256: request.iso4217_sha256.to_owned(), codes: currencies.len() },
+            lexicon: LexiconSource { file: LEXICON_PATH.to_owned(), sha256: checksum(&lexicon_path)? },
+        },
+        minimum_count: minimum,
+        web_cyrillic: at_least(web_cyrillic, minimum),
+        web_latin: at_least(web_latin, minimum),
+        technical_cyrillic: at_least(technical_cyrillic, minimum),
+        technical_latin: at_least(technical_latin, minimum),
+        iso4217: currencies.into_iter().collect(),
+        lexicon_capitals: lexicon.into_iter().collect(),
+    })
+}
+
+/// The sentences of the Leipzig corpora unpacked under the directory, as messages: a typeable sentence of `MIN_TOKENS` to
+/// `MAX_TOKENS` tokens with Cyrillic, its question the corpus's place in their sorted list times `LEIPZIG_QUESTION_STRIDE`
+/// plus its number, each handed to `each` as it is read, as a line of JSON like a line of the messages' files.
+fn leipzig_messages(leipzig: &Path, each: &mut dyn FnMut(&str) -> Result<(), String>) -> Result<(), String> {
+    for (corpus, path) in (0_i64..).zip(leipzig_files(leipzig, "-sentences.txt", false)?) {
+        let reader = BufReader::new(std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?);
+        for line in reader.lines() {
+            let line = line.map_err(|error| error.to_string())?;
+            let Some((number, text)) = line.split_once('\t') else { continue };
+            let Ok(number) = number.parse::<i64>() else { continue };
+            let translated = typeable(text);
+            let tokens = pystr::split(&translated);
+            if !(MIN_TOKENS..=MAX_TOKENS).contains(&tokens.len()) || !typeable_tokens(&tokens) || !tokens.iter().any(|token| has_cyrillic(token)) {
+                continue;
+            }
+            let message = SentenceMessage { qid: corpus * LEIPZIG_QUESTION_STRIDE + number, kind: LEIPZIG_KIND, mix: mix_of(&tokens), text: tokens.join(" ") };
+            each(&ks_text::json::dumps(&message, &JsonOptions { ensure_ascii: false, ..JsonOptions::default() }))?;
+        }
+    }
+    Ok(())
 }
 
 /// `build_sources`: whose text the captured files hold, written next to the manifest for attribution.
@@ -790,6 +1022,15 @@ fn russian_alnum_token(previous: &str, token: &str) -> bool {
     !pystr::isascii(pystr::strip_chars(token, ALNUM_EDGE_SIGNS)) && alnum_token(previous, token)
 }
 
+/// A token of the upper-case head's shape (`capital_token`) once its edge signs are stripped, whose other reading is letters
+/// too, opening the message or after a word of Cyrillic letters: `USD` in `курс USD`, `США` in `в США`. The other reading is
+/// that of the keys, as the engine reads it (`ФСБ` is `AC<`); the static mapper leaves a capital whose key is a sign as it is.
+fn capitals_token(previous: &str, token: &str) -> bool {
+    let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
+    let other = crate::physical::translated(core, i64::from(!pystr::isascii(core))).unwrap_or_default();
+    capital_token(core) && pystr::isalpha(&other) && (previous.is_empty() || (has_cyrillic(previous) && !has_latin(previous)))
+}
+
 fn opening_short(text: &str) -> bool {
     pystr::split(text).first().is_some_and(|first| pystr::isalpha(first) && first.chars().count() <= OPENING_SHORT_MAX_LETTERS)
 }
@@ -866,6 +1107,7 @@ fn token_class(name: &str) -> Option<TokenClass> {
         "dash" => dash_token,
         "digitdot" => digit_dot_token,
         "digitdot-letter" => digit_letter_token,
+        "capitals" => capitals_token,
         _ => return None,
     })
 }
@@ -889,6 +1131,8 @@ fn listed_ids(path: &Path) -> Result<HashSet<i64>, String> {
 
 pub struct SelectRequest<'a> {
     pub messages: &'a Path,
+    /// The Leipzig corpora to read sentences from in place of `messages` (`leipzig_messages`).
+    pub leipzig: Option<&'a Path>,
     pub members: &'a [PathBuf],
     pub name: &'a str,
     pub development_share: f64,
@@ -914,19 +1158,19 @@ pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let name_of = |split: &str| format!("{}-{}-{split}.jsonl.gz", request.prefix, request.name);
     let mut handles: HashMap<&str, GzWriter> = ["train", "dev"].iter().map(|split| Ok((*split, GzWriter::create(&request.out.join(name_of(split)))?))).collect::<Result<_, String>>()?;
     let (mut train, mut dev, mut dropped) = (0, 0, 0);
-    for line in gz_text(request.messages)?.lines() {
+    let mut take = |line: &str| -> Result<(), String> {
         let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
         let text = row["text"].as_str().ok_or("a text")?;
         if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) {
-            continue;
+            return Ok(());
         }
         let question = row["qid"].as_i64().ok_or("a question")?;
         if allowed.as_ref().is_some_and(|ids| !ids.contains(&question)) {
-            continue;
+            return Ok(());
         }
         if left_out.contains(&question) {
             dropped += 1;
-            continue;
+            return Ok(());
         }
         let split = capture_split(question, request.development_share);
         handles.get_mut(split).expect("a split").line(&row_line(&row))?;
@@ -934,6 +1178,15 @@ pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
             dev += 1;
         } else {
             train += 1;
+        }
+        Ok(())
+    };
+    match request.leipzig {
+        Some(leipzig) => leipzig_messages(leipzig, &mut take)?,
+        None => {
+            for line in gz_text(request.messages)?.lines() {
+                take(line)?;
+            }
         }
     }
     for (_, writer) in handles {
@@ -1114,13 +1367,23 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
         }
         Some("alnum") => write_table(&build_alnum(&required("--messages")?, &repeated("--members"))?, &required("--out")?),
         Some("short") => write_table(&build_short(&required("--leipzig")?)?, &required("--out")?),
+        Some("capitals") => {
+            let minimum: i64 = required("--minimum-count")?.to_string_lossy().parse().map_err(|_| "--minimum-count is a number")?;
+            let request = CapitalsRequest { root, leipzig: &required("--leipzig")?, messages: &required("--messages")?, members: &repeated("--members"), iso4217: &required("--iso4217")?, iso4217_sha256: ISO_4217_LIST_SHA256, minimum };
+            let table = build_capitals(&request)?;
+            std::fs::write(required("--out")?, ks_text::json::dumps(&table, &indented) + "\n").map_err(|error| error.to_string())?;
+            Ok(json!({"web_cyrillic": table.web_cyrillic.len(), "web_latin": table.web_latin.len(), "technical_cyrillic": table.technical_cyrillic.len(),
+                "technical_latin": table.technical_latin.len(), "iso4217": table.iso4217.len(), "lexicon_capitals": table.lexicon_capitals.len()}))
+        }
         Some("sources") => build_sources(&required("--manifest")?, &required("--messages")?, &required("--tatoeba")?),
         Some("select") => {
             let share: f64 = arguments.iter().position(|argument| argument == "--development-share").and_then(|place| arguments.get(place + 1)).ok_or("--development-share is required")?.parse().map_err(|_| "--development-share is a number")?;
             let name = arguments.iter().position(|argument| argument == "--class").and_then(|place| arguments.get(place + 1)).ok_or("--class is required")?;
             let prefix = arguments.iter().position(|argument| argument == "--prefix").and_then(|place| arguments.get(place + 1)).map_or("so", String::as_str);
             let only = option("--only-ids");
-            select(&SelectRequest { messages: &required("--messages")?, members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref() })
+            let leipzig = option("--leipzig");
+            let messages = if leipzig.is_some() { PathBuf::new() } else { required("--messages")? };
+            select(&SelectRequest { messages: &messages, leipzig: leipzig.as_deref(), members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref() })
         }
         Some("devchat-messages") => build_devchat(root, &required("--comments")?, &required("--dump")?, &required("--out")?, &repeated("--earlier")),
         other => Err(format!("unknown command: {other:?}")),

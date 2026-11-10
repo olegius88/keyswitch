@@ -9,6 +9,7 @@ use ks_backend::constants::SHIFT_MASK;
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::config::SettingsStore;
 use ks_config::history::HistoryStore;
+use ks_context::constants::{UPPER_HEAD_MAX_LETTERS, UPPER_HEAD_MIN_LETTERS};
 use ks_context::context_action_features as features;
 use ks_context::context_model::{ContextEvidence, ContextModel, ContextPrediction, BeforeOrigin};
 use ks_context::input_context::InputContext;
@@ -30,6 +31,11 @@ pub const TYPING_MODES: [&str; 4] = ["correct", "forget_ru", "forget_en", "start
 const SLIP_MODE: &str = "slip";
 const LETTER_SLIP_MODE: &str = "slip_letter";
 const LETTER_SLIP_BACK_MODE: &str = "slip_letter_back";
+/// The slip mode with the slipped word a Russian abbreviation in capitals (`США` typed `CIF` after `в `): a message holds
+/// one such word among many others, and the plain slip mode lands on it once in as many messages.
+const CAPITALS_SLIP_MODE: &str = "slip_capitals";
+/// Signs a word of the message may carry at its ends, set aside when the slip modes read the word.
+const SLIP_EDGE_SIGNS: &str = ".,!?:;\"'()";
 const UNPROTECTED_MODE: &str = "unprotected";
 const US_SIGNS_MODE: &str = "us_signs";
 const EDIT_MODE: &str = "insert";
@@ -70,6 +76,13 @@ fn russian_letter(character: char) -> bool {
     ('а'..='я').contains(&character) || ('А'..='Я').contains(&character) || character == 'ё' || character == 'Ё'
 }
 
+/// A Russian word in capitals of the upper-case head's length once its edge signs are set aside: what the capitals slip
+/// mode slips.
+fn capital_slip(token: &str) -> bool {
+    let core = pystr::strip_chars(token, SLIP_EDGE_SIGNS);
+    (UPPER_HEAD_MIN_LETTERS..=UPPER_HEAD_MAX_LETTERS).contains(&core.chars().count()) && pystr::isalpha(core) && pystr::isupper(core) && core.chars().all(russian_letter)
+}
+
 /// `script`: the layout a token's letters belong to.
 fn script(token: &str) -> Option<i64> {
     if token.chars().any(russian_letter) {
@@ -105,7 +118,7 @@ fn plan(tokens: &[&str], mode: &str, choice: u64) -> Option<(i64, Vec<Step>)> {
         }
     }
     let transitions: Vec<usize> = (1..tokens.len()).filter(|index| intended[*index] != intended[*index - 1]).collect();
-    if matches!(mode, SLIP_MODE | LETTER_SLIP_MODE | LETTER_SLIP_BACK_MODE) {
+    if matches!(mode, SLIP_MODE | LETTER_SLIP_MODE | LETTER_SLIP_BACK_MODE | CAPITALS_SLIP_MODE) {
         let trusted = ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
         let slips: Vec<usize> = (1..tokens.len())
             .filter(|index| {
@@ -113,7 +126,11 @@ fn plan(tokens: &[&str], mode: &str, choice: u64) -> Option<(i64, Vec<Step>)> {
                 intended[*index - 1] == 1
                     && intended[*index] == 1
                     && script(token) == Some(1)
-                    && (mode == SLIP_MODE || trusted.contains(&pystr::casefold(token).as_str()))
+                    && match mode {
+                        SLIP_MODE => true,
+                        CAPITALS_SLIP_MODE => capital_slip(token),
+                        _ => trusted.contains(&pystr::casefold(token).as_str()),
+                    }
                     && (mode != LETTER_SLIP_BACK_MODE || index + 1 < tokens.len())
             })
             .collect();
@@ -545,15 +562,20 @@ impl Typist {
         session.backend.text().iter().collect()
     }
 
-    fn send(session: &mut Session, event: KeyEvent) -> Result<(), String> {
+    /// A key to the engine; a failure goes to its recovery and the typing goes on, as in the running program, whose worker
+    /// forgets the word in hand (`recover_from_error`): `TLV`, typed in the Russian layout from the start of `3. TLV в самом
+    /// SNMP`, waited in its own layout with no reading to ask about, and the capture stopped on it.
+    fn send(session: &mut Session, event: KeyEvent) {
         session.backend.type_key(&event);
-        session.core.handle_inner(Arc::new(event)).map_err(|error| error.to_string())
+        if let Err(error) = session.core.handle_inner(Arc::new(event)) {
+            session.core.recover_from_error(&error);
+        }
     }
 
-    fn tap(session: &mut Session, event: KeyEvent) -> Result<(), String> {
+    fn tap(session: &mut Session, event: KeyEvent) {
         let released = KeyEvent { pressed: false, ..event.clone() };
-        Self::send(session, event)?;
-        Self::send(session, released)
+        Self::send(session, event);
+        Self::send(session, released);
     }
 
     /// `_type_message`: one message in one mode; the final text, or None if it cannot be typed.
@@ -561,7 +583,7 @@ impl Typist {
         let tokens = pystr::split(&job.text);
         let Some((start, steps)) = plan(&tokens, &job.mode, job.choice) else { return Ok(None) };
         let mut session = self.session(start, false)?;
-        if matches!(job.mode.as_str(), SLIP_MODE | LETTER_SLIP_MODE | LETTER_SLIP_BACK_MODE) {
+        if matches!(job.mode.as_str(), SLIP_MODE | LETTER_SLIP_MODE | LETTER_SLIP_BACK_MODE | CAPITALS_SLIP_MODE) {
             // A layout the engine did not select is no switch by hand that protects the next word.
             session.settings.set("detection.respect_manual_layout", json!(false), false).expect("in memory");
             session.settings.set("detection.early_switch", json!(false), false).expect("in memory");
@@ -578,11 +600,11 @@ impl Typist {
         let typed = self.type_steps(&mut session, &job.mode, steps);
         // The engine pieces come back whatever happened to the message.
         let text = self.finish(session);
-        Ok(typed?.then_some(text))
+        Ok(typed.then_some(text))
     }
 
     /// The tokens of a plan typed one after another: false when a token has no keys in its layout.
-    fn type_steps(&self, session: &mut Session, mode: &str, steps: Vec<Step>) -> Result<bool, String> {
+    fn type_steps(&self, session: &mut Session, mode: &str, steps: Vec<Step>) -> bool {
         for (token, intended, selected, slipped) in steps {
             if let Some(selected) = selected.filter(|value| i64::from(session.backend.group()) != *value) {
                 session.backend.set_group(selected.to::<i32>());
@@ -590,7 +612,7 @@ impl Typist {
                     session.core.observe_group(selected, "hotkey");
                 }
             }
-            let Some(mut keys) = keys_for(&token, intended, &self.inverse) else { return Ok(false) };
+            let Some(mut keys) = keys_for(&token, intended, &self.inverse) else { return false };
             let mut meant = intended;
             if mode == US_SIGNS_MODE && intended == 1 && token.chars().any(|character| pystr::isdigit(character.encode_utf8(&mut [0_u8; 4]))) {
                 let signed: Vec<String> = token.chars().zip(keys.iter()).map(|(character, key)| if matches!(character, '.' | ',') { character.to_string() } else { key.clone() }).collect();
@@ -605,10 +627,10 @@ impl Typist {
             for key in keys {
                 let group = session.backend.group();
                 let event = session.keys.key(&key, group);
-                Self::tap(session, event)?;
+                Self::tap(session, event);
             }
         }
-        Ok(true)
+        true
     }
 
     /// `_edit_message`: letters removed from inside a word are typed back after a click in the other layout.
@@ -639,13 +661,14 @@ impl Typist {
             session.clock.advance(MIXED_EDIT_KEY_INTERVAL_SECONDS);
             let group = session.backend.group();
             let event = session.keys.key(&key, group);
-            Self::tap(session, event)?;
+            Self::tap(session, event);
         }
         session.clock.advance(MIXED_EDIT_PAUSE_SECONDS);
         session.core.maybe_correct_after_pause(None).map_err(|error| error.to_string())
     }
 
-    /// `_capture`: the questions of one job. A message the engine fails on stops the capture, as it stops the Python's.
+    /// `_capture`: the questions of one job. A key the engine fails on goes to its recovery (`send`); an engine that cannot
+    /// be made stops the capture.
     fn capture(&mut self, job: &Job) -> Vec<Value> {
         {
             let mut state = self.spy.lock().unwrap_or_else(PoisonError::into_inner);
@@ -653,7 +676,8 @@ impl Typist {
             state.rows.clear();
             state.edit = job.mode == EDIT_MODE;
         }
-        let typed = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }.expect("the engine types the message");
+        let typed = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }
+            .unwrap_or_else(|error| panic!("the engine failed ({error}) on message {} typed {}: {:?}", job.index, job.mode, job.text));
         let mut state = self.spy.lock().unwrap_or_else(PoisonError::into_inner);
         if job.mode != EDIT_MODE && typed.is_none() {
             state.rows.clear();
@@ -789,7 +813,7 @@ pub fn jobs_for(messages: &Path, recipe: &Value, code_path: Option<&Path>) -> Re
     } else {
         recipe.get("modes").map_or_else(|| TYPING_MODES.iter().map(|mode| (*mode).to_owned()).collect(), string_list)
     };
-    let known = [EDIT_MODE, SLIP_MODE, LETTER_SLIP_MODE, LETTER_SLIP_BACK_MODE, UNPROTECTED_MODE, US_SIGNS_MODE];
+    let known = [EDIT_MODE, SLIP_MODE, LETTER_SLIP_MODE, LETTER_SLIP_BACK_MODE, CAPITALS_SLIP_MODE, UNPROTECTED_MODE, US_SIGNS_MODE];
     if modes.iter().any(|mode| !known.contains(&mode.as_str()) && !TYPING_MODES.contains(&mode.as_str())) {
         return Err(format!("unknown typing modes: {modes:?}"));
     }
@@ -883,6 +907,7 @@ fn captured_question(name: &str, row: &[Value], fields: &[&'static str], tables:
         "dash" => features::dash_question(original, alternative, trigger),
         "digitdot" => features::digit_dot_question(original, alternative, trigger),
         "quote" => features::quote_question(original, alternative, trigger),
+        "upper" => features::upper_question(original, alternative, before, tables).map_err(|error| format!("{error:?}"))?,
         _ => return Err(format!("no class of questions {name}")),
     })
 }
@@ -960,7 +985,7 @@ pub fn evaluate(resource_dir: &Path, messages: &Path, recipe: &Value, code: Opti
     let jobs = jobs_for(messages, recipe, code)?;
     let bench = Bench::new(resource_dir)?;
     let make = |worker: usize| bench.typist(model, worker, Vec::new(), false);
-    // A message the engine fails on stops the run, as it stops the Python's.
+    // A key the engine fails on goes to its recovery as in the running program; an engine that cannot be made stops the run.
     let rows = run_jobs(&jobs, workers, &make, &|typist: &mut Typist, job: &Job| typist.evaluate(job).expect("the engine types the message"))?;
     let mut summary: BTreeMap<String, (i64, i64)> = BTreeMap::new();
     let mut listed = Vec::new();

@@ -13,7 +13,7 @@ use ks_context::context_model::{AfterOrigin, ContextAction};
 use ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
 use ks_text::pystr;
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use ContextAction::{Convert, Keep, Suggest, Wait};
 
 const ABBREVIATION_SPLIT_MODULUS: usize = 5;
@@ -50,6 +50,7 @@ const ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS: i64 = 512;
 const PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: usize = 64;
 const PLANNED_CONTEXT_WORD_MAX_CHARACTERS: usize = 3;
 const LAYOUT_GROUP_COUNT: usize = 2;
+const CURRENCY_SPLIT_MODULUS: usize = 5;
 
 pub type Curriculum = (Vec<ActionRow>, Value);
 
@@ -1082,6 +1083,58 @@ pub fn letter_curriculum(tools: &Tools, source_rows: &[CorpusRow], options: &Val
 
 /// What the labelling base answers on a frame, or None when the profiles' answers differ.
 pub type Decide<'a> = &'a (dyn Fn(&ActionRow) -> Option<ContextAction> + Sync);
+
+/// The recipe's `currencies` of the upper-case head's curriculum.
+#[derive(serde::Deserialize)]
+pub struct CurrencyOptions {
+    pub contexts_per_code: usize,
+    pub sample_weight: f64,
+}
+
+/// `currency_curriculum`: the upper-case head's captured frames followed by its authored frames, the currency codes of ISO
+/// 4217, which messages hold too rarely to teach (`UAH`, `UZS` and `KGS` are spelled no more than once in the Leipzig word
+/// lists). Each code, one in `CURRENCY_SPLIT_MODULUS` to DEVELOPMENT by hash, alone and after `contexts_per_code` - 1 left
+/// contexts of Russian rows of the split: typed as written, keep; its keys typed in the Russian layout, convert, unless
+/// that reading is spelled in capitals in a table or is a word of the Russian lexicon, which may be what was meant. A code
+/// the head holds out, or a test refuses, gives no frame.
+pub fn currency_curriculum<S: std::hash::BuildHasher>(tools: &Tools, split: &str, source_rows: &[CorpusRow], currencies: Option<&CurrencyOptions>, held_out: &HashSet<String, S>, captured: Curriculum) -> Curriculum {
+    let (mut rows, captured_report) = captured;
+    let captured_frames = rows.len();
+    let per_code = currencies.map_or(0, |options| options.contexts_per_code);
+    let weight = currencies.map_or(0.0, |options| options.sample_weight);
+    let mut counts = Counts::default();
+    if per_code > 0 && (split == TRAIN || split == DEVELOPMENT) {
+        let [_, russian] = natural_mixed_contexts(source_rows);
+        let contexts = ContextRing::new(russian);
+        let capitals = tools.tables.capitals().expect("the packaged capitals table");
+        for code in capitals.currencies() {
+            let family = format!("currency:{code}");
+            if contexts.is_empty() || share_of(&family, CURRENCY_SPLIT_MODULUS) != split {
+                continue;
+            }
+            let keys = reading(code, 0);
+            if held_out.contains(&pystr::casefold(code)) || held_out.contains(&pystr::casefold(&keys)) || tools.is_refused(&[code, &keys]) {
+                counts.add("refused");
+                continue;
+            }
+            let attested = capitals.web(&keys) > 0 || capitals.technical(&keys) > 0 || capitals.lexicon(&keys) || tools.portable[1].score(&keys).known;
+            counts.add(if attested { "attested" } else { "codes" });
+            for index in 0..per_code {
+                let identifier = format!("{family}:{index}");
+                let (trigger, boundary) = varied_boundary(&identifier);
+                let before = if index == 0 { "" } else { contexts.choice(&identifier, "context").as_str() };
+                let field = public_field(application_of(&identifier), before, "");
+                rows.push(ActionRow::new(identifier.as_str(), code, 0, field.clone(), trigger, Keep, "currency", boundary.as_str()).weighing(weight));
+                if !attested {
+                    rows.push(ActionRow::new(format!("{identifier}:keys"), keys.as_str(), 1, field, trigger, Convert, "currency_keys", boundary.as_str()).weighing(weight));
+                }
+            }
+        }
+    }
+    let frames = rows.len();
+    (rows, json!({"frames": frames, "captured": captured_report, "currencies": {"frames": frames - captured_frames, "codes": counts.report(), "contexts_per_code": per_code, "sample_weight": weight,
+        "scope": "the currency codes of ISO 4217 alone and after Russian prose: as written, keep; their keys in the Russian layout, convert unless that reading is spelled in capitals or is a Russian word (currency_curriculum)."}}))
+}
 
 /// `alone_labels`: the frames of a split with every deferred frame of the lone-word head's class labelled.
 pub fn alone_labels(tools: &Tools, rows: Vec<ActionRow>, evidence: Option<&Value>, decide: Option<Decide<'_>>) -> Vec<ActionRow> {

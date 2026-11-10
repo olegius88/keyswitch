@@ -107,25 +107,28 @@ impl Tools {
     pub fn onboard_capitals(&self) -> &HashSet<String> {
         self.onboard_capitals.get_or_init(|| {
             let text = std::fs::read_to_string(self.root.join("model/intent_v1/sources/ru_RU.lm")).expect("the pinned Russian lexicon");
-            let mut forms = HashSet::new();
-            let mut unigrams = false;
-            for line in text.lines() {
-                let line = pystr::strip(line);
-                if line.starts_with('\\') {
-                    unigrams = line == "\\1-grams:";
-                    continue;
-                }
-                if !unigrams {
-                    continue;
-                }
-                let parts = pystr::split(line);
-                if parts.len() > 1 && pystr::len(parts[1]) > 1 && pystr::isalpha(parts[1]) && pystr::isupper(parts[1]) {
-                    forms.insert(pystr::casefold(parts[1]));
-                }
-            }
-            forms
+            arpa_unigrams(&text).into_iter().filter(|word| pystr::len(word) > 1 && pystr::isalpha(word) && pystr::isupper(word)).map(pystr::casefold).collect()
         })
     }
+}
+
+/// The words of the unigram section (`\1-grams:`) of an ARPA language model's text: the second field of each line.
+#[must_use]
+pub fn arpa_unigrams(text: &str) -> Vec<&str> {
+    let mut words = Vec::new();
+    let mut unigrams = false;
+    for line in text.lines() {
+        let line = pystr::strip(line);
+        if line.starts_with('\\') {
+            unigrams = line == "\\1-grams:";
+            continue;
+        }
+        let parts = pystr::split(line);
+        if unigrams && parts.len() > 1 {
+            words.push(parts[1]);
+        }
+    }
+    words
 }
 
 /// `reference_models(spelling)`: the pinned onboard lexicons plus the packaged supplements, as the engine loads them;

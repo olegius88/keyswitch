@@ -7,6 +7,7 @@ use flate2::write::GzEncoder;
 use flate2::read::MultiGzDecoder;
 use ks_train::messages::{post_messages, unescape};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Output;
@@ -247,7 +248,7 @@ fn a_class_selects_its_messages() {
     let messages = sources.out.join("so-train.jsonl.gz");
     let out = sources.folder.join("selected");
     let mut found = 0;
-    for class in ["opening-short", "slippable", "formula", "resume", "cyrletter-russian", "quote-opener", "variable", "dotted", "dotted-latin", "dotted-russian", "alnum-latin", "alnum-russian", "cyrletter-latin", "dash", "digitdot", "digitdot-letter"] {
+    for class in ["opening-short", "slippable", "formula", "resume", "cyrletter-russian", "quote-opener", "variable", "dotted", "dotted-latin", "dotted-russian", "alnum-latin", "alnum-russian", "cyrletter-latin", "dash", "digitdot", "digitdot-letter", "capitals"] {
         let output = tool("select", &["--messages".as_ref(), messages.as_os_str(), "--class".as_ref(), class.as_ref(), "--development-share".as_ref(), "0.5".as_ref(), "--out".as_ref(), out.as_os_str()]);
         assert!(output.status.success(), "{class}: {}", String::from_utf8_lossy(&output.stderr));
         let said: Value = serde_json::from_slice(&output.stdout).expect("json");
@@ -411,4 +412,98 @@ fn a_latin_c_beside_a_latin_word_is_no_lookalike() {
     std::fs::write(root.join("model/context_v3/devchat-test-batches.json"), serde_json::to_vec(&json!({"dump_sha256": pin})).expect("json")).expect("a file");
     let counts = ks_train::messages::build_devchat(&root, &comments, &dump, &out, &[]).expect("the pools");
     assert_eq!(counts["dropped:lookalike"].as_i64(), Some(1), "{counts}");
+}
+
+/// A folder of Leipzig corpora: one unpacked into a folder of its own, one straight into its `x-` folder.
+fn leipzig_folder(name: &str, words: [&str; 2], sentences: [&str; 2]) -> PathBuf {
+    let leipzig = SOURCES.folder.join(name);
+    let nested = leipzig.join("x-a/a");
+    std::fs::create_dir_all(&nested).expect("a folder");
+    std::fs::create_dir_all(leipzig.join("x-b")).expect("a folder");
+    std::fs::create_dir_all(leipzig.join("other")).expect("a folder");
+    std::fs::write(nested.join("a-words.txt"), words[0]).expect("a file");
+    std::fs::write(leipzig.join("x-b/b-words.txt"), words[1]).expect("a file");
+    std::fs::write(nested.join("a-sentences.txt"), sentences[0]).expect("a file");
+    std::fs::write(leipzig.join("x-b/b-sentences.txt"), sentences[1]).expect("a file");
+    std::fs::write(leipzig.join("x-b/notes.txt"), "").expect("a file");
+    leipzig
+}
+
+#[test]
+fn the_table_of_capitals_counts_each_source_apart() {
+    use ks_train::messages::{CapitalsRequest, build_capitals};
+    let sources = &*SOURCES;
+    let leipzig = leipzig_folder("capitals-leipzig", ["1\tUSD\t7\n2\tСША\t9\n3\tusd\t100\n4\tНЕ\t1\n5\tU2\t9\n6\tΑΒΓ\t9\n7\tWINDOWS\t9\nкороткая\n", "1\tUSD\t3\n2\tНЕ\t1\n"], ["", ""]);
+    let messages = sources.folder.join("capitals-messages");
+    std::fs::create_dir_all(&messages).expect("a folder");
+    gz_write(&messages.join("so-train.jsonl.gz"), "{\"qid\": 1, \"text\": \"курс USD и (США), API API.\"}\n{\"qid\": 2, \"text\": \"API SQL\"}\n".as_bytes());
+    let members = sources.folder.join("capitals-members.jsonl.gz");
+    gz_write(&members, b"{\"question\": 2}\n");
+    let list = sources.folder.join("capitals-iso.xml");
+    std::fs::write(&list, "<ISO_4217 Pblshd=\"2026-01-01\"><CcyNtry><Ccy>USD</Ccy></CcyNtry><CcyNtry><Ccy>KZT</Ccy></CcyNtry><CcyNtry><Ccy>USD</Ccy></CcyNtry></ISO_4217>").expect("a file");
+    let root = scratch("capitals-root");
+    let lexicon = root.join("model/intent_v1/sources");
+    std::fs::create_dir_all(&lexicon).expect("a folder");
+    std::fs::write(lexicon.join("ru_RU.lm"), "\\data\\\nngram 1=4\n\n\\1-grams:\n-1.0\tСССР\n-1.0\tСША\t-0.1\n-1.0\tслово\n-1.0\tА\n-1.0\tUSA\n\n\\2-grams:\n-1.0\tСША СССР\n\\end\\\n").expect("a file");
+    let pinned = digest(&std::fs::read(&list).expect("the list"));
+    let members = [members];
+    let request = CapitalsRequest { root: &root, leipzig: &leipzig, messages: &messages, members: &members, iso4217: &list, iso4217_sha256: &pinned, minimum: 2 };
+    let table = build_capitals(&request).expect("a table");
+    let counted = |pairs: &[(&str, i64)]| pairs.iter().map(|&(token, count)| (token.to_owned(), count)).collect::<BTreeMap<String, i64>>();
+    assert_eq!(table.web_latin, counted(&[("USD", 10)]));
+    assert_eq!(table.web_cyrillic, counted(&[("НЕ", 2), ("США", 9)]));
+    assert_eq!(table.technical_latin, counted(&[("API", 2)]));
+    assert_eq!(table.technical_cyrillic, counted(&[]));
+    assert_eq!(table.iso4217, ["KZT", "USD"]);
+    assert_eq!(table.lexicon_capitals, ["СССР", "США"]);
+    assert_eq!(table.sources.iso4217.published, "2026-01-01");
+    assert_eq!((table.sources.technical.questions_left_out, table.sources.web.word_lists_sha256.len()), (1, 2));
+    assert!(table.scope.contains("under 2 is cut"));
+    // The list is the pinned one, the counts are counts, and the list says when it was published.
+    assert!(build_capitals(&CapitalsRequest { iso4217_sha256: "0", ..request }).unwrap_err().contains("differs"));
+    let undated = sources.folder.join("capitals-undated.xml");
+    std::fs::write(&undated, "<Ccy>USD</Ccy>").expect("a file");
+    let undated_digest = digest(&std::fs::read(&undated).expect("the list"));
+    assert!(build_capitals(&CapitalsRequest { iso4217: &undated, iso4217_sha256: &undated_digest, ..request }).unwrap_err().contains("publication"));
+    let broken = leipzig_folder("capitals-broken", ["1\tUSD\tmany\n", ""], ["", ""]);
+    assert!(build_capitals(&CapitalsRequest { leipzig: &broken, ..request }).is_err());
+    // The command writes the table and refuses a list other than the pinned one.
+    let out = sources.folder.join("capitals.json");
+    let mut arguments: Vec<&std::ffi::OsStr> = vec!["--leipzig".as_ref(), leipzig.as_os_str(), "--messages".as_ref(), messages.as_os_str(), "--iso4217".as_ref(), list.as_os_str(), "--out".as_ref(), out.as_os_str()];
+    assert!(!tool("capitals", &arguments).status.success(), "no minimum count");
+    arguments.push("--minimum-count".as_ref());
+    arguments.push("many".as_ref());
+    assert!(!tool("capitals", &arguments).status.success());
+    arguments.pop();
+    arguments.push("2".as_ref());
+    let output = tool("capitals", &arguments);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("differs from the pinned one"), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+/// A message `select` wrote: the fields a Leipzig sentence is given.
+#[derive(serde::Deserialize)]
+struct Selected {
+    qid: i64,
+    mix: String,
+    text: String,
+}
+
+#[test]
+fn the_sentences_of_the_leipzig_corpora_are_selected_as_messages() {
+    let leipzig = leipzig_folder(
+        "capitals-sentences",
+        ["", ""],
+        [
+            "1\tКурс USD вырос сегодня утром\n2\tбез заглавных тут вообще\nnot a number\tтекст тут такой\nbad\n3\tIn English USD here\n4\tВ США ввели санкции вчера\n",
+            "1\tГЫВ опять растёт тут\n2\tкороткая\n3\tтут ФСБ и всё\n",
+        ],
+    );
+    let out = SOURCES.folder.join("capitals-selected");
+    let output = tool("select", &["--leipzig".as_ref(), leipzig.as_os_str(), "--class".as_ref(), "capitals".as_ref(), "--development-share".as_ref(), "0.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "leipzig".as_ref()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let rows: Vec<Selected> = gz_lines(&out.join("leipzig-capitals-train.jsonl.gz")).iter().map(|line| ks_text::json::loads(line).expect("a message")).collect();
+    let texts: Vec<&str> = rows.iter().map(|row| row.text.as_str()).collect();
+    assert_eq!(texts, ["Курс USD вырос сегодня утром", "В США ввели санкции вчера", "ГЫВ опять растёт тут"]);
+    assert_eq!((rows[2].qid, rows[0].mix.as_str()), (10_000_001, "mixed"));
+    assert!(!tool("select", &["--leipzig".as_ref(), "/nonexistent".as_ref(), "--class".as_ref(), "capitals".as_ref(), "--development-share".as_ref(), "0.0".as_ref(), "--out".as_ref(), out.as_os_str()]).status.success());
 }
