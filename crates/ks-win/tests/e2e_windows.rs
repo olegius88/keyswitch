@@ -25,13 +25,13 @@ mod scenario {
     use std::time::{Duration, Instant};
 
     use ks_config::config::SettingsStore;
-    use ks_config::constants::{ENABLED, HOTKEYS_TOGGLE};
+    use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, ENABLED, HOTKEYS_TOGGLE};
     use ks_config::history::HistoryStore;
     use ks_config::learning::LearningStore;
     use ks_ui::constants::HINT_TYPING_SETTLE_SECONDS;
     use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
     use ks_ui::hints::{Click, HINT_NEVER_LABEL, HINT_OK_LABEL};
-    use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
+    use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RCONTROL, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
     use ks_win::hint_card::link_areas;
     use ks_win::hint_layout::Area;
     use ks_win::windows_backend::{NativeInput, NativeKeyEvent, WindowsAPI, WindowsSelectionAPI};
@@ -70,6 +70,7 @@ mod scenario {
     const SCAN_L: u32 = 0x26;
     const SCAN_O: u32 = 0x18;
     const SCAN_SPACE: u32 = 0x39;
+    const SCAN_C: u32 = 0x2E;
     /// F9, the pause hotkey of this test: the function keys follow F1 one by one.
     const VK_F9: u32 = VK_F1 + 8;
     const SCAN_ENTER: u32 = 0x1C;
@@ -812,6 +813,23 @@ mod scenario {
         Ok(())
     }
 
+    /// The conversion key (`detection.convert_last_key` set to Right Ctrl): a lone tap converts the word just typed, as
+    /// Pause does; Right Ctrl held over a letter converts nothing.
+    fn convert_key(editor: &Editor) -> Result<(), String> {
+        editor.prepare(0)?;
+        editor.scans(&HELLO)?;
+        editor.expect("hello", 0, LONG)?;
+        let control = |pressed: bool| NativeInput { virtual_key: VK_RCONTROL, extended: true, ..user(pressed) };
+        editor.send(&[control(true), control(false)])?;
+        editor.expect("руддщ", 1, LONG)?;
+        let letter = |pressed: bool| NativeInput { scan_code: SCAN_C, ..user(pressed) };
+        editor.send(&[control(true), letter(true), letter(false), control(false)])?;
+        editor.pump(PHASE_SETTLE);
+        editor.expect("руддщ", 1, STANDARD)?;
+        println!("WINDOWS_CONVERT_KEY_E2E_OK");
+        Ok(())
+    }
+
     // ---------------------------------------------------------------------------------------------------- the hints
 
     fn hint_card(process: u32) -> Option<HWND> {
@@ -1120,6 +1138,7 @@ mod scenario {
             let _ = child.kill();
             let _ = child.wait();
             configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true)), ("detection.layout_switch_key", json!("Shift_L"))])?;
+            SettingsStore::new(Some(root.join("config/config.json"))).write(DETECTION_CONVERT_LAST_KEY, "Control_R".to_owned(), true).map_err(|error| format!("{error:?}"))?;
             let engine_before = engine_ready_line(&root);
             let restarted = Instant::now();
             child = start(binary, &root)?;
@@ -1144,6 +1163,7 @@ mod scenario {
                 }
             }
             layout_key(&editor)?;
+            convert_key(&editor)?;
             function_key(&editor, &root)
         })();
         let _ = child.kill();

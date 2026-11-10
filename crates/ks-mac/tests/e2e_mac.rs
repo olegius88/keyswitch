@@ -26,7 +26,7 @@ mod scenario {
 
     use ks_backend::InputBackend;
     use ks_config::config::SettingsStore;
-    use ks_config::constants::{ENABLED, GENERAL_HINTS, HOTKEYS_TOGGLE};
+    use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, ENABLED, GENERAL_HINTS, HOTKEYS_TOGGLE};
     use ks_mac::constants::{CF_STRING_ENCODING_UTF8, HINT_PANEL_GAP_POINTS};
     use ks_mac::hint_place::{CaretAnchor, Frame, caret_anchor};
     use ks_mac::macos_app::VERSION;
@@ -107,6 +107,8 @@ mod scenario {
     const IOHID_PARAM_CONNECT: u32 = 1;
     const SHIFT: u16 = 0x38;
     const RIGHT_SHIFT: u16 = 0x3C;
+    /// `kVK_RightControl`: the conversion key of this test (`convert_key`).
+    const RIGHT_CONTROL: u16 = 0x3E;
     const CONTROL: u16 = 0x3B;
     const OPTION: u16 = 0x3A;
     const COMMAND: u16 = 0x37;
@@ -852,6 +854,24 @@ mod scenario {
         Ok(())
     }
 
+    /// The conversion key (Right Control here): a lone tap converts the word just typed, as Control+Option+K does; Right
+    /// Control held over a letter converts nothing.
+    fn convert_key(driver: &Driver) -> Result<(), String> {
+        driver.put_text("")?;
+        driver.select(0)?;
+        driver.type_keys("the hello", false)?;
+        let typed = driver.value();
+        driver.key(RIGHT_CONTROL, true)?;
+        driver.key(RIGHT_CONTROL, false)?;
+        let converted = driver.wait_change(&typed);
+        driver.check("conversion key tap", (converted.as_str(), driver.group()) == ("the руддщ", 1), &format!("{typed:?} became {converted:?}"));
+        driver.chord('e', &[RIGHT_CONTROL])?;
+        std::thread::sleep(Duration::from_millis(500));
+        let kept = driver.value();
+        driver.check("right control with a letter", (kept.as_str(), driver.group()) == ("the руддщ", 1), &format!("{kept:?}, group {}", driver.group()));
+        Ok(())
+    }
+
     /// A function key is a hotkey by its name: F13 pauses the program here, and F13 again lets it go on.
     fn function_key(driver: &Driver, root: &Path) -> Result<(), String> {
         let enabled = |wanted: bool| wait_for(CHANGE_DEADLINE, || (SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted)).then_some(())).is_some();
@@ -876,6 +896,8 @@ mod scenario {
         }
         // The pause hotkey is a function key (`function_key`).
         settings.write(HOTKEYS_TOGGLE, "F13".to_owned(), true).map_err(|error| format!("{error:?}"))?;
+        // The conversion key is Right Control (`convert_key`).
+        settings.write(DETECTION_CONVERT_LAST_KEY, "Control_R".to_owned(), true).map_err(|error| format!("{error:?}"))?;
         let mut child: Child = Command::new(binary).arg("--hidden").env("KEYSWITCH_CONFIG_DIR", root.join("config")).env("KEYSWITCH_DATA_DIR", root.join("data")).spawn().map_err(|error| error.to_string())?;
         std::thread::sleep(PROGRAM_STARTS);
         let document = root.join("document.txt").to_string_lossy().into_owned();
@@ -894,6 +916,7 @@ mod scenario {
             words(&driver)?;
             conversion(&driver)?;
             layout_key(&driver)?;
+            convert_key(&driver)?;
             function_key(&driver, &root)?;
             driver.release_modifiers()?;
             let _ = child.kill();

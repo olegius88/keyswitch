@@ -136,12 +136,18 @@ pub const HOTKEY_SELECTION_TRANSLITERATE: &str = "selection_transliterate";
 /// would also toggle capitals).
 pub const DEFAULT_LAYOUT_SWITCH_KEY: &str = "";
 pub const LAYOUT_SWITCH_KEYS: [&str; 4] = ["Shift_L", "Shift_R", "Control_L", "Control_R"];
+/// `detection.convert_last_key`: the modifier that does what the conversion hotkey (`hotkeys.convert_last`) does when it is
+/// pressed and released alone, from the keys `detection.layout_switch_key` offers, or empty for none, the default. One key
+/// is never both: the settings windows refuse it, and the engine leaves a file that names one key twice to the layout
+/// switch key.
+pub const DEFAULT_CONVERT_LAST_KEY: &str = "";
+pub const CONVERT_LAST_KEYS: [&str; 4] = LAYOUT_SWITCH_KEYS;
 /// `general.hints`: the one-time hints about what the program can do (`ks_ui::hints`). A settings file written before
 /// it existed gains it from the defaults, as the selection hotkeys do.
 pub const HINTS_SETTING: &str = "general.hints";
 /// Settings the Python program never had. Each default leaves the engine as the Python's was, so the traces of the
 /// Python's engine hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
-pub const SETTINGS_SINCE_PYTHON: [&str; 2] = ["detection.layout_switch_key", HINTS_SETTING];
+pub const SETTINGS_SINCE_PYTHON: [&str; 3] = [DETECTION_LAYOUT_SWITCH_KEY.path(), DETECTION_CONVERT_LAST_KEY.path(), HINTS_SETTING];
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
@@ -192,6 +198,7 @@ macro_rules! for_each_setting {
             DETECTION_CORRECT_ON_PUNCTUATION, DetectionCorrectOnPunctuation, bool, "detection.correct_on_punctuation";
             DETECTION_RESPECT_MANUAL_LAYOUT, DetectionRespectManualLayout, bool, "detection.respect_manual_layout";
             DETECTION_LAYOUT_SWITCH_KEY, DetectionLayoutSwitchKey, String, "detection.layout_switch_key";
+            DETECTION_CONVERT_LAST_KEY, DetectionConvertLastKey, String, "detection.convert_last_key";
             DETECTION_FIX_DOUBLE_CAPITALS, DetectionFixDoubleCapitals, bool, "detection.fix_double_capitals";
             DETECTION_AGGRESSIVE, DetectionAggressive, bool, "detection.aggressive";
             DETECTION_CONTEXT_AWARE, DetectionContextAware, bool, "detection.context_aware";
@@ -232,7 +239,7 @@ pub use shipped::DEFAULT_SETTINGS;
 mod shipped {
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "the shipped settings are the literal JSON of the file they seed")]
 use super::{
-    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
+    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_CONVERT_LAST_KEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
     DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SELECTION_CASE_HOTKEY,
     DEFAULT_SELECTION_LAYOUT_HOTKEY, DEFAULT_SELECTION_TRANSLITERATE_HOTKEY, HOTKEY_CONVERT_LAST, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT,
     HOTKEY_SELECTION_TRANSLITERATE, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
@@ -272,6 +279,7 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
             "correct_on_punctuation": true,
             "respect_manual_layout": true,
             "layout_switch_key": DEFAULT_LAYOUT_SWITCH_KEY,
+            "convert_last_key": DEFAULT_CONVERT_LAST_KEY,
             // A word kept in its layout and typed with two capitals at its start (`ПРивет`, `HEllo`) gets
             // its second letter lowercase when the lexicon knows the word so written (engine fix_double_capitals).
             "fix_double_capitals": true,

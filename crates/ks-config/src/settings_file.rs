@@ -1163,8 +1163,10 @@ mod tests {
         let defaults = default_settings(Some("linux"));
         let python = without_settings_since_python(&defaults);
         assert!(defaults["detection"].get("layout_switch_key").is_some());
+        assert_eq!(defaults["detection"].get("convert_last_key"), Some(&json!("")));
         assert!(defaults["general"].get("hints").is_some());
         assert!(python["detection"].get("layout_switch_key").is_none());
+        assert!(python["detection"].get("convert_last_key").is_none());
         assert!(python["general"].get("hints").is_none());
         // The hash the traces of the Python's engine name its defaults by.
         assert_eq!(defaults_sha256(&python), "bb6151bb4466c9d4f0e156483a52bf40135d7bdd01b62ae115553caf66ecfe9f");

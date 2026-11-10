@@ -28,7 +28,10 @@ mod word_parts;
 pub use decide::WordOptions;
 pub use logging::WordEvaluation;
 pub use handle::KeySwitchEngine;
-pub use layout_tap::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE, LAYOUT_TAP_SOURCE};
+pub use layout_tap::{
+    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS,
+    LAYOUT_SWITCH_KEY_TITLE, LAYOUT_TAP_SOURCE, single_key_conflict,
+};
 pub use shared::{Command, QueueItem, Shared};
 pub use types::*;
 
@@ -119,7 +122,8 @@ pub struct EngineCore {
     pub pressed: HashSet<u32>,
     pub pressed_since: Vec<(u32, f64)>,
     pub modifier_keycodes: HashSet<u32>,
-    /// A lone press of the layout switch key, until it comes up or anything else happens (`layout_tap`).
+    /// A lone press of the layout switch key or the conversion key, until it comes up or anything else happens
+    /// (`layout_tap`).
     pub layout_tap: Option<LayoutTap>,
     pub symbol_strokes: Strokes,
     pub mention_shown: Option<Stroke>,

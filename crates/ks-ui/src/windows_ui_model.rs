@@ -6,7 +6,7 @@ use ks_cast::To as _;
 use std::fmt;
 
 use ks_config::app_quirks::MENTION_HEADS;
-use ks_config::constants::HINTS_SETTING;
+use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, HINTS_SETTING, HOTKEYS_CONVERT_LAST};
 use ks_config::history::HistoryEntry;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::LogStatus;
@@ -19,7 +19,10 @@ use ks_engine::constants::{
     FIELD_CATCH_UP_CHOICES, MINIMUM_WORD_LENGTH_SETTING_MAX, MINIMUM_WORD_LENGTH_SETTING_MIN, PAUSE_DELAY_SETTING_MAX_SECONDS,
     PAUSE_DELAY_SETTING_MIN_SECONDS, PREFIX_MIN_CHARACTERS, SELECTION_HOTKEYS, UNDO_AVAILABLE_WINDOW_SECONDS,
 };
-use ks_engine::engine::{LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE};
+use ks_engine::engine::{
+    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, HotkeyProblem, LAYOUT_SWITCH_KEY_DESCRIPTION,
+    LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE,
+};
 use ks_engine::rule_editor::{action_text, condition_text, other_layout_text};
 use ks_text::pystr;
 use ks_text::russian_text::{HOURS, SECONDS, quantity};
@@ -355,6 +358,10 @@ pub fn hotkey_settings() -> Vec<SettingSpec> {
              переключения для этого слова.",
             Text,
         ),
+        choice(
+            spec(DETECTION_CONVERT_LAST_KEY.path(), CONVERT_LAST_KEY_TITLE, &format!("{CONVERT_LAST_KEY_DESCRIPTION}."), Choice),
+            &CONVERT_LAST_KEY_LABELS,
+        ),
         spec(
             "hotkeys.undo",
             "Отменить исправление",
@@ -582,6 +589,17 @@ pub fn catalog_label(name: &str, identifier: &str) -> String {
 }
 
 // --------------------------------------------------------------------------------------------- status and listings
+
+/// What the settings window says of a hotkey that can never fire (`ks_engine::engine::Hotkey::problem`) typed for the
+/// setting at `path`. A modifier alone typed for the conversion hotkey gets where such a key can be chosen for it.
+#[must_use]
+pub fn hotkey_problem_text(path: &str, problem: &HotkeyProblem) -> String {
+    let message = problem.message();
+    if *problem == HotkeyProblem::NoKey && path == HOTKEYS_CONVERT_LAST.path() {
+        return format!("{message}. Одиночный левый или правый Ctrl либо Shift для этой команды выбирается в настройке «{CONVERT_LAST_KEY_TITLE}»");
+    }
+    message
+}
 
 /// Whether a setting is a hotkey: its text is checked before it is stored (`ks_engine::engine::Hotkey::problem`).
 #[must_use]
@@ -897,6 +915,19 @@ mod tests {
     }
 
     #[test]
+    fn a_modifier_alone_for_the_conversion_hotkey_is_told_where_a_single_key_is_chosen() {
+        let alone = hotkey_problem_text("hotkeys.convert_last", &HotkeyProblem::NoKey);
+        assert_eq!(
+            alone,
+            "Сочетанию нужна обычная клавиша: одни Ctrl, Alt, Shift и Super не срабатывают. Например, Ctrl+Alt+K. Одиночный левый или \
+             правый Ctrl либо Shift для этой команды выбирается в настройке «Преобразовать последнее слово одной клавишей»"
+        );
+        // Another hotkey, another problem: the message alone.
+        assert_eq!(hotkey_problem_text("hotkeys.toggle", &HotkeyProblem::NoKey), HotkeyProblem::NoKey.message());
+        assert_eq!(hotkey_problem_text("hotkeys.convert_last", &HotkeyProblem::SeveralKeys), HotkeyProblem::SeveralKeys.message());
+    }
+
+    #[test]
     fn the_settings_window_names_its_version() {
         assert_eq!(settings_window_title("0.71.2"), "KeySwitch 0.71.2");
     }
@@ -967,7 +998,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 18 + 1 + 6 + 7 + 11 + 2 + 1 + 1);
+        assert_eq!(count, 18 + 1 + 6 + 8 + 11 + 2 + 1 + 1);
     }
 
     #[test]
@@ -987,10 +1018,16 @@ mod tests {
         assert!(find(&hotkeys, "hotkeys.undo").description.ends_with("Доступно 10 секунд после исправления."));
         assert!(find(&update_settings(), "updates.check_automatically").description.ends_with("раз в 6 часов."));
         assert!(find(&autocorrection_settings(), "detection.early_switch_min_length").description.contains("значение 3 действует"));
-        assert_eq!(hotkeys.len(), 7);
+        assert_eq!(hotkeys.len(), 8);
         let tap = find(&hotkeys, "detection.layout_switch_key");
         assert_eq!((tap.kind, control_text(tap, Some(&json!(""))), control_text(tap, Some(&json!("Shift_L")))), (Choice, "Выключено".to_owned(), "Левый Shift".to_owned()));
         assert_eq!(choice_value(tap, "Правый Ctrl"), "Control_R");
+        // The conversion key offers the same keys, right after the conversion hotkey.
+        let convert = find(&hotkeys, "detection.convert_last_key");
+        assert_eq!((convert.kind, &convert.choices, convert.title.as_str()), (Choice, &tap.choices, "Преобразовать последнее слово одной клавишей"));
+        let place = |path: &str| hotkeys.iter().position(|spec| spec.path == path).unwrap();
+        assert_eq!(place("detection.convert_last_key"), place("hotkeys.convert_last") + 1);
+        assert!(convert.description.starts_with("Нажатие и отпускание выбранной клавиши") && convert.description.ends_with("с удалённого компьютера."));
         // The texts name the conversion hotkey of this system: Pause has no key on a Mac.
         let named = |path: &str| find(&autocorrection_settings(), path).description.contains(&format!("{CONVERT_HOTKEY_NAME} "));
         assert!(named("detection.hold_after_caret_move") && CONVERT_HOTKEY_NAME == if cfg!(target_os = "macos") { "Control+Option+K" } else { "Pause" });

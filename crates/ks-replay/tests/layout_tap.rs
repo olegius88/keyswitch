@@ -1,14 +1,20 @@
 //! A modifier pressed and released alone switches the layout (`detection.layout_switch_key`): what is a tap and what is
-//! not, what the engine books for it, and that nothing changes while no key is set.
+//! not, what the engine books for it, and that nothing changes while no key is set. A tap of the conversion key
+//! (`detection.convert_last_key`) does what the conversion hotkey does, and one key is never both.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use std::sync::Arc;
 
 use ks_backend::KeyEvent;
 use ks_backend::constants::{CONTROL_MASK, SHIFT_MASK};
+use ks_config::config::SettingsStore;
+use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, DETECTION_LAYOUT_SWITCH_KEY, DETECTION_LEARNING, ENABLED, EXCLUSIONS_APPLICATIONS};
 use ks_config::learning::RuleAction;
-use ks_engine::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LAYOUT_TAP_MAX_SECONDS, STALE_PRESS_SECONDS};
-use ks_engine::engine::{CorrectionPlan, EngineSnapshot, FieldWait, LAYOUT_TAP_SOURCE, LearningPrompt, QueueItem, Shared};
+use ks_engine::constants::{DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, ENGINE_EVENT_QUEUE_MAX_SIZE, LAYOUT_TAP_MAX_SECONDS, STALE_PRESS_SECONDS};
+use ks_engine::engine::{
+    CONVERT_LAST_KEY_TITLE, CorrectionPlan, EngineSnapshot, ExecutedPlan, FieldWait, LAYOUT_SWITCH_KEY_TITLE, LAYOUT_TAP_SOURCE, LearningPrompt,
+    QueueItem, Shared, TapAction, single_key_conflict,
+};
 use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 use serde_json::json;
 
@@ -44,6 +50,11 @@ fn down(session: &mut Session, name: &str) {
 fn up(session: &mut Session, name: &str) {
     let event = modifier(session, name, false);
     session.handle(event);
+}
+
+/// Pause, the conversion hotkey.
+fn pause(pressed: bool) -> KeyEvent {
+    KeyEvent { pressed, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), characters: vec![String::new(), String::new()], ..KeyEvent::default() }
 }
 
 /// A quick press and release of the key alone.
@@ -256,13 +267,6 @@ fn a_tap_is_the_chosen_key_alone_and_quick() {
     // 8. Shift pressed while Pause is down: Pause converts the word, and the Shift that came up after it is no tap.
     let mut converting = session(&mut bundle, "Shift_L");
     type_keys(&mut converting, "ghbdtn");
-    let pause = |pressed: bool| KeyEvent {
-        pressed,
-        keycode: PAUSE_KEYCODE,
-        key_name: "Pause".to_owned(),
-        characters: vec![String::new(), String::new()],
-        ..KeyEvent::default()
-    };
     converting.handle(pause(true));
     down(&mut converting, "Shift_L");
     converting.handle(pause(false));
@@ -510,3 +514,283 @@ fn a_turned_wheel_is_queued_only_while_a_key_is_set() {
     bundle.give_back(session);
     bundle.clean();
 }
+
+// ------------------------------------------------------------------------------------------------- the conversion key
+
+/// The conversion key of these tests, apart from the layout switch key of the tests above.
+const CONVERT_KEY: &str = "Control_R";
+
+fn convert_with(session: &mut Session, key: &str) {
+    session.core.settings.write(DETECTION_CONVERT_LAST_KEY, key.to_owned(), false).expect("in memory");
+}
+
+/// How the conversion is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asked {
+    /// A press of the conversion hotkey, Pause.
+    Hotkey,
+    /// A tap of the conversion key, its press with this state: Windows and macOS mark the press of Ctrl with Ctrl, X11 does not.
+    Tap(u32),
+}
+
+/// One ask, a press and a release as quick as `Session::tap` makes them, and the timers after it.
+fn ask(session: &mut Session, asked: Asked) {
+    match asked {
+        Asked::Hotkey => {
+            // A key comes with the layout it was pressed in.
+            let press = KeyEvent { group: session.backend.group(), ..pause(true) };
+            session.tap(press);
+        }
+        Asked::Tap(state) => {
+            let press = KeyEvent { state, ..modifier(session, CONVERT_KEY, true) };
+            session.handle(press);
+            session.advance(0.08);
+            up(session, CONVERT_KEY);
+            session.idle(0.0);
+        }
+    }
+}
+
+/// What a field ends with: its text, its layout, the offer of a rule, the layout kept for the next word, the layout the
+/// engine switched to, what the engine typed, the text the next word is read after and whether a word waits for it.
+type Outcome = (String, i32, Option<LearningPrompt>, Option<i64>, Option<i64>, Option<Vec<ExecutedPlan>>, String, bool);
+
+/// `typed` in EN, then `presses` asks `gap` seconds apart, in a field set up by `setup`.
+fn converted(bundle: &mut Bundle, asked: Asked, typed: &str, presses: usize, gap: f64, setup: fn(&SettingsStore)) -> Outcome {
+    let mut field = session(bundle, "");
+    convert_with(&mut field, CONVERT_KEY);
+    setup(&field.core.settings);
+    type_keys(&mut field, typed);
+    for press in 0..presses {
+        if press > 0 {
+            field.advance(gap);
+        }
+        ask(&mut field, asked);
+    }
+    field.idle(0.05);
+    let outcome = (
+        field.backend.text().iter().collect(),
+        field.backend.group(),
+        field.core.shared.learning_prompt(),
+        field.core.manual_layout_group,
+        field.core.engine_switch_group,
+        field.core.executed.clone(),
+        field.core.context_policy.stream.before_word(""),
+        field.core.context_waiting.is_some(),
+    );
+    bundle.give_back(field);
+    outcome
+}
+
+#[test]
+fn a_tap_of_the_conversion_key_does_what_the_conversion_hotkey_does() {
+    let mut bundle = Bundle::load(None);
+    let plain: fn(&SettingsStore) = |_| {};
+    let paused: fn(&SettingsStore) = |settings| settings.write(ENABLED, false, false).expect("in memory");
+    let excluded: fn(&SettingsStore) = |settings| settings.write(EXCLUSIONS_APPLICATIONS, vec!["firefox".to_owned()], false).expect("in memory");
+    let unlearning: fn(&SettingsStore) = |settings| settings.write(DETECTION_LEARNING, false, false).expect("in memory");
+    let quick = 0.1;
+    let slow = DOUBLE_CONVERT_PRESS_WINDOW_SECONDS + 0.2;
+    // The word being typed, a short word converted at its space while it waits for the next one, a finished word, a
+    // correction the engine made, nothing at all; one press, a double press, a third press, two presses too far apart;
+    // paused, in an excluded program, with the rules off.
+    let cases: [(&str, usize, f64, fn(&SettingsStore), &str, i32, bool); 13] = [
+        ("ghbdtn", 1, quick, plain, "привет", 1, false),
+        ("z ", 1, quick, plain, "z ", 0, false),
+        ("hello z ", 1, quick, plain, "hello я ", 1, false),
+        ("hello ", 1, quick, plain, "руддщ ", 1, false),
+        ("hello", 2, quick, plain, "руддщ", 1, true),
+        ("hello", 3, quick, plain, "hello", 0, false),
+        ("hello", 2, slow, plain, "hello", 0, false),
+        ("ghbdtn ", 2, quick, plain, "ghbdtn ", 0, true),
+        ("", 1, quick, plain, "", 1, false),
+        ("", 2, quick, plain, "", 0, true),
+        ("ghbdtn ", 1, quick, paused, "привет ", 1, false),
+        ("ghbdtn", 1, quick, excluded, "привет", 1, false),
+        ("hello", 2, quick, unlearning, "hello", 0, false),
+    ];
+    for (typed, presses, gap, setup, text, group, offered) in cases {
+        let by_hotkey = converted(&mut bundle, Asked::Hotkey, typed, presses, gap, setup);
+        for state in [0, CONTROL_MASK] {
+            let by_tap = converted(&mut bundle, Asked::Tap(state), typed, presses, gap, setup);
+            assert_eq!(by_tap, by_hotkey, "{typed:?} asked {presses} times {gap} s apart, state {state}");
+        }
+        assert_eq!((by_hotkey.0.as_str(), by_hotkey.1, by_hotkey.2.is_some()), (text, group, offered), "{typed:?} asked {presses} times {gap} s apart");
+    }
+    bundle.clean();
+}
+
+#[test]
+fn a_conversion_tap_is_the_chosen_key_alone_and_quick() {
+    let mut bundle = Bundle::load(None);
+    // `ghbdtn` in EN, the conversion key `key`, then `between`: the text and the layout after it.
+    let typed_then = |bundle: &mut Bundle, key: &str, between: &dyn Fn(&mut Session)| {
+        let mut field = session(bundle, "");
+        convert_with(&mut field, key);
+        type_keys(&mut field, "ghbdtn");
+        between(&mut field);
+        field.idle(0.05);
+        assert!(field.core.layout_tap.is_none());
+        let outcome = (field.backend.text().iter().collect::<String>(), field.backend.group());
+        bundle.give_back(field);
+        outcome
+    };
+    let kept = || ("ghbdtn".to_owned(), 0);
+    // The chosen key alone, quick: the word converts. Another key, a key not offered, none: nothing.
+    assert_eq!(typed_then(&mut bundle, CONVERT_KEY, &|field| tap_alone(field, CONVERT_KEY)), ("привет".to_owned(), 1));
+    for (key, tapped) in [(CONVERT_KEY, "Control_L"), ("Alt_L", "Alt_L"), ("", "Shift_L")] {
+        assert_eq!(typed_then(&mut bundle, key, &|field| tap_alone(field, tapped)), kept(), "{key} by {tapped}");
+    }
+    // Held too long; Ctrl+C with the chosen Ctrl; a click while it is held.
+    let held_long = |field: &mut Session| {
+        down(field, CONVERT_KEY);
+        field.advance(LAYOUT_TAP_MAX_SECONDS + 0.1);
+        up(field, CONVERT_KEY);
+    };
+    let copied = |field: &mut Session| {
+        down(field, CONVERT_KEY);
+        let letter = KeyEvent { state: CONTROL_MASK, character: String::new(), ..letter_event(field, 'c', true) };
+        field.tap(letter);
+        up(field, CONVERT_KEY);
+    };
+    let clicked = |field: &mut Session| {
+        down(field, CONVERT_KEY);
+        field.pointer();
+        up(field, CONVERT_KEY);
+    };
+    let disturbed: [&dyn Fn(&mut Session); 3] = [&held_long, &copied, &clicked];
+    for between in disturbed {
+        assert_eq!(typed_then(&mut bundle, CONVERT_KEY, between), kept());
+    }
+    // Another window came to the front while the key was down: the word stayed in the old one.
+    let mut moved = session(&mut bundle, "");
+    convert_with(&mut moved, CONVERT_KEY);
+    type_keys(&mut moved, "ghbdtn");
+    down(&mut moved, CONVERT_KEY);
+    moved.backend.focus(2, "telegram-desktop");
+    up(&mut moved, CONVERT_KEY);
+    assert!(moved.core.pending.is_none() && moved.core.executed.as_ref().is_some_and(Vec::is_empty));
+    assert_eq!((moved.backend.text().iter().collect::<String>(), moved.backend.group()), kept());
+    bundle.give_back(moved);
+    // Shift as the conversion key: Shift with a letter is a capital.
+    let capital = |field: &mut Session| {
+        down(field, "Shift_L");
+        let letter = KeyEvent { state: SHIFT_MASK, ..letter_event(field, 'H', true) };
+        field.tap(letter);
+        up(field, "Shift_L");
+    };
+    assert_eq!(typed_then(&mut bundle, "Shift_L", &capital), ("ghbdtnH".to_owned(), 0));
+    bundle.clean();
+}
+
+#[test]
+fn one_key_is_never_both_the_layout_switch_key_and_the_conversion_key() {
+    let mut bundle = Bundle::load(None);
+    // Two keys, each with its own action.
+    let mut both = session(&mut bundle, "Shift_L");
+    convert_with(&mut both, CONVERT_KEY);
+    assert_eq!((both.core.tap_action("Shift_L"), both.core.tap_action(CONVERT_KEY), both.core.tap_action("Control_L")), (Some(TapAction::SwitchLayout), Some(TapAction::ConvertLast), None));
+    type_keys(&mut both, "ghbdtn");
+    tap_alone(&mut both, CONVERT_KEY);
+    assert_eq!((both.backend.text().iter().collect::<String>(), both.backend.group()), ("привет".to_owned(), 1));
+    tap_alone(&mut both, "Shift_L");
+    assert_eq!(both.backend.group(), 0);
+    bundle.give_back(both);
+    // A file edited by hand that names one key in both: the key switches the layout, and the word typed stays as it is.
+    let mut twice = session(&mut bundle, "Shift_L");
+    convert_with(&mut twice, "Shift_L");
+    assert_eq!((twice.core.layout_switch_key(), twice.core.convert_last_key()), (Some("Shift_L"), None));
+    type_keys(&mut twice, "ghbdtn");
+    tap_alone(&mut twice, "Shift_L");
+    assert_eq!((twice.backend.text().iter().collect::<String>(), twice.backend.group(), twice.core.strokes.len()), ("ghbdtn".to_owned(), 1, 6));
+    bundle.give_back(twice);
+    // The key chosen for the other action while it was down: no tap of either.
+    let mut rechosen = session(&mut bundle, "");
+    convert_with(&mut rechosen, CONVERT_KEY);
+    type_keys(&mut rechosen, "ghbdtn");
+    down(&mut rechosen, CONVERT_KEY);
+    convert_with(&mut rechosen, "");
+    rechosen.core.settings.write(DETECTION_LAYOUT_SWITCH_KEY, CONVERT_KEY.to_owned(), false).expect("in memory");
+    up(&mut rechosen, CONVERT_KEY);
+    assert_eq!((rechosen.backend.text().iter().collect::<String>(), rechosen.backend.group()), ("ghbdtn".to_owned(), 0));
+    // The settings windows refuse a key the other setting has, saying which and where.
+    let settings = &rechosen.core.settings;
+    let refused = single_key_conflict(settings, DETECTION_CONVERT_LAST_KEY.path(), CONVERT_KEY);
+    assert_eq!(
+        refused.as_deref(),
+        Some("Правый Ctrl уже выбран в настройке «Переключать раскладку одной клавишей»: одна клавиша не может и переключать раскладку, и преобразовывать слово. Выберите другую клавишу или сначала выключите её там")
+    );
+    convert_with(&mut rechosen, "Shift_R");
+    let settings = &rechosen.core.settings;
+    let refused = single_key_conflict(settings, DETECTION_LAYOUT_SWITCH_KEY.path(), "Shift_R").expect("the conversion key has it");
+    assert!(refused.starts_with("Правый Shift уже выбран в настройке") && refused.contains(&format!("«{CONVERT_LAST_KEY_TITLE}»")), "{refused}");
+    assert!(!refused.contains(LAYOUT_SWITCH_KEY_TITLE), "{refused}");
+    // No key, a free key, a setting of another kind: nothing to say.
+    for (path, key) in [(DETECTION_CONVERT_LAST_KEY.path(), ""), (DETECTION_CONVERT_LAST_KEY.path(), "Shift_L"), (DETECTION_LAYOUT_SWITCH_KEY.path(), "Control_L"), (ENABLED.path(), CONVERT_KEY)] {
+        assert_eq!(single_key_conflict(settings, path, key), None, "{path} {key}");
+    }
+    bundle.give_back(rechosen);
+    bundle.clean();
+}
+
+#[test]
+fn a_turned_wheel_is_queued_while_only_the_conversion_key_is_set() {
+    let mut bundle = Bundle::load(None);
+    let session = bundle.session("firefox", 0, Vec::new());
+    let settings = session.core.settings.clone();
+    let shared = Shared::new(settings.clone(), session.core.backend.clone(), session.core.clock.clone(), 2, EngineSnapshot::default());
+    settings.write(DETECTION_CONVERT_LAST_KEY, "Shift_R".to_owned(), false).expect("in memory");
+    shared.refresh_hook_settings();
+    shared.enqueue(KeyEvent::wheel(1));
+    assert_eq!((shared.qsize(), shared.typed_events.load(std::sync::atomic::Ordering::Relaxed)), (1, 0));
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
+fn a_tap_made_while_the_word_waits_to_be_converted_is_answered_after_it() {
+    let mut bundle = Bundle::load(None);
+    // `hello` and a first ask, the keys `queued` waiting behind it when it is answered, then those keys: the text, and
+    // whether a rule is offered.
+    let mut converted_with = |asked: Asked, queued: &dyn Fn(&Session) -> Vec<KeyEvent>| {
+        let mut field = session(&mut bundle, "");
+        convert_with(&mut field, CONVERT_KEY);
+        type_keys(&mut field, "hello");
+        let (press, release) = match asked {
+            Asked::Hotkey => (KeyEvent { group: field.backend.group(), ..pause(true) }, KeyEvent { group: field.backend.group(), ..pause(false) }),
+            Asked::Tap(state) => (KeyEvent { state, ..modifier(&field, CONVERT_KEY, true) }, modifier(&field, CONVERT_KEY, false)),
+        };
+        field.handle(press);
+        for key in queued(&field) {
+            // The hook passes each key on to the window as it queues it.
+            field.backend.type_key(&key);
+            assert!(field.core.shared.put_nowait(QueueItem::Key(Arc::new(key))));
+        }
+        field.handle(release);
+        while let Some(QueueItem::Key(key)) = field.core.shared.get_nowait() {
+            field.handle(KeyEvent::clone(&key));
+        }
+        field.idle(0.05);
+        let outcome = (field.backend.text().iter().collect::<String>(), field.core.shared.learning_prompt().is_some());
+        bundle.give_back(field);
+        outcome
+    };
+    // A second press and its release, both in before the first is answered: the double press, either way.
+    let hotkey_again = |field: &Session| vec![KeyEvent { group: field.backend.group(), ..pause(true) }, KeyEvent { group: field.backend.group(), ..pause(false) }];
+    let tap_again = |field: &Session| vec![modifier(field, CONVERT_KEY, true), modifier(field, CONVERT_KEY, false)];
+    assert_eq!(converted_with(Asked::Hotkey, &hotkey_again), ("руддщ".to_owned(), true));
+    assert_eq!(converted_with(Asked::Tap(0), &tap_again), ("руддщ".to_owned(), true));
+    // A letter typed after them goes with the word and comes back after it, as after the hotkey.
+    let hotkey_then_letter = |field: &Session| [hotkey_again(field), vec![letter_event(field, 'a', true)]].concat();
+    let tap_then_letter = |field: &Session| [tap_again(field), vec![letter_event(field, 'a', true)]].concat();
+    let by_hotkey = converted_with(Asked::Hotkey, &hotkey_then_letter);
+    assert_eq!(converted_with(Asked::Tap(0), &tap_then_letter), by_hotkey);
+    assert!(by_hotkey.0.starts_with("руддщ"), "{by_hotkey:?}");
+    // The conversion key still down, or another modifier: the word is left alone, as with any modifier behind a correction.
+    let still_down = |field: &Session| vec![modifier(field, CONVERT_KEY, true)];
+    let another = |field: &Session| vec![modifier(field, "Shift_L", true), modifier(field, "Shift_L", false)];
+    assert_eq!(converted_with(Asked::Tap(0), &still_down), ("hello".to_owned(), false));
+    assert_eq!(converted_with(Asked::Tap(0), &another), ("hello".to_owned(), false));
+    bundle.clean();
+}
+

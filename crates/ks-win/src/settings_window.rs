@@ -23,7 +23,7 @@ use ks_config::history::{HistoryStore, data_dir};
 use ks_config::indicator::layout_label;
 use ks_config::logsetup::{self, log_directory, log_path, log_status, rotation_summary};
 use ks_engine::EngineSnapshot;
-use ks_engine::engine::Hotkey;
+use ks_engine::engine::{Hotkey, single_key_conflict};
 use ks_engine::engine_loader::{DeferredEngine, LOADING_ACTION};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_rule};
 use ks_ui::hints::{Click, HintView, Place, SettingsPage};
@@ -57,7 +57,7 @@ use crate::win32_controls::{self as w32, Brushes, Fonts, MessageKind, Themed, sc
 use crate::windows_backend::key_name_exists;
 use crate::windows_native::wide;
 use crate::windows_system::{WindowsApplicationCatalog, open_directory};
-use crate::windows_ui_model::{is_hotkey_setting, settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
+use crate::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ID_BASE: usize = 1000;
@@ -1267,7 +1267,21 @@ impl Ui {
         let title = self.settings_controls.borrow()[index].title;
         let stored = match spec.kind {
             ControlKind::Bool => Some(Value::Bool(w32::is_checked(title))),
-            ControlKind::Choice => w32::combo_selected_text(control).map(|label| Value::String(choice_value(&spec, &label))),
+            ControlKind::Choice => {
+                let chosen = w32::combo_selected_text(control).map(|label| choice_value(&spec, &label));
+                let problem = chosen.as_deref().and_then(|key| single_key_conflict(self.settings(), &spec.path, key));
+                if let Some(problem) = problem {
+                    // A key the other setting of a lone tap has is not stored: the list takes back what it had, and the
+                    // window says why once the list has finished with its change.
+                    w32::combo_select_text(control, &control_text(&spec, self.settings().get(&spec.path).as_ref()));
+                    *self.hotkey_problem.borrow_mut() = Some(problem);
+                    // SAFETY: a message posted to this window, which lives as long as the program.
+                    unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.window, WM_APP_HOTKEY_PROBLEM, 0, 0) };
+                    None
+                } else {
+                    chosen.map(Value::String)
+                }
+            }
             ControlKind::Int | ControlKind::Float => if let Some((value, shown)) = parse_number(&spec, &w32::text_of(control)) {
                 w32::set_text(control, &shown);
                 Some(value)
@@ -1284,7 +1298,7 @@ impl Ui {
                     // A hotkey that can never fire is not stored: the field takes back what it had, and the window says
                     // why once this field has let the keyboard go (a box opened from inside the loss of focus fights it).
                     w32::set_text(control, &control_text(&spec, self.settings().get(&spec.path).as_ref()));
-                    *self.hotkey_problem.borrow_mut() = Some(problem.message());
+                    *self.hotkey_problem.borrow_mut() = Some(hotkey_problem_text(&spec.path, &problem));
                     // SAFETY: a message posted to this window, which lives as long as the program.
                     unsafe { windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(self.window, WM_APP_HOTKEY_PROBLEM, 0, 0) };
                     None

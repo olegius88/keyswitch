@@ -2,7 +2,7 @@
 
 use super::logging::technical_event;
 use super::types::{Stroke, EngineSnapshot, CorrectionPlan, LearningPrompt, Hotkey, is_modifier_key, PROMPT_KEYS, Update};
-use super::layout_tap::configured_layout_switch_key;
+use super::layout_tap::{configured_convert_last_key, configured_layout_switch_key};
 use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, WHEEL_KEY_NAME};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
@@ -84,7 +84,7 @@ pub struct Shared {
     // Input other programs inject (remote control, macros) counts as typing
     // only with detection.injected_input; read by the hook, so cached here.
     injected_input: AtomicBool,
-    // Whether a layout switch key is set: only then is a turned wheel queued (`enqueue_wheel`).
+    // Whether a layout switch key or a conversion key is set: only then is a turned wheel queued (`enqueue_wheel`).
     layout_tap_enabled: AtomicBool,
     sensitive_context_window: AtomicI64,
     focus_window: AtomicI64,
@@ -175,7 +175,8 @@ impl Shared {
         let hotkeys = Arc::new(self.configured_hotkeys());
         *self.own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
         self.injected_input.store(self.flag("detection.injected_input", false), Ordering::Relaxed);
-        self.layout_tap_enabled.store(configured_layout_switch_key(&self.settings).is_some(), Ordering::Relaxed);
+        let tap_key_set = configured_layout_switch_key(&self.settings).is_some() || configured_convert_last_key(&self.settings).is_some();
+        self.layout_tap_enabled.store(tap_key_set, Ordering::Relaxed);
     }
 
     fn configured_action_keys(&self) -> u8 {
@@ -324,9 +325,10 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         }
     }
 
-    /// A turned wheel only ends a lone press of the layout switch key (`follow_layout_tap`). It is queued only while that
-    /// key is set, once for a run of turns, never in place of a key, and it is no typing (`typed_events` counts what the
-    /// hook saw during a correction, a wheel included would read as a key that went past it).
+    /// A turned wheel only ends a lone press of the layout switch key or the conversion key (`follow_layout_tap`). It is
+    /// queued only while such a key is set, once for a run of turns, never in place of a key, and it is no typing
+    /// (`typed_events` counts what the hook saw during a correction, a wheel included would read as a key that went past
+    /// it).
     fn enqueue_wheel(&self, event: KeyEvent) {
         if !self.layout_tap_enabled.load(Ordering::Relaxed) {
             return;
