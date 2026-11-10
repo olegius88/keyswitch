@@ -31,7 +31,7 @@ use ks_ui::windows_ui_model::{SettingSpec, update_settings};
 use ks_updates::{AutomaticInstallGate, SemanticVersion, UpdateError, UpdateRelease};
 
 use crate::constants::{
-    ARCHIVE_BUNDLE_NAME, BUNDLE_EXECUTABLE, BUNDLE_INFO_PLIST, CODESIGN_TOOL, DITTO_TOOL, FINISH_RIGHTS_ADMINISTRATOR, FINISH_RIGHTS_USER,
+    ARCHIVE_BUNDLE_NAME, BUNDLE_EXECUTABLE, BUNDLE_EXTENSION, BUNDLE_INFO_PLIST, CODESIGN_TOOL, DITTO_TOOL, FINISH_RIGHTS_ADMINISTRATOR, FINISH_RIGHTS_USER,
     FINISH_UPDATE_ARGUMENT, FINISH_WINDOW_HIDDEN, FINISH_WINDOW_SHOWN, ID_TOOL, INSTANCE_LOCK_FILE, KILL_TOOL, LSOF_TOOL, OPEN_TOOL, OSASCRIPT_TOOL,
     OWNER_WRITE_PERMISSION, PLIST_BUDDY_TOOL, TRANSLOCATION_MARKER, UPDATE_DOWNLOADS_FOLDER, UPDATE_FAILED_FOLDER, UPDATE_FAILED_VERSIONS_FILE,
     UPDATE_NEW_FOLDER, UPDATE_OLD_COPY_EXIT_TIMEOUT_SECONDS, UPDATE_PENDING_FILE, UPDATE_PENDING_STALE_SECONDS, UPDATE_POLL_INTERVAL_MS,
@@ -144,7 +144,7 @@ pub fn running_bundle(executable: &Path) -> Result<Bundle, UpdateError> {
     let named = |path: Option<&Path>, name: &str| path.and_then(Path::file_name).is_some_and(|found| found == name);
     let folder = executable.parent();
     let contents = folder.and_then(Path::parent);
-    let bundle = contents.and_then(Path::parent).filter(|bundle| bundle.extension().is_some_and(|extension| extension == "app"));
+    let bundle = contents.and_then(Path::parent).filter(|bundle| bundle.extension().is_some_and(|extension| extension == BUNDLE_EXTENSION));
     match bundle {
         Some(bundle) if named(folder, "MacOS") && named(contents, "Contents") => {
             Ok(Bundle { path: bundle.to_path_buf(), parent: bundle.parent().unwrap_or(Path::new("/")).to_path_buf() })

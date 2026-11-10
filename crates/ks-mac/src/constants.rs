@@ -284,6 +284,8 @@ pub const UPDATE_PREVIOUS_FOLDER: &str = "previous";
 pub const UPDATE_FAILED_FOLDER: &str = "failed";
 /// The application inside the archive of a release, as `packaging/build-rust-macos.sh` packs it.
 pub const ARCHIVE_BUNDLE_NAME: &str = "KeySwitch.app";
+/// The extension of an application bundle's name.
+pub const BUNDLE_EXTENSION: &str = "app";
 /// The executable and the property list inside a bundle.
 pub const BUNDLE_EXECUTABLE: &str = "Contents/MacOS/KeySwitch";
 pub const BUNDLE_INFO_PLIST: &str = "Contents/Info.plist";

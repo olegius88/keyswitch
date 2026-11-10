@@ -163,7 +163,7 @@ pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -
         };
     }
     let architecture = machine.to_lowercase();
-    if operating_system == "macos" || operating_system == "darwin" {
+    if matches!(operating_system.as_str(), "macos" | "darwin") {
         return match architecture.as_str() {
             "aarch64" | "arm64" => Some(UpdateTarget::MacArm64),
             "x86_64" => Some(UpdateTarget::MacX86_64),
