@@ -135,8 +135,14 @@ fn read_head<R: Read>(stdout: &mut BufReader<R>, url: &str) -> io::Result<Head> 
             match status {
                 None => status = Some(status_code(text).ok_or_else(|| malformed("a response without a status line"))?),
                 Some(_) => {
+                    // With two different `Location` lines in one response, curl 8.7.1 (macOS 13) follows the first and
+                    // curl 8.18 refuses the response: the first is the address, and two different ones fail here too.
                     if let Some(value) = location(text) {
-                        next = Some(value.to_owned());
+                        match &next {
+                            None => next = Some(value.to_owned()),
+                            Some(first) if first == value => {}
+                            Some(_) => return Err(malformed("a redirect names two different addresses")),
+                        }
                     }
                 }
             }
@@ -294,6 +300,8 @@ mod tests {
         // A redirect without an address is the final response.
         assert_eq!(head("HTTP/2 304 \r\n\r\n").unwrap(), Head::Body("https://start".to_owned()));
         assert_eq!(head("HTTP/2 404 \r\n\r\n").unwrap(), Head::Failed(404));
+        assert_eq!(head("HTTP/2 302 \r\nlocation: https://a\r\nlocation: https://a\r\n\r\nHTTP/2 200 \r\n\r\n").unwrap(), Head::Body("https://a".to_owned()));
+        assert!(head("HTTP/2 302 \r\nlocation: https://a\r\nlocation: https://b\r\n\r\n").unwrap_err().to_string().contains("two different addresses"));
         assert_eq!(head("").unwrap(), Head::Ended);
         assert_eq!(head("HTTP/2 200 \r\nx: y").unwrap(), Head::Ended);
         assert_eq!(head("\r\n").unwrap_err().kind(), io::ErrorKind::InvalidData);
