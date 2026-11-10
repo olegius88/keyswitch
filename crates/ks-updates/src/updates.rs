@@ -104,6 +104,8 @@ pub enum UpdateTarget {
     WindowsArm64,
     WindowsX86,
     UbuntuAmd64,
+    MacArm64,
+    MacX86_64,
 }
 
 impl UpdateTarget {
@@ -114,12 +116,21 @@ impl UpdateTarget {
             Self::WindowsArm64 => "windows-arm64",
             Self::WindowsX86 => "windows-x86",
             Self::UbuntuAmd64 => "ubuntu-amd64",
+            Self::MacArm64 => "macos-arm64",
+            Self::MacX86_64 => "macos-x86_64",
         }
     }
 
-    /// `KeySwitch` downloads and runs this target's installer itself; APT updates the package.
+    /// The update of this target is a Windows installer.
     #[must_use]
     pub fn windows_installer(self) -> bool {
+        matches!(self, Self::WindowsX64 | Self::WindowsArm64 | Self::WindowsX86)
+    }
+
+    /// `KeySwitch` downloads and installs this target's update itself: the installer on Windows, the archive of the
+    /// application on macOS. APT updates the Linux package.
+    #[must_use]
+    pub fn installs_itself(self) -> bool {
         self != Self::UbuntuAmd64
     }
 
@@ -127,6 +138,7 @@ impl UpdateTarget {
     pub fn asset_name(self, version: SemanticVersion) -> String {
         let architecture = match self {
             Self::UbuntuAmd64 => return format!("keyswitch_{version}_amd64.deb"),
+            Self::MacArm64 | Self::MacX86_64 => return format!("KeySwitch-{version}-{}.zip", self.value()),
             Self::WindowsX64 => "x64",
             Self::WindowsArm64 => "arm64",
             Self::WindowsX86 => "x86",
@@ -137,7 +149,8 @@ impl UpdateTarget {
 
 /// A Windows build updates with the installer of its own architecture, which the build script names after the
 /// platform the program was built for: an x86 build under WOW64 stays x86, an x64 one on an Arm PC stays x64. The
-/// machine is not asked, so builds of two architectures never share an install folder.
+/// machine is not asked, so builds of two architectures never share an install folder. A macOS build is told its
+/// processor the same way, by the build: an Intel build run by Rosetta on an Apple processor stays an Intel build.
 #[must_use]
 pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -> Option<UpdateTarget> {
     let operating_system = system.to_lowercase();
@@ -150,6 +163,13 @@ pub fn detect_update_target(system: &str, machine: &str, build_platform: &str) -
         };
     }
     let architecture = machine.to_lowercase();
+    if matches!(operating_system.as_str(), "macos" | "darwin") {
+        return match architecture.as_str() {
+            "aarch64" | "arm64" => Some(UpdateTarget::MacArm64),
+            "x86_64" => Some(UpdateTarget::MacX86_64),
+            _ => None,
+        };
+    }
     if operating_system == "linux" && (architecture == "amd64" || architecture == "x86_64") {
         return Some(UpdateTarget::UbuntuAmd64);
     }
@@ -318,6 +338,17 @@ fn is_windows_installer_name(name: &str) -> bool {
         Some((version, architecture)) => {
             matches!(architecture, "x64" | "arm64" | "x86") && parse_numbers(version).is_some()
         }
+        None => false,
+    }
+}
+
+/// Whether `name` is exactly the name of a `KeySwitch` macOS archive.
+fn is_macos_archive_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("KeySwitch-").and_then(|rest| rest.strip_suffix(".zip")) else {
+        return false;
+    };
+    match rest.split_once("-macos-") {
+        Some((version, architecture)) => matches!(architecture, "arm64" | "x86_64") && parse_numbers(version).is_some(),
         None => false,
     }
 }
@@ -491,16 +522,16 @@ impl ReleaseClient for GitHubReleaseClient {
     }
 }
 
-/// Delete the installers of earlier updates; each one is tens of megabytes.
+/// Delete the installers and archives of earlier updates; each one is tens of megabytes.
 ///
-/// Only files named exactly as a `KeySwitch` installer are touched. One that is still open is left for the next
-/// download to try again.
+/// Only files named exactly as a `KeySwitch` installer or macOS archive are touched. One that is still open is left
+/// for the next download to try again.
 pub fn remove_previous_installers(directory: &Path, keep: &str) -> io::Result<()> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if name != keep && is_windows_installer_name(name) {
+        if name != keep && (is_windows_installer_name(name) || is_macos_archive_name(name)) {
             let _ = fs::remove_file(entry.path());
         }
     }
@@ -569,6 +600,10 @@ pub type Job = Box<dyn FnOnce() + Send>;
 pub type BackgroundRunner = Arc<dyn Fn(Job) -> io::Result<()> + Send + Sync>;
 /// Starts the downloaded installer.
 pub type InstallRequest = Arc<dyn Fn(&Path) -> Result<(), UpdateError> + Send + Sync>;
+/// Asked before an automatic check installs a release by itself: `None` lets it, a message keeps the release announced
+/// with that message, to be installed when the user asks (a release that failed to start before, an install that
+/// needs the administrator's password).
+pub type AutomaticInstallGate = Arc<dyn Fn(&UpdateRelease) -> Option<String> + Send + Sync>;
 
 pub fn run_in_background(action: Job) -> io::Result<()> {
     thread::Builder::new().name("keyswitch-update".into()).spawn(action).map(|_| ())
@@ -602,6 +637,7 @@ struct Inner {
     client: Arc<dyn ReleaseClient>,
     runner: BackgroundRunner,
     install_request: Option<InstallRequest>,
+    automatic_install_gate: Option<AutomaticInstallGate>,
     state: Mutex<State>,
 }
 
@@ -624,6 +660,7 @@ impl UpdateManager {
                 client,
                 runner: default_runner(),
                 install_request: None,
+                automatic_install_gate: None,
                 state: Mutex::new(State { observers: Vec::new(), release: None, busy: false, closed: false, snapshot }),
             }),
         })
@@ -655,6 +692,11 @@ impl UpdateManager {
     #[must_use]
     pub fn with_install_request(self, request: InstallRequest) -> Self {
         self.rebuilt(|inner| inner.install_request = Some(request))
+    }
+
+    #[must_use]
+    pub fn with_automatic_install_gate(self, gate: AutomaticInstallGate) -> Self {
+        self.rebuilt(|inner| inner.automatic_install_gate = Some(gate))
     }
 
     #[must_use]
@@ -756,9 +798,12 @@ impl Inner {
         if !self.transition(available, None) {
             return;
         }
-        if automatic && install_automatically && target.windows_installer() {
-            self.download_worker(&release);
-            return;
+        if automatic && install_automatically && target.installs_itself() {
+            let Some(message) = self.automatic_install_gate.as_ref().and_then(|gate| gate(&release)) else {
+                self.download_worker(&release);
+                return;
+            };
+            self.transition(self.release_snapshot(UpdatePhase::Available, message, &release, 0), None);
         }
         self.set_busy(false);
     }
@@ -782,7 +827,9 @@ impl Inner {
             release,
             PROGRESS_COMPLETE_PERCENT,
         );
-        if !self.transition(installing, Some(false)) {
+        // The manager stays busy while the update installs: a check or a second install started meanwhile would race
+        // it for the same files. A failed install frees it (`installation_failed`); a good one ends the program.
+        if !self.transition(installing, None) {
             return;
         }
         let Some(request) = self.install_request.clone() else {
@@ -848,7 +895,7 @@ impl UpdateController for UpdateManager {
     fn install_available(&self) -> bool {
         let release = {
             let mut state = self.inner.lock();
-            let installable = self.inner.target.is_some_and(UpdateTarget::windows_installer);
+            let installable = self.inner.target.is_some_and(UpdateTarget::installs_itself);
             match &state.release {
                 Some(release) if !state.closed && !state.busy && installable => {
                     let release = release.clone();
@@ -904,10 +951,30 @@ impl UpdateChecks {
         Self::start_with(controller, check_automatically, UPDATE_CHECK_INITIAL_DELAY, UPDATE_CHECK_INTERVAL)
     }
 
-    /// `None` when the setting is off; the caller starts again when it turns on.
+    /// `None` when the setting is off; the caller starts again when it turns on. The checks only tell of a release.
     pub fn start_with(
         controller: Arc<dyn UpdateController>,
         check_automatically: impl Fn() -> bool + Send + 'static,
+        initial_delay: Duration,
+        interval: Duration,
+    ) -> Option<Self> {
+        Self::installing_with(controller, check_automatically, || false, initial_delay, interval)
+    }
+
+    /// The checks of a build that installs its updates itself: each one installs a release when
+    /// `install_automatically` says so at the time of the check.
+    pub fn installing(
+        controller: Arc<dyn UpdateController>,
+        check_automatically: impl Fn() -> bool + Send + 'static,
+        install_automatically: impl Fn() -> bool + Send + 'static,
+    ) -> Option<Self> {
+        Self::installing_with(controller, check_automatically, install_automatically, UPDATE_CHECK_INITIAL_DELAY, UPDATE_CHECK_INTERVAL)
+    }
+
+    pub fn installing_with(
+        controller: Arc<dyn UpdateController>,
+        check_automatically: impl Fn() -> bool + Send + 'static,
+        install_automatically: impl Fn() -> bool + Send + 'static,
         initial_delay: Duration,
         interval: Duration,
     ) -> Option<Self> {
@@ -928,12 +995,12 @@ impl UpdateChecks {
             if !wait(initial_delay) {
                 return;
             }
-            controller.check(true, false);
+            controller.check(true, install_automatically());
             if !check_automatically() {
                 return;
             }
             while wait(interval) {
-                controller.check(true, false);
+                controller.check(true, install_automatically());
             }
         });
         spawned.ok().map(|_| Self { cancel })

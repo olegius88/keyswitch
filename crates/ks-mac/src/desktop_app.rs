@@ -2,10 +2,10 @@
 #![cfg_attr(target_os = "macos", expect(unsafe_code, reason = "calls into the macOS system libraries"))]
 use ks_cast::To as _;
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::sync::{Arc, OnceLock, mpsc};
+use std::time::{Duration, Instant};
 
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
@@ -22,20 +22,23 @@ use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_ui::constants::HINT_TICK_INTERVAL_MS;
 use ks_ui::hints::{EngineInput, Hints, HintView, Moment, RUNNING_PLATFORM, SettingsPage, subscribe};
 use ks_ui::tray_model::{TrayAction, TrayState};
-use ks_ui::windows_ui_model::truthy;
+use ks_ui::windows_ui_model::{NoUpdates, truthy};
+use ks_updates::http_curl::CurlOpener;
+use ks_updates::{UpdateChecks, UpdateController, UpdateError, UpdateManager, UpdatePhase, UpdateSnapshot};
 use objc2::{class, msg_send};
 use serde_json::Value;
 
-use crate::constants::{BACKEND_LABEL, MACOS_PERMISSION_POLL_SECONDS, PANEL_SLOT};
+use crate::constants::{BACKEND_LABEL, INSTANCE_LOCK_FILE, MACOS_PERMISSION_POLL_SECONDS, PANEL_SLOT, UPDATE_WINDOW_QUERY_TIMEOUT_SECONDS};
 use crate::hint_panel::HintPanel;
 use crate::hint_place::{CaretAnchor, click_of};
-use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, SECOND_COPY_MESSAGE, resource_dir};
+use crate::macos_app::{PERMISSION_GRANTED_MESSAGE, PERMISSION_REQUEST_MESSAGE, SECOND_COPY_MESSAGE, VERSION, resource_dir};
 use crate::macos_backend::MacBackend;
 use crate::macos_context::MacFieldReader;
 use crate::macos_native::{NativeAccessibility, run_on_main, run_on_main_after};
 use crate::macos_objc::{Id, beep, notify};
 use crate::macos_system::MacAutostartManager;
 use crate::macos_tray_native::StatusItem;
+use crate::macos_update::{self, Bundle, Commands, InstallHost, Installer, SystemCommands, UpdateFiles};
 use crate::settings_window;
 
 const LOGGER: &str = "keyswitch.desktop_ui";
@@ -47,6 +50,7 @@ pub struct Services {
     pub learning: Arc<LearningStore>,
     pub engine: Arc<DeferredEngine>,
     pub backend: Arc<dyn InputBackend>,
+    pub updates: Arc<dyn UpdateController>,
 }
 
 struct App {
@@ -60,6 +64,10 @@ struct App {
     hint_clock: Instant,
     /// A tick of the hints is on its way.
     hint_tick_pending: bool,
+    /// The automatic update checks, while their setting is on.
+    update_checks: Option<UpdateChecks>,
+    /// The version the last notice of a found update was about: each version is announced once.
+    announced_update: String,
 }
 
 thread_local! {
@@ -196,8 +204,6 @@ fn sync_tray() {
     });
 }
 
-const INSTANCE_LOCK_FILE: &str = "keyswitch.lock";
-
 fn sync_autostart() {
     with_app(|app| {
         let settings = &app.services.settings;
@@ -246,7 +252,9 @@ fn apply_setting(path: &str, value: &Value) {
             with_app(|app| app.services.history.set_limit(history_limit(&app.services.settings.get("history.limit").unwrap_or(Value::Null))));
             sync_autostart();
             sync_indicator();
+            sync_update_schedule();
         }
+        "updates.check_automatically" => sync_update_schedule(),
         "general.autostart" | "general.start_hidden" => sync_autostart(),
         "appearance.show_indicator" => sync_indicator(),
         "history.limit" => {
@@ -306,7 +314,7 @@ pub fn quit() {
         std::process::exit(0);
     });
     std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_secs(ENGINE_STOP_WAIT_SECONDS));
+        std::thread::sleep(Duration::from_secs(ENGINE_STOP_WAIT_SECONDS));
         std::process::exit(0);
     });
 }
@@ -406,6 +414,84 @@ fn start_engine(engine: &Arc<DeferredEngine>) {
     }));
 }
 
+/// The automatic checks follow their setting: one timer while it is on, none while it is off. Each check installs a
+/// release by itself when `updates.install_automatically` says so at the time.
+fn sync_update_schedule() {
+    with_app(|app| {
+        app.update_checks = None;
+        let (check, install) = (app.services.settings.clone(), app.services.settings.clone());
+        app.update_checks = UpdateChecks::installing(
+            app.services.updates.clone(),
+            move || setting_bool(&check, "updates.check_automatically", true),
+            move || setting_bool(&install, "updates.install_automatically", true),
+        );
+    });
+}
+
+/// The Updates page follows the manager; a version found is announced once.
+fn apply_update_snapshot(snapshot: &UpdateSnapshot) {
+    settings_window::apply_update_snapshot(snapshot);
+    let announce = with_app(|app| {
+        let found = snapshot.phase == UpdatePhase::Available && app.announced_update != snapshot.available_version;
+        if found {
+            app.announced_update.clone_from(&snapshot.available_version);
+        }
+        found && setting_bool(&app.services.settings, "general.notifications", true)
+    });
+    if announce == Some(true) {
+        notify("Доступно обновление KeySwitch", &snapshot.message);
+    }
+}
+
+/// What an update needs of the running program: its engine stopped before the bundle is swapped and started again when
+/// the swap fails, whether the settings window is open, and its end.
+struct UpdateHost {
+    engine: Arc<DeferredEngine>,
+}
+
+impl InstallHost for UpdateHost {
+    fn stop_engine(&self) {
+        self.engine.stop();
+    }
+
+    fn start_engine(&self) {
+        let engine = self.engine.clone();
+        run_on_main(Box::new(move || start_engine(&engine)));
+    }
+
+    fn window_shown(&self) -> bool {
+        let (sender, receiver) = mpsc::channel();
+        run_on_main(Box::new(move || {
+            let _ = sender.send(settings_window::window_shown());
+        }));
+        receiver.recv_timeout(Duration::from_secs_f64(UPDATE_WINDOW_QUERY_TIMEOUT_SECONDS)).unwrap_or(false)
+    }
+
+    fn quit(&self) {
+        run_on_main(Box::new(quit));
+    }
+}
+
+/// The update manager over `curl`, installing with [`Installer`]; without a version it can read, one that finds nothing.
+fn update_controller(engine: Arc<DeferredEngine>, commands: Arc<dyn Commands>, files: UpdateFiles, executable: PathBuf, bundle: Result<Bundle, UpdateError>) -> Arc<dyn UpdateController> {
+    let process = std::process::id();
+    let gate = macos_update::automatic_install_gate(files.clone(), bundle, process);
+    let installer = Installer { commands, host: Arc::new(UpdateHost { engine }), files: files.clone(), executable, process, current_version: VERSION.to_owned() };
+    match UpdateManager::with_opener(VERSION, files.downloads, Arc::new(CurlOpener)) {
+        Ok(manager) => Arc::new(
+            manager
+                .with_install_request(Arc::new(move |archive: &Path| {
+                    installer.install(archive).inspect_err(|error| logsetup::error(LOGGER, &format!("Обновление не установлено: {error}")))
+                }))
+                .with_automatic_install_gate(gate),
+        ),
+        Err(error) => {
+            logsetup::warning(LOGGER, &format!("Обновления недоступны: {error}"));
+            Arc::new(NoUpdates { version: VERSION.to_owned() })
+        }
+    }
+}
+
 /// Two copies would both correct the same word and garble it, so a second one started directly (the system stops only
 /// those it starts itself) ends at once. The lock goes away with the process.
 fn only_copy() -> Result<Option<std::fs::File>, ()> {
@@ -464,12 +550,36 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let post: Post = Arc::new(run_on_main);
     let enabled = setting_bool(&settings, "enabled", true);
     let engine = DeferredEngine::new(build, learning.clone(), enabled, post, true);
-    let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input });
+    // The real path of the program: the bundle an update replaces is the one it runs from.
+    let executable = std::env::current_exe().and_then(std::fs::canonicalize).unwrap_or_default();
+    let files = UpdateFiles::new(&ks_config::history::data_dir());
+    let commands: Arc<dyn Commands> = Arc::new(SystemCommands);
+    let bundle = macos_update::running_bundle(&executable);
+    // The new copy of an update first says that it runs, which the helper waits for; the cleaning of the start then
+    // leaves the update's folders alone while it is under way.
+    let started_notice = macos_update::mark_started(&files, VERSION, std::process::id());
+    let update_notice = macos_update::startup(&files, bundle.as_ref().ok(), commands.now_seconds());
+    let updates = update_controller(engine.clone(), commands, files, executable, bundle);
+    let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input, updates: updates.clone() });
     // SAFETY: on the main thread, before anything else of AppKit.
     let application: Id = unsafe { msg_send![class!(NSApplication), sharedApplication] };
     let autostart = MacAutostartManager::new(None, None);
     let wants_caret = hints.caret_anchor_wanted();
-    APP.with(|slot| *slot.borrow_mut() = Some(App { services: services.clone(), permission: backend.clone(), tray: None, autostart, closing: false, hints, hint_panel: HintPanel::new(), hint_clock, hint_tick_pending: false }));
+    APP.with(|slot| {
+        *slot.borrow_mut() = Some(App {
+            services: services.clone(),
+            permission: backend.clone(),
+            tray: None,
+            autostart,
+            closing: false,
+            hints,
+            hint_panel: HintPanel::new(),
+            hint_clock,
+            hint_tick_pending: false,
+            update_checks: None,
+            announced_update: String::new(),
+        });
+    });
     settings_window::create(services.clone());
     let showing = setting_bool(&settings, "appearance.show_indicator", true);
     if showing {
@@ -481,6 +591,17 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
         run_on_main(Box::new(move || apply_setting(&path, &value)));
     }));
     services.history.subscribe(Arc::new(|| run_on_main(Box::new(settings_window::refresh_history))));
+    updates.subscribe(Arc::new(|snapshot: &UpdateSnapshot| {
+        let snapshot = snapshot.clone();
+        run_on_main(Box::new(move || apply_update_snapshot(&snapshot)));
+    }));
+    sync_update_schedule();
+    for (title, message) in [started_notice, update_notice].into_iter().flatten() {
+        // The outcome of an update is told whatever the setting of the notices of corrections says: it is news of the
+        // program itself, given once.
+        logsetup::info(LOGGER, &format!("{title}: {message}"));
+        notify(&title, &message);
+    }
     attach_engine(&services, wants_caret);
     if !granted {
         ask_for_permission(&backend);
