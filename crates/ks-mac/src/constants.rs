@@ -302,6 +302,27 @@ pub const OPEN_TOOL: &str = "/usr/bin/open";
 pub const LSOF_TOOL: &str = "/usr/sbin/lsof";
 pub const KILL_TOOL: &str = "/bin/kill";
 pub const ID_TOOL: &str = "/usr/bin/id";
+/// The tools the swap as root runs besides those above.
+pub const MKTEMP_TOOL: &str = "/usr/bin/mktemp";
+pub const DIRNAME_TOOL: &str = "/usr/bin/dirname";
+pub const MKDIR_TOOL: &str = "/bin/mkdir";
+pub const CHOWN_TOOL: &str = "/usr/sbin/chown";
+pub const STAT_TOOL: &str = "/usr/bin/stat";
+pub const CHMOD_TOOL: &str = "/bin/chmod";
+pub const MV_TOOL: &str = "/bin/mv";
+pub const RM_TOOL: &str = "/bin/rm";
+pub const RMDIR_TOOL: &str = "/bin/rmdir";
+pub const FIND_TOOL: &str = "/usr/bin/find";
+/// The only variable of the environment the password dialog's command gets: what runs as root takes nothing from ours.
+pub const CLEAN_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+/// How long `lsof` may take before its answer counts as none, and how often a program run with a limit is looked at.
+pub const LSOF_TIME_LIMIT_MS: u64 = 5000;
+pub const LIMITED_RUN_POLL_MS: u64 = 50;
+/// How many times the helper tries to start the program, and how long it waits between the tries.
+pub const OPEN_ATTEMPTS: u32 = 3;
+pub const OPEN_RETRY_MS: u64 = 1000;
+/// How long the processes of a version that did not start have to end after they are told to.
+pub const UPDATE_STOP_WAIT_SECONDS: u64 = 5;
 /// How long the helper waits for the old copy to end, for the new copy to take the lock, and how long the new copy has
 /// to keep it to count as started.
 pub const UPDATE_OLD_COPY_EXIT_TIMEOUT_SECONDS: u64 = 30;
@@ -316,6 +337,9 @@ pub const UPDATE_PENDING_STALE_SECONDS: u64 = 300;
 pub const UPDATE_FAILED_VERSIONS_FILE: &str = "failed-versions.txt";
 pub const UPDATE_RESULT_FILE: &str = "update-result.txt";
 pub const UPDATE_PENDING_FILE: &str = "update-pending.txt";
+/// The new copy of an update marks here that it runs; and where an old version that could not go back stays.
+pub const UPDATE_STARTED_FILE: &str = "update-started.txt";
+pub const UPDATE_STRANDED_FILE: &str = "update-stranded.txt";
 /// The folder of the downloads of updates, in the data folder.
 pub const UPDATE_DOWNLOADS_FOLDER: &str = "updates";
 /// The owner's write bit of a file's mode.

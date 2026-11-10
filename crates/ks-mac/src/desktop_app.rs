@@ -555,6 +555,9 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
     let files = UpdateFiles::new(&ks_config::history::data_dir());
     let commands: Arc<dyn Commands> = Arc::new(SystemCommands);
     let bundle = macos_update::running_bundle(&executable);
+    // The new copy of an update first says that it runs, which the helper waits for; the cleaning of the start then
+    // leaves the update's folders alone while it is under way.
+    let started_notice = macos_update::mark_started(&files, VERSION, std::process::id());
     let update_notice = macos_update::startup(&files, bundle.as_ref().ok(), commands.now_seconds());
     let updates = update_controller(engine.clone(), commands, files, executable, bundle);
     let services = Arc::new(Services { settings: settings.clone(), history, learning, engine: engine.clone(), backend: input, updates: updates.clone() });
@@ -593,7 +596,7 @@ pub fn run(hidden: bool, no_engine: bool) -> i32 {
         run_on_main(Box::new(move || apply_update_snapshot(&snapshot)));
     }));
     sync_update_schedule();
-    if let Some((title, message)) = update_notice {
+    for (title, message) in [started_notice, update_notice].into_iter().flatten() {
         // The outcome of an update is told whatever the setting of the notices of corrections says: it is news of the
         // program itself, given once.
         logsetup::info(LOGGER, &format!("{title}: {message}"));
