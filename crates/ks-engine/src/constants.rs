@@ -1,7 +1,7 @@
 //! The values the engine uses, each once, as in the Python's `constants` folder.
 
 pub use ks_backend::constants::{HOOK_GAP_MS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS, WHEEL_KEY_NAME};
-pub use ks_config::constants::{DEFAULT_LAYOUT_SWITCH_KEY, LAYOUT_SWITCH_KEYS};
+pub use ks_config::constants::{CONVERT_LAST_KEYS, DEFAULT_CONVERT_LAST_KEY, DEFAULT_LAYOUT_SWITCH_KEY, LAYOUT_SWITCH_KEYS};
 pub use ks_context::constants::{
     CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS, PREFIX_MAX_CHARACTERS,
@@ -70,10 +70,10 @@ pub const FIELD_CATCH_UP_RETRY_SECONDS: f64 = 0.025;
 pub const HOOK_SILENCE_MS: i64 = 10000;
 pub const INPUT_DELAY_REPORT_INTERVAL_SECONDS: f64 = 60.0;
 pub const LATE_STROKE_GRACE_SECONDS: f64 = 0.5;
-/// The layout switch key (`detection.layout_switch_key`) switches the layout when it comes up at most this long after it
-/// went down. Longer, it was held for something else: a click, a selection, a key the person thought better of. The
-/// window of a double press of the conversion hotkey (`DOUBLE_CONVERT_PRESS_WINDOW_SECONDS`) is as long: a quick press
-/// takes a person well under it.
+/// The layout switch key (`detection.layout_switch_key`) switches the layout, and the conversion key
+/// (`detection.convert_last_key`) converts, when it comes up at most this long after it went down. Longer, it was held for
+/// something else: a click, a selection, a key the person thought better of. The window of a double press of the
+/// conversion hotkey (`DOUBLE_CONVERT_PRESS_WINDOW_SECONDS`) is as long: a quick press takes a person well under it.
 pub const LAYOUT_TAP_MAX_SECONDS: f64 = 0.5;
 pub const LEARNING_PROMPT_TIMEOUT_SECONDS: f64 = 8.0;
 pub const MANUAL_RELEASE_TIMEOUT_SECONDS: f64 = 3.0;
@@ -100,3 +100,10 @@ pub const HOTKEY_SEVERAL_KEYS_MESSAGE: &str =
 pub const HOTKEY_UNKNOWN_KEY_MESSAGE: &str =
     "Клавиши «{key}» программа не знает. Буквы и цифры пишутся латиницей, например Ctrl+Alt+K";
 pub const HOTKEY_MESSAGE_KEY_PLACE: &str = "{key}";
+/// What the settings window says of a key chosen for a lone tap that the other such setting has already
+/// (`single_key_conflict`): `HOTKEY_MESSAGE_KEY_PLACE` stands for the key as the list names it, and
+/// `SINGLE_KEY_MESSAGE_SETTING_PLACE` for the title of the setting that has it.
+pub const SINGLE_KEY_TAKEN_MESSAGE: &str = "{key} уже выбран в настройке «{setting}»: одна клавиша не может и переключать \
+                                            раскладку, и преобразовывать слово. Выберите другую клавишу или сначала \
+                                            выключите её там";
+pub const SINGLE_KEY_MESSAGE_SETTING_PLACE: &str = "{setting}";

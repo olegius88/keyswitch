@@ -2,6 +2,8 @@
 //! stop that trace there; and the tool itself, run over folders it cannot read, with workers that die or cannot start.
 #![cfg(any(not(debug_assertions), coverage))]
 
+use ks_config::config::default_settings;
+use ks_config::constants::SETTINGS_SINCE_PYTHON;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{Read as _, Write as _};
@@ -91,9 +93,15 @@ fn cases() -> Vec<(&'static str, Value, &'static str, &'static str)> {
         ("settings-missing", with(&|trace| {
             trace["settings"].as_object_mut().expect("settings").remove("enabled");
         }), "not_run", "settings .enabled"),
-        // A trace that holds a setting the Python never had is no trace of the Python's: it is compared whole, and the
-        // defaults it names are the Python's.
-        ("settings-newer", with(&|trace| { trace["settings"]["detection"]["layout_switch_key"] = json!(""); trace["settings"]["general"]["hints"] = json!(true); }), "differed", "log: engine_initialized.settings.defaults_sha256"),
+        // A trace that holds the settings the Python never had, at their defaults, is no trace of the Python's: it is
+        // compared whole, and the defaults it names are the Python's.
+        ("settings-newer", with(&|trace| {
+            let defaults = Value::Object(default_settings(None));
+            for path in SETTINGS_SINCE_PYTHON {
+                let (table, name) = path.split_once('.').expect("a setting of a table");
+                trace["settings"][table][name] = defaults[table][name].clone();
+            }
+        }), "differed", "log: engine_initialized.settings.defaults_sha256"),
         ("engine-not-built", with(&|trace| trace["files"]["learning"] = json!(r#"{"rules": {"²:word": {"target_group": 1, "confirmations": 5}}}"#)), "differed", "panic: the engine was not built"),
         ("panic", steps(json!([{"k": "policy", "n": "model", "a": [], "io": [], "c": clock, "o": {}}])), "differed", "panic: index out of bounds"),
         ("step-kind", steps(json!([{"k": "strange", "n": "x", "a": [], "io": [], "c": clock, "o": {}}])), "not_run", "step kind strange"),

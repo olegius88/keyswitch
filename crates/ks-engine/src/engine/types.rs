@@ -44,8 +44,17 @@ pub(crate) fn is_action_boundary_key(name: &str) -> bool {
     ACTION_BOUNDARY_KEYS.contains(&name)
 }
 
-/// A lone press of the layout switch key (`detection.layout_switch_key`), from its first press until it comes up or anything
-/// else happens (`layout_tap`).
+/// What a lone tap of a modifier does: the setting the key is chosen in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapAction {
+    /// `detection.layout_switch_key`: the layout switches.
+    SwitchLayout,
+    /// `detection.convert_last_key`: what a press of the conversion hotkey does.
+    ConvertLast,
+}
+
+/// A lone press of the layout switch key (`detection.layout_switch_key`) or of the conversion key
+/// (`detection.convert_last_key`), from its first press until it comes up or anything else happens (`layout_tap`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutTap {
     pub keycode: u32,
@@ -53,6 +62,8 @@ pub struct LayoutTap {
     pub pressed_at: f64,
     /// The layout the press came with.
     pub group: i64,
+    /// The setting the key was chosen in when it went down.
+    pub action: TapAction,
 }
 
 /// What the focus probe found: another window, or one whose layout is moot.

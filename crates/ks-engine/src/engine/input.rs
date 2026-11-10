@@ -131,15 +131,19 @@ impl EngineCore {
             let window = self.focus_or_zero();
             self.context_policy.stream.focus(&application, window);
             self.log_input_edit(&event, &application);
+            // The conversion key going down is the conversion hotkey if it comes up alone, as Pause is, and no shortcut of
+            // its own, though Windows and macOS mark its press with its modifier: a key pressed with it is the shortcut,
+            // and that key's press says so here.
+            let conversion_key = self.tap_action(&event.key_name) == Some(TapAction::ConvertLast);
             if context_enabled {
-                let hotkey = ["toggle", "convert_last", "undo"].iter().chain(SELECTION_HOTKEYS.iter()).any(|name| self.matches_hotkey(name, &event));
+                let hotkey = conversion_key || ["toggle", "convert_last", "undo"].iter().chain(SELECTION_HOTKEYS.iter()).any(|name| self.matches_hotkey(name, &event));
                 if !hotkey {
                     self.context_policy.stream.observe(&event);
                 }
             } else {
                 self.context_policy.stream.clear();
             }
-            if event.key_name == "BackSpace" || event.control() || event.alt() || event.super_key() {
+            if event.key_name == "BackSpace" || (!conversion_key && (event.control() || event.alt() || event.super_key())) {
                 self.cancel_context_wait(if event.key_name == "BackSpace" { "backspace" } else { "modifier_shortcut" });
             }
         }

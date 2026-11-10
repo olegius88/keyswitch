@@ -210,7 +210,7 @@ impl EngineCore {
                     if key.synthetic {
                         kept.push(item.clone());
                     } else if is_modifier_key(&key.key_name) {
-                        if refusal.is_empty() {
+                        if refusal.is_empty() && !self.queued_conversion_tap(&queued, key) {
                             refusal = "modifier";
                         }
                         kept.push(item.clone());
