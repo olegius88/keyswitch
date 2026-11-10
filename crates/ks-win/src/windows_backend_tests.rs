@@ -1209,6 +1209,8 @@ fn a_failed_injection_still_types_the_held_keys_again() {
     // The batch fails after the switch: nothing was deleted either, and a restore that fails too keeps the original error.
     api.state().accept_switch = true;
     api.state().sent.clear();
+    // The key-down typed again came back through the hook, which counts the key as down.
+    subject.inner.hook.lock().unwrap().pressed.insert(VK_D);
     subject.hold_input();
     assert!(hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
     api.state().send_count = Some(0);
@@ -3035,4 +3037,28 @@ fn a_shift_the_user_holds_is_neither_pressed_again_for_a_capital_nor_left_down_f
         [(true, SCAN_CODE_LEFT_SHIFT), (true, key), (false, key), (false, SCAN_CODE_LEFT_SHIFT)]
     );
     assert_eq!(keys(&subject.inner.strokes_inputs([&small].into_iter(), true, Some(1))), [(true, key), (false, key)]);
+}
+
+/// The scan code of the left Ctrl.
+const SCAN_CODE_LEFT_CONTROL: u32 = 0x1D;
+
+#[test]
+fn a_key_up_of_a_key_never_seen_down_goes_through_a_hold_at_once() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.start(collecting(&delivered)).unwrap();
+    let hook = api.hook();
+    // A key down before the hold: its key-up waits behind the correction, as before.
+    assert!(!hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
+    subject.hold_input();
+    assert!(hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
+    // A key pressed during the hold keeps its key-up behind its key-down.
+    assert!(hook(native(true, VK_SHIFT, SCAN_CODE_LEFT_SHIFT, false, 12)));
+    assert!(hook(native(false, VK_SHIFT, SCAN_CODE_LEFT_SHIFT, false, 13)));
+    // The key-up of Ctrl that Windows sends when a window's layout changes was never down: it passes now.
+    assert!(!hook(native(false, VK_LCONTROL, SCAN_CODE_LEFT_CONTROL, false, 14)));
+    assert_eq!(subject.inner.hold.lock().unwrap().held.len(), 3);
+    assert_eq!(subject.release_input().unwrap(), 3);
+    subject.stop();
 }
