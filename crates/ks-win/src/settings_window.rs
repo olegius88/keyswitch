@@ -1774,11 +1774,11 @@ ks_config::learning::LearningError::Value(_)) => format!("Правило не с
         let ready = self.services.engine.ready();
         let snapshot = self.services.engine.snapshot();
         let built = if ready { self.services.engine.engine().ok() } else { None };
-        let guard = built.as_ref().map(|engine| engine.core());
-        let (intent, context, prefix) = if let Some(core) = guard.as_ref().and_then(|guard| guard.as_ref()) { (
-            core.intent_model_status.as_dict(),
-            Map::from_iter([("available".to_owned(), json!(core.context_policy.model.is_some())), ("status".to_owned(), json!(core.context_policy.status))]),
-            Map::from_iter([("available".to_owned(), json!(core.prefix_model.is_some())), ("status".to_owned(), json!(core.prefix_model.as_ref().map_or_else(String::new, |model| model.version().to_owned())))]),
+        // From the report the handle keeps: the running worker holds the core itself.
+        let (intent, context, prefix) = if let Some(models) = built.as_ref().map(|engine| engine.models()) { (
+            models.intent.as_dict(),
+            Map::from_iter([("available".to_owned(), json!(models.context_available)), ("status".to_owned(), json!(models.context_status))]),
+            Map::from_iter([("available".to_owned(), json!(models.prefix_available)), ("status".to_owned(), json!(models.prefix_version))]),
         ) } else {
             let status = if snapshot.last_error.is_empty() { LOADING_ACTION.to_owned() } else { snapshot.last_error.clone() };
             (
@@ -1787,7 +1787,6 @@ ks_config::learning::LearningError::Value(_)) => format!("Правило не с
                 Map::from_iter([("available".to_owned(), json!(false)), ("status".to_owned(), json!(status))]),
             )
         };
-        drop(guard);
         let input = DiagnosticsInput {
             version: crate::windows_app::VERSION.to_owned(),
             available: probe.available,

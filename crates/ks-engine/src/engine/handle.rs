@@ -12,12 +12,36 @@ use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+/// What the engine has of its models, taken when its handle is made. The worker takes the core away while it runs, so a
+/// settings window that asked the core read every model as still loading for as long as the program worked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelReport {
+    pub intent: IntentModelStatus,
+    pub context_available: bool,
+    pub context_status: String,
+    pub prefix_available: bool,
+    pub prefix_version: String,
+}
+
+impl ModelReport {
+    fn of(core: &EngineCore) -> ModelReport {
+        ModelReport {
+            intent: core.intent_model_status.clone(),
+            context_available: core.context_policy.model.is_some(),
+            context_status: core.context_policy.status.clone(),
+            prefix_available: core.prefix_model.is_some(),
+            prefix_version: core.prefix_model.as_ref().map_or_else(String::new, |model| model.version().to_owned()),
+        }
+    }
+}
+
 /// The handle the application keeps. Everything here may be called from any thread but the keyboard hook's.
 pub struct KeySwitchEngine {
     pub shared: Arc<Shared>,
     learning: Arc<LearningStore>,
     personal: Arc<PersonalWords>,
     backend_label: String,
+    models: ModelReport,
     /// The state, until the worker takes it; the worker hands it back when it ends.
     core: Mutex<Option<EngineCore>>,
     worker: Mutex<Option<JoinHandle<EngineCore>>>,
@@ -76,9 +100,16 @@ impl KeySwitchEngine {
             learning: core.learning.clone(),
             personal: core.personal.clone(),
             backend_label: core.backend_label.clone(),
+            models: ModelReport::of(&core),
             core: Mutex::new(Some(core)),
             worker: Mutex::new(None),
         }
+    }
+
+    /// What the engine has of its models, whether or not its worker runs.
+    #[must_use]
+    pub fn models(&self) -> &ModelReport {
+        &self.models
     }
 
     /// The state, for a replay that drives the engine from its own thread: empty once a worker holds it.
