@@ -106,6 +106,10 @@ pub const VK_LWIN: u32 = 0x5B;
 pub const VK_RWIN: u32 = 0x5C;
 pub const VK_LSHIFT: u32 = 0xA0;
 pub const VK_RSHIFT: u32 = 0xA1;
+/// The scan codes of the two Shift keys (set 1), as a keyboard sends them: KeySwitch types its own Shift so, and lets go the
+/// one the user holds by its own code.
+pub const SCAN_CODE_LEFT_SHIFT: u32 = 0x2A;
+pub const SCAN_CODE_RIGHT_SHIFT: u32 = 0x36;
 pub const VK_LCONTROL: u32 = 0xA2;
 pub const VK_RCONTROL: u32 = 0xA3;
 pub const VK_LMENU: u32 = 0xA4;
