@@ -60,18 +60,29 @@ impl KeySwitchEngine {
             Some(Value::Array(items)) => items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect(),
             _ => vec!["en_US".to_owned(), "ru_RU".to_owned()],
         });
-        let mut models = Vec::new();
-        for locale in locales.iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()) {
-            models.push(resources.engine_language_model(locale)?);
-        }
-        let (intent_model, intent_model_status) = resources.intent_model();
         let platform_reader = match (&context_reader, reader_factory) {
             (None, Some(factory)) => Some(Arc::new(crate::context_access::PlatformFieldReader::new(factory, clock.clone()))),
             _ => None,
         };
         let reader: Option<Arc<dyn FieldReader>> = context_reader.or_else(|| platform_reader.clone().map(|reader| -> Arc<dyn FieldReader> { reader }));
-        let context_policy = ContextPolicy::new(resources, reader, EngineCore::known_of(&models), Some(clock.clone()));
-        let prefix_indexes = models.iter().map(|model| resources.prefix_index(model)).collect();
+        // The program corrects nothing until all of this is read, and read one file after another it took about two
+        // seconds on a fast computer (11.11.2026). What does not need the dictionaries is read beside them: the intent
+        // model and the context model while the dictionaries load, the prefix indexes while the orthotactic model, which
+        // asks the dictionaries, is read after them. Every part is what it was, read by the same call.
+        let models_dir = resources.resource_dir().join("models");
+        let (models, (intent_model, intent_model_status), context_policy, prefix_indexes) = std::thread::scope(|scope| -> EngineResult<_> {
+            let intent = scope.spawn(|| resources.intent_model());
+            let context = scope.spawn(|| ks_context::ContextModel::try_load(&models_dir));
+            let mut models = Vec::new();
+            for locale in locales.iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()) {
+                models.push(resources.engine_language_model(locale)?);
+            }
+            let dictionaries = models.clone();
+            let indexes = scope.spawn(move || dictionaries.iter().map(|model| resources.prefix_index(model)).collect::<Vec<_>>());
+            let ortho = ContextPolicy::load_ortho(resources, EngineCore::known_of(&models));
+            let context_policy = ContextPolicy::with_models(resources, reader, ortho, joined(context), Some(clock.clone()));
+            Ok((models, joined(intent), context_policy, joined(indexes)))
+        })?;
         let core = EngineCore::from_parts(EngineParts {
             settings,
             history,
@@ -303,6 +314,11 @@ impl KeySwitchEngine {
         }
         true
     }
+}
+
+/// What a thread of `KeySwitchEngine::new` read; a failure nobody foresaw there goes on as one of the caller's.
+fn joined<T>(reading: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    reading.join().unwrap_or_else(|failure| std::panic::resume_unwind(failure))
 }
 
 /// `run`: the worker's loop. It owns the core and hands it back when it ends.
