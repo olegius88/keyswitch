@@ -11,6 +11,7 @@ use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, early_
 use ks_lang::language_model::WordScore;
 use ks_lang::lexicon_supplement::supplement_words;
 use ks_lang::ortho_model::{FEATURES, OrthoEvidence, OrthoModel};
+use ks_lang::packed_grams::PackedGrams;
 use ks_lang::short_words::trusted_short_word_decision;
 use ks_lang::tables::WordTable;
 use ks_lang::word_decision::opening_letter_decision;
@@ -197,4 +198,28 @@ fn a_gated_feature_counts_only_for_a_reading_that_is_noise() {
     let strange = model.score(&OrthoEvidence { keys: "ghbdtn", shape: "strange", source_script: "en" }, Some(&known));
     assert_eq!(plain, strange);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A table that gives every gram many times packs each of them once, with the value given last.
+///
+/// The tests reach the path of a repeated gram once, in a table of four names, while the loop around it runs hundreds
+/// of millions of times in every test that loads a model, on many threads at once. The coverage report counts that path
+/// as the difference of two counters of the loop, and counters are not raised atomically: one lost update in a run of
+/// 12.11.2026 left the difference at nothing, and the gate failed on a line the tests had run. Here the path is taken
+/// a hundred thousand times.
+#[test]
+fn a_gram_given_many_times_is_packed_once_with_its_last_value() {
+    let letters: Vec<char> = ('a'..='z').chain('а'..='я').chain("-'0123456789".chars()).collect();
+    let grams: Vec<String> = letters.iter().flat_map(|first| letters.iter().map(move |second| format!("{first}{second}"))).collect();
+    let rounds = 24;
+    let mut table: Vec<(&str, f64)> = Vec::with_capacity(grams.len() * rounds);
+    for round in 0..rounds {
+        table.extend(grams.iter().enumerate().map(|(index, gram)| (gram.as_str(), -f64::from(u32::try_from(index * rounds + round).unwrap()))));
+    }
+    assert!(table.len() > 100_000);
+    let packed = PackedGrams::pack(&table).unwrap();
+    assert_eq!(packed.len(), grams.len());
+    for (index, gram) in grams.iter().enumerate() {
+        assert_eq!(packed.get(gram), Some(-f64::from(u32::try_from(index * rounds + rounds - 1).unwrap())), "{gram}");
+    }
 }
