@@ -56,7 +56,8 @@ use crate::constants::{
     VK_HOME, VK_INSERT, VK_LAST, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
-    VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
+    VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS, WINDOWS_TYPED_EVENT_SETTLE_SECONDS,
+    WINDOWS_TYPED_SETTLE_MAX_SECONDS,
     WITHHELD_ACTION_MAX_MS, WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
 };
 use crate::log;
@@ -577,6 +578,9 @@ struct Inner {
     start_job: JobStarter,
     /// Atomic: the hook's thread counts pointer presses, the engine's thread compares the count.
     pointer_epoch: AtomicU64,
+    /// The moment by which the window is taken to have read the keys this program typed last (`send_exact`), as the bits
+    /// of a monotonic time: a layout is asked of the window only after it (`switch_group_inner`).
+    typed_until: AtomicU64,
     hold: Mutex<HoldState>,
     /// Atomic: how many keys of the user's the hook is answering right now (`KeyInFlight`). The hook's thread counts, the
     /// engine's thread waits for none as it begins a hold.
@@ -645,6 +649,7 @@ impl WindowsBackend {
                 caps_lock: AtomicBool::new(false),
                 start_job: parts.start_job,
                 pointer_epoch: AtomicU64::new(0),
+                typed_until: AtomicU64::new(0f64.to_bits()),
                 hold: Mutex::new(HoldState::default()),
                 keys_in_flight: AtomicUsize::new(0),
                 release_job: AtomicBool::new(false),
@@ -1835,6 +1840,12 @@ impl Inner {
                 inputs.len()
             )));
         }
+        // The window has these keys in its queue now, not in its text yet (`typed_until`). Keys sent one batch after
+        // another are read one after another: the allowance of each begins where the one before ends.
+        let now = self.clock.monotonic();
+        let pending = f64::from_bits(self.typed_until.load(Ordering::Relaxed)).max(now);
+        let allowance = inputs.len().to::<f64>() * WINDOWS_TYPED_EVENT_SETTLE_SECONDS;
+        self.typed_until.store((pending + allowance).min(now + WINDOWS_TYPED_SETTLE_MAX_SECONDS).to_bits(), Ordering::Relaxed);
         Ok(())
     }
 
@@ -2104,6 +2115,16 @@ impl Inner {
         };
         if self.group_for_layout(self.api.foreground_layout())? == group {
             return Ok(false);
+        }
+        // Keys this program has just typed are read by the window after a request posted now: the layout would change
+        // under them. A third Pause pressed right after a conversion switched the layout 12 ms after the word was typed
+        // again, and `ghbdtn` came out as `ghивет` (Windows 10, a candidate of 0.72.0, 12.11.2026).
+        let typed_until = f64::from_bits(self.typed_until.load(Ordering::Relaxed));
+        if typed_until > 0.0 {
+            let unread = typed_until - self.clock.monotonic();
+            if unread > 0.0 {
+                self.clock.sleep(unread);
+            }
         }
         if !self.api.request_layout(layout) {
             return Err(failed("Окно отклонило запрос смены раскладки"));

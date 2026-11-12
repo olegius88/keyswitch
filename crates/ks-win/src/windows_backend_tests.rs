@@ -1297,6 +1297,34 @@ fn keys_other_programs_inject_are_marked_and_replayed_as_theirs() {
     subject.stop();
 }
 
+/// A layout is asked of the window only once it has had time to read the keys this program typed: asked at once, the
+/// request is read before those keys and changes the layout under them.
+#[test]
+fn a_layout_is_asked_for_once_the_typed_keys_are_read() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let typed = [true, false, true, false].map(|pressed| NativeInput::scan(pressed, SCAN_CODE_A));
+    // Four key events typed at the tenth second, and a layout asked for 5 ms later: the other 15 ms are waited.
+    clock.readings.lock().unwrap().extend([10.0, 10.005]);
+    subject.inner.send_exact(&typed).unwrap();
+    assert!(subject.inner.switch_group_inner(1).unwrap());
+    let waited = clock.sleeps.lock().unwrap().clone();
+    assert_eq!(waited.len(), 1);
+    assert!((waited[0] - (4.0 * WINDOWS_TYPED_EVENT_SETTLE_SECONDS - 0.005)).abs() < 1e-9, "{waited:?}");
+    // Asked for long after the keys, the layout is asked for at once.
+    clock.readings.lock().unwrap().push_back(20.0);
+    assert!(subject.inner.switch_group_inner(0).unwrap());
+    assert_eq!(clock.sleeps.lock().unwrap().len(), 1);
+    // However much is typed, the wait has its limit.
+    let many = vec![NativeInput::scan(true, SCAN_CODE_A); 1000];
+    clock.readings.lock().unwrap().extend([30.0, 30.0]);
+    subject.inner.send_exact(&many).unwrap();
+    assert!(subject.inner.switch_group_inner(1).unwrap());
+    let waited = clock.sleeps.lock().unwrap().clone();
+    assert!((waited[1] - WINDOWS_TYPED_SETTLE_MAX_SECONDS).abs() < 1e-9, "{waited:?}");
+}
+
 #[test]
 fn a_switch_timeout_and_an_already_selected_group() {
     let api = FakeWindowsAPI::plain();

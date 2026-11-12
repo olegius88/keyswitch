@@ -13,6 +13,13 @@ pub const LAYOUT_SWITCH_POLL_SECONDS: f64 = 0.01;
 /// right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms. The deletion
 /// needs no layout and goes before the pause.
 pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
+/// How long a window is given to take in each key event this program typed before a layout is asked of it, and the most
+/// that is ever waited. A layout request is a posted message, and a window reads its posted messages before the keys
+/// still waiting in its input queue: asked at once, the layout changed under keys already typed. In Notepad of Windows 10
+/// a request posted right after forty keys left eight of them in their layout, one posted 80 ms later left them all
+/// (about 1 ms an event; measured 12.11.2026); the allowance is five times that.
+pub const WINDOWS_TYPED_EVENT_SETTLE_SECONDS: f64 = 0.005;
+pub const WINDOWS_TYPED_SETTLE_MAX_SECONDS: f64 = 0.5;
 /// How long a layout chosen in the tray menu waits for the window the user worked in to come back to the front with its
 /// keyboard focus, before it is switched wherever the front is.
 pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
