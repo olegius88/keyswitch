@@ -168,25 +168,78 @@ impl EngineCore {
             technical_event!(self.shared, "field_wait_expired", "mode": plan.mode, "application": plan.application);
             return false;
         }
-        self.field_wait = Some(FieldWait { plan: plan.clone(), learning_prompt: learning_prompt.cloned(), deadline });
+        // A wait that goes on keeps the count it began with: the keys typed since are counted from its first moment.
+        let (presses, rolled) = match waiting.filter(|waited| Arc::ptr_eq(&waited.plan, plan)) {
+            Some(waited) => (waited.presses, waited.rolled),
+            None => (self.presses_handled, self.rolled_after(plan)),
+        };
+        self.field_wait = Some(FieldWait { plan: plan.clone(), learning_prompt: learning_prompt.cloned(), deadline, presses, rolled });
         true
+    }
+
+    /// How many keys of the word in progress `plan` does not type: the letters begun after its boundary, which its
+    /// correction takes with it and types again (`collect_late_input`).
+    fn rolled_after(&self, plan: &CorrectionPlan) -> usize {
+        let planned: Vec<*const KeyEvent> = plan.strokes.iter().chain(plan.trailing.iter()).map(Arc::as_ptr).collect();
+        self.strokes.iter().filter(|stroke| !is_planned(&planned, stroke)).count()
+    }
+
+    /// Whether every key answered since the correction began to wait is a letter of the word typed on after it.
+    ///
+    /// The correction deletes the word, its boundary and those letters, and types them again: it counts the keys after
+    /// the boundary by the word in progress and the queue (`collect_late_input`). A key that is in neither stands in the
+    /// window all the same: a bracket or a second space before the next word, a word that was finished and kept, a
+    /// Backspace. The correction then deleted that many characters too few and typed its own over the wrong ones: with
+    /// the field of an Electron editor read a moment late, `gthtl (j` became `gперед о` for `перед (о` (the walk of
+    /// `tests/integrity.rs`, 11.11.2026). A correction that is about to run drops at any such key (`additional_boundary`,
+    /// Backspace); one that waits for its field is held to the same.
+    fn typed_on_since(&self, waiting: &FieldWait) -> bool {
+        let typed = self.presses_handled - waiting.presses;
+        self.rolled_after(&waiting.plan).checked_sub(waiting.rolled).and_then(|rolled| u64::try_from(rolled).ok()) == Some(typed)
     }
 
     /// A correction waiting for its field (`waits_for_field`) is tried again once no key is held down; a correction
     /// planned since then supersedes it, and it is given up as an unseen field always was.
-    pub fn retry_field_wait(&mut self) {
+    pub fn retry_field_wait(&mut self) -> EngineResult<()> {
         let Some(waiting) = self.field_wait.clone() else {
-            return;
+            return Ok(());
         };
         if !self.pressed.is_empty() || !self.modifier_keycodes.is_empty() {
-            return;
+            return Ok(());
         }
-        if self.pending.is_some() {
+        let given_up = if self.pending.is_some() {
+            Some("correction_pending")
+        } else if !self.typed_on_since(&waiting) {
+            // The word stays as typed, and Pause no longer reaches it: other text stands after it.
+            self.last_committed_stale = true;
+            Some("other_keys_typed")
+        } else {
+            None
+        };
+        if let Some(reason) = given_up {
             self.field_wait = None;
-            technical_event!(self.shared, "field_wait_dropped", "mode": waiting.plan.mode, "reason": "correction_pending");
-            return;
+            technical_event!(self.shared, "field_wait_dropped", "mode": waiting.plan.mode, "reason": reason);
+            // An Enter kept back meanwhile was left to this wait (maybe_execute_pending). With the wait over it is
+            // answered now, with the correction that is its own if it has one, and not when its two seconds run out.
+            if let Some(action) = self.deferred_action.clone() {
+                self.maybe_execute_pending(&action)?;
+            }
+            return Ok(());
         }
-        self.execute_correction(waiting.plan, waiting.learning_prompt);
+        let action_waits = self.deferred_action.is_some();
+        let made = self.execute_correction(waiting.plan, waiting.learning_prompt);
+        if action_waits && self.field_wait.is_none() {
+            // The Enter that waited with this correction (maybe_execute_pending) follows it now. One whose correction
+            // was refused with nothing typed has gone on already (action_goes_on); one still here is answered as an Enter
+            // is whose correction did not wait.
+            if self.deferred_action.is_some() {
+                self.complete_deferred_action(made, "corrected");
+            }
+            self.clear_word(None, "action_completed");
+            self.contexts.clear();
+            self.context_policy.stream.clear();
+        }
+        Ok(())
     }
 
     /// Keys typed after the word but before its correction lands.
@@ -203,6 +256,7 @@ impl EngineCore {
         let queued = self.shared.take_queued();
         let mut late = rollover.clone();
         let mut kept: Vec<QueueItem> = Vec::new();
+        let mut action: Option<&Stroke> = None;
         let mut refusal: &'static str = rollover.iter().find(|stroke| !Self::_late_text_key(stroke)).map_or("", |stroke| Self::_late_key_kind(stroke));
         for item in &queued {
             match item {
@@ -218,6 +272,13 @@ impl EngineCore {
                         // A key-up types nothing, and neither does a second press of the
                         // conversion hotkey: it is answered once this correction lands.
                         kept.push(item.clone());
+                    } else if key.deferred {
+                        // An Enter or Tab the hook keeps back has not reached the window, and the hook holds every key
+                        // pressed after it: nothing stands after the word because of it, and it is answered once this
+                        // correction lands. Taken for a key typed after the word, it stopped the correction: `ytn`, a
+                        // space and Enter typed faster than the engine took them sent `ytn` (a review, 12.11.2026).
+                        action = Some(key);
+                        kept.push(item.clone());
                     } else if Self::_late_text_key(key) && Self::_safe_text_stroke(key) {
                         late.push(key.clone());
                     } else if refusal.is_empty() {
@@ -231,6 +292,13 @@ impl EngineCore {
                     kept.push(item.clone());
                 }
             }
+        }
+        if let Some(action) = action.filter(|_| !late.is_empty() && refusal.is_empty()) {
+            // The letters typed after the word are deleted with it and typed again, and come back through the hook as
+            // keys just typed: behind the Enter that already waits in the queue, though they stand before it in the
+            // window. The engine would then take them for the start of the line after the Enter. The correction is
+            // given up as it was when the Enter itself stopped it, and the journal names that key as before.
+            refusal = Self::_late_key_kind(action);
         }
         refusal.clone_into(&mut self.late_refusal);
         let usable = refusal.is_empty();
@@ -260,13 +328,40 @@ impl EngineCore {
             return Ok(());
         }
         if self.deferred_action.is_some() && self.pressed.is_empty() && self.modifier_keycodes.is_empty() {
-            let plan = self.pending.take();
+            if self.pending.is_none() && self.field_wait.is_some() {
+                // The Enter waits with its correction for the field (below): a key coming up meanwhile changes nothing.
+                return Ok(());
+            }
+            let mut plan = self.pending.take();
             self.learning_prompt_after = None;
+            if let Some(early) = plan.clone().filter(|plan| matches!(plan.mode, "early" | "early_undo" | "late_stroke")) {
+                // A switch planned on the first letters of the word waits for the keys to come up, and a word typed
+                // without a gap up to its Enter brings it here as it was planned. It is looked at again, as it is
+                // before any other key comes up (below): made as planned, it deleted the last letters of the word and
+                // typed the first ones over them (a review of the Windows hook, 11.11.2026).
+                plan = self.refresh_early_plan(&early)?;
+                if plan.is_none() {
+                    technical_event!(
+                        self.shared, "early_switch_dropped",
+                        "reason": "word_changed_before_action",
+                        "current_word_length": self.strokes.len(),
+                    );
+                }
+            }
             let corrected = plan.is_some();
             let succeeded = match plan {
                 None => true,
                 Some(plan) => self.execute_correction(plan, None),
             };
+            if !succeeded && self.field_wait.is_some() {
+                // The field has not shown the word yet, and the correction waits for it (waits_for_field). The Enter
+                // waits with it: the hook keeps every key back meanwhile, so nothing changes in the field, and
+                // retry_field_wait passes the Enter on after the correction. Given up here, the Enter was dropped and
+                // the wait with it at once: `ytn` and Enter in an editor that shows its text a moment late left the
+                // word as typed and the message unsent, and the second Enter sent `ytn` (found by the walk of
+                // `tests/integrity.rs` and by a review of the Windows hook, 11.11.2026).
+                return Ok(());
+            }
             if self.deferred_action.is_some() {
                 self.complete_deferred_action(succeeded, if corrected { "corrected" } else { "no_correction" });
             }
@@ -364,7 +459,9 @@ impl EngineCore {
             technical_event!(self.shared, "correction_aborted", "mode": plan.mode, "reason": "hook_gap");
             return false;
         }
-        if plan.strokes.iter().chain(plan.trailing.iter()).any(|stroke| !Self::_safe_text_stroke(stroke)) {
+        let typed_again = || plan.strokes.iter().chain(plan.trailing.iter());
+        if typed_again().any(|stroke| !Self::_safe_text_stroke(stroke)) || typed_again().chain(plan.boundary.iter()).any(|stroke| !self.backend.types_again(stroke)) {
+            self.action_goes_on("unrepresentable_text");
             self.clear_word(None, "unrepresentable_text");
             technical_event!(
                 self.shared, "correction_aborted", "mode": plan.mode, "reason": "unrepresentable_text",
@@ -395,6 +492,7 @@ impl EngineCore {
             }
             if !refusal.is_empty() {
                 let typed_after_boundary = !self.strokes.is_empty();
+                self.action_goes_on("field_refused");
                 self.clear_word(None, "context_field_changed");
                 // The letters already typed for the next word stand somewhere
                 // the engine can no longer vouch for. The rest of that token is
@@ -488,6 +586,8 @@ impl EngineCore {
             return false;
         }
         if unsafe_input {
+            // Nothing was typed: an Enter kept back for this correction is the user's to have.
+            self.action_goes_on("unsafe_input_after_word");
             return false;
         }
         let late = late.unwrap_or_default();

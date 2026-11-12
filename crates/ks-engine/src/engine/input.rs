@@ -3,7 +3,7 @@
 use super::logging::technical_event;
 use super::shared::SETTING_FROM_CORE;
 use super::*;
-use crate::constants::WHEEL_KEY_NAME;
+use crate::constants::{POINTER_KEY_NAME, WHEEL_KEY_NAME};
 use crate::unicode_category::category;
 use serde_json::json;
 
@@ -28,13 +28,45 @@ impl EngineCore {
     }
 
     /// `handle_inner`: every key the worker takes, in the order the hook saw them.
+    ///
+    /// An Enter or Tab the hook keeps back (`deferred`) is this key's to answer: it becomes the action that waits for its
+    /// correction (`deferred_action`), or the hook is told at once what to do with it. The hook holds every key typed
+    /// after it until it is answered, and nothing else answers it: an Enter that left this function unanswered kept the
+    /// keyboard held until the program was restarted. One did when the rule window took the keyboard between the hook's
+    /// answer and this call, and each time when a hotkey was set to Tab alone (a review of the Windows hook, 11.11.2026).
+    /// Such a key goes on to the window it was pressed for.
     pub fn handle_inner(&mut self, event: Stroke) -> EngineResult<()> {
+        // A click types nothing, and the word is forgotten at it: the Enter after it has nothing to wait for.
+        if event.pressed && !is_action_boundary_key(&event.key_name) && event.key_name != POINTER_KEY_NAME {
+            self.shared.note_typed();
+        }
+        let withheld = event.deferred && event.pressed;
+        let completed = self.actions_completed;
+        self.withheld_in_hand = withheld.then_some(completed);
+        let result = self.handle_key(event);
+        self.withheld_in_hand = None;
+        if withheld && self.deferred_action.is_none() && self.actions_completed == completed {
+            self.actions_completed += 1;
+            technical_event!(self.shared, "action_unclaimed", "text_verified": false);
+            self.backend.complete_action(true)?;
+        }
+        result
+    }
+
+    fn handle_key(&mut self, event: Stroke) -> EngineResult<()> {
         let mut event = event;
         if event.key_name == WHEEL_KEY_NAME {
             // Ctrl+wheel zooms and Shift+wheel scrolls sideways: the modifier was held for that, not tapped. The wheel
             // moves no caret, and it reaches the engine only while a layout switch key is set (Shared::enqueue).
             self.layout_tap = None;
             return Ok(());
+        }
+        if event.pressed && !is_modifier_key(&event.key_name) && !event.deferred {
+            // An Enter or Tab the hook keeps back has not reached the window: it is no key typed after the word. Counted,
+            // it made a correction that waited for its field give up (typed_on_since), and the Enter was left to that
+            // wait with nobody to answer it: `ytn `, the field a moment behind, and Enter held the keyboard for the two
+            // seconds an unanswered Enter is given (a review, 12.11.2026).
+            self.presses_handled += 1;
         }
         self.expire_manual_correction();
         if self.shared.input_overflow.swap(false, std::sync::atomic::Ordering::Relaxed) {
@@ -92,18 +124,27 @@ impl EngineCore {
                     // The prompt may have appeared after the hook deferred
                     // Enter but before the worker reached it. It still owns
                     // this key; release the barrier without submitting.
+                    self.actions_completed += 1;
                     self.backend.complete_action(false)?;
+                    return Ok(());
                 }
-                return Ok(());
-            }
-            if unmodified && event.key_name == "Escape" {
+                if self.backend.filters_keys() {
+                    return Ok(());
+                }
+                // A hook that only watches (X11) could not keep this Enter from the window: the window has had it as it
+                // has any other Enter, and the word before it is over. Kept, the word took the letters typed after the
+                // Enter for its own: `Djn`, Pause twice, Enter and `string` typed in the wrong layout had Pause delete
+                // nine characters of a line that held six and type `Djnstring` (the walk of `tests/integrity.rs`,
+                // 11.11.2026). It goes on below as the action boundary it is.
+            } else if unmodified && event.key_name == "Escape" {
                 self.shared.dismiss_learning_prompt(Some(&prompt), "escape");
                 return Ok(());
+            } else {
+                self.shared.dismiss_learning_prompt(Some(&prompt), "other_key");
             }
-            self.shared.dismiss_learning_prompt(Some(&prompt), "other_key");
         }
         if event.pressed {
-            let application = self.backend.active_application();
+            let application = self.front_application();
             if !event.character.is_empty()
                 && self.strokes.is_empty()
                 && self.shared.sensitive_context_window().is_none()
@@ -302,12 +343,20 @@ impl EngineCore {
                 self.deferred_action = Some(event.clone());
                 self.action_deadline = self.monotonic() + ACTION_TIMEOUT_SECONDS;
                 technical_event!(self.shared, "action_deferred", "key_name": event.key_name);
-                if !self.strokes.is_empty() && !self.untracked_token {
-                    self.commit_word(&event)?;
+                if self.shared.front_excluded() {
+                    // The program came to the front a moment ago and the hook did not know yet that the user excluded
+                    // it (`front_application` has said so for this very key). Nothing is corrected there, so the key
+                    // goes on now and not when it comes up, and ends the word as an Enter the hook let through does:
+                    // a Tab held in a game came once, after it was let go, and one held for two seconds never came.
+                    self.complete_deferred_action(true, "application_excluded");
                 } else {
-                    self.settle_context_wait_at_action(&event)?;
+                    if !self.strokes.is_empty() && !self.untracked_token {
+                        self.commit_word(&event)?;
+                    } else {
+                        self.settle_context_wait_at_action(&event)?;
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
             // These events have already reached the application. Enter may
             // submit a chat and Tab may focus another field; neither can be

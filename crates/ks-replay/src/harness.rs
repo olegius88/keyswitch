@@ -684,22 +684,32 @@ impl Bundle {
 
     /// `Field(app, group, text)`: a new engine and a new clock over the shared models.
     pub fn session(&mut self, application: &str, group: i32, text: Vec<char>) -> Session {
-        let settings = Arc::new(SettingsStore::new(Some(self.root.join("settings.json"))));
+        let backend = Arc::new(Backend::new(application, group, text));
+        let clock = FakeClock::new();
+        let reader: Arc<dyn FieldReader> = Arc::new(CaretReader { backend: backend.clone() });
         // The gate compares the layout decision: the typo correction is measured apart.
-        settings.set("detection.correct_typos", json!(false), false).expect("in memory");
+        let core = self.core_over(backend.clone(), Some(reader), &clock, false);
+        Session { core, backend, clock, recovers: false }
+    }
+
+    /// A new engine over the shared models and a window of the caller's own: what `session` builds over the model
+    /// editor. The settings are the ones the program ships with, but for the typo correction, which is `typos`: it is set
+    /// before the engine is built, since an engine that corrects typos reads their lists as it is built, and a replay
+    /// builds an engine for every stream. `take_back` returns the policy for the next engine.
+    pub fn core_over(&mut self, backend: Arc<dyn InputBackend>, reader: Option<Arc<dyn FieldReader>>, clock: &FakeClock, typos: bool) -> EngineCore {
+        let settings = Arc::new(SettingsStore::new(Some(self.root.join("settings.json"))));
+        settings.set("detection.correct_typos", json!(typos), false).expect("in memory");
         if self.debug {
             settings.set("diagnostics.technical_logging", json!(true), false).expect("in memory");
         }
-        let backend = Arc::new(Backend::new(application, group, text));
-        let clock = FakeClock::new();
         let mut context_policy = self.context_policy.take().expect("one engine at a time");
         context_policy.stream = InputContext::with_clock(clock.read());
-        context_policy.reader = Some(Arc::new(CaretReader { backend: backend.clone() }));
+        context_policy.reader = reader;
         let history = Arc::new(HistoryStore::new(Some(self.root.join("history.jsonl")), 200));
         let mut core = EngineCore::from_parts(EngineParts {
             settings,
             history,
-            backend: backend.clone(),
+            backend,
             learning: None,
             backend_label: "X11 RECORD + XTEST".to_owned(),
             models: self.models.clone(),
@@ -716,12 +726,17 @@ impl Bundle {
         })
         .expect("an engine over the shared models");
         core.executed = Some(Vec::new());
-        Session { core, backend, clock, recovers: false }
+        core
     }
 
     /// `field.close()`: the policy goes on to the next engine.
     pub fn give_back(&mut self, session: Session) {
-        self.context_policy = Some(session.core.context_policy);
+        self.take_back(session.core);
+    }
+
+    /// `give_back` for an engine `core_over` built.
+    pub fn take_back(&mut self, core: EngineCore) {
+        self.context_policy = Some(core.context_policy);
         let _ = std::fs::remove_file(self.root.join("history.jsonl"));
     }
 

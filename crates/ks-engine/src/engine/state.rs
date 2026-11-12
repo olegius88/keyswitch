@@ -11,6 +11,7 @@ impl EngineCore {
     pub fn complete_deferred_action(&mut self, deliver: bool, reason: &str) {
         let action = self.deferred_action.take();
         self.action_deadline = 0.0;
+        self.actions_completed += 1;
         match self.backend.complete_action(deliver) {
             Ok(_) => {
                 technical_event!(
@@ -18,7 +19,13 @@ impl EngineCore {
                     "key_name": action.as_ref().map_or("unknown", |action| action.key_name.as_str()), "reason": reason,
                     "text_verified": false,
                 );
-                if !deliver {
+                if deliver {
+                    // The window has the Enter now, as it has one the hook let through (`handle_key`): what was typed
+                    // before it says nothing of the token typed after it. Left set, a key the engine does not follow
+                    // (F5) or a caret move before the Enter kept the first word of the next line as typed.
+                    self.untracked_token = false;
+                    self.caret_moved = false;
+                } else {
                     self.shared.update(Update { last_action: Some("Enter/Tab не передан · проверьте текст и нажмите ещё раз".to_owned()), ..Update::default() });
                 }
             }
@@ -30,6 +37,21 @@ impl EngineCore {
                     ..Update::default()
                 });
             }
+        }
+    }
+
+    /// The Enter or Tab kept back for a correction goes on to its window when that correction is refused before
+    /// KeySwitch has typed anything: the field could not be read, never showed the word, or holds text that cannot be
+    /// typed again.
+    ///
+    /// The text stands as the user typed it, and the key is theirs to press. Dropped, the Enter did nothing the user
+    /// could see: the word stayed as typed, the message stayed unsent, and a second Enter sent it uncorrected, so the
+    /// drop saved nothing and cost a keystroke (a review of the Windows hook, 11.11.2026). An Enter is still dropped
+    /// when a correction failed after it began to type, when the hook lost keys, and when the window in front changed:
+    /// there the text is not known to be what the user saw as they pressed it.
+    pub fn action_goes_on(&mut self, reason: &str) {
+        if self.deferred_action.is_some() {
+            self.complete_deferred_action(true, reason);
         }
     }
 
@@ -138,6 +160,8 @@ impl EngineCore {
             self.context_policy.stream.clear();
             self.cancel_context_wait("settings_changed");
             self.shared.set_sensitive_context_window(None);
+            // The list of excluded programs may have changed: the next key says anew whether the one in front is on it.
+            self.shared.set_front_excluded(false);
         }
         self.shared.refresh_hook_settings();
         if path == "*" {
@@ -165,6 +189,16 @@ impl EngineCore {
         }
     }
 
+    /// The program in front, as every pressed key asks for it, with a word for the hook on whether the user excluded it:
+    /// the hook leaves that program its Enter and Tab (`Shared::consumes_key`) and cannot ask for the program itself
+    /// while the system waits for its answer. Another window in front or another list takes the word back until the
+    /// next key (`focus_changed`, `settings_changed`).
+    pub fn front_application(&self) -> String {
+        let application = self.backend.active_application();
+        self.shared.set_front_excluded(self.shared.application_listed(&application));
+        application
+    }
+
     /// Notice the user moving to another window.
     pub fn track_focus(&mut self) -> FocusChange {
         let Some(focus) = self.shared.focused_window().filter(|focus| focus.window != 0) else {
@@ -189,6 +223,7 @@ impl EngineCore {
         self.own_layout_ignored = false;
         self.layout_tap = None;
         self.shared.set_sensitive_context_window(None);
+        self.shared.set_front_excluded(false);
         self.convert_press_at = 0.0;
         let dropped = self.strokes.len();
         self.clear_word(None, "focus_changed");

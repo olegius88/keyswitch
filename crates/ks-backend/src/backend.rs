@@ -157,6 +157,16 @@ pub struct Injection<'a> {
 pub trait InputBackend: Send + Sync {
     fn start(&self, listener: KeyListener) -> Result<(), BackendError>;
     fn set_key_filter(&self, predicate: Option<KeyFilter>);
+    /// Whether the key filter decides what reaches the window. False where the backend only watches the keys (X11): there
+    /// every key has reached the window by the time the engine hears of it, an Enter the filter would have kept too.
+    fn filters_keys(&self) -> bool {
+        true
+    }
+    /// Whether a correction can type this key again. False on Windows for a key that came with no scan code (another
+    /// program typed it by its virtual key alone): a word with such a key is left as typed.
+    fn types_again(&self, _stroke: &KeyEvent) -> bool {
+        true
+    }
     fn hold_input(&self);
     /// `hold_input` where it can fail: the correction then ends as any failed injection does. A backend whose hold
     /// cannot fail has no need of it.

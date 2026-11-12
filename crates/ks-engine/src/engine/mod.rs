@@ -146,6 +146,13 @@ pub struct EngineCore {
     pub prefix_indexes: Vec<Arc<PrefixIndex>>,
     pub pending: Option<PlanRef>,
     pub field_wait: Option<FieldWait>,
+    /// Every key press the worker has answered, but those of the modifiers: what a correction that waits for its field
+    /// counts the keys typed meanwhile by (`typed_on_since`).
+    pub presses_handled: u64,
+    /// How many times the engine has answered an Enter or Tab the hook keeps back (`complete_action`), and that count as
+    /// it stood when the key in hand is such a key nobody has answered yet: see `handle_inner`.
+    pub actions_completed: u64,
+    pub withheld_in_hand: Option<u64>,
     pub pending_trigger_keycode: i64,
     pub input_delay_due: f64,
     pub manual_release_deadline: f64,
@@ -294,6 +301,9 @@ impl EngineCore {
             prefix_indexes,
             pending: None,
             field_wait: None,
+            presses_handled: 0,
+            actions_completed: 0,
+            withheld_in_hand: None,
             pending_trigger_keycode: -1,
             input_delay_due: now + INPUT_DELAY_REPORT_INTERVAL_SECONDS,
             manual_release_deadline: 0.0,

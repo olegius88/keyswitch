@@ -462,7 +462,8 @@ fn a_tap_keeps_the_words_the_engine_holds() {
     let before = waiting.core.context_waiting.as_ref().map(|word| word.diagnostic_id);
     let now = waiting.core.monotonic();
     let plan = Arc::new(CorrectionPlan::new(Vec::new(), None, 0, 1, "a".to_owned(), "ф".to_owned(), 1.0, "firefox"));
-    waiting.core.field_wait = Some(FieldWait { plan, learning_prompt: None, deadline: now + 10.0 });
+    let presses = waiting.core.presses_handled;
+    waiting.core.field_wait = Some(FieldWait { plan, learning_prompt: None, deadline: now + 10.0, presses, rolled: 0 });
     tap_alone(&mut waiting, "Shift_L");
     assert!(waiting.core.manual_layout_group.is_some());
     assert_eq!(waiting.core.context_waiting.as_ref().map(|word| word.diagnostic_id), before);

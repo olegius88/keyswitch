@@ -355,6 +355,7 @@ fn the_group_count_is_clamped_and_the_filter_is_ignored() {
     let backend = fake.backend();
     assert!(!backend.running());
     backend.set_key_filter(Some(Arc::new(|_| KeyDisposition::Consume)));
+    assert!(!backend.filters_keys(), "the filter is taken and never asked: every key has reached the window");
     backend.hold_input();
     assert_eq!((backend.release_input(), backend.complete_action(true)), (Ok(0), Ok(0)));
 }

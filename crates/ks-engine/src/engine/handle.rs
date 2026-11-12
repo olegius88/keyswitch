@@ -392,7 +392,7 @@ impl EngineCore {
         self.expire_manual_correction();
         self.poll_current_group()?;
         self.maybe_correct_after_pause(None)?;
-        self.retry_field_wait();
+        self.retry_field_wait()?;
         self.expire_learning_prompt(None);
         self.report_input_delay();
         self.report_unseen_input()?;
@@ -449,7 +449,19 @@ impl EngineCore {
     }
 
     pub fn recover_from_error(&mut self, error: &EngineError) {
+        let withheld = self.withheld_in_hand.take();
         self.clear_word(None, "input_error");
+        if withheld == Some(self.actions_completed) {
+            // The key in hand when the engine failed was an Enter or Tab the hook keeps back, and nothing has answered
+            // it: the hook lets go of the keyboard only once it is answered (`handle_inner`).
+            self.actions_completed += 1;
+            if let Err(error) = self.backend.complete_action(false) {
+                technical_event!(self.shared, "action_failed", "reason": "input_error", "error": error.to_string(), "text_verified": false);
+            }
+        }
+        // A failure in the middle of a correction leaves the hook holding the keys typed since it began, and the engine
+        // hears of no key until they are let go. That it could not let them go is the same failure, reported below.
+        let _ = self.backend.release_input();
         self.shared.update(Update {
             last_error: Some(error.to_string()),
             last_action: Some("Ошибка обработки ввода".to_owned()),
