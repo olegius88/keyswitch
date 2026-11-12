@@ -8,14 +8,34 @@
 //!
 //! With --candidate the tag is vX.Y.Z-rcN and the release a pre-release: the update check of an installed program does not
 //! see it, and the APT repository stays as it is. Without it the tag replaces the published version for everybody.
+//!
+//! No check the workflow makes is made here as well. What only this machine can check is checked here on every run: the
+//! engine reports the release commits, and the owner's typing against the last release. Everything else the workflow
+//! run of the tag makes on every system, so a candidate leaves it to that run, which the command waits for; a failed run
+//! costs a candidate number. A release on the very commit of a candidate that passed leaves it to the run that candidate
+//! had, and the run of its own tag publishes the candidate's files; any other release makes every check here first,
+//! since its tag cannot be taken back. Either way the workflow must already have checked the commit the release starts
+//! from.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-#![expect(clippy::disallowed_types, clippy::disallowed_methods, reason = "temporary: this crate still handles its JSON as untyped trees; steps 4 and 5 of the strict-json plan type them and remove this")]
 use ks_cast::To as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const UNRELEASED: &str = "## Unreleased";
 const WORKFLOW: &str = "CI and release";
+/// The job that ends the checks of a workflow run. It passes only in a run that checked and built everything: a run that
+/// publishes the files of a candidate, or that stands aside for the run of a tag on the same commit, skips it.
+const CHECKS_JOB: &str = "Every line and branch of the program ran";
+/// What `gh` says of a run or a job that has ended, and of one that ended well or was not needed.
+const COMPLETED: &str = "completed";
+const SUCCESS: &str = "success";
+const SKIPPED: &str = "skipped";
+/// How many runs of one commit are read (a branch, its candidates and its release), and of one tag.
+const RUNS_OF_A_COMMIT: &str = "20";
+const RUNS_OF_A_TAG: &str = "1";
+/// How many answers in a row `gh` may fail to give before a wait is given up: a network that is down for half an hour
+/// comes back, a `gh` that is not signed in does not.
+const UNREAD_ANSWERS: u32 = 30;
 const CI_TIMEOUT_SECONDS: u64 = 3 * 60 * 60;
 const CI_POLL_SECONDS: u64 = 60;
 const SECONDS_PER_DAY: i64 = 86_400;
@@ -67,6 +87,62 @@ fn run(root: &Path, label: &str, program: &str, arguments: &[&str]) -> Result<()
     println!("    $ {label}");
     let status = Command::new(program).current_dir(root).args(arguments).status().map_err(|error| format!("{program}: {error}"))?;
     if status.success() { Ok(()) } else { Err(format!("{label} failed ({status})")) }
+}
+
+/// A run of the workflow, as `gh run list --json` gives it.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct Run {
+    database_id: u64,
+    status: String,
+    conclusion: String,
+    /// The branch or the tag the run is for.
+    head_branch: String,
+    url: String,
+}
+
+/// A job of a run, as `gh run view --json jobs` gives it.
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct Job {
+    name: String,
+    status: String,
+    conclusion: String,
+}
+
+#[derive(serde::Deserialize)]
+struct Jobs {
+    jobs: Vec<Job>,
+}
+
+/// A published release, as `gh release view --json url,assets` gives it.
+#[derive(serde::Deserialize)]
+struct Published {
+    url: String,
+    assets: Vec<Asset>,
+}
+
+#[derive(serde::Deserialize)]
+struct Asset {
+    name: String,
+}
+
+/// A run that ended in success, and whether it checked and built everything.
+struct Passed {
+    run: Run,
+    whole: bool,
+}
+
+/// What the runs of a tag or of a commit say so far.
+enum Runs {
+    Passed(Vec<Passed>),
+    Failed(String),
+    Going,
+}
+
+/// The answer of `gh`, read as what it is asked for.
+fn gh<T: serde::de::DeserializeOwned>(root: &Path, arguments: &[&str]) -> Result<T, String> {
+    ks_text::json::loads(output(root, "gh", arguments)?).map_err(|error| format!("gh {} gave no answer to read: {error}", arguments.join(" ")))
 }
 
 /// The files that spell the version, each by the pattern that finds the version it holds: the program's own in
@@ -138,6 +214,22 @@ fn changelog_sections(text: &str) -> Vec<(String, Vec<String>)> {
     sections
 }
 
+/// The changelog with the entries under Unreleased put at the top of the section `heading`, when that section is the one
+/// right below them.
+fn unreleased_into_section(text: &str, heading: &str) -> Option<String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let unreleased = lines.iter().position(|line| *line == UNRELEASED)?;
+    let (head, below) = lines.split_at(unreleased + 1);
+    let (entries, section) = below.split_at(below.iter().position(|line| line.starts_with("## "))?);
+    let (title, older) = section.split_first()?;
+    if title.strip_prefix("## ") != Some(heading) {
+        return None;
+    }
+    let entries = entries.iter().filter(|line| !line.trim().is_empty());
+    let older = older.iter().skip_while(|line| line.trim().is_empty());
+    Some(head.iter().chain(&["", *title, ""]).chain(entries).chain(older).copied().collect::<Vec<&str>>().join("\n"))
+}
+
 /// Today in the local calendar, as the Python tool dated a release (`date.today()`): the answer of `date +%F`, or the UTC
 /// date when it gives none.
 fn today() -> String {
@@ -173,22 +265,24 @@ fn close_changelog(root: &Path, options: &Options) -> Result<(), String> {
     let path = root.join("CHANGELOG.md");
     let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let sections = changelog_sections(&text);
+    let entries = sections.iter().find(|(heading, _)| heading == "Unreleased").map_or(0, |(_, entries)| entries.len());
     if let Some((heading, _)) = sections.iter().find(|(heading, _)| heading != "Unreleased" && heading.split(' ').next() == Some(options.version.as_str())) {
-        // A candidate closes the section on the day it is built; the release is dated by the day it is published.
-        let dated = format!("{} — {}", options.version, today());
-        if options.candidate.is_some() || *heading == dated {
+        // The section keeps the day its candidate closed it: a release on the candidate's commit publishes the
+        // candidate's files, and a new date would be a new commit that nothing has checked.
+        if entries == 0 {
             println!("    CHANGELOG.md already has a section for {}", options.version);
             return Ok(());
         }
+        // Written after the section was closed, these are still changes of this release.
+        let moved = unreleased_into_section(&text, heading).ok_or_else(|| format!("CHANGELOG.md has entries under {UNRELEASED} and a section for {} that is not the one right below them; move the entries by hand", options.version))?;
         if options.dry_run {
-            println!("    would date the section {heading} as {dated}");
+            println!("    would move {entries} Unreleased entries into the section {heading}");
             return Ok(());
         }
-        std::fs::write(&path, text.replacen(&format!("## {heading}\n"), &format!("## {dated}\n"), 1)).map_err(|error| error.to_string())?;
-        println!("    dated the section {heading} as {dated}, the day of the release");
+        std::fs::write(&path, moved).map_err(|error| error.to_string())?;
+        println!("    moved {entries} Unreleased entries into the section {heading}");
         return Ok(());
     }
-    let entries = sections.iter().find(|(heading, _)| heading == "Unreleased").map_or(0, |(_, entries)| entries.len());
     if entries == 0 {
         return Err(format!("CHANGELOG.md has neither a section for {} nor entries under {UNRELEASED}; describe the release there first", options.version));
     }
@@ -250,15 +344,34 @@ fn check_release_notes(root: &Path, version: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Every check a release holds to, stopping at the first that does not. The engine reports are replayed for this program
-/// first, so every check after them holds the tree that is committed.
-fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
+/// What only this machine can check, stopping at the first check that does not hold: the engine reports replayed for this
+/// program, which the release commits, and the owner's typing against the last release, which never leaves this machine.
+/// The reports come first, so every check after them holds the tree that is committed.
+fn own_checks(root: &Path, options: &Options) -> Result<(), String> {
+    let (Some(field_root), Some(released)) = (&options.field_root, &options.field_released) else {
+        return Err(fail("--field-root and --field-released name the owner's typing and the last release's reports; a release does not skip them"));
+    };
     let tree = root.to_string_lossy().into_owned();
     run(root, "the trainer", "cargo", &["build", "--profile", "train", "-p", "ks-train"])?;
-    let trainer = root.join("target/train/ks-train");
-    let trainer = trainer.to_string_lossy().into_owned();
+    let trainer = root.join("target/train/ks-train").to_string_lossy().into_owned();
     run(root, "the boundary regressions", "dbus-run-session", &["--", &trainer, "engine", "boundary", "--tree", &tree, "--refresh-runtime"])?;
     run(root, "the prefix replay", "dbus-run-session", &["--", &trainer, "engine", "prefix", "--tree", &tree, "--refresh-runtime"])?;
+    let (field_root, released) = (field_root.to_string_lossy().into_owned(), released.to_string_lossy().into_owned());
+    // The gate runs the replay beside it: both are built, so neither is left from an older tree.
+    run(root, "the replay tools", "cargo", &["build", "--profile", "parity", "-p", "ks-replay", "--bins"])?;
+    let gate = root.join("target/parity/field-gate").to_string_lossy().into_owned();
+    run(root, "the owner's typing against the last release", &gate, &["--root", &field_root, "--released", &released])?;
+    if let Some(spelled) = &options.field_released_speller {
+        run(root, "the owner's typing with Hunspell against the last release", &gate, &["--root", &field_root, "--released", &spelled.to_string_lossy(), "--speller"])?;
+    }
+    Ok(())
+}
+
+/// The checks the workflow run of a tag repeats on every system, made here for a release whose tag no run has checked
+/// yet: a tag that is pushed and then fails cannot be taken back.
+fn repeated_checks(root: &Path, options: &Options) -> Result<(), String> {
+    let tree = root.to_string_lossy().into_owned();
+    let trainer = root.join("target/train/ks-train").to_string_lossy().into_owned();
     let mut arguments = vec!["test", "--profile", "parity"];
     for name in TESTED_CRATES {
         arguments.extend(["-p", name]);
@@ -273,18 +386,6 @@ fn run_checks(root: &Path, options: &Options) -> Result<(), String> {
     run(root, "the files of retired families", &trainer, &["archive", "--tree", &tree])?;
     for family in ["boundary-v1", "context-v2", "ortho-v2", "prefix-v1"] {
         run(root, "a rejected or retired model replays", &trainer, &["retired", family, "--tree", &tree, "--replay"])?;
-    }
-    if let (Some(field_root), Some(released)) = (&options.field_root, &options.field_released) {
-        let (field_root, released) = (field_root.to_string_lossy().into_owned(), released.to_string_lossy().into_owned());
-        // The gate runs the replay beside it: both are built, so neither is left from an older tree.
-        run(root, "the replay tools", "cargo", &["build", "--profile", "parity", "-p", "ks-replay", "--bins"])?;
-        let gate = root.join("target/parity/field-gate").to_string_lossy().into_owned();
-        run(root, "the owner's typing against the last release", &gate, &["--root", &field_root, "--released", &released])?;
-        if let Some(spelled) = &options.field_released_speller {
-            run(root, "the owner's typing with Hunspell against the last release", &gate, &["--root", &field_root, "--released", &spelled.to_string_lossy(), "--speller"])?;
-        }
-    } else {
-        return Err(fail("--field-root and --field-released name the owner's typing and the last release's reports; a release does not skip them"));
     }
     run(root, "the Debian package", "bash", &["packaging/build-rust-deb.sh"])?;
     let architecture = output(root, "dpkg", &["--print-architecture"])?;
@@ -316,36 +417,139 @@ fn commit_tag_push(root: &Path, options: &Options) -> Result<String, String> {
     Ok(tag)
 }
 
-/// The workflow run of this tag, by polling: `completed` with `success`, or the reason it is not.
-fn wait_for_workflow(root: &Path, tag: &str, options: &Options) -> Result<(), String> {
-    let started = std::time::Instant::now();
-    loop {
-        let listed = output(root, "gh", &["run", "list", "--workflow", WORKFLOW, "--branch", tag, "--limit", "1", "--json", "status,conclusion,url"])?;
-        let runs: serde_json::Value = serde_json::from_str(&listed).map_err(|error| error.to_string())?;
-        if let Some(run) = runs.as_array().and_then(|runs| runs.first())
-            && run["status"] == "completed"
-        {
-            if run["conclusion"] == "success" {
-                println!("    {}", run["url"].as_str().unwrap_or(""));
-                return Ok(());
-            }
-            return Err(format!("the release workflow ended with {}: {}", run["conclusion"], run["url"]));
+/// What the push runs of the workflow that `selector` names say now (`--branch <tag>` or `--commit <sha>`). A job that
+/// has failed is said at once, while the jobs beside it go on: the run can no longer end well.
+fn runs_so_far(root: &Path, selector: [&str; 2], limit: &str) -> Result<Runs, String> {
+    let listed: Vec<Run> = gh(root, &["run", "list", "--workflow", WORKFLOW, selector[0], selector[1], "--event", "push", "--limit", limit, "--json", "databaseId,status,conclusion,headBranch,url"])?;
+    let mut passed = Vec::new();
+    let mut going = false;
+    for run in listed {
+        let jobs = gh::<Jobs>(root, &["run", "view", &run.database_id.to_string(), "--json", "jobs"])?.jobs;
+        if let Some(job) = jobs.iter().find(|job| job.status == COMPLETED && job.conclusion != SUCCESS && job.conclusion != SKIPPED) {
+            return Ok(Runs::Failed(format!("the job «{}» ended with {}: {}", job.name, job.conclusion, run.url)));
         }
-        if started.elapsed().as_secs() >= options.timeout_seconds {
-            return Err(format!("the release workflow of {tag} did not finish in time"));
+        if run.status != COMPLETED {
+            going = true;
+        } else if run.conclusion == SUCCESS {
+            passed.push(Passed { whole: jobs.iter().any(|job| job.name == CHECKS_JOB && job.conclusion == SUCCESS), run });
+        } else {
+            return Ok(Runs::Failed(format!("the run ended with {}: {}", run.conclusion, run.url)));
+        }
+    }
+    Ok(if going { Runs::Going } else { Runs::Passed(passed) })
+}
+
+/// The runs that `selector` names, once all of them have ended well; `first` waits for a run to appear, as the run of a
+/// tag just pushed does. An answer `gh` fails to give is asked for again, since one lost call must not end a release
+/// whose tag is already pushed; the wait is given up when the time is up, or when `gh` has given no answer too many times
+/// in a row.
+fn settled_runs(root: &Path, selector: [&str; 2], limit: &str, first: bool, options: &Options) -> Result<Vec<Passed>, String> {
+    let started = std::time::Instant::now();
+    let (mut said, mut unread_in_a_row, mut appeared) = (String::new(), 0_u32, false);
+    loop {
+        let unread = match runs_so_far(root, selector, limit) {
+            Ok(Runs::Passed(passed)) if !(first && passed.is_empty()) => return Ok(passed),
+            Ok(Runs::Failed(why)) => return Err(why),
+            Ok(found) => {
+                appeared |= matches!(found, Runs::Going);
+                unread_in_a_row = 0;
+                None
+            }
+            Err(error) => {
+                unread_in_a_row += 1;
+                Some(error)
+            }
+        };
+        // Said once, not at every asking: whoever watches sees what is wrong.
+        if let Some(error) = unread.as_ref().filter(|error| **error != said) {
+            println!("    asking again: {error}");
+            said.clone_from(error);
+        }
+        let late = started.elapsed().as_secs() >= options.timeout_seconds;
+        if let Some(error) = unread.filter(|_| late || unread_in_a_row >= UNREAD_ANSWERS) {
+            return Err(format!("the runs could not be read: {error}"));
+        }
+        if late {
+            return Err(fail(if appeared { "the run did not end in time" } else { "no run appeared in time" }));
         }
         std::thread::sleep(std::time::Duration::from_secs(options.poll_seconds));
     }
 }
 
+/// The runs that passed on a commit hold one that checked and built everything: the checks made here are not all there
+/// are.
+fn with_a_whole_run(passed: Vec<Passed>, head: &str) -> Result<Vec<Passed>, String> {
+    if passed.iter().any(|run| run.whole) {
+        return Ok(passed);
+    }
+    Err(format!("no run of the workflow has checked the commit {head} whole; push the branch, let its run end and start again"))
+}
+
+/// The runs that passed on the commit the release starts from. With `wait` the runs that still go on are waited for.
+/// Without it only what is known already is said, before the minutes of the checks made here: a run that failed, or no
+/// run that checked the commit.
+fn checked_commit(root: &Path, options: &Options, wait: bool) -> Result<Vec<Passed>, String> {
+    let head = output(root, "git", &["rev-parse", "HEAD"])?;
+    let on_commit = |why: String| format!("the workflow on the commit {head}: {why}");
+    if wait {
+        println!("    $ the workflow has checked the commit this release starts from");
+        return with_a_whole_run(settled_runs(root, ["--commit", &head], RUNS_OF_A_COMMIT, false, options).map_err(on_commit)?, &head);
+    }
+    match runs_so_far(root, ["--commit", &head], RUNS_OF_A_COMMIT) {
+        Ok(Runs::Failed(why)) => Err(on_commit(why)),
+        Ok(Runs::Passed(passed)) => with_a_whole_run(passed, &head),
+        // Still going, or not read this once: the wait after the checks made here settles it.
+        Ok(Runs::Going) | Err(_) => Ok(Vec::new()),
+    }
+}
+
+/// The candidate whose files a release publishes: a candidate of this version whose run checked this very commit whole
+/// and passed, when the tree holds nothing more to commit. The workflow run of the release's tag then publishes those
+/// files instead of building others.
+fn published_candidate(root: &Path, options: &Options, passed: &[Passed]) -> Result<Option<String>, String> {
+    if !output(root, "git", &["status", "--porcelain"])?.is_empty() {
+        return Ok(None);
+    }
+    let prefix = format!("v{}-rc", options.version);
+    Ok(passed.iter().filter(|run| run.whole).map(|run| &run.run.head_branch).find(|tag| tag.strip_prefix(&prefix).is_some_and(|number| number.parse::<u32>().is_ok())).cloned())
+}
+
+/// Every check a release holds to. What only this machine can check is checked on every run; the rest is repeated here
+/// only when no workflow run has made it, or will make it before the tag is final. Gives the candidate whose files the
+/// run of the release's tag is to publish, when there is one.
+fn run_checks(root: &Path, options: &Options) -> Result<Option<String>, String> {
+    checked_commit(root, options, false)?;
+    own_checks(root, options)?;
+    let passed = checked_commit(root, options, true)?;
+    if options.candidate.is_some() {
+        println!("    the workflow run of the candidate's tag makes every other check");
+        return Ok(None);
+    }
+    let candidate = published_candidate(root, options, &passed)?;
+    match &candidate {
+        Some(candidate) => println!("    {candidate} passed every other check on this commit: none is repeated here, and the run of the release's tag is to publish its files"),
+        None => repeated_checks(root, options)?,
+    }
+    Ok(candidate)
+}
+
+/// The workflow run of this tag, waited for until it ends in success. Says whether the run checked and built everything,
+/// as a run that publishes the files of a candidate does not.
+fn wait_for_workflow(root: &Path, tag: &str, options: &Options) -> Result<bool, String> {
+    let passed = settled_runs(root, ["--branch", tag], RUNS_OF_A_TAG, true, options).map_err(|why| format!("the release workflow of {tag}: {why}"))?;
+    for run in &passed {
+        println!("    {}", run.run.url);
+    }
+    Ok(passed.iter().any(|run| run.whole))
+}
+
 fn verify_published(root: &Path, options: &Options, tag: &str) -> Result<String, String> {
-    let release: serde_json::Value = serde_json::from_str(&output(root, "gh", &["release", "view", tag, "--json", "url,assets"])?).map_err(|error| error.to_string())?;
-    let published: Vec<&str> = release["assets"].as_array().map_or_else(Vec::new, |assets| assets.iter().filter_map(|asset| asset["name"].as_str()).collect());
-    let missing: Vec<String> = assets(&options.version).into_iter().filter(|asset| !published.contains(&asset.as_str())).collect();
+    let release: Published = gh(root, &["release", "view", tag, "--json", "url,assets"])?;
+    let missing: Vec<String> = assets(&options.version).into_iter().filter(|asset| !release.assets.iter().any(|published| published.name == *asset)).collect();
     if !missing.is_empty() {
         return Err(format!("the release {tag} is missing: {}", missing.join(", ")));
     }
-    Ok(release["url"].as_str().unwrap_or("").to_owned())
+    Ok(release.url)
 }
 
 fn check_preconditions(root: &Path, options: &Options) -> Result<(), String> {
@@ -377,12 +581,13 @@ fn release(root: &Path, options: &Options) -> Result<(), String> {
         println!("    dry run: nothing was written, stopping before the checks");
         return Ok(());
     }
-    if options.skip_checks {
+    let candidate = if options.skip_checks {
         println!("[5] skipping the checks (--skip-checks)");
+        None
     } else {
         println!("[5] running the checks");
-        run_checks(root, options)?;
-    }
+        run_checks(root, options)?
+    };
     println!("[6] committing, tagging and pushing");
     let tag = commit_tag_push(root, options)?;
     if options.skip_ci {
@@ -390,7 +595,12 @@ fn release(root: &Path, options: &Options) -> Result<(), String> {
         return Ok(());
     }
     println!("[7] waiting for the release workflow");
-    wait_for_workflow(root, &tag, options)?;
+    // What the run did with the candidate is its own decision (packaging/ci-plan.sh), so it is read, not assumed.
+    match (candidate, wait_for_workflow(root, &tag, options)?) {
+        (Some(candidate), false) => println!("    the run published the files of {candidate}"),
+        (Some(candidate), true) => println!("    the run checked and built everything anew instead of publishing the files of {candidate}: its plan job says why"),
+        (None, _) => {}
+    }
     println!("[8] verifying the published release");
     let url = verify_published(root, options, &tag)?;
     println!("\nKeySwitch {tag} is released: {url}");
@@ -546,18 +756,84 @@ mod tests {
     }
 
     #[test]
-    fn a_release_dates_the_section_of_its_candidate_by_the_day_it_is_published() {
-        let tree = Tree::new("redated");
-        tree.write("CHANGELOG.md", "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- new\n\n## 1.2.0 — 2026-01-01\n\n- old\n");
+    fn a_release_keeps_the_day_its_candidate_closed_the_section() {
+        // A new date would be a new commit, and the release publishes the files of the candidate's commit.
+        let tree = Tree::new("kept-date");
+        let text = "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- new\n\n## 1.2.0 — 2026-01-01\n\n- old\n";
+        tree.write("CHANGELOG.md", text);
+        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
+        assert_eq!(tree.read("CHANGELOG.md"), text);
+    }
+
+    #[test]
+    fn entries_written_after_the_section_was_closed_join_it() {
+        let tree = Tree::new("late-entries");
+        let text = "# Changes\n\n## Unreleased\n\n- late\n- later\n\n## 1.3.0 — 2026-01-01\n\n- new\n\n## 1.2.0 — 2026-01-01\n\n- old\n";
+        tree.write("CHANGELOG.md", text);
         close_changelog(&tree.0, &options("1.3.0", true)).unwrap();
-        assert!(tree.read("CHANGELOG.md").contains("## 1.3.0 — 2026-01-01\n"), "a dry run writes nothing");
-        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
-        let dated = format!("## 1.3.0 — {}\n", today());
-        let text = tree.read("CHANGELOG.md");
-        assert!(text.contains(&dated), "{text}");
-        assert!(text.contains("## 1.2.0 — 2026-01-01\n"), "{text}");
-        close_changelog(&tree.0, &options("1.3.0", false)).unwrap();
-        assert_eq!(tree.read("CHANGELOG.md"), text, "a section dated today stays as it is");
+        assert_eq!(tree.read("CHANGELOG.md"), text, "a dry run writes nothing");
+        for candidate in [Some(2), None] {
+            tree.write("CHANGELOG.md", text);
+            close_changelog(&tree.0, &Options { candidate, ..options("1.3.0", false) }).unwrap();
+            assert_eq!(tree.read("CHANGELOG.md"), "# Changes\n\n## Unreleased\n\n## 1.3.0 — 2026-01-01\n\n- late\n- later\n- new\n\n## 1.2.0 — 2026-01-01\n\n- old\n");
+        }
+        // Another section between them: which entries belong to which release is the author's to say.
+        tree.write("CHANGELOG.md", "# Changes\n\n## Unreleased\n\n- late\n\n## 1.4.0 — 2026-02-01\n\n- other\n\n## 1.3.0 — 2026-01-01\n\n- new\n");
+        assert!(close_changelog(&tree.0, &options("1.3.0", false)).unwrap_err().contains("by hand"));
+        assert_eq!(unreleased_into_section("# Changes\n\n## 1.3.0 — 2026-01-01\n", "1.3.0 — 2026-01-01"), None, "no Unreleased heading");
+        assert_eq!(unreleased_into_section("## Unreleased\n\n- late\n", "1.3.0 — 2026-01-01"), None, "no section below");
+    }
+
+    #[test]
+    fn the_workflow_has_the_names_the_command_asks_for() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let workflow = std::fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+        assert!(workflow.starts_with(&format!("name: {WORKFLOW}\n")), "the workflow is asked for by its name");
+        assert!(workflow.contains(&format!("    name: {CHECKS_JOB}\n")), "the job that ends the checks is asked for by its name");
+        // The workflow's own plan publishes a candidate's files only when it finds every file a release has.
+        let plan = std::fs::read_to_string(root.join("packaging/ci-plan.sh")).unwrap().replace("${version}", "$version");
+        for asset in ASSETS {
+            assert!(plan.contains(&format!("\"{}\"", asset.replace("{version}", "$version"))), "{asset}");
+        }
+        assert!(plan.contains(&format!("checks_job=\"{CHECKS_JOB}\"")), "the plan reads the same job");
+        assert!(workflow.contains(&format!("    name: {}\n", plan.split("apt_job=\"").nth(1).unwrap().split('"').next().unwrap())), "the plan names the job of the APT repository");
+    }
+
+    #[test]
+    fn the_stable_tests_of_a_tag_are_the_tests_a_release_runs_here() {
+        // A candidate leaves these tests to the workflow run of its tag: a crate tested here and not there would go untested.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let script = std::fs::read_to_string(root.join("packaging/stable-tests.sh")).unwrap();
+        let named = |line: &str| line.split(" -p ").skip(1).map(|rest| rest.split([' ', '"']).next().unwrap().to_owned()).collect::<Vec<String>>();
+        let whole = script.lines().find(|line| line.trim_start().starts_with("all) ")).unwrap();
+        assert_eq!(named(whole), TESTED_CRATES, "a whole run");
+        let rest = script.lines().find(|line| line.contains(" -p ks-text ") && !line.trim_start().starts_with("all) ")).unwrap();
+        let mut in_parts = named(rest);
+        in_parts.push("ks-train".to_owned());
+        in_parts.sort();
+        let mut tested = TESTED_CRATES.map(str::to_owned).to_vec();
+        tested.sort();
+        assert_eq!(in_parts, tested, "the parts: every crate but ks-train in `rest`, ks-train dealt out by its tests");
+    }
+
+    #[test]
+    fn the_workflow_runs_every_part_the_scripts_deal_out() {
+        // A part a script knows and no runner takes would leave its tests unrun with every job green.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let workflow = std::fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+        let parts = |script: &str| {
+            let text = std::fs::read_to_string(root.join("packaging").join(script)).unwrap();
+            let usage = text.lines().find_map(|line| line.strip_prefix("usage='usage: ")).unwrap().to_owned();
+            let listed = usage.split('[').next_back().unwrap().trim_end_matches("]'").to_owned();
+            listed.split('|').filter(|part| *part != "all").map(str::to_owned).collect::<Vec<String>>()
+        };
+        let measured = parts("coverage.sh");
+        assert_eq!(measured.len(), 8);
+        for part in &measured {
+            assert_eq!(workflow.matches(&format!("            part: {part}\n")).count(), 1, "{part}");
+        }
+        assert_eq!(workflow.matches("          - os: ubuntu-26.04\n            part: ").count(), measured.len(), "a part of the workflow no script knows");
+        assert!(workflow.contains(&format!("        part: [{}]\n", parts("stable-tests.sh").join(", "))), "the parts of the tests on the stable compiler");
     }
 
     #[test]

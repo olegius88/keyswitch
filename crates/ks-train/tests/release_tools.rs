@@ -336,6 +336,7 @@ struct Project {
     root: PathBuf,
     path: std::ffi::OsString,
     gh_runs: PathBuf,
+    gh_jobs: PathBuf,
     gh_release: PathBuf,
 }
 
@@ -386,24 +387,67 @@ fn project(name: &str) -> Project {
     std::fs::create_dir_all(&bin).unwrap();
     let trainer_stub = root.join("target/train/ks-train");
     // A replay keeps the report it replaced in the history, as the real one does; a step may also leave a stray file.
-    executable(&trainer_stub, "#!/bin/sh\nif [ \"$1\" = engine ]; then mkdir -p model/boundary_v1/engine-history && : > model/boundary_v1/engine-history/0.json; fi\nif [ \"$1\" = \"$KS_STRAY_STEP\" ]; then : > stray; fi\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
+    executable(&trainer_stub, "#!/bin/sh\nif [ \"$1\" = engine ] && [ -z \"$KS_SAME_REPORT\" ]; then mkdir -p model/boundary_v1/engine-history && : > model/boundary_v1/engine-history/0.json; fi\nif [ \"$1\" = \"$KS_STRAY_STEP\" ]; then : > stray; fi\n[ \"$1\" != \"$KS_FAIL_STEP\" ]\n");
     executable(&bin.join("cargo"), "#!/bin/sh\n[ \"$1\" != \"$KS_FAIL_CARGO\" ]\n");
     std::fs::create_dir_all(root.join("target/parity")).unwrap();
     executable(&root.join("target/parity/field-gate"), "#!/bin/sh\ncase \"$*\" in\n  *--speller*) [ \"$KS_FAIL_GATE\" != speller ] ;;\n  *) [ \"$KS_FAIL_GATE\" != plain ] ;;\nesac\n");
     executable(&bin.join("dbus-run-session"), "#!/bin/sh\nshift\nexec \"$@\"\n");
     executable(&bin.join("bash"), "#!/bin/sh\nexit 0\n");
     executable(&bin.join("dpkg"), "#!/bin/sh\necho amd64\n");
-    let (gh_runs, gh_release) = (folder.join("runs.jsonl"), folder.join("release.json"));
-    executable(&bin.join("gh"), &format!("#!/bin/sh\nif [ \"$1\" = run ]; then\n  head -n 1 {runs}\n  sed -i 1d {runs}\nelse\n  cat {release}\nfi\n", runs = gh_runs.display(), release = gh_release.display()));
+    // `gh run list` gives the next line of the answers, and fails where the line says so; `gh run view <id>` the jobs
+    // written for that run, or none.
+    let (gh_runs, gh_jobs, gh_release) = (folder.join("runs.jsonl"), folder.join("jobs.json"), folder.join("release.json"));
+    executable(
+        &bin.join("gh"),
+        &format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"run list\" ]; then\n  line=\"$(head -n 1 {runs})\"\n  sed -i 1d {runs}\n  [ \"$line\" != fail ] || exit 1\n  printf '%s\\n' \"$line\"\nelif [ \"$1 $2\" = \"run view\" ]; then\n  if [ -f {jobs}.$3 ]; then cat {jobs}.$3; else echo '{{\"jobs\": []}}'; fi\nelse\n  cat {release}\nfi\n",
+            runs = gh_runs.display(),
+            jobs = gh_jobs.display(),
+            release = gh_release.display()
+        ),
+    );
     let mut path = bin.into_os_string();
     path.push(":");
     path.push(std::env::var_os("PATH").unwrap());
-    Project { root, path, gh_runs, gh_release }
+    let project = Project { root, path, gh_runs, gh_jobs, gh_release };
+    // The workflow has checked the commit a release starts from, unless a test says otherwise.
+    let checked = runs(&[run(7, "completed", "success", "main")]);
+    project.answers(&[&checked, &checked]);
+    project.jobs(7, CHECKED);
+    project
 }
+
+/// A run as `gh run list` gives it.
+fn run(id: u64, status: &str, conclusion: &str, branch: &str) -> String {
+    format!(r#"{{"databaseId": {id}, "status": "{status}", "conclusion": "{conclusion}", "headBranch": "{branch}", "url": "https://example.org/run/{id}"}}"#)
+}
+
+/// One answer of `gh run list`.
+fn runs(listed: &[String]) -> String {
+    format!("[{}]", listed.join(", "))
+}
+
+/// The jobs of a run that checked and built everything, and of one that had nothing to check.
+const CHECKED: &str = r#"{"jobs": [{"name": "Tests", "status": "completed", "conclusion": "success"}, {"name": "Every line and branch of the program ran", "status": "completed", "conclusion": "success"}]}"#;
+const STOOD_ASIDE: &str = r#"{"jobs": [{"name": "Every line and branch of the program ran", "status": "completed", "conclusion": "skipped"}]}"#;
 
 impl Project {
     fn release(&self, arguments: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&self.root).args(arguments).env("PATH", &self.path).output().unwrap()
+        self.release_with(arguments, &[])
+    }
+
+    fn release_with(&self, arguments: &[&str], environment: &[(&str, &str)]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&self.root).args(arguments).env("PATH", &self.path).envs(environment.iter().copied()).output().unwrap()
+    }
+
+    /// What `gh run list` answers, call by call.
+    fn answers(&self, lines: &[&str]) {
+        std::fs::write(&self.gh_runs, lines.join("\n") + "\n").unwrap();
+    }
+
+    /// The jobs `gh run view` gives for a run.
+    fn jobs(&self, id: u64, text: &str) {
+        std::fs::write(format!("{}.{id}", self.gh_jobs.display()), text).unwrap();
     }
 }
 
@@ -444,34 +488,80 @@ fn the_release_command() {
     assert_eq!(in_git(&tree.root, &["tag", "--list", "v1.3.0-rc1"]), "v1.3.0-rc1");
     let tree = project("release-gone-message");
     refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--skip-ci", "--message-file", "/nonexistent"]), "/nonexistent");
-    // The whole way: the checks, the workflow polled until it ends, the assets.
+    // The whole way of a release no candidate went before: every check here, the workflow polled until it ends, the assets.
     let names: Vec<Value> = notes("1.3.0").split(": ").nth(1).unwrap().trim_end().trim_end_matches('.').split(", ").map(|name| json!({"name": name})).collect();
     let tree = project("release-whole");
     let whole_arguments = ["--version", "1.3.0", "--field-root", ".", "--field-released", ".", "--poll-seconds", "0", "--timeout-seconds", "60"];
-    std::fs::write(&tree.gh_runs, "[]\n[{\"status\": \"in_progress\"}]\n[{\"status\": \"completed\", \"conclusion\": \"success\", \"url\": \"https://example.org/run\"}]\n").unwrap();
-    std::fs::write(&tree.gh_release, json!({"url": "https://example.org/release", "assets": names}).to_string()).unwrap();
+    // The commit it starts from is still being checked before the checks made here and after them, then is; the run of
+    // the tag is not there yet, cannot be read twice (which is said once), goes on, and ends.
+    tree.answers(&[
+        &runs(&[run(7, "in_progress", "", "main")]),
+        &runs(&[run(7, "in_progress", "", "main")]),
+        &runs(&[run(7, "completed", "success", "main")]),
+        "[]",
+        "fail",
+        "fail",
+        &runs(&[run(8, "in_progress", "", "v1.3.0")]),
+        &runs(&[run(8, "completed", "success", "v1.3.0")]),
+    ]);
+    let published = json!({"url": "https://example.org/release", "assets": names}).to_string();
+    std::fs::write(&tree.gh_release, &published).unwrap();
     let whole = tree.release(&whole_arguments);
-    assert!(whole.status.success() && said(&whole).contains("is released"), "{}", said(&whole));
+    assert!(whole.status.success() && said(&whole).contains("is released") && said(&whole).contains("https://example.org/run/8"), "{}", said(&whole));
+    assert!(said(&whole).contains("the tests of the engine"), "no candidate went before: {}", said(&whole));
+    assert_eq!(said(&whole).matches("asking again").count(), 1, "{}", said(&whole));
+    assert!(!said(&whole).contains("the run published") && !said(&whole).contains("anew"), "no candidate, nothing to say of one: {}", said(&whole));
     // Each way the workflow or the release can disappoint.
-    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"failure\", \"url\": \"https://example.org/run\"}]\n").unwrap();
-    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "workflow ended with");
-    std::fs::write(&tree.gh_runs, "[{\"status\": \"queued\"}]\n[{\"status\": \"queued\"}]\n").unwrap();
-    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "did not finish in time");
-    std::fs::write(&tree.gh_runs, "not json\n").unwrap();
-    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "");
-    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"success\"}]\n").unwrap();
+    tree.answers(&[&runs(&[run(8, "completed", "failure", "v1.3.0")])]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "the release workflow of v1.3.0: the run ended with failure");
+    // A job that failed is said while the others go on.
+    tree.answers(&[&runs(&[run(9, "in_progress", "", "v1.3.0")])]);
+    tree.jobs(9, r#"{"jobs": [{"name": "Tests", "status": "in_progress", "conclusion": ""}, {"name": "Windows installer (arm64)", "status": "completed", "conclusion": "failure"}]}"#);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "the job «Windows installer (arm64)» ended with failure: https://example.org/run/9");
+    tree.answers(&[&runs(&[run(8, "queued", "", "v1.3.0")]), &runs(&[run(8, "queued", "", "v1.3.0")])]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "the run did not end in time");
+    tree.answers(&["[]"]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "no run appeared in time");
+    // An answer that never comes ends the wait long before the time is up.
+    tree.answers(&["fail"; 30]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "3600"]), "the runs could not be read");
+    // What cannot be read is asked for again, until the time is up.
+    tree.answers(&["not json"]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "the runs could not be read");
+    tree.answers(&["fail"]);
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "the runs could not be read");
+    tree.answers(&[&runs(&[run(10, "in_progress", "", "v1.3.0")])]);
+    tree.jobs(10, "not json");
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0", "--timeout-seconds", "0"]), "the runs could not be read");
+    tree.answers(&[&runs(&[run(8, "completed", "success", "v1.3.0")])]);
     std::fs::write(&tree.gh_release, json!({"url": "https://example.org/release", "assets": []}).to_string()).unwrap();
     refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "is missing");
-    std::fs::write(&tree.gh_runs, "[{\"status\": \"completed\", \"conclusion\": \"success\"}]\n").unwrap();
+    tree.answers(&[&runs(&[run(8, "completed", "success", "v1.3.0")])]);
     std::fs::write(&tree.gh_release, "not json").unwrap();
-    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "");
-    // Each check that fails stops it; the owner's typing is not skipped.
+    refused(&tree.release(&["--version", "1.3.0", "--skip-checks", "--poll-seconds", "0"]), "gave no answer to read");
+    // The commit a release starts from has been checked by the workflow, whole and with no run that failed. What is
+    // known already is said before the checks made here take their minutes.
+    let unchecked = |name: &str, answers: &[&str], jobs: &str, words: &str, at_once: bool| {
+        let tree = project(&format!("release-unchecked-{name}"));
+        tree.answers(answers);
+        tree.jobs(7, jobs);
+        let answer = tree.release(&whole_arguments);
+        refused(&answer, words);
+        assert_eq!(!said(&answer).contains("$ the trainer"), at_once, "{}", said(&answer));
+    };
+    let (going, passed, failed) = (runs(&[run(7, "in_progress", "", "main")]), runs(&[run(7, "completed", "success", "main")]), runs(&[run(7, "completed", "failure", "main")]));
+    unchecked("none", &["[]"], CHECKED, "no run of the workflow has checked the commit", true);
+    unchecked("aside", &[&passed], STOOD_ASIDE, "no run of the workflow has checked the commit", true);
+    unchecked("failed", &[&failed], CHECKED, "the workflow on the commit", true);
+    // What a run still going, or an answer not read, could not say before them is said after them.
+    unchecked("failed-later", &[&going, &failed], CHECKED, "the run ended with failure", false);
+    unchecked("aside-later", &["fail", &passed], STOOD_ASIDE, "no run of the workflow has checked the commit", false);
+    // Each check that fails stops it; the owner's typing is not skipped, and is asked for before anything runs.
     let tree = project("release-checks");
     refused(&tree.release(&["--version", "1.3.0"]), "a release does not skip them");
     let failing = |variable: &str, value: &str, words: &str| {
         let tree = project(&format!("release-check-{value}"));
-        let answer = Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&tree.root).args(whole_arguments).env("PATH", &tree.path).env(variable, value).output().unwrap();
-        refused(&answer, words);
+        refused(&tree.release_with(&whole_arguments, &[(variable, value)]), words);
     };
     failing("KS_FAIL_CARGO", "test", "the tests of the engine");
     failing("KS_FAIL_CARGO", "build", "the trainer failed");
@@ -480,11 +570,60 @@ fn the_release_command() {
     let tree = project("release-check-speller");
     let mut spelled: Vec<&str> = whole_arguments.to_vec();
     spelled.extend(["--field-released-speller", "."]);
-    let answer = Command::new(env!("CARGO_BIN_EXE_ks-release")).current_dir(&tree.root).args(&spelled).env("PATH", &tree.path).env("KS_FAIL_GATE", "speller").output().unwrap();
-    refused(&answer, "with Hunspell");
+    refused(&tree.release_with(&spelled, &[("KS_FAIL_GATE", "speller")]), "with Hunspell");
     failing("KS_FAIL_STEP", "gates", "the evidence");
     failing("KS_FAIL_STEP", "retired", "rejected or retired");
     failing("KS_FAIL_STEP", "engine", "the boundary regressions");
+    // A candidate checks here what only this machine can, and leaves the rest to the workflow run of its tag: a test that
+    // would fail here is not run here.
+    let tree = project("release-candidate");
+    let mut candidate: Vec<&str> = whole_arguments.to_vec();
+    candidate.extend(["--candidate", "1", "--skip-ci"]);
+    let done = tree.release_with(&candidate, &[("KS_FAIL_CARGO", "test"), ("KS_FAIL_STEP", "gates")]);
+    assert!(done.status.success() && said(&done).contains("makes every other check") && !said(&done).contains("the tests of the engine"), "{}", said(&done));
+    assert_eq!(in_git(&tree.root, &["tag", "--list", "v1.3.0-rc1"]), "v1.3.0-rc1");
+    refused(&project("release-candidate-gate").release_with(&candidate, &[("KS_FAIL_GATE", "plain")]), "the owner's typing against");
+    refused(&project("release-candidate-engine").release_with(&candidate, &[("KS_FAIL_STEP", "engine")]), "the boundary regressions");
+    // A release on the commit of that candidate, once the run of the candidate's tag has checked it whole: the files of the
+    // candidate are published, and nothing is checked a second time. The tag is on the candidate's commit.
+    let mut release: Vec<&str> = whole_arguments.to_vec();
+    release.push("--skip-ci");
+    let both = runs(&[run(5, "completed", "success", "main"), run(6, "completed", "success", "v1.3.0-rc1")]);
+    let of_the_tag = runs(&[run(9, "completed", "success", "v1.3.0")]);
+    tree.answers(&[&both, &both, &of_the_tag]);
+    tree.jobs(5, STOOD_ASIDE);
+    tree.jobs(6, CHECKED);
+    tree.jobs(9, STOOD_ASIDE);
+    std::fs::write(&tree.gh_release, &published).unwrap();
+    let done = tree.release_with(&whole_arguments, &[("KS_FAIL_CARGO", "test"), ("KS_FAIL_STEP", "gates"), ("KS_SAME_REPORT", "1")]);
+    assert!(done.status.success() && said(&done).contains("v1.3.0-rc1 passed every other check on this commit"), "{}", said(&done));
+    assert!(said(&done).contains("the run published the files of v1.3.0-rc1") && said(&done).contains("is released"), "{}", said(&done));
+    assert_eq!(in_git(&tree.root, &["rev-parse", "v1.3.0^{commit}"]), in_git(&tree.root, &["rev-parse", "v1.3.0-rc1^{commit}"]));
+    // The run of the tag may still build everything anew (the files its candidate's run built are kept for a time only):
+    // what it did is read from the run, and said.
+    tree.answers(&[&both, &both, &of_the_tag]);
+    tree.jobs(9, CHECKED);
+    let done = tree.release_with(&whole_arguments, &[("KS_FAIL_CARGO", "test"), ("KS_SAME_REPORT", "1")]);
+    assert!(done.status.success() && said(&done).contains("built everything anew instead of publishing the files of v1.3.0-rc1"), "{}", said(&done));
+    // Not that release: the reports changed after the candidate, the run that passed was of a tag that is no candidate of
+    // this version, or the candidate's run had nothing to check. Every check is then made here.
+    let other = |name: &str, answer: &str, same_report: &str| {
+        let tree = project(&format!("release-other-{name}"));
+        assert!(tree.release(&["--version", "1.3.0", "--candidate", "1", "--skip-checks", "--skip-ci"]).status.success());
+        tree.answers(&[answer, answer]);
+        tree.jobs(5, CHECKED);
+        tree.jobs(6, CHECKED);
+        refused(&tree.release_with(&release, &[("KS_FAIL_CARGO", "test"), ("KS_SAME_REPORT", same_report)]), "the tests of the engine");
+    };
+    other("changed", &both, "");
+    other("version", &runs(&[run(5, "completed", "success", "main"), run(6, "completed", "success", "v1.2.9-rc1")]), "1");
+    other("number", &runs(&[run(5, "completed", "success", "main"), run(6, "completed", "success", "v1.3.0-rcx")]), "1");
+    let tree = project("release-other-aside");
+    assert!(tree.release(&["--version", "1.3.0", "--candidate", "1", "--skip-checks", "--skip-ci"]).status.success());
+    tree.answers(&[&both, &both]);
+    tree.jobs(5, CHECKED);
+    tree.jobs(6, STOOD_ASIDE);
+    refused(&tree.release_with(&release, &[("KS_FAIL_CARGO", "test"), ("KS_SAME_REPORT", "1")]), "the tests of the engine");
     // A file the release does not write stops it: one a check leaves before the commit, one in the tree before it starts.
     failing("KS_STRAY_STEP", "gates", "the checks changed files a release does not write: stray");
     let tree = project("release-foreign");
