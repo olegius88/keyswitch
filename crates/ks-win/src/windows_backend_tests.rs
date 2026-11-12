@@ -19,6 +19,7 @@ const SCAN_CODE_ENTER: u32 = 0x1C;
 const SCAN_CODE_SEMICOLON: u32 = 39;
 const SCAN_CODE_LEFT_ALT: u32 = 0x38;
 const SCAN_CODE_PAUSE: u32 = 0x45;
+const SCAN_CODE_SLASH: u32 = 0x35;
 const LATE_KEY_SCAN_CODE: u32 = 31;
 const HELD_KEY_SCAN_CODE: u32 = 32;
 const INJECTED_KEY_SCAN_CODE: u32 = 45;
@@ -79,6 +80,8 @@ struct FakeState {
     sent: Vec<Vec<NativeInput>>,
     send_count: Option<usize>,
     send_error: bool,
+    /// The next so many sends are refused, and the ones after them taken.
+    refused_sends: usize,
     accept_switch: bool,
     apply_switch: bool,
     refuse_after_first_request: Option<i64>,
@@ -147,6 +150,7 @@ impl FakeWindowsAPI {
                 sent: Vec::new(),
                 send_count: None,
                 send_error: false,
+                refused_sends: 0,
                 accept_switch: true,
                 apply_switch: true,
                 refuse_after_first_request: None,
@@ -276,6 +280,10 @@ impl WindowsAPI for FakeWindowsAPI {
     fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError> {
         let (count, callback) = {
             let mut state = self.state();
+            if state.refused_sends != 0 {
+                state.refused_sends -= 1;
+                return Err(failed("send refused"));
+            }
             if state.send_error {
                 return Err(failed("send refused"));
             }
@@ -1215,8 +1223,13 @@ fn a_failed_injection_still_types_the_held_keys_again() {
     assert!(hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
     api.state().send_count = Some(0);
     assert!(message(&subject.inject_correction(with_late()).unwrap_err()).contains("SendInput"));
-    assert_eq!(api.sent().len(), 2);
+    // The deletion, then the held key-up, offered again until the hold is given up. The key is down for the window: its
+    // key-up alone stays, for the next key of the user's to send ahead of itself.
+    let sent = api.sent();
+    assert!(sent.len() > 2);
+    assert!(sent[1..].iter().all(|batch| batch == &[replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)]));
     assert!(!subject.inner.hold.lock().unwrap().holding);
+    assert_eq!(subject.inner.hold.lock().unwrap().held, [native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)]);
 
     // The boundary switch fails after the batch: the late key was deleted, so it is typed again together with the held keys.
     {
@@ -1540,6 +1553,112 @@ fn a_validation_error_and_a_pointer_during_a_layout_switch_release_input() {
     assert!(message(&error).contains("Место ввода изменилось"));
     assert!(api.sent().is_empty());
     assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+/// A window that came to the front after the keys were held has its layout left alone: the correction is given up before
+/// the layout is asked for.
+#[test]
+fn a_window_that_took_the_front_before_a_correction_keeps_its_layout() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    subject.hold_input();
+    subject.inner.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1));
+    let strokes = [key_event()];
+    let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+    assert!(message(&error).contains("Место ввода изменилось"));
+    assert!(api.requests().is_empty());
+    assert!(api.sent().is_empty());
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+/// The same with no pointer pressed: another window is in front when the correction begins.
+#[test]
+fn another_window_in_front_keeps_its_layout() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    subject.hold_input();
+    api.state().foreground = WINDOWS_OTHER_HWND;
+    let strokes = [key_event()];
+    let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+    assert!(message(&error).contains("Место ввода изменилось до замены; текст не изменён"));
+    assert!(api.requests().is_empty());
+    assert!(api.sent().is_empty());
+    assert_eq!(api.state().current_layout, ENGLISH_HKL);
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+/// A right Shift the user holds is let go around a small letter of a correction by its scan code alone, with no
+/// extended flag: so sent, it arrives as the right Shift (the probe of `KEYS_TYPED_BY_VIRTUAL_KEY`); with the flag the
+/// hook reports for that key it would arrive as no key.
+#[test]
+fn a_held_right_shift_is_let_go_by_its_scan_code_alone() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let small = subject.inner.stroke_inputs(&key_event(), true, Some(1), Some(SCAN_CODE_RIGHT_SHIFT));
+    let around: Vec<(bool, u32, bool, bool)> =
+        small.iter().filter(|item| item.scan_code == SCAN_CODE_RIGHT_SHIFT).map(|item| (item.pressed, item.virtual_key, item.extended, item.by_virtual_key)).collect();
+    assert_eq!(around, [(false, 0, false, false), (true, 0, false, false)]);
+}
+
+/// The slash of the numeric keypad in a word is typed again with the extended flag, which makes its scan code that key
+/// and not the main slash; the main slash and every other key go without it.
+#[test]
+fn the_keypad_slash_of_a_word_is_typed_again_as_the_keypad_slash() {
+    assert_eq!(key_name(crate::constants::VK_DIVIDE), KEYPAD_SLASH_KEY_NAME);
+    let subject = backend(&FakeWindowsAPI::plain());
+    let slash = |name: &str, russian: &str| KeyEvent { key_name: name.to_owned(), ..key_with(SCAN_CODE_SLASH, "/", ["/", russian], 0) };
+    let keypad = subject.inner.stroke_inputs(&slash(KEYPAD_SLASH_KEY_NAME, "/"), true, Some(1), None);
+    assert_eq!(keypad.iter().map(|item| (item.pressed, item.scan_code, item.extended)).collect::<Vec<_>>(), [(true, SCAN_CODE_SLASH, true), (false, SCAN_CODE_SLASH, true)]);
+    let main = subject.inner.stroke_inputs(&slash(&key_name(VK_OEM_2), "."), true, Some(1), None);
+    assert_eq!(main.iter().map(|item| (item.pressed, item.scan_code, item.extended)).collect::<Vec<_>>(), [(true, SCAN_CODE_SLASH, false), (false, SCAN_CODE_SLASH, false)]);
+}
+
+/// A key with no scan code cannot be typed again, so its word is not deleted either: the word, a key typed after it, and
+/// the sign that ended it.
+#[test]
+fn a_word_with_a_key_that_has_no_scan_code_is_left_as_typed() {
+    let unnamed = [KeyEvent { keycode: 0, ..key_event() }];
+    let strokes = [key_event()];
+    let sign = KeyEvent { character: ",".to_owned(), ..unnamed[0].clone() };
+    let subject = backend(&FakeWindowsAPI::plain());
+    assert!(!subject.types_again(&unnamed[0]));
+    assert!(subject.types_again(&strokes[0]));
+    for refused in [
+        injection(&unnamed, 1),
+        Injection { late: &unnamed, ..injection(&strokes, 1) },
+        Injection { trailing: &unnamed, source_group: Some(0), ..injection(&strokes, 1) },
+        Injection { boundary: Some(&sign), source_group: Some(0), ..injection(&strokes, 1) },
+    ] {
+        let api = FakeWindowsAPI::plain();
+        let subject = backend(&api);
+        let error = subject.inject_correction(refused).unwrap_err();
+        assert!(message(&error).contains("нет скан-кода"));
+        assert!(api.requests().is_empty());
+        assert!(api.sent().is_empty());
+    }
+}
+
+/// Pause, Num Lock and the right Shift held back for a correction are typed again by their virtual keys: by the scan code
+/// the hook reports for them Windows types another key or none (`KEYS_TYPED_BY_VIRTUAL_KEY`). Any other key goes by its
+/// scan code, which names the same key in the layout the correction left.
+#[test]
+fn a_held_pause_is_typed_again_as_pause() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    subject.hold_input();
+    let held = [(VK_PAUSE, SCAN_CODE_PAUSE, false), (crate::constants::VK_NUMLOCK, SCAN_CODE_PAUSE, true), (VK_RSHIFT, SCAN_CODE_RIGHT_SHIFT, true), (VK_D, HELD_KEY_SCAN_CODE, false)];
+    for (virtual_key, scan_code, extended) in held {
+        for pressed in [true, false] {
+            assert!(subject.handle_native(NativeKeyEvent::new(pressed, virtual_key, scan_code, extended, false, 10)));
+        }
+    }
+    assert_eq!(subject.release_input().unwrap(), 8);
+    let sent: Vec<NativeInput> = api.sent().into_iter().flatten().collect();
+    let by_virtual_key: Vec<(u32, bool)> = sent.iter().filter(|item| item.pressed).map(|item| (item.virtual_key, item.by_virtual_key)).collect();
+    assert_eq!(by_virtual_key, [(VK_PAUSE, true), (crate::constants::VK_NUMLOCK, true), (VK_RSHIFT, true), (VK_D, false)]);
+    assert!(sent.iter().all(|item| item.replayed && !item.synthetic));
+    let scan_codes: Vec<u32> = sent.iter().filter(|item| item.pressed).map(|item| item.scan_code).collect();
+    assert_eq!(scan_codes, [SCAN_CODE_PAUSE, SCAN_CODE_PAUSE, SCAN_CODE_RIGHT_SHIFT, HELD_KEY_SCAN_CODE]);
 }
 
 #[test]
@@ -3061,4 +3180,808 @@ fn a_key_up_of_a_key_never_seen_down_goes_through_a_hold_at_once() {
     assert_eq!(subject.inner.hold.lock().unwrap().held.len(), 3);
     assert_eq!(subject.release_input().unwrap(), 3);
     subject.stop();
+}
+
+// ------------------------------------------------------------------- keys between the hook, a hold and their replay
+
+/// The scan codes of the left Win key and of V.
+const SCAN_CODE_LEFT_WIN: u32 = 0x5B;
+const SCAN_CODE_V: u32 = 47;
+/// How long a test waits for another thread before it calls the test failed.
+const OTHER_THREAD_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// What `SendInput` types comes back through the hook, as on Windows. `before` runs ahead of each event: a key of the
+/// user's that reached the hook a moment earlier is answered there.
+fn the_hook_answers_what_is_sent(
+    api: &Arc<FakeWindowsAPI>,
+    subject: &WindowsBackend,
+    before: impl Fn(&Arc<Inner>, &NativeInput) + Send + Sync + 'static,
+) {
+    let inner = Arc::clone(&subject.inner);
+    api.state().on_send = Some(Arc::new(move |inputs: &[NativeInput]| {
+        for item in inputs {
+            before(&inner, item);
+            inner.handle_native(NativeKeyEvent {
+                replayed: item.replayed,
+                ..NativeKeyEvent::new(item.pressed, item.virtual_key, item.scan_code, item.extended, item.synthetic, 1)
+            });
+        }
+    }));
+}
+
+#[test]
+fn a_key_up_waits_behind_its_key_down_that_is_being_typed_again() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.set_listener(Some(collecting(&delivered)));
+    let answers = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&answers);
+    the_hook_answers_what_is_sent(&api, &subject, move |inner, item| {
+        if item.pressed && item.virtual_key == CTRL {
+            // The user lets go of Ctrl while its key-down is out of the held keys and has not reached the hook again.
+            seen.lock().unwrap().push(inner.handle_native(native(false, CTRL, SCAN_CODE_LEFT_CONTROL, false, 12)));
+        }
+    });
+    subject.hold_input();
+    assert!(subject.handle_native(native(true, CTRL, SCAN_CODE_LEFT_CONTROL, false, 10)));
+    // Both are typed again, the key-up kept back for its turn: let through, it reached the window first and Ctrl stayed down.
+    assert_eq!(subject.release_input().unwrap(), 2);
+    assert_eq!(*answers.lock().unwrap(), [true]);
+    let order: Vec<bool> = delivered.lock().unwrap().iter().map(|event| event.pressed).collect();
+    assert_eq!(order, [true, false]);
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(CTRL));
+    assert_eq!(subject.normalized_state() & CONTROL_MASK, 0);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.is_empty() && hold.held_down.0.is_empty());
+}
+
+#[test]
+fn an_enter_let_go_while_its_key_down_is_typed_again_is_still_withheld_once() {
+    let api = FakeWindowsAPI::plain();
+    let subject = deferring_backend(&api);
+    let delivered = collected();
+    subject.set_listener(Some(collecting(&delivered)));
+    the_hook_answers_what_is_sent(&api, &subject, |inner, item| {
+        if item.pressed && item.virtual_key == VK_RETURN && item.replayed {
+            assert!(inner.handle_native(ENTER_UP));
+        }
+    });
+    subject.hold_input();
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert_eq!(subject.release_input().unwrap(), 2);
+    // The engine hears of the Enter and then of its release: it waits for no key-up that has gone by.
+    let order: Vec<(bool, bool)> = delivered.lock().unwrap().iter().map(|event| (event.pressed, event.deferred)).collect();
+    assert_eq!(order, [(true, true), (false, false)]);
+    assert!(!subject.inner.hook.lock().unwrap().consumed_keys.contains(SCAN_CODE_ENTER));
+    assert!(subject.inner.hold.lock().unwrap().deferred_action.is_some());
+    assert_eq!(subject.complete_action(true).unwrap(), COMPLETED_ACTION_EVENT_COUNT);
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+/// A clock whose sleep is a meeting point: it says that its thread waits, and goes on when told.
+struct MeetingClock {
+    now: Mutex<f64>,
+    waits: Mutex<mpsc::Sender<()>>,
+    goes_on: Mutex<mpsc::Receiver<()>>,
+}
+
+impl Clock for MeetingClock {
+    fn monotonic(&self) -> f64 {
+        *self.now.lock().unwrap()
+    }
+
+    fn perf_counter(&self) -> f64 {
+        0.0
+    }
+
+    fn sleep(&self, seconds: f64) {
+        self.waits.lock().unwrap().send(()).unwrap();
+        self.goes_on.lock().unwrap().recv().unwrap();
+        *self.now.lock().unwrap() += seconds;
+    }
+}
+
+/// A key filter that stands still: the hook has looked at `holding` by then and has not given the key to the engine yet.
+/// The first channel says that the hook is there, the second lets it go on.
+fn a_key_stopped_in_the_hook(subject: &WindowsBackend) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+    let (answering, hook_answers) = mpsc::channel();
+    let (finish, finishes) = mpsc::channel::<()>();
+    let (answering, finishes) = (Mutex::new(answering), Mutex::new(finishes));
+    subject.set_key_filter(Some(Arc::new(move |_event: &KeyEvent| {
+        answering.lock().unwrap().send(()).unwrap();
+        finishes.lock().unwrap().recv().unwrap();
+        KeyDisposition::Pass
+    })));
+    (hook_answers, finish)
+}
+
+#[test]
+fn a_hold_waits_for_the_key_the_hook_is_answering() {
+    let api = FakeWindowsAPI::plain();
+    let (waits, engine_waits) = mpsc::channel();
+    let (go_on, goes_on) = mpsc::channel();
+    let clock = Arc::new(MeetingClock { now: Mutex::new(0.0), waits: Mutex::new(waits), goes_on: Mutex::new(goes_on) });
+    let subject = Arc::new(backend_with(&api, clock, script(|_| {})));
+    let queue = collected();
+    subject.set_listener(Some(collecting(&queue)));
+    let (hook_answers, finish) = a_key_stopped_in_the_hook(&subject);
+    let hook = {
+        let subject = Arc::clone(&subject);
+        thread::spawn(move || subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)))
+    };
+    hook_answers.recv_timeout(OTHER_THREAD_TIMEOUT).unwrap();
+    // The engine begins a hold and takes its queue, as it does before a correction.
+    let engine = {
+        let (subject, queue) = (Arc::clone(&subject), Arc::clone(&queue));
+        thread::spawn(move || {
+            subject.hold_input();
+            queue.lock().unwrap().len()
+        })
+    };
+    engine_waits.recv_timeout(OTHER_THREAD_TIMEOUT).expect("the hold waits for the key in flight");
+    assert!(subject.inner.hold.lock().unwrap().holding);
+    assert!(queue.lock().unwrap().is_empty());
+    finish.send(()).unwrap();
+    // The key goes on to the window, as the hook had decided before the hold.
+    assert!(!hook.join().unwrap());
+    go_on.send(()).unwrap();
+    // And it is in the queue the engine takes: counted among the characters to delete, where it was counted nowhere.
+    assert_eq!(engine.join().unwrap(), 1);
+    assert!(subject.inner.hold.lock().unwrap().held.is_empty());
+    assert_eq!(subject.inner.keys_in_flight.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn a_hold_waits_no_longer_than_its_bound_for_a_hook_that_stands_still() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = Arc::new(backend_with(&api, clock.clone(), script(|_| {})));
+    let queue = collected();
+    subject.set_listener(Some(collecting(&queue)));
+    let (hook_answers, finish) = a_key_stopped_in_the_hook(&subject);
+    let hook = {
+        let subject = Arc::clone(&subject);
+        thread::spawn(move || subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)))
+    };
+    hook_answers.recv_timeout(OTHER_THREAD_TIMEOUT).unwrap();
+    subject.hold_input();
+    let sleeps = clock.sleeps.lock().unwrap().clone();
+    assert_eq!(sleeps, vec![KEY_IN_FLIGHT_POLL_SECONDS; sleeps.len()]);
+    let waited: f64 = sleeps.iter().sum();
+    assert!((KEY_IN_FLIGHT_WAIT_SECONDS..KEY_IN_FLIGHT_WAIT_SECONDS + 2.0 * KEY_IN_FLIGHT_POLL_SECONDS).contains(&waited), "{waited}");
+    // The hold has begun without that key, as a hold did before there was a wait.
+    assert!(subject.inner.hold.lock().unwrap().holding);
+    assert!(queue.lock().unwrap().is_empty());
+    finish.send(()).unwrap();
+    assert!(!hook.join().unwrap());
+    assert_eq!(queue.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_hold_begun_inside_the_hooks_own_answer_does_not_wait() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = Arc::new(backend_with(&api, clock.clone(), script(|_| {})));
+    let engine = Arc::clone(&subject);
+    // The filter runs on the hook's thread, in the middle of the answer for a key: the hook's thread never waits.
+    subject.set_key_filter(Some(Arc::new(move |_event: &KeyEvent| {
+        engine.hold_input();
+        KeyDisposition::Pass
+    })));
+    assert!(!subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
+    assert!(clock.sleeps.lock().unwrap().is_empty());
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.holding && hold.engine_hold_at.is_none());
+    }
+    assert_eq!(subject.inner.keys_in_flight.load(Ordering::Acquire), 0);
+    subject.set_key_filter(None);
+}
+
+#[test]
+fn a_correction_is_not_typed_under_ctrl_alt_or_win() {
+    for (modifier, scan_code) in [(CTRL, SCAN_CODE_LEFT_CONTROL), (VK_LMENU, SCAN_CODE_LEFT_ALT), (VK_LWIN, SCAN_CODE_LEFT_WIN)] {
+        let api = FakeWindowsAPI::plain();
+        let subject = backend(&api);
+        // The hook has passed the key-down on: the key is down for the window, whatever the engine has taken so far.
+        assert!(!subject.handle_native(native(true, modifier, scan_code, false, 1)));
+        subject.hold_input();
+        let strokes = [key_event()];
+        let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+        assert_eq!(message(&error), "Нажат Ctrl, Alt или Win; текст не изменён");
+        // Neither a Backspace nor a request for a layout went out, and the keyboard is free.
+        assert!(api.sent().is_empty());
+        assert!(api.requests().is_empty());
+        assert!(!subject.inner.hold.lock().unwrap().holding);
+        // With the key up again the same correction is typed.
+        assert!(!subject.handle_native(native(false, modifier, scan_code, false, 2)));
+        subject.hold_input();
+        subject.inject_correction(injection(&strokes, 1)).unwrap();
+        assert!(!api.sent().is_empty());
+    }
+}
+
+/// Ctrl+V pressed and let go while a correction holds the input.
+fn a_held_ctrl_v(subject: &WindowsBackend) -> [NativeInput; 4] {
+    subject.hold_input();
+    for event in [
+        native(true, CTRL, SCAN_CODE_LEFT_CONTROL, false, 10),
+        native(true, VK_V, SCAN_CODE_V, false, 11),
+        native(false, VK_V, SCAN_CODE_V, false, 12),
+        native(false, CTRL, SCAN_CODE_LEFT_CONTROL, false, 13),
+    ] {
+        assert!(subject.handle_native(event));
+    }
+    [
+        replayed_key(true, CTRL, SCAN_CODE_LEFT_CONTROL),
+        replayed_key(true, VK_V, SCAN_CODE_V),
+        replayed_key(false, VK_V, SCAN_CODE_V),
+        replayed_key(false, CTRL, SCAN_CODE_LEFT_CONTROL),
+    ]
+}
+
+#[test]
+fn a_held_key_the_system_did_not_take_at_once_is_offered_again() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let keys = a_held_ctrl_v(&subject);
+    // Another thread blocks input for a moment: two calls take nothing.
+    api.state().refused_sends = 2;
+    assert_eq!(subject.release_input().unwrap(), 4);
+    // Every key is typed, once and in its order.
+    assert_eq!(api.sent(), keys.map(|key| vec![key]));
+    assert_eq!(*clock.sleeps.lock().unwrap(), [HELD_KEY_RETRY_POLL_SECONDS; 2]);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.is_empty());
+}
+
+#[test]
+fn a_second_refusal_later_in_the_same_replay_is_offered_again_too() {
+    let api = FakeWindowsAPI::plain();
+    // Every reading of the clock is later than the whole time a refused key is offered again: a replay that takes long.
+    let clock = FakeClock::stepping(HELD_KEY_RETRY_SECONDS + HELD_KEY_RETRY_POLL_SECONDS);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let refusing = Arc::clone(&api);
+    the_hook_answers_what_is_sent(&api, &subject, move |_inner, item| {
+        if item.pressed && item.virtual_key == VK_V {
+            // One more refusal for a moment, after V's key-down went out.
+            refusing.state().refused_sends = 1;
+        }
+    });
+    let keys = a_held_ctrl_v(&subject);
+    api.state().refused_sends = 1;
+    // Each refusal has its own time: counted from the first one, the second was given up without one more try, and
+    // Ctrl and V, typed down again by then, stayed down.
+    assert_eq!(subject.release_input().unwrap(), 4);
+    assert_eq!(api.sent(), keys.map(|key| vec![key]));
+    assert_eq!(*clock.sleeps.lock().unwrap(), [HELD_KEY_RETRY_POLL_SECONDS; 2]);
+    assert!(subject.inner.hook.lock().unwrap().pressed.0.is_empty());
+}
+
+#[test]
+fn held_keys_the_system_will_not_take_are_given_up_all_but_the_key_ups_of_keys_that_are_down() {
+    log::capture::install();
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let delivered = collected();
+    subject.set_listener(Some(collecting(&delivered)));
+    let refusing = Arc::clone(&api);
+    the_hook_answers_what_is_sent(&api, &subject, move |_inner, item| {
+        if item.pressed && item.virtual_key == CTRL {
+            // The secure desktop comes up after the first key: the system takes no more.
+            refusing.state().send_error = true;
+        }
+    });
+    let keys = a_held_ctrl_v(&subject);
+    assert_eq!(message(&subject.release_input().unwrap_err()), "send refused");
+    assert_eq!(api.sent(), [[keys[0]]]);
+    // The key was offered again for as long as the bound says, and then the keyboard is free.
+    let waited: f64 = clock.sleeps.lock().unwrap().iter().sum();
+    assert!((HELD_KEY_RETRY_SECONDS..HELD_KEY_RETRY_SECONDS + 2.0 * HELD_KEY_RETRY_POLL_SECONDS).contains(&waited), "{waited}");
+    // V was never typed and is given up with its key-up. Ctrl went down for the system: its key-up alone is still owed.
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(!hold.holding && hold.held_down.0.is_empty());
+        assert_eq!(hold.held, [native(false, CTRL, SCAN_CODE_LEFT_CONTROL, false, 13)]);
+    }
+    assert!(log::capture::contains("SendInput не принял удержанные клавиши; не набрано заново событий: 2, отпусканий осталось набрать: 1"));
+    assert_ne!(subject.normalized_state() & CONTROL_MASK, 0);
+    // The system takes keys again, and the user, whose fingers are off Ctrl, types a letter, in whatever window is in
+    // front by now. The key-up goes out first, and the letter is a letter: let through as it was, it was Ctrl+D.
+    {
+        let mut state = api.state();
+        state.send_error = false;
+        state.sent.clear();
+        state.foreground = WINDOWS_OTHER_HWND;
+    }
+    delivered.lock().unwrap().clear();
+    assert!(!subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 20)));
+    assert_eq!(api.sent(), [[keys[3]]]);
+    assert_eq!(delivered.lock().unwrap().last().unwrap().state & CONTROL_MASK, 0);
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(CTRL));
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(!hold.holding && hold.held.is_empty());
+    }
+    assert!(!subject.inner.release_job.load(Ordering::Acquire));
+    assert!(!subject.handle_native(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 21)));
+    // And a correction is typed again: with Ctrl down by the books every one was refused.
+    api.state().sent.clear();
+    subject.hold_input();
+    subject.inject_correction(injection(&[key_event()], 1)).unwrap();
+    assert!(!api.sent().is_empty());
+}
+
+/// Shift was down before the hold and let go during it: the window had the key-down, the hook kept the key-up back, and
+/// the system then refused it for good. What is left is that key-up, with no hold on.
+fn a_key_up_the_system_did_not_take(api: &Arc<FakeWindowsAPI>, subject: &WindowsBackend) -> NativeInput {
+    assert!(!subject.handle_native(native(true, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, false, 1)));
+    subject.hold_input();
+    assert!(subject.handle_native(native(false, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, false, 2)));
+    api.state().send_error = true;
+    assert!(subject.release_input().is_err());
+    api.state().send_error = false;
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding);
+    assert_eq!(hold.held, [native(false, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, false, 2)]);
+    replayed_key(false, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT)
+}
+
+#[test]
+fn a_key_up_the_hold_kept_from_the_window_is_typed_before_the_next_key_goes_on() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.set_listener(Some(collecting(&delivered)));
+    let shift_up = a_key_up_the_system_did_not_take(&api, &subject);
+    the_hook_answers_what_is_sent(&api, &subject, |_inner, _item| {});
+    assert!(!subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 20)));
+    assert_eq!(api.sent(), [[shift_up]]);
+    // The letter the engine hears of is typed without Shift, as the user typed it.
+    assert_eq!(delivered.lock().unwrap().last().unwrap().state & SHIFT_MASK, 0);
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(VK_LSHIFT));
+}
+
+/// A backend whose job starter is `start_job`, with a clock that never really waits.
+fn backend_starting_jobs_with(api: &Arc<FakeWindowsAPI>, start_job: JobStarter) -> WindowsBackend {
+    let parts = BackendParts {
+        clock: FakeClock::stepping(0.0),
+        start_job,
+        selection_reader_factory: Box::new(|| Err(failed("no UI Automation"))),
+        listener_start_timeout_seconds: KEYBOARD_LISTENER_START_TIMEOUT_SECONDS,
+    };
+    WindowsBackend::with_parts(api.clone(), parts)
+}
+
+#[test]
+fn a_key_goes_on_as_it_is_when_no_job_can_type_the_key_ups_before_it() {
+    log::capture::install();
+    let api = FakeWindowsAPI::plain();
+    let subject = backend_starting_jobs_with(&api, Box::new(|_| Err(failed("no thread for the key-ups"))));
+    a_key_up_the_system_did_not_take(&api, &subject);
+    // Kept for a job that never comes, the key would be held for good: it goes to the window, and the next one asks again.
+    assert!(!subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 20)));
+    assert!(log::capture::contains("Удержанные клавиши не отпущены\nno thread for the key-ups"));
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.len() == 1);
+    assert!(!subject.inner.release_job.load(Ordering::Acquire));
+}
+
+#[test]
+fn a_hold_the_engine_takes_over_stays_when_no_job_comes_for_the_key_ups() {
+    let api = FakeWindowsAPI::plain();
+    let made: Arc<Mutex<Option<Arc<WindowsBackend>>>> = Arc::default();
+    let engine = Arc::clone(&made);
+    let subject = Arc::new(backend_starting_jobs_with(
+        &api,
+        Box::new(move |_job| {
+            // The engine begins a correction at this very moment, on its own thread, and no job starts.
+            let subject = engine.lock().unwrap().clone().expect("the backend is made before a key comes");
+            thread::spawn(move || subject.hold_input()).join().expect("the engine's thread ends");
+            Err(failed("no thread for the key-ups"))
+        }),
+    ));
+    *made.lock().unwrap() = Some(Arc::clone(&subject));
+    let shift_up = a_key_up_the_system_did_not_take(&api, &subject);
+    // The hold the hook began for the key-ups is the engine's now: the key waits in it, behind them.
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 20)));
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.holding && hold.engine_hold_at.is_some() && hold.held.len() == 2);
+    }
+    // The engine types them all as it lets go, in their order.
+    assert_eq!(subject.release_input().unwrap(), 2);
+    assert_eq!(api.sent(), [[shift_up], [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]]);
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+    made.lock().unwrap().take();
+}
+
+#[test]
+fn an_enter_the_engine_never_answers_is_given_up_and_the_keys_behind_it_are_typed_again() {
+    log::capture::install();
+    let api = FakeWindowsAPI::plain();
+    let subject = deferring_backend(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    let letter = native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2);
+    assert!(subject.handle_native(letter));
+    assert!(subject.handle_native(NativeKeyEvent { pressed: false, ..letter }));
+    // A moment short of the bound the keys still wait for the engine.
+    api.state().ticks = WITHHELD_ACTION_MAX_MS - 1;
+    let next = native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 3);
+    assert!(subject.handle_native(next));
+    assert!(api.sent().is_empty());
+    // At the bound the next key lets the keyboard go: the keys held are typed again in their order and this one goes on
+    // after them. The Enter is not among them: nobody said the correction before it was made.
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    assert!(!subject.handle_native(NativeKeyEvent { pressed: false, ..next }));
+    assert_eq!(
+        api.sent(),
+        [
+            [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)],
+            [replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)],
+            [replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)],
+        ]
+    );
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.deferred_action.is_none() && !hold.holding && hold.held.is_empty());
+    }
+    assert!(log::capture::contains("Enter/Tab не дождался движка за 10 секунд: не передан"));
+    // An engine that answers after all finds nothing to deliver.
+    assert_eq!(subject.complete_action(true).unwrap(), 0);
+    assert_eq!(api.sent().len(), 3);
+}
+
+type Jobs = Arc<Mutex<Vec<Box<dyn FnOnce() + Send>>>>;
+
+/// A backend that keeps Enter back and whose jobs wait in `Jobs` until the test runs them.
+fn withholding_backend_with_waiting_jobs(api: &Arc<FakeWindowsAPI>) -> (WindowsBackend, Jobs) {
+    let jobs = Jobs::default();
+    let waiting = Arc::clone(&jobs);
+    let subject = backend_starting_jobs_with(
+        api,
+        Box::new(move |job| {
+            waiting.lock().unwrap().push(job);
+            Ok(())
+        }),
+    );
+    subject.set_key_filter(Some(Arc::new(|event: &KeyEvent| {
+        if event.key_name == "Return" && event.state == 0 { KeyDisposition::Defer } else { KeyDisposition::Pass }
+    })));
+    (subject, jobs)
+}
+
+#[test]
+fn one_job_waits_for_a_stale_enter_and_leaves_alone_what_the_engine_answered() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    // The first key starts the job; while it has not run, the next ones start no other.
+    let letter = native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2);
+    assert!(subject.handle_native(letter));
+    assert!(subject.handle_native(NativeKeyEvent { pressed: false, ..letter }));
+    assert_eq!(jobs.lock().unwrap().len(), 1);
+    // The engine answers before the job runs: its Enter goes out, once, and the job finds nothing to give up.
+    assert_eq!(subject.complete_action(true).unwrap(), COMPLETED_ACTION_EVENT_COUNT);
+    let sent = api.sent();
+    assert_eq!(sent.len(), 3);
+    assert!(sent[0].iter().all(|item| item.virtual_key == VK_RETURN && item.synthetic));
+    let job = jobs.lock().unwrap().pop().unwrap();
+    job();
+    assert_eq!(api.sent().len(), 3);
+    // The next Enter left unanswered gets a job of its own.
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = 2 * WITHHELD_ACTION_MAX_MS;
+    assert!(subject.handle_native(letter));
+    assert_eq!(jobs.lock().unwrap().len(), 1);
+    let job = jobs.lock().unwrap().pop().unwrap();
+    job();
+    assert_eq!(api.sent().last().unwrap(), &[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]);
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+#[test]
+fn a_job_that_cannot_start_leaves_the_stale_enter_to_the_next_key() {
+    log::capture::install();
+    let api = FakeWindowsAPI::plain();
+    let subject = backend_starting_jobs_with(&api, Box::new(|_| Err(failed("no thread for the stale Enter"))));
+    subject.set_key_filter(Some(Arc::new(|event: &KeyEvent| {
+        if event.key_name == "Return" { KeyDisposition::Defer } else { KeyDisposition::Pass }
+    })));
+    assert!(subject.handle_native(ENTER_DOWN));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    // The key is kept with the others, and the next one asks for the job again.
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    assert!(log::capture::contains("Удержанные клавиши не отпущены\nno thread for the stale Enter"));
+    assert!(!subject.inner.release_job.load(Ordering::Acquire));
+    assert!(subject.inner.hold.lock().unwrap().deferred_action.is_some());
+    assert_eq!(subject.complete_action(false).unwrap(), 0);
+}
+
+#[test]
+fn a_stale_enter_is_given_up_even_when_the_keys_behind_it_cannot_be_typed() {
+    log::capture::install();
+    let api = FakeWindowsAPI::plain();
+    let subject = deferring_backend(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    {
+        let mut state = api.state();
+        state.ticks = WITHHELD_ACTION_MAX_MS;
+        state.send_error = true;
+    }
+    // The system takes no key: the hold ends all the same, the key that asked goes on, and the journal has the failure.
+    assert!(!subject.handle_native(native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 3)));
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(hold.deferred_action.is_none() && !hold.holding && hold.held.is_empty());
+    assert!(log::capture::contains("keyswitch.windows_backend: send refused"));
+}
+
+/// A stale Enter, a key held behind it, and the job that was asked for at that key, not run yet.
+fn a_stale_enter_and_its_waiting_job(api: &Arc<FakeWindowsAPI>) -> (WindowsBackend, Box<dyn FnOnce() + Send>) {
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    let job = jobs.lock().unwrap().pop().expect("the key asked for the job");
+    (subject, job)
+}
+
+#[test]
+fn the_job_of_a_stale_enter_leaves_the_held_keys_to_an_engine_that_has_begun_a_correction() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, job) = a_stale_enter_and_its_waiting_job(&api);
+    // The engine, late, begins a correction: it holds the input and counts the keys typed so far. Then the job runs.
+    subject.hold_input();
+    job();
+    // The Enter is given up, and nothing is typed: typed now, the key landed after the engine's count, and the hold
+    // the correction is typed under was over.
+    assert!(api.sent().is_empty());
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.deferred_action.is_none() && hold.holding && hold.held.len() == 1);
+    }
+    // The engine types its correction under the hold and then the held key, as after any correction.
+    assert_eq!(subject.inject_correction(injection(&[key_event()], 1)).unwrap(), 1);
+    let sent = api.sent();
+    assert!(sent.len() > 1);
+    assert!(sent[..sent.len() - 1].iter().flatten().all(|item| item.synthetic));
+    assert_eq!(sent.last().unwrap(), &[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.engine_hold_at.is_none());
+}
+
+#[test]
+fn a_hold_an_engine_began_too_long_ago_does_not_keep_the_job_from_the_held_keys() {
+    let api = FakeWindowsAPI::plain();
+    let subject = deferring_backend(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    // An engine that began a correction and failed before it let go.
+    subject.hold_input();
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS + ENGINE_HOLD_MAX_MS;
+    // The next key has the keyboard given back all the same.
+    assert!(!subject.handle_native(native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 3)));
+    assert_eq!(api.sent(), [[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]]);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(hold.deferred_action.is_none() && !hold.holding && hold.held.is_empty());
+}
+
+/// How long a test looks at a thread that must be waiting before it takes it to be waiting.
+const A_MOMENT: Duration = Duration::from_millis(50);
+
+#[test]
+fn the_engine_begins_no_hold_while_the_job_types_the_held_keys() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, job) = a_stale_enter_and_its_waiting_job(&api);
+    let subject = Arc::new(subject);
+    let (held, engine_holds) = mpsc::channel();
+    let engine = Mutex::new(Some((Arc::clone(&subject), held, engine_holds)));
+    let waited = Arc::new(Mutex::new(None));
+    let noted = Arc::clone(&waited);
+    // The job is in the middle of the held keys, one of them on its way through `SendInput`, when the engine decides
+    // on a correction.
+    api.state().on_send = Some(Arc::new(move |_inputs: &[NativeInput]| {
+        let (subject, held, engine_holds) = engine.lock().unwrap().take().expect("the job types one key");
+        let thread = thread::spawn(move || {
+            subject.hold_input();
+            held.send(()).unwrap();
+        });
+        // The engine's hold does not begin while the job types: begun now, the job ended it with its own.
+        *noted.lock().unwrap() = Some((engine_holds.recv_timeout(A_MOMENT).is_err(), thread, engine_holds));
+    }));
+    job();
+    let (engine_waited, thread, engine_holds) = waited.lock().unwrap().take().expect("the job typed a key");
+    assert!(engine_waited);
+    // The job has typed its key and ended its hold; the engine's hold begins after it and stands.
+    engine_holds.recv_timeout(OTHER_THREAD_TIMEOUT).expect("the engine's hold begins once the job is done");
+    thread.join().unwrap();
+    assert_eq!(api.sent(), [[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)]]);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(hold.holding && hold.engine_hold_at.is_some() && hold.held.is_empty());
+}
+
+/// The job that waits for the test to run it, if a key has asked for one.
+fn the_waiting_job(jobs: &Jobs) -> Option<Box<dyn FnOnce() + Send>> {
+    jobs.lock().unwrap().pop()
+}
+
+#[test]
+fn a_job_that_fails_half_way_does_not_keep_the_next_one_from_starting() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    let letter = native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2);
+    assert!(subject.handle_native(letter));
+    let job = the_waiting_job(&jobs).expect("the key asked for the job");
+    // The job fails in the middle of its work, whatever the reason.
+    api.state().on_send = Some(Arc::new(|_inputs: &[NativeInput]| panic!("the job fails here")));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err());
+    {
+        let mut state = api.state();
+        state.on_send = None;
+        state.sent.clear();
+        state.ticks = WITHHELD_ACTION_MAX_MS + UNOWNED_HOLD_MAX_MS;
+    }
+    // No job is under way any more. The hold it was to end is still on, the Enter given up and no engine at work: nobody
+    // is left to end it.
+    assert!(!subject.inner.release_job.load(Ordering::Acquire));
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.holding && hold.deferred_action.is_none());
+    }
+    // So the next key of the user's, kept like the others, asks for a job again, and that one gives the keyboard back.
+    let next = native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 3);
+    assert!(subject.handle_native(next));
+    let job = the_waiting_job(&jobs).expect("the key asked for another job");
+    job();
+    assert_eq!(api.sent(), [[replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)]]);
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+    assert!(!subject.handle_native(NativeKeyEvent { pressed: false, ..next }));
+    // And the next Enter the engine does not answer has its job.
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = 2 * WITHHELD_ACTION_MAX_MS + UNOWNED_HOLD_MAX_MS;
+    assert!(subject.handle_native(letter));
+    assert!(the_waiting_job(&jobs).is_some());
+}
+
+#[test]
+fn keys_typed_while_a_letters_key_up_is_owed_go_on_to_the_window() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(&api);
+    let delivered = collected();
+    subject.set_listener(Some(collecting(&delivered)));
+    // Typing with rollover: the letter went down before the hold and came up during it. Then the system takes no key,
+    // and goes on taking none.
+    assert!(!subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 1)));
+    subject.hold_input();
+    assert!(subject.handle_native(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    api.state().send_error = true;
+    assert!(subject.release_input().is_err());
+    let owed = native(false, VK_D, HELD_KEY_SCAN_CODE, false, 2);
+    assert_eq!(subject.inner.hold.lock().unwrap().held, [owed]);
+    delivered.lock().unwrap().clear();
+    for time in [10, 20, 30] {
+        // The key reaches the window and the engine, as a key does: a letter that is down for the system changes no
+        // other key. Kept behind its key-up, each of these was held for the job and then given up.
+        for pressed in [true, false] {
+            assert!(!subject.handle_native(native(pressed, VK_X, INJECTED_KEY_SCAN_CODE, false, time)));
+            // The job the key asked for runs once the hook has answered, and can type nothing.
+            the_waiting_job(&jobs).expect("the key asked for the job")();
+        }
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(!hold.holding);
+        assert_eq!(hold.held, [owed]);
+    }
+    assert!(api.sent().is_empty());
+    assert_eq!(delivered.lock().unwrap().iter().filter(|event| event.pressed).count(), 3);
+    // Once the system takes keys again the key-up goes out, at the next key.
+    api.state().send_error = false;
+    assert!(!subject.handle_native(native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 40)));
+    the_waiting_job(&jobs).expect("the key asked for the job")();
+    assert_eq!(api.sent(), [[replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)]]);
+    assert!(subject.inner.hold.lock().unwrap().held.is_empty());
+}
+
+#[test]
+fn a_hold_the_hook_began_for_a_job_that_failed_is_ended_by_the_next_job() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(&api);
+    a_key_up_the_system_did_not_take(&api, &subject);
+    // Shift's key-up is owed: the key is kept behind it and asks for the job, which fails before it has typed a key.
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 20)));
+    let job = the_waiting_job(&jobs).expect("the key asked for the job");
+    api.state().on_send = Some(Arc::new(|_inputs: &[NativeInput]| panic!("the job fails here")));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err());
+    {
+        let mut state = api.state();
+        state.on_send = None;
+        state.sent.clear();
+    }
+    // The hold the hook began for that job is young: a job may still be on its way, and the key waits.
+    let next = native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 30);
+    assert!(subject.handle_native(next));
+    assert!(the_waiting_job(&jobs).is_none());
+    // Past the bound nobody is on the way: the next key asks for a job, and the keys are typed in their order.
+    api.state().ticks = UNOWNED_HOLD_MAX_MS;
+    assert!(subject.handle_native(NativeKeyEvent { pressed: false, ..next }));
+    the_waiting_job(&jobs).expect("the key asked for another job")();
+    assert_eq!(
+        api.sent(),
+        [
+            [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)],
+            [replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)],
+            [replayed_key(false, VK_X, INJECTED_KEY_SCAN_CODE)],
+        ]
+    );
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.is_empty());
+}
+
+#[test]
+fn the_keys_left_to_an_engine_that_never_lets_go_are_typed_once_its_mark_is_old() {
+    let api = FakeWindowsAPI::plain();
+    let (subject, jobs) = withholding_backend_with_waiting_jobs(&api);
+    assert!(subject.handle_native(ENTER_DOWN));
+    assert!(subject.handle_native(ENTER_UP));
+    api.state().ticks = WITHHELD_ACTION_MAX_MS;
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    let job = the_waiting_job(&jobs).expect("the key asked for the job");
+    // The engine begins a correction and fails before it lets go; the job gives the Enter up and leaves the keys to it.
+    subject.hold_input();
+    job();
+    {
+        let hold = subject.inner.hold.lock().unwrap();
+        assert!(hold.deferred_action.is_none() && hold.holding && hold.held.len() == 1);
+    }
+    // While the engine's mark is fresh the keys wait for the engine, and no job is asked for.
+    let next = native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 30);
+    assert!(subject.handle_native(next));
+    assert!(the_waiting_job(&jobs).is_none());
+    assert!(api.sent().is_empty());
+    // Once it is old the next key asks for the job, though the Enter that used to ask is gone, and the keys are typed
+    // in their order.
+    api.state().ticks = WITHHELD_ACTION_MAX_MS + ENGINE_HOLD_MAX_MS;
+    assert!(subject.handle_native(NativeKeyEvent { pressed: false, ..next }));
+    the_waiting_job(&jobs).expect("the key asked for the job")();
+    assert_eq!(
+        api.sent(),
+        [
+            [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)],
+            [replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)],
+            [replayed_key(false, VK_X, INJECTED_KEY_SCAN_CODE)],
+        ]
+    );
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.is_empty());
+}
+
+#[test]
+fn a_hold_the_engine_never_lets_go_of_is_ended_at_the_next_key_past_its_bound() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    // The engine begins a correction and fails before it lets go: no Enter is withheld, and nothing asked for a job.
+    subject.hold_input();
+    assert!(subject.handle_native(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 2)));
+    api.state().ticks = UNOWNED_HOLD_MAX_MS - 1;
+    let next = native(true, VK_X, INJECTED_KEY_SCAN_CODE, false, 3);
+    assert!(subject.handle_native(next));
+    assert!(api.sent().is_empty());
+    // Past the bound the next key has the keyboard given back: the keys held are typed in their order, and it goes on.
+    api.state().ticks = UNOWNED_HOLD_MAX_MS + ENGINE_HOLD_MAX_MS;
+    assert!(!subject.handle_native(NativeKeyEvent { pressed: false, ..next }));
+    assert_eq!(api.sent(), [[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)], [replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)]]);
+    let hold = subject.inner.hold.lock().unwrap();
+    assert!(!hold.holding && hold.held.is_empty());
 }

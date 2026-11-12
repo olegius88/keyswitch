@@ -20,6 +20,32 @@ pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
 /// milliseconds later or in another window: its release may have gone where the hook does not reach (a UAC prompt, the
 /// Ctrl+Alt+Del screen, an elevated window).
 pub const MODIFIER_RECHECK_GAP_MS: i64 = 1000;
+/// How long `hold_input` waits for a key the hook is answering at that moment to reach the engine's queue. The hook
+/// answers a key in tens of microseconds; a hook thread kept from the processor for longer than this is not waited for,
+/// and the hold begins without that key, as every hold did before.
+pub const KEY_IN_FLIGHT_WAIT_SECONDS: f64 = 0.005;
+/// Step at which `hold_input` looks again for that key.
+pub const KEY_IN_FLIGHT_POLL_SECONDS: f64 = 0.0005;
+/// How long a held key that `SendInput` did not take is offered again, counted anew after each key it took, before the
+/// keys still held are given up. A refusal that passes ("the input was already blocked by another thread", SendInput,
+/// Microsoft Learn) then costs the user nothing; one that lasts is not waited out: typed later, the keys would land in
+/// another window.
+pub const HELD_KEY_RETRY_SECONDS: f64 = 0.25;
+/// Step at which a held key that was not taken is offered again.
+pub const HELD_KEY_RETRY_POLL_SECONDS: f64 = 0.01;
+/// How long an Enter or Tab may stay withheld before the backend lets the keyboard go by itself. The engine gives a
+/// withheld key up 2 s after it was pressed and types a correction within three waits for a layout
+/// (`WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS`), so one withheld this long is one the engine never answered.
+pub const WITHHELD_ACTION_MAX_MS: i64 = 10_000;
+/// How long a hold the engine began for a correction counts as the engine's. A correction is typed within three waits
+/// for a layout (`WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS`) and the retries of its held keys; a hold this old is one a
+/// failed engine left behind, and the job that gives the keyboard back no longer leaves the held keys to it.
+pub const ENGINE_HOLD_MAX_MS: i64 = 10_000;
+/// How long a hold may last with nobody at work to end it: no Enter or Tab withheld for the engine (which has its own
+/// bound, `WITHHELD_ACTION_MAX_MS`) and no engine typing a correction (`ENGINE_HOLD_MAX_MS`). The job that types owed
+/// key-ups ends the hold begun for it as soon as the engine has done typing; a hold this old was left behind, by a job
+/// or an engine that failed, and the next key of the user's has the keyboard given back.
+pub const UNOWNED_HOLD_MAX_MS: i64 = 10_000;
 /// How long `start()` waits for the keyboard hook to confirm it runs.
 pub const KEYBOARD_LISTENER_START_TIMEOUT_SECONDS: f64 = 5.0;
 /// How long `stop()` waits for the keyboard hook's thread to finish.
@@ -110,6 +136,18 @@ pub const VK_RSHIFT: u32 = 0xA1;
 /// one the user holds by its own code.
 pub const SCAN_CODE_LEFT_SHIFT: u32 = 0x2A;
 pub const SCAN_CODE_RIGHT_SHIFT: u32 = 0x36;
+pub const VK_NUMLOCK: u32 = 0x90;
+/// The slash of the numeric keypad and its name as a key (`key_name`). It has the scan code of the main slash key and
+/// the extended flag to tell them apart; it types a slash in every layout, the main key a full stop in the Russian one.
+pub const VK_DIVIDE: u32 = 0x6F;
+pub const KEYPAD_SLASH_KEY_NAME: &str = "VK_6F";
+/// The keys whose scan code, as the hook reports it, names another key to `SendInput`, so a key held back is typed again
+/// by its virtual key with the scan code beside it. Pause comes as 0x45, the code of Num Lock; Num Lock and the right
+/// Shift come with the extended flag, and with it `SendInput` finds no key for their codes. On Windows 10 (19045), by a
+/// probe that injected each and read what a hook was told: 0x45 by scan code arrived as Num Lock and switched it, 0x45
+/// and 0x36 with the extended flag arrived as no key at all, each of the three sent by its virtual key arrived as itself
+/// with its scan code, and 0x36 by scan code without the flag arrived as the right Shift (12.11.2026).
+pub const KEYS_TYPED_BY_VIRTUAL_KEY: [u32; 3] = [VK_PAUSE, VK_NUMLOCK, VK_RSHIFT];
 pub const VK_LCONTROL: u32 = 0xA2;
 pub const VK_RCONTROL: u32 = 0xA3;
 pub const VK_LMENU: u32 = 0xA4;

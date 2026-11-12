@@ -116,7 +116,8 @@ pub fn keyboard_fields(item: &NativeInput) -> KeyboardFields {
         if item.extended {
             flags |= KEYEVENTF_EXTENDEDKEY;
         }
-        if item.scan_code != 0 {
+        // Without the flag the key is the one `wVk` names, and `wScan` is the scan code its messages carry.
+        if item.scan_code != 0 && !item.by_virtual_key {
             flags |= KEYEVENTF_SCANCODE;
         }
     }
@@ -1043,6 +1044,10 @@ mod tests {
         );
         let replay = NativeInput { synthetic: false, replayed: true, ..NativeInput::new(true) };
         assert_eq!(keyboard_fields(&replay).extra, KEYSWITCH_REPLAY_INFO);
+        // A key named by its virtual key keeps its scan code beside it and is not looked up by it.
+        let pause = NativeInput { virtual_key: VK_BACK, by_virtual_key: true, extended: true, ..NativeInput::scan(true, 30) };
+        let fields = keyboard_fields(&pause);
+        assert_eq!((fields.virtual_key, fields.scan_code, fields.flags), (VK_BACK.low::<u16>(), 30, KEYEVENTF_EXTENDEDKEY));
         let plain = NativeInput { synthetic: false, ..NativeInput::new(true) };
         assert_eq!(keyboard_fields(&plain).extra, 0);
     }
