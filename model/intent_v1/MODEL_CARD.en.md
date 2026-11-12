@@ -37,6 +37,23 @@ and dataset `f3a250aceb6a065fb403962aa978fc0a9c243b3a942e6b30fda85842ba63d04e`.
 Development selected epoch 40 of 44 completed epochs. The container holds
 711,340 nonzero weights and 1,031,370 membership fingerprints.
 
+This sealed file lies beside its evidence:
+`model/intent_v1/layout_intent_v1.ksm`. The manifest, the test report and the
+candidate registry name it. The program is packaged with the same file without
+its table of membership fingerprints: `resources/models/layout_intent_v1.ksm`,
+4,696,874 bytes, SHA-256
+`504f53329f863fccecf17cedf74d91d1de36008cf50a7b79fbc34342cfce00e5`. The
+fingerprints give only the `coverage` of a prediction, which the trainer's
+evaluation reports and no decision of the program reads, and the table is two
+thirds of the file. The weights, bias, calibration, thresholds, veto, hash
+seeds, version and embedded manifest of the packaged file are the same to the
+byte; two fields of the container's own description differ:
+`supported_fingerprint_count` (0) and `payload_sha256` (the weights alone).
+`ks-train intent --tree . --pack` writes the packaged file and its record,
+[`packaged-model.json`](packaged-model.json). `ks-train intent
+--verify`, `--evaluate --strict` and `ks-train gates` compare it with the sealed
+file byte for byte.
+
 The [recorded test report](test-report.json) states that internal training
 gates passed. Boundary_probe, space, tab, enter and punctuation have zero
 false positives among 22,435 negatives and recall 0.956004279; pause also has
@@ -423,7 +440,8 @@ weights and little-endian uint64 fingerprints. The loader validates the schema
 and feature versions, exact payload shape, membership ordering and uniqueness,
 CRC32, SHA-256 and a 14 MiB complete-file limit. The embedded manifest is
 capped separately at 1 MiB, the payload at 12 MiB and membership at `2^20`
-fingerprints. `layout_intent_v1.ksm` remains the
+fingerprints; a container may hold none, as the packaged file does.
+`layout_intent_v1.ksm` remains the
 stable name of the first classifier generation; the container format has
 independently advanced to KSLM schema 4. The three independent version numbers
 must not be conflated: the training config uses `schema_version: 13`, the

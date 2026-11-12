@@ -124,7 +124,10 @@
   tie-breaker; threshold split остаётся независимым.
   Покрытие определяется по отсортированным точным uint64-отпечаткам символьных
   признаков в независимом membership hash namespace, а не по занятости
-  collision-prone weight buckets. Runtime не содержит ML-зависимостей,
+  collision-prone weight buckets. Покрытие — диагностика оценки тренера, решения
+  его не читают: запечатанный файл с отпечатками лежит в `model/intent_v1/`, а в
+  пакет идёт та же модель без таблицы отпечатков (`ks-train intent --pack`;
+  `ks-train gates` сверяет один файл с другим). Runtime не содержит ML-зависимостей,
   ограничивает весь контейнер 14 MiB, embedded manifest 1 MiB, payload 12 MiB,
   число membership-отпечатков `2^20` и при любой ошибке возвращается к
   детерминированному ансамблю.

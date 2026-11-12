@@ -241,6 +241,16 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
             left.as_object_mut().map(|object| object.remove("field_reader_status"));
             right.as_object_mut().map(|object| object.remove("field_reader_status"));
         }
+        // The traces were recorded with the sealed intent model. The program is packaged with that model without its table
+        // of fingerprints, which no decision reads: the same version in another file. Wherever an event reports the model
+        // (the engine's start, a session's audit and probe, logging switched on), its version, its path and whether it
+        // loaded are compared; the file's checksum, and the summary that quotes it, are not.
+        for side in [&mut left, &mut right] {
+            if let Some(model) = side.get_mut("intent_model").and_then(Value::as_object_mut) {
+                model.remove("checksum");
+                model.remove("summary");
+            }
+        }
         // An exception's class is the Python's; the port has its own names for the same failure.
         if left["event"] == "history_write_failed" {
             left.as_object_mut().map(|object| object.remove("error"));

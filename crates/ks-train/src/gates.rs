@@ -128,6 +128,17 @@ pub fn ortho(root: &Path) -> Result<Value, String> {
     Ok(json!({"model_version": seal["model_version"], "artifact_sha256": candidate, "thresholds": seal["thresholds"], "recall": report["recall"], "test_negatives": negatives, "test_false_conversions": false_total}))
 }
 
+/// The layout-intent model: the sealed file is the one its manifest names, and the packaged file is the sealed one without
+/// its table of fingerprints, to the byte, with the record that names both (`intent::pack`).
+pub fn intent(root: &Path) -> Result<Value, String> {
+    let (sealed, packaged) = crate::intent::pack::packaged_from_sealed(root)?;
+    let manifest = read_json(&root.join("model/intent_v1/manifest.json"))?;
+    if manifest["artifact_sha256"].as_str() != Some(sealed.as_str()) {
+        return Err("the sealed layout-intent model is not the one its manifest names".to_owned());
+    }
+    Ok(json!({"model_version": manifest["artifact_model_version"], "sealed_sha256": sealed, "packaged_sha256": packaged}))
+}
+
 pub fn run(root: &Path) -> Result<Value, String> {
     let resources = root.join("resources/models");
     let receipt = read_json(&root.join("model/context_v3/release-receipt.json"))?;
@@ -142,6 +153,7 @@ pub fn run(root: &Path) -> Result<Value, String> {
         "context": {"model_version": receipt["model_version"], "scope": receipt["scope"]},
         "boundary": boundary(root)?,
         "orthotactic": ortho(root)?,
+        "intent": intent(root)?,
         "rejected": {
             "context-v2": retired::context_v2::verify(root)?["candidate"],
             "boundary-v1": retired::boundary_v1::verify(root)?["accepted"],

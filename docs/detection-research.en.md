@@ -187,7 +187,10 @@ complete container at 14 MiB, the embedded manifest at 1 MiB, the payload at
 schema/feature versions, payload shape, ordering, uniqueness, CRC32 and SHA-256. If the file is absent, corrupt
 or incompatible, KeySwitch keeps running with its conservative deterministic
 ensemble. The `layout_intent_v1.ksm` name identifies the classifier generation,
-not the container schema.
+not the container schema. The membership fingerprints give only the diagnostic
+`coverage`, which no decision reads; the package holds the same model without
+the table of fingerprints, and the sealed file with the table lies in
+`model/intent_v1/` (see the model card).
 Training config schema 13, KSLM schema 4 and external publication
 `manifest.json` schema 1 are three independent schemas.
 

@@ -307,6 +307,8 @@ fn validate_manifest(manifest: &Value) -> Result<(), String> {
 pub struct ProvenanceInputs<'a> {
     pub root: &'a Path,
     pub artifact: &'a Path,
+    /// Whether the artifact is the sealed model of the tree, whose packaged model is checked against it.
+    pub packaged: bool,
     pub config_path: &'a Path,
     pub raw_config: &'a Value,
     pub config: &'a FitConfig,
@@ -351,7 +353,7 @@ fn toolchain_checks(root: &Path, toolchain: &Value, registry: &str) -> Result<Ve
 /// `verify_provenance`.
 pub fn verify_provenance(model: &LinearNgramModel, manifest: &Value, inputs: &ProvenanceInputs<'_>) -> Result<Vec<Check>, String> {
     validate_manifest(manifest)?;
-    let ProvenanceInputs { root, artifact, config_path, raw_config, config, candidate, dataset, scorer, hard_negative, protected } = *inputs;
+    let ProvenanceInputs { root, artifact, packaged, config_path, raw_config, config, candidate, dataset, scorer, hard_negative, protected } = *inputs;
     let manifest_object = manifest.as_object().expect("validated");
     let artifact_digest = seal::sha256_file(artifact)?;
     let config_digest = seal::sha256_file(config_path)?;
@@ -401,6 +403,12 @@ pub fn verify_provenance(model: &LinearNgramModel, manifest: &Value, inputs: &Pr
     ];
     if let Some(digest) = dataset_digest {
         checks.insert(2, check("dataset_sha256", manifest["dataset_sha256"].as_str() == Some(digest.as_str()), digest.clone()));
+    }
+    if packaged {
+        // The program loads the sealed model without its fingerprints: what is evaluated here stands for what is packaged
+        // only if the packaged file is that cut, to the byte (`pack::packaged_check`).
+        let (passed, detail) = super::pack::packaged_check(root, artifact);
+        checks.push(check("packaged_artifact", passed, detail));
     }
     checks.extend(toolchain_checks(root, &manifest["toolchain"], registry)?);
     Ok(checks)
@@ -1265,6 +1273,8 @@ fn slice_passes(config: &FitConfig, metrics: &Confusion, minimum_recall: f64, ma
 pub struct Options<'a> {
     pub root: &'a Path,
     pub artifact: &'a Path,
+    /// The artifact is the sealed model of the tree: the packaged model must be it without its fingerprints.
+    pub packaged: bool,
     pub manifest: &'a Path,
     pub comparison_sample: usize,
     pub latency_sample: usize,
@@ -1348,7 +1358,7 @@ fn stages(options: &Options<'_>) -> Result<(String, i32), Stop> {
     let hard_provenance = hard.provenance();
     let manifest = crate::corpus::read_json(options.manifest)?;
     let model = Arc::new(LinearNgramModel::load(options.artifact).map_err(load_error)?);
-    let presealed_inputs = ProvenanceInputs { root, artifact: options.artifact, config_path: &config_path, raw_config: &raw_config, config: &config, candidate: &candidate, dataset: None, scorer: &scorer, hard_negative: &hard_provenance, protected: &protected_list };
+    let presealed_inputs = ProvenanceInputs { root, artifact: options.artifact, packaged: options.packaged, config_path: &config_path, raw_config: &raw_config, config: &config, candidate: &candidate, dataset: None, scorer: &scorer, hard_negative: &hard_provenance, protected: &protected_list };
     let presealed_checks = verify_provenance(&model, &manifest, &presealed_inputs)?;
     let provenance_count = presealed_checks.len();
     stop_unless(checks_pass(&presealed_checks, provenance_count), || json!({"schema_version": 1, "phase": "presealed_provenance", "sealed_test_evaluated": false, "provenance": checks_payload(&presealed_checks)}))?;

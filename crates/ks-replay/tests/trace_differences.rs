@@ -13,6 +13,35 @@ use std::process::{Command, Output};
 const BASE: &str = "test_selection_commands/test_selection_commands.EngineSelectionTests.test_the_engine_refuses_where_no_correction_is_made--1.json.gz";
 const FAILING_SELECTION: &str = "test_selection_commands/test_selection_commands.EngineSelectionTests.test_a_failure_while_typing_is_an_error_and_an_unconfirmed_switch_is_still_the_engines--1.json.gz";
 
+/// The traces were recorded with the sealed intent model, which lies beside its evidence; the tool compares the model's
+/// version and not its file, since the program loads that model without its table of fingerprints. What every trace
+/// names, wherever it names a checksum of the model, is still the sealed file.
+#[test]
+fn every_trace_names_the_sealed_intent_model() {
+    use sha2::{Digest as _, Sha256};
+    const DIGEST_CHARACTERS: usize = 64;
+    let sealed = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../model/intent_v1/layout_intent_v1.ksm")).expect("the sealed intent model");
+    let digest: String = Sha256::digest(&sealed).iter().map(|byte| format!("{byte:02x}")).collect();
+    let (mut traces, mut named) = (0, 0);
+    for folder in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("traces")).expect("the traces").flatten() {
+        for file in std::fs::read_dir(folder.path()).into_iter().flatten().flatten() {
+            let mut text = String::new();
+            flate2::read::GzDecoder::new(std::fs::File::open(file.path()).expect("the trace")).read_to_string(&mut text).expect("gzip");
+            traces += 1;
+            // `"checksum":"<digest>"`, as an event writes it and as a logged line quotes it.
+            for (at, word) in text.match_indices("checksum") {
+                let rest = text.get(at + word.len()..).unwrap_or_default();
+                let found: String = rest.chars().skip_while(|character| matches!(character, '"' | ':' | '\\')).take_while(char::is_ascii_hexdigit).collect();
+                if found.len() == DIGEST_CHARACTERS {
+                    assert_eq!(found, digest, "{}", file.path().display());
+                    named += 1;
+                }
+            }
+        }
+    }
+    assert!(traces > 800 && named > traces, "{traces} traces name the model {named} times");
+}
+
 fn scratch(name: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!("ks-trace-differences-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&path);
@@ -65,6 +94,12 @@ fn cases() -> Vec<(&'static str, Value, &'static str, &'static str)> {
     let initialized: Value = serde_json::from_str(base["init_logs"][0].as_str().expect("a line").trim_start_matches("TECHNICAL ")).expect("an event");
     let mut other_backend = initialized.clone();
     other_backend["backend"] = json!("another backend");
+    // The same intent model in another file, as the program is packaged with it; and another model.
+    let mut other_file = initialized.clone();
+    other_file["intent_model"]["checksum"] = json!("0".repeat(64));
+    other_file["intent_model"]["summary"] = json!("the same version in another file");
+    let mut other_model = initialized.clone();
+    other_model["intent_model"]["version"] = json!("intent-v1-another");
     let mut snapshot = base["snapshot"].clone();
     snapshot["last_action"] = json!("something else");
     let mut own_words = base["snapshot"].clone();
@@ -88,6 +123,8 @@ fn cases() -> Vec<(&'static str, Value, &'static str, &'static str)> {
         ("log-selection", with(&|trace| trace["init_logs"][0] = technical(&json!({"event": "selection_command"}))), "differed", "log: selection_command expected, engine_initialized written"),
         ("log-extra", with(&|trace| trace["init_logs"] = json!([])), "differed", "log: extra engine_initialized"),
         ("log-field", with(&|trace| trace["init_logs"][0] = technical(&other_backend)), "differed", "log: engine_initialized.backend"),
+        ("log-intent-file", with(&|trace| trace["init_logs"][0] = technical(&other_file)), "passed", ""),
+        ("log-intent-model", with(&|trace| trace["init_logs"][0] = technical(&other_model)), "differed", "log: engine_initialized.intent_model.version"),
         ("log-error-class", selection, "differed", "log: selection_command.error"),
         ("models-none", with(&|trace| trace["models"] = json!([])), "not_run", "language models "),
         ("settings-missing", with(&|trace| {
