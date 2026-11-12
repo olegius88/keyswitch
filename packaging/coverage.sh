@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Measures test coverage on Linux: every test, the live tests in a private desktop, and the replays CI runs. The report is
 # written to the file named by the first argument, and `ks-train coverage-gate` reads it. The second argument names one
-# part of the run: CI measures the four parts on four runners at once, each with its own report, and the gate joins those
-# reports as it joins the reports of the three systems. Without it every step runs here, one after another.
+# part of the run: CI measures the eight parts on eight runners at once, each with its own report, and the gate joins
+# those reports as it joins the reports of the three systems. Without it every step runs here, one after another.
 # KS_COVERAGE_DRY_RUN=1 prints the steps of a part without running them.
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-usage='usage: coverage.sh <report.json> [all|trainer-1|trainer-2|models|rest]'
+usage='usage: coverage.sh <report.json> [all|trainer-1|trainer-2|trainer-3|trainer-4|trainer-rest|models|engine|rest]'
 report="$(realpath -m -- "${1:?$usage}")"
 part="${2:-all}"
 case "$part" in
-    all | trainer-1 | trainer-2 | models | rest) ;;
+    all | trainer-1 | trainer-2 | trainer-3 | trainer-4 | trainer-rest | models | engine | rest) ;;
     *)
         printf '%s\n' "$usage" >&2
         exit 2
@@ -27,51 +27,8 @@ export RUSTUP_TOOLCHAIN="${KS_COVERAGE_TOOLCHAIN:-nightly-2026-11-05}"
 # empty record that llvm-cov may read first: tested code would read as never run.
 export RUSTFLAGS="${RUSTFLAGS:-} -Zcross-crate-inline-threshold=never"
 
-# The integration tests of ks-train take most of the run. The longest are dealt out by name, three of them beside the
-# replays of `models`, so that each part takes about twenty minutes of a four-core runner; every other test of ks-train
-# runs in `rest`, so a new test file is measured without being listed here.
-trainer_1=(fit_small cycle typing)
-trainer_2=(models_kept corpora fit_whole)
-models_tests=(curricula receipt commands)
-
-# The parts name the targets of ks-train one by one, so the script stops on a target they would not run as a plain
-# `cargo test` does (an example, a bench, a target with `test = false`, a library without doc tests), on a listed test that
-# is gone and on a test listed twice. It checks this before measuring anything, in each part and in the whole run alike,
-# so that a list gone stale stops a local run before it reaches CI.
-found="$(cargo metadata --no-deps --format-version 1 | jq -r '
-    .packages[] | select(.name == "ks-train") | .targets[] | select(.kind != ["custom-build"])
-    | if (.kind - ["lib", "bin", "test"]) != [] or .test != true or (.kind == ["lib"] and .doctest != true)
-      then error("packaging/coverage.sh does not deal out the target \(.name) of ks-train (\(.kind | join(",")))")
-      elif .kind == ["test"] then .name
-      else empty end')"
-trainer_tests=()
-if [[ -n "$found" ]]; then
-    mapfile -t trainer_tests <<< "$found"
-fi
-declare -A listed=() known=()
-problems=()
-for name in "${trainer_1[@]}" "${trainer_2[@]}" "${models_tests[@]}"; do
-    if [[ -n "${listed[$name]:-}" ]]; then
-        problems+=("$name is listed twice")
-    fi
-    listed[$name]=1
-done
-rest_tests=()
-for name in "${trainer_tests[@]}"; do
-    known[$name]=1
-    if [[ -z "${listed[$name]:-}" ]]; then
-        rest_tests+=("$name")
-    fi
-done
-for name in "${!listed[@]}"; do
-    if [[ -z "${known[$name]:-}" ]]; then
-        problems+=("$name is not a test of ks-train")
-    fi
-done
-if ((${#problems[@]})); then
-    printf 'packaging/coverage.sh: %s\n' "${problems[@]}" >&2
-    exit 1
-fi
+# The tests of ks-train in the groups every runner of CI takes one of: `long_1` to `long_4`, and `rest_tests`.
+source "$project_dir/packaging/test-parts.sh"
 
 if [[ -z "$dry_run" ]]; then
     source <(cargo llvm-cov show-env --sh --branch)
@@ -129,22 +86,27 @@ replays() {
     step train intent --evaluate --strict --output "$scratch/strict.json"
 }
 
+# The parts take a runner about the same time each. The tests of ks-replay drive the engine through every recorded trace
+# and every walk, and take as long as all the other crates together, so they are a part of their own; `rest` is every
+# other crate but ks-train, and the live tests.
 case "$part" in
     all)
         step cargo test --profile coverage --workspace --no-fail-fast -j "$jobs"
         step env KS_E2E_PROFILE=coverage packaging/e2e.sh
         replays
         ;;
-    trainer-1) test_trainer "${trainer_1[@]}" ;;
-    trainer-2) test_trainer "${trainer_2[@]}" ;;
-    models)
-        test_trainer "${models_tests[@]}"
-        replays
-        ;;
-    rest)
-        step cargo test --profile coverage --workspace --exclude ks-train --no-fail-fast -j "$jobs"
+    trainer-1) test_trainer "${long_1[@]}" ;;
+    trainer-2) test_trainer "${long_2[@]}" ;;
+    trainer-3) test_trainer "${long_3[@]}" ;;
+    trainer-4) test_trainer "${long_4[@]}" ;;
+    trainer-rest)
         test_trainer --lib --bins "${rest_tests[@]}"
         test_trainer --doc
+        ;;
+    models) replays ;;
+    engine) step cargo test --profile coverage -p ks-replay --no-fail-fast -j "$jobs" ;;
+    rest)
+        step cargo test --profile coverage --workspace --exclude ks-train --exclude ks-replay --no-fail-fast -j "$jobs"
         step env KS_E2E_PROFILE=coverage packaging/e2e.sh
         ;;
 esac

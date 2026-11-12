@@ -15,25 +15,53 @@ env:
   CARGO_TERM_COLOR: never
 
 jobs:
+  plan:
+    # Decided once, for every job: `full` checks and builds everything; `promote` is a tag on the commit of a candidate
+    # that passed, and publishes the candidate's files instead of building others; `covered` is a branch whose head commit
+    # a tag's run checks. packaging/ci-plan.sh says how each is told, and leaves the files of a promoted candidate here.
+    # The APT repository goes live before the release does: a tag that does not name the packaged version stops in this
+    # job, before installed systems are offered a rebuilt package under the old version.
+    name: What this run has to do
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      candidate: ${{ steps.plan.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: packaging/ci-plan.sh "$RUNNER_TEMP/candidate"
+      # Under names of their own: a run started again may plan otherwise than it did, and the jobs that publish take the
+      # files this plan names and never the files of the other kind beside them.
+      - uses: actions/upload-artifact@v7
+        if: steps.plan.outputs.mode == 'promote'
+        with:
+          name: keyswitch-candidate-deb
+          path: ${{ runner.temp }}/candidate/keyswitch_*.deb
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: steps.plan.outputs.mode == 'promote'
+        with:
+          name: keyswitch-candidate-files
+          path: ${{ runner.temp }}/candidate/KeySwitch-*
+          if-no-files-found: error
+          retention-days: 14
+
   tests:
     name: Tests (pure logic, every crate that needs no desktop)
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      # The APT repository goes live before the release does: a tag that does not name the packaged version must stop here,
-      # before installed systems are offered a rebuilt package under the old version. A candidate adds -rcN to the version.
-      - name: The tag names the packaged version
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          version="$(sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml | head -n 1)"
-          case "$GITHUB_REF_NAME" in
-            "v$version" | "v$version"-rc[0-9]*) ;;
-            *)
-              printf 'Tag %s does not name the packaged version %s\n' "$GITHUB_REF_NAME" "$version" >&2
-              exit 1
-              ;;
-          esac
       - name: Toolchain with the Windows target for type checks
         run: |
           rustup toolchain install stable --profile minimal --component clippy
@@ -45,9 +73,34 @@ jobs:
           cargo test -p ks-text -p ks-backend -p ks-config -p ks-lang -p ks-hunspell -p ks-context -p ks-engine -p ks-replay -p ks-updates -p ks-ui -p ks-win
       - name: The engine against the recorded traces
         run: cargo test --release -p ks-replay
-      - name: The trainer, and the models it can rebuild from the files in the repository
+      - name: Windows code type-checks for every architecture
         run: |
-          # The whole runs on small corpora are in the coverage job, which has the time for them.
+          for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do
+            cargo clippy -p ks-win --all-targets --target "$target"
+          done
+      - name: The macOS code type-checks
+        run: |
+          rustup target add x86_64-apple-darwin
+          cargo clippy -p ks-mac --all-targets --target x86_64-apple-darwin
+
+  trainer:
+    # A job of its own beside `tests`: the two took one runner twenty-five minutes, as long as the longest part of the
+    # measure of coverage.
+    name: The trainer, and the models it can rebuild from the files in the repository
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and what the trainer reads
+        run: |
+          rustup toolchain install stable --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data
+      - name: The trainer's own tests, and every model rebuilt
+        run: |
+          # The whole runs on small corpora are in the measure of coverage, and on a tag in `stable` as well.
           cargo test --release -p ks-train --lib --bins --test core --test line_endings --test quality_ratchet --test receipt --test strict_typing
           cargo run --release -p ks-train --bin ks-train -- boundary --tree "$PWD" --verify
           cargo run --release -p ks-train --bin ks-train -- ortho --tree "$PWD" --verify
@@ -65,19 +118,37 @@ jobs:
           cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --freeze --output development.json
           cmp development.json model/intent_v1/unknown-typo-development-v28.json
           cargo run --release -p ks-train --bin ks-train -- intent --tree "$PWD" --evaluate --strict --output strict.json
-      - name: Windows code type-checks for every architecture
+
+  stable:
+    # The measure of coverage runs every test, but on a nightly compiler and with counters in the code; the program is
+    # built with stable. A tag that is checked and built whole is published only after the same tests have passed there,
+    # as a release is built but with its checks on. On tags only: a branch has the measure, and the tests of `tests` and
+    # `trainer` on stable.
+    name: Every test on the stable compiler (${{ matrix.part }})
+    needs: plan
+    if: needs.plan.outputs.mode == 'full' && startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [long-1, long-2, long-3, long-4, rest]
+    # The image the measure of coverage runs the same tests on.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain and what the tests read
         run: |
-          for target in x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc; do
-            cargo clippy -p ks-win --all-targets --target "$target"
-          done
-      - name: The macOS code type-checks
-        run: |
-          rustup target add x86_64-apple-darwin
-          cargo clippy -p ks-mac --all-targets --target x86_64-apple-darwin
+          rustup toolchain install stable --profile minimal
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data jq
+      - name: Tests
+        run: packaging/stable-tests.sh "${{ matrix.part }}"
 
   windows-installer:
     # Built and run on the architecture it is for: Windows on Arm on an Arm runner, x86 on the x64 image.
     name: Windows installer (${{ matrix.architecture }})
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -247,10 +318,13 @@ jobs:
           path: |
             out/KeySwitch-Setup-*.exe
             out/KeySwitch-*-windows-*.zip
-          retention-days: 14
+          # The files of a tag are what a later tag on the same commit publishes: kept as long as files are kept.
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}
 
   deb:
     name: Debian package and the Linux program's tests
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -277,13 +351,14 @@ jobs:
         with:
           name: keyswitch-release-deb
           path: out/keyswitch_*.deb
-          retention-days: 14
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}
 
   linux-e2e:
     # On the newer image: GTK 4.14 of the image the package is built on leaves a field made hidden at run time readable as
     # plain text over AT-SPI, which a password entry of any version is not.
     name: The real tests on Linux, and the package
-    needs: deb
+    needs: [plan, deb]
+    if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -302,6 +377,8 @@ jobs:
 
   macos:
     name: macOS bundle, ${{ matrix.architecture }}
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -387,10 +464,12 @@ jobs:
         with:
           name: keyswitch-release-macos-${{ matrix.architecture }}
           path: dist/KeySwitch-*-macos-*.zip
-          retention-days: 14
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 14 }}
 
   logcourier:
     name: LogCourier tests (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -418,9 +497,12 @@ jobs:
 
   coverage:
     # Every line and branch of the program ran, on the system it is for. `ks-train coverage-gate` joins the reports.
-    # Linux is measured in four parts at once, each with its own report: one runner took an hour and a half for all of it.
-    # packaging/coverage.sh says what each part runs; Windows and macOS measure all of theirs in one job.
+    # Linux is measured in eight parts at once, each with its own report: one runner took an hour and a half for all of
+    # it, and four took half an hour each. packaging/coverage.sh says what each part runs; Windows and macOS measure all
+    # of theirs in one job. With the other jobs of a branch that makes twenty at once, as many as run side by side.
     name: Coverage (${{ matrix.os }}, ${{ matrix.part }})
+    needs: plan
+    if: needs.plan.outputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -430,7 +512,15 @@ jobs:
           - os: ubuntu-26.04
             part: trainer-2
           - os: ubuntu-26.04
+            part: trainer-3
+          - os: ubuntu-26.04
+            part: trainer-4
+          - os: ubuntu-26.04
+            part: trainer-rest
+          - os: ubuntu-26.04
             part: models
+          - os: ubuntu-26.04
+            part: engine
           - os: ubuntu-26.04
             part: rest
           - os: windows-2025
@@ -447,7 +537,7 @@ jobs:
         shell: bash
         run: |
           rustup toolchain install nightly-2026-11-05 --profile minimal --component llvm-tools
-          cargo install cargo-llvm-cov --version 0.9.1 --locked
+          packaging/install-llvm-cov.sh
       - name: System packages for the live tests
         if: runner.os == 'Linux'
         run: |
@@ -481,8 +571,8 @@ jobs:
 
   coverage-gate:
     name: Every line and branch of the program ran
-    needs: [coverage]
-    if: ${{ !cancelled() }}
+    needs: [plan, coverage]
+    if: ${{ !cancelled() && needs.plan.outputs.mode == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -499,15 +589,32 @@ jobs:
           for report in reports/*.json; do
             arguments+=(--report "$report")
           done
-          cargo run --release -p ks-train --bin ks-train -- coverage-gate --tree "$PWD" "${arguments[@]}"
+          # Built without optimisation: joining the reports takes seconds either way, and the release build two minutes.
+          cargo run -p ks-train --bin ks-train -- coverage-gate --tree "$PWD" "${arguments[@]}"
+
+  checked:
+    # What the two jobs that publish wait for in a full run. It runs only when every job it names passed: one that failed,
+    # was cancelled or was skipped leaves it skipped, and nothing is published. The measure itself is named, not only its
+    # gate: a test that runs only under coverage and fails leaves the gate green.
+    name: Every check of a tag passed
+    needs: [plan, tests, trainer, stable, windows-installer, deb, linux-e2e, macos, logcourier, coverage, coverage-gate]
+    if: needs.plan.outputs.mode == 'full' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: echo "Every check and every build of $GITHUB_REF_NAME passed"
 
   apt-repository:
     # The repository is what keeps an installed Linux KeySwitch up to date, and every package carries the source pointing
     # at it, so it has to be live before the release that hands out that package. A candidate tag (-rcN) stays out of it.
+    # It publishes the package this run built and checked, or the package of the candidate this run promotes; a job that
+    # was skipped is no check that passed, so each of the two ways is named.
     name: Publish the signed APT repository
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    # The measure itself, not only its gate: a test that runs only under coverage and fails leaves the gate green.
-    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage, coverage-gate]
+    needs: [plan, checked]
+    if: >-
+      ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+      && (needs.checked.result == 'success'
+      || (needs.plan.result == 'success' && needs.plan.outputs.mode == 'promote')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -525,7 +632,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: keyswitch-release-deb
+          name: ${{ needs.plan.outputs.mode == 'promote' && 'keyswitch-candidate-deb' || 'keyswitch-release-deb' }}
           path: dist
       - name: Read the GitHub Pages configuration
         id: pages
@@ -591,11 +698,16 @@ jobs:
   publish:
     # A candidate tag (vX.Y.Z-rcN) becomes a pre-release: the update check of every installed program reads the latest
     # release, and a pre-release is never that. The plain tag vX.Y.Z replaces the published version for everybody.
+    # The files this run built and checked, or the files of the candidate this run promotes, which plan gives under
+    # names of their own. A release waits for its APT repository; a candidate has none.
     name: Publish the files of a tag
+    needs: [plan, checked, apt-repository]
     if: >-
       ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v')
-      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
-    needs: [tests, windows-installer, deb, linux-e2e, macos, logcourier, coverage, coverage-gate, apt-repository]
+      && (needs.checked.result == 'success'
+      || (needs.plan.result == 'success' && needs.plan.outputs.mode == 'promote'))
+      && (needs.apt-repository.result == 'success'
+      || (contains(github.ref_name, '-') && needs.apt-repository.result == 'skipped')) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -603,7 +715,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          pattern: keyswitch-release-*
+          pattern: ${{ needs.plan.outputs.mode == 'promote' && 'keyswitch-candidate-*' || 'keyswitch-release-*' }}
           path: assets
           merge-multiple: true
       - name: Create the release

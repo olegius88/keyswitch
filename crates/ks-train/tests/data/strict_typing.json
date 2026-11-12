@@ -452,7 +452,7 @@
    "value_tokens": 21
   },
   "ks-train": {
-   "expect_roots": 38,
+   "expect_roots": 37,
    "files": {
     "src/artifact.rs": {
      "literal_compares": 1,
@@ -464,10 +464,7 @@
      "value_tokens": 122
     },
     "src/bin/ks-release.rs": {
-     "expect_roots": 1,
-     "literal_compares": 2,
-     "string_key_index": 8,
-     "value_tokens": 4
+     "literal_compares": 2
     },
     "src/boundary.rs": {
      "literal_compares": 1,
@@ -898,8 +895,8 @@
     }
    },
    "literal_compares": 259,
-   "string_key_index": 2948,
-   "value_tokens": 3816
+   "string_key_index": 2940,
+   "value_tokens": 3812
   },
   "ks-ui": {
    "expect_roots": 1,
