@@ -123,9 +123,14 @@ See [settings, training, privacy and limits](docs/context-assistant.md).
 On Windows, Enter/Tab is intercepted before delivery: the word is corrected
 first, then the action is sent exactly once. For example, `ghbdtn` + Enter
 submits `привет` when settings and safety guards permit correction.
+They are intercepted only when a key was pressed since the last Enter/Tab: an
+Enter after an Enter and a Tab after a Tab reach the application at once and
+repeat while held. In an excluded program Enter/Tab are not intercepted.
 While a rule offer is shown, Enter only opens the rule window and does not reach
 the application.
-Shift/Ctrl/Alt shortcuts are not intercepted. A correction failure or a focus
+Shift/Ctrl/Alt shortcuts are not intercepted. If the word cannot be corrected and
+the text is untouched (the field gave no answer or did not show the word), the
+key goes on with the text as it stands. A correction failure or a focus
 change cancels submission and is reported in diagnostics. A Wayland session
 works the same way. On X11 these actions have already reached the application,
 so use Space, idle correction or Pause before submitting or changing fields.
