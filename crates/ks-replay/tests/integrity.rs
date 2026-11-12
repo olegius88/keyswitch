@@ -132,7 +132,8 @@ enum Act {
 struct DeskState {
     cells: Vec<Cell>,
     caret: usize,
-    password: bool,
+    /// The field in front hides what is typed into it: a password field.
+    masked: bool,
     group: i32,
     window: i64,
     /// The hook can keep keys from the window (Windows, macOS, Wayland); false is X11, which only watches.
@@ -216,11 +217,11 @@ impl DeskState {
         format!("{milliseconds:.0}").parse().expect("a whole number of milliseconds")
     }
 
-    fn another_field(&mut self, password: bool) {
+    fn another_field(&mut self, masked: bool) {
         self.window += 1;
         self.cells.clear();
         self.caret = 0;
-        self.password = password;
+        self.masked = masked;
     }
 
     /// The event the hook makes of a key, in the layout of this moment, and the character the window gets from it.
@@ -444,7 +445,7 @@ impl Desk {
             state: Mutex::new(DeskState {
                 cells: Vec::new(),
                 caret: 0,
-                password: false,
+                masked: false,
                 group,
                 window: 1,
                 holds: mode.holds,
@@ -616,7 +617,7 @@ impl InputBackend for Desk {
         let word = erased.unwrap_or(strokes.len());
         let count = word + trailing.len() + usize::from(boundary.is_some()) + late.len();
         let typed_text: String = typed.iter().map(|(character, _)| character.as_str()).collect();
-        if state.password && state.read {
+        if state.masked && state.read {
             let text = format!("a correction types «{typed_text}» into a password field");
             state.violation(text);
         }
@@ -684,7 +685,7 @@ impl FieldReader for DeskReader {
         }
         let mut field = FieldContext::new(application, state.window.to_string());
         "uia".clone_into(&mut field.source);
-        if state.password {
+        if state.masked {
             field.role = FieldRole::Password;
             field.sensitive = true;
             return Some(field);
@@ -964,9 +965,9 @@ fn walk(bundle: &mut Bundle, seed: u64, mode: Walk, verbose: bool) -> Outcome {
             }
             Act::Window | Act::Password => {
                 let mut state = desk.lock();
-                let password = matches!(act, Act::Password);
-                state.another_field(password);
-                state.note(if password { "another window, a password field".to_owned() } else { "another window".to_owned() });
+                let masked = matches!(act, Act::Password);
+                state.another_field(masked);
+                state.note(if masked { "another window, a password field".to_owned() } else { "another window".to_owned() });
             }
             Act::Paste(text) => {
                 desk.lock().clipboard = text;
