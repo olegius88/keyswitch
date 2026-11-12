@@ -1422,14 +1422,14 @@ fn an_enter_with_nothing_before_it_is_the_windows_own() {
     scene.ends_clean(&mut bundle);
     // A program in the user's exclusions: nothing of it is kept back, and nothing in it is corrected.
     let mut scene = Scene::new(&mut bundle, true, false);
-    scene.core.settings.set("exclusions.applications", serde_json::json!(["Editor"]), false).expect("in memory");
+    scene.core.settings.set("exclusions.applications", vec!["Editor"].into(), false).expect("in memory");
     scene.core.apply_commands();
     scene.text("нет", 1);
     scene.tap(RETURN_KEYCODE, "Return");
     assert_eq!(scene.desk.lock().deferred_actions, 0);
     assert_eq!(scene.desk.lock().submitted, ["ytn"]);
     // Taken off the list, it is a program like any other.
-    scene.core.settings.set("exclusions.applications", serde_json::json!([]), false).expect("in memory");
+    scene.core.settings.set("exclusions.applications", Vec::<String>::new().into(), false).expect("in memory");
     scene.core.apply_commands();
     scene.text("нет", 1);
     scene.tap(RETURN_KEYCODE, "Return");
@@ -1440,7 +1440,7 @@ fn an_enter_with_nothing_before_it_is_the_windows_own() {
     // learns of the program from the first key the engine takes there, so it keeps this Tab back, and the engine passes
     // it on as it takes it, not when the key comes up. The second Tab is the program's own.
     let mut scene = Scene::new(&mut bundle, true, false);
-    scene.core.settings.set("exclusions.applications", serde_json::json!(["game"]), false).expect("in memory");
+    scene.core.settings.set("exclusions.applications", vec!["game"].into(), false).expect("in memory");
     scene.core.apply_commands();
     scene.text("нет", 1);
     scene.tap(RETURN_KEYCODE, "Return");
