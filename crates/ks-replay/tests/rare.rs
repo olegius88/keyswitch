@@ -1169,6 +1169,13 @@ fn what_is_asked_of_a_lone_letter_and_of_a_waiting_word_directly() {
     let waiting = session.core.context_waiting.clone();
     let waiting = waiting.expect("some word waits for its neighbour");
     let core = &mut session.core;
+    // A password field found while the word waits (the hook kept the Enter back before the engine knew of the field): the
+    // Enter settles nothing there, and the word goes on waiting.
+    core.last_committed_stale = false;
+    core.shared.set_sensitive_context_window(core.shared.focus_window());
+    core.settle_context_wait_at_action(&KeyEvent { deferred: true, ..named("Return") }).expect("no failure");
+    assert_eq!(core.context_waiting.as_ref().map(|word| word.diagnostic_id), Some(waiting.diagnostic_id));
+    core.shared.set_sensitive_context_window(None);
     let space = key(' ');
     let next = keys("ghbdtn");
     let alternatives = vec![(1, "привет".to_owned())];
