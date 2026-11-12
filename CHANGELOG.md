@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.72.0 — 2026-11-12
+
 - A correction that waits for a field read a moment late (an Electron editor, a browser) is given up as soon as anything but letters of the next word is typed: a bracket, a second space, a word that was finished and kept, a Backspace. It was made all the same and counted the keys after its word by the letters alone, so it deleted too few characters and typed over the wrong ones: `gthtl (j`, with the correction of `gthtl` still waiting when `(j` was typed, became `gперед о` instead of `перед (о`. A correction that is about to run always gave way to such a key; one that waited for its field did not.
 - Windows, macOS and Wayland: an Enter or Tab pressed right after a word waits together with that word's correction for a field that shows its text a moment late, and goes to the window after the correction. The Enter used to be dropped at once and the wait with it: `ytn` and Enter in such a field left the word as typed and the message unsent, and the second Enter sent `ytn`.
 - Windows, macOS and Wayland: an Enter or Tab that KeySwitch keeps back for a correction is always passed on or let go. One that no part of the program answered kept every key typed after it held until KeySwitch was restarted: it happened when the rule window took the keyboard at that very moment, and at every press when a hotkey was set to Tab or Enter alone. Such a hotkey is no longer kept back, and an Enter the engine does not take as an action goes on to its window.

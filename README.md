@@ -19,7 +19,7 @@ EveryLang, и в отличие от них KeySwitch работает и в Lin
 [Проверка, сборка и выпуск](docs/verification.md)
 
 Последний опубликованный стабильный выпуск —
-[0.71.2](https://github.com/olegius88/keyswitch/releases/tag/v0.71.2).
+[0.72.0](https://github.com/olegius88/keyswitch/releases/tag/v0.72.0).
 Изменения перечислены в [CHANGELOG.md](CHANGELOG.md), известные дефекты
 выпуска — в [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
@@ -205,17 +205,17 @@ Telegram. Токен бота и ID группы задаются в её инт
 
 ## Установка в Windows
 
-Скачайте `KeySwitch-Setup-0.71.2-x64.exe` со страницы
-[опубликованного выпуска 0.71.2](https://github.com/olegius88/keyswitch/releases/tag/v0.71.2) и
+Скачайте `KeySwitch-Setup-0.72.0-x64.exe` со страницы
+[опубликованного выпуска 0.72.0](https://github.com/olegius88/keyswitch/releases/tag/v0.72.0) и
 запустите его. Установка выполняется для текущего пользователя в
 `%LOCALAPPDATA%\Programs\KeySwitch` и не требует прав администратора. В выпуск
-также входит переносимый архив `KeySwitch-0.71.2-windows-x64.zip`.
+также входит переносимый архив `KeySwitch-0.72.0-windows-x64.zip`.
 
-Для Windows на ARM есть собственная сборка: `KeySwitch-Setup-0.71.2-arm64.exe` и
-`KeySwitch-0.71.2-windows-arm64.zip`. x64-установщик на таком компьютере тоже
+Для Windows на ARM есть собственная сборка: `KeySwitch-Setup-0.72.0-arm64.exe` и
+`KeySwitch-0.72.0-windows-arm64.zip`. x64-установщик на таком компьютере тоже
 ставится, но программа тогда работает через эмуляцию. Для 32-битной Windows 10,
-на которой x64-сборка не запускается, есть сборка x86: `KeySwitch-Setup-0.71.2-x86.exe`
-и `KeySwitch-0.71.2-windows-x86.zip`. Каждая сборка обновляется сама установщиком
+на которой x64-сборка не запускается, есть сборка x86: `KeySwitch-Setup-0.72.0-x86.exe`
+и `KeySwitch-0.72.0-windows-x86.zip`. Каждая сборка обновляется сама установщиком
 своей архитектуры.
 
 После запуска KeySwitch появится в области уведомлений. Левый или правый щелчок
@@ -255,11 +255,11 @@ EXE и переносимый ZIP словари, KSLM и контекстная
 ## Установка на macOS
 
 Нужна macOS 13 или новее. На странице
-[опубликованного выпуска 0.71.2](https://github.com/olegius88/keyswitch/releases/tag/v0.71.2)
+[опубликованного выпуска 0.72.0](https://github.com/olegius88/keyswitch/releases/tag/v0.72.0)
 лежат два архива, и нужен ровно один из них:
 
-- `KeySwitch-0.71.2-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее);
-- `KeySwitch-0.71.2-macos-x86_64.zip` — Mac на процессоре Intel.
+- `KeySwitch-0.72.0-macos-arm64.zip` — Mac на Apple Silicon (M1 и новее);
+- `KeySwitch-0.72.0-macos-x86_64.zip` — Mac на процессоре Intel.
 
 Распакуйте архив и перенесите `KeySwitch.app` в «Программы». Приложение подписано
 сертификатом Developer ID и нотаризовано Apple, поэтому открывается обычным двойным
@@ -354,11 +354,11 @@ AnyDesk), макросы, экранная клавиатура — в Windows �
 
 ## Установка DEB-пакета
 
-Скачайте `keyswitch_0.71.2_amd64.deb` со страницы
-[опубликованного выпуска 0.71.2](https://github.com/olegius88/keyswitch/releases/tag/v0.71.2), затем:
+Скачайте `keyswitch_0.72.0_amd64.deb` со страницы
+[опубликованного выпуска 0.72.0](https://github.com/olegius88/keyswitch/releases/tag/v0.72.0), затем:
 
 ```bash
-sudo apt install ./keyswitch_0.71.2_amd64.deb
+sudo apt install ./keyswitch_0.72.0_amd64.deb
 ```
 
 Пакет установит системные зависимости и добавит KeySwitch в меню приложений.
@@ -830,7 +830,7 @@ target/train/ks-release --version X.Y.Z --field-root <дерево с набор
   считается набором (настройка «Ввод от других программ»).
 - Сборку для 32-битной Windows проверяют тестами и нажатиями на 64-битной Windows,
   где 32-битные программы работают через WOW64: машины с 32-битной Windows в CI нет.
-- Windows Setup EXE опубликованной версии 0.71.2 не подписан сертификатом издателя.
+- Windows Setup EXE опубликованной версии 0.72.0 не подписан сертификатом издателя.
 - macOS: автоисправление орфографии (например, в TextEdit) может изменить слово на
   пробеле раньше KeySwitch; тогда KeySwitch не пишет поверх чужой правки и слово
   остаётся как есть. В таком приложении стоит выключить автоисправление.
