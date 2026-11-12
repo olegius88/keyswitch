@@ -64,8 +64,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain with the Windows target for type checks
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup target add x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc
+          packaging/toolchain.sh clippy x86_64-pc-windows-msvc i686-pc-windows-msvc aarch64-pc-windows-msvc x86_64-apple-darwin
       - name: Tests
         run: |
           sudo apt-get update
@@ -79,9 +78,7 @@ jobs:
             cargo clippy -p ks-win --all-targets --target "$target"
           done
       - name: The macOS code type-checks
-        run: |
-          rustup target add x86_64-apple-darwin
-          cargo clippy -p ks-mac --all-targets --target x86_64-apple-darwin
+        run: cargo clippy -p ks-mac --all-targets --target x86_64-apple-darwin
 
   trainer:
     # A job of its own beside `tests`: the two took one runner twenty-five minutes, as long as the longest part of the
@@ -95,7 +92,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain and what the trainer reads
         run: |
-          rustup toolchain install stable --profile minimal
+          packaging/toolchain.sh
           sudo apt-get update
           sudo apt-get install -y libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data
       - name: The trainer's own tests, and every model rebuilt
@@ -138,7 +135,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain and what the tests read
         run: |
-          rustup toolchain install stable --profile minimal
+          packaging/toolchain.sh
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru onboard-data jq
       - name: Tests
@@ -163,11 +160,12 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Rust and Inno Setup
+      - name: Toolchain
+        shell: bash
+        run: packaging/toolchain.sh i686-pc-windows-msvc
+      - name: Inno Setup
         shell: pwsh
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup target add i686-pc-windows-msvc
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup --no-progress -y }
       - name: Build
         shell: powershell
@@ -331,7 +329,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain and GTK development files
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
+          packaging/toolchain.sh clippy
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev xvfb dbus
       - name: The strict rules over everything that builds here
@@ -365,7 +363,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain, GTK development files and what the tests drive
         run: |
-          rustup toolchain install stable --profile minimal
+          packaging/toolchain.sh
           sudo apt-get update
           sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libhunspell-1.7-0 hunspell-en-us hunspell-ru xvfb dbus x11-xkb-utils at-spi2-core libglib2.0-bin xfwm4
       - uses: actions/download-artifact@v7
@@ -399,7 +397,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Toolchain
-        run: rustup toolchain install stable --profile minimal
+        run: packaging/toolchain.sh
       - name: Tests
         run: cargo test -p ks-mac
       - name: Import the Developer ID signing identity
@@ -478,7 +476,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - run: rustup toolchain install stable --profile minimal --component clippy
+      - name: Toolchain
+        shell: bash
+        run: packaging/toolchain.sh clippy
       - name: GTK development files
         if: runner.os == 'Linux'
         run: |
@@ -582,7 +582,7 @@ jobs:
           pattern: coverage-*
           path: reports
           merge-multiple: true
-      - run: rustup toolchain install stable --profile minimal
+      - run: packaging/toolchain.sh
       - name: The gate
         run: |
           arguments=()
@@ -675,7 +675,7 @@ jobs:
           printf '%s' "$SIGNING_PASSPHRASE" > "$RUNNER_TEMP/keyswitch-apt-passphrase"
           chmod 0600 "$RUNNER_TEMP/keyswitch-apt-passphrase"
           echo "GNUPGHOME=$home" >> "$GITHUB_ENV"
-      - run: rustup toolchain install stable --profile minimal
+      - run: packaging/toolchain.sh
       - name: Build and sign the repository
         run: |
           arguments=()
