@@ -200,19 +200,19 @@ fn a_correction_waits_only_for_a_field_that_is_behind() {
     assert!(core.strokes.is_empty());
     // Retried only with no key down and nothing newer planned.
     let waiting = |core: &mut EngineCore| {
-        core.field_wait = Some(FieldWait { plan: of_field("ghbdtn", Some(' ')), learning_prompt: None, deadline: f64::MAX });
+        core.field_wait = Some(FieldWait { plan: of_field("ghbdtn", Some(' ')), learning_prompt: None, deadline: f64::MAX, presses: core.presses_handled, rolled: 0 });
     };
     waiting(core);
     core.pressed.insert(50);
-    core.retry_field_wait();
+    core.retry_field_wait().expect("no failure");
     assert!(core.field_wait.is_some());
     core.pressed.clear();
     core.modifier_keycodes.insert(50);
-    core.retry_field_wait();
+    core.retry_field_wait().expect("no failure");
     assert!(core.field_wait.is_some());
     core.modifier_keycodes.clear();
     core.pending = Some(of_field("ghbdtn", Some(' ')));
-    core.retry_field_wait();
+    core.retry_field_wait().expect("no failure");
     assert!(core.field_wait.is_none());
     core.pending = None;
     waiting(core);
@@ -944,7 +944,7 @@ fn late_keys_of_a_correction_that_cannot_be_typed_again_refuse_it() {
         core.pending = None;
     }
     // The worker wakes for a correction waiting on its field sooner than for anything else.
-    core.field_wait = Some(FieldWait { plan: plan("ghbdtn", "привет", Some(' ')), learning_prompt: None, deadline: f64::MAX });
+    core.field_wait = Some(FieldWait { plan: plan("ghbdtn", "привет", Some(' ')), learning_prompt: None, deadline: f64::MAX, presses: core.presses_handled, rolled: 0 });
     assert!(core.loop_timeout() < 0.5);
     core.field_wait = None;
     bundle.give_back(session);
@@ -1169,6 +1169,13 @@ fn what_is_asked_of_a_lone_letter_and_of_a_waiting_word_directly() {
     let waiting = session.core.context_waiting.clone();
     let waiting = waiting.expect("some word waits for its neighbour");
     let core = &mut session.core;
+    // A password field found while the word waits (the hook kept the Enter back before the engine knew of the field): the
+    // Enter settles nothing there, and the word goes on waiting.
+    core.last_committed_stale = false;
+    core.shared.set_sensitive_context_window(core.shared.focus_window());
+    core.settle_context_wait_at_action(&KeyEvent { deferred: true, ..named("Return") }).expect("no failure");
+    assert_eq!(core.context_waiting.as_ref().map(|word| word.diagnostic_id), Some(waiting.diagnostic_id));
+    core.shared.set_sensitive_context_window(None);
     let space = key(' ');
     let next = keys("ghbdtn");
     let alternatives = vec![(1, "привет".to_owned())];

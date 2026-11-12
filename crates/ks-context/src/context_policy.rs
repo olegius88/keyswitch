@@ -386,21 +386,34 @@ impl ContextPolicy {
     /// dictionary questions with the engine's own models, which it would otherwise find again by normalising the Russian
     /// supplement once more (`ortho_model`._`engine_dictionaries`).
     pub fn new(resources: &Arc<Resources>, reader: Option<Arc<dyn FieldReader>>, known: Option<KnownWord>, clock: Option<Clock>) -> Self {
-        let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), None, known, Some(resources.clone())) {
+        Self::with_ortho(resources, reader, Self::load_ortho(resources, known), clock)
+    }
+
+    /// The orthotactic artifact, read and bound to the dictionaries `known` answers from: what `new` reads first.
+    pub fn load_ortho(resources: &Arc<Resources>, known: Option<KnownWord>) -> SharedOrtho {
+        match OrthoModel::load(&artifact_path(resources.resource_dir()), None, known, Some(resources.clone())) {
             Ok(model) => {
                 let version = model.version.clone();
                 (Some(Arc::new(model)), version)
             }
             Err(error) => (None, format!("unavailable: {}", error.name)),
-        };
-        Self::with_ortho(resources, reader, shared, clock)
+        }
     }
 
     /// The same with the orthotactic artifact parsed once for many policies: a running application builds one engine,
     /// but replays and tests build many.
     pub fn with_ortho(resources: &Arc<Resources>, reader: Option<Arc<dyn FieldReader>>, shared: SharedOrtho, clock: Option<Clock>) -> Self {
+        let loaded = ContextModel::try_load(&resources.resource_dir().join("models"));
+        Self::with_models(resources, reader, shared, loaded, clock)
+    }
+
+    /// The same with the context model read by the caller as well (`ContextModel::try_load`): the program reads its
+    /// largest files side by side as it starts (`KeySwitchEngine::new`).
+    pub fn with_models(
+        resources: &Arc<Resources>, reader: Option<Arc<dyn FieldReader>>, shared: SharedOrtho, loaded: (Option<ContextModel>, String), clock: Option<Clock>,
+    ) -> Self {
         let stream = clock.map_or_else(InputContext::new, InputContext::with_clock);
-        let (model, status) = ContextModel::try_load(&resources.resource_dir().join("models"));
+        let (model, status) = loaded;
         let (ortho, ortho_status) = shared;
         let identifiers = resources.identifier_lexicon().0;
         if model.is_some() {

@@ -306,6 +306,10 @@ pub struct FieldWait {
     pub plan: PlanRef,
     pub learning_prompt: Option<LearningPrompt>,
     pub deadline: f64,
+    /// The keys the engine had answered when the wait began (`EngineCore::presses_handled`), and how many of the keys
+    /// typed after the word were letters of the next one by then (`rolled_after`): see `typed_on_since`.
+    pub presses: u64,
+    pub rolled: usize,
 }
 
 /// What a press of the conversion hotkey did: the plan it scheduled, or a layout toggle.

@@ -415,7 +415,9 @@ fn disturb(session: &mut Session, dice: &mut Dice) {
         0 => {
             let _ = session.core.run_timers();
         }
-        1 => session.core.retry_field_wait(),
+        1 => {
+            let _ = session.core.retry_field_wait();
+        }
         2 => press_pause(session),
         _ => {}
     }

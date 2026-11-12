@@ -88,6 +88,10 @@ pub struct Shared {
     layout_tap_enabled: AtomicBool,
     sensitive_context_window: AtomicI64,
     focus_window: AtomicI64,
+    /// The program in front is one of the user's exclusions, as the engine saw it last (`set_front_excluded`).
+    front_excluded: AtomicBool,
+    /// A key other than Enter or Tab has been pressed since the hook last kept one of them back (`consumes_key`).
+    typed_since_action: AtomicBool,
     action_keys: AtomicU8,
     /// Swapped whole when the settings change; the hook only tries it, so it never waits.
     own_hotkeys: RwLock<Arc<Vec<Hotkey>>>,
@@ -125,6 +129,9 @@ impl Shared {
             layout_tap_enabled: AtomicBool::new(false),
             sensitive_context_window: AtomicI64::new(NO_WINDOW),
             focus_window: AtomicI64::new(NO_WINDOW),
+            front_excluded: AtomicBool::new(false),
+            // Nothing is known of what was typed before the program started.
+            typed_since_action: AtomicBool::new(true),
             action_keys: AtomicU8::new(0),
             own_hotkeys: RwLock::new(Arc::new(Vec::new())),
             typed_events: AtomicI64::new(0),
@@ -234,6 +241,23 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         self.focus_window.store(window, Ordering::Relaxed);
     }
 
+    /// The engine tells the hook whether the program in front is in the user's exclusions, as of the last key it took
+    /// (`EngineCore::front_application`).
+    pub fn set_front_excluded(&self, excluded: bool) {
+        self.front_excluded.store(excluded, Ordering::Relaxed);
+    }
+
+    pub fn front_excluded(&self) -> bool {
+        self.front_excluded.load(Ordering::Relaxed)
+    }
+
+    /// A key that may have left something to correct was pressed: the next Enter or Tab is kept back for it. The hook
+    /// says so for every key it is asked about, and the engine for every key it takes, which covers a key that reached
+    /// the engine by another way than the hook's question.
+    pub fn note_typed(&self) {
+        self.typed_since_action.store(true, Ordering::Relaxed);
+    }
+
     pub fn input_suspended(&self) -> bool {
         self.input_suspended.load(Ordering::Relaxed)
     }
@@ -262,6 +286,15 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         if !event.pressed || event.synthetic {
             return KeyDisposition::Pass;
         }
+        let action = match event.key_name.as_str() {
+            "Return" => ACTION_RETURN,
+            "KP_Enter" => ACTION_KP_ENTER,
+            "Tab" => ACTION_TAB,
+            _ => 0,
+        };
+        if action == 0 {
+            self.note_typed();
+        }
         if self.input_suspended() || (event.foreign && !self.accepts_injected(event)) {
             return KeyDisposition::Pass;
         }
@@ -288,13 +321,29 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
             return KeyDisposition::Consume;
         }
         self.set_prompt_key_deadline(0.0);
-        let action = match event.key_name.as_str() {
-            "Return" => ACTION_RETURN,
-            "KP_Enter" => ACTION_KP_ENTER,
-            "Tab" => ACTION_TAB,
-            _ => 0,
-        };
-        if action & self.action_keys.load(Ordering::Relaxed) != 0 { KeyDisposition::Defer } else { KeyDisposition::Pass }
+        if action & self.action_keys.load(Ordering::Relaxed) == 0 {
+            return KeyDisposition::Pass;
+        }
+        // A hotkey of the program's own set to Tab or Enter alone is that hotkey, not an action to keep back for a
+        // correction: the engine answers it as the hotkey and never as the action.
+        if self.own_hotkeys.try_read().is_ok_and(|hotkeys| hotkeys.iter().any(|hotkey| hotkey.matches(event))) {
+            return KeyDisposition::Pass;
+        }
+        // A program the user excluded is left alone, its Enter and Tab too: kept back, they reached it only once every
+        // key had come up and as typed by a program, in the very programs people exclude for that (a remote desktop, a
+        // virtual machine, a game where Tab is held). The first key after such a program comes to the front may still
+        // be kept back: the engine learns of the program in front from the keys it takes.
+        if self.front_excluded.load(Ordering::Relaxed) {
+            return KeyDisposition::Pass;
+        }
+        // Nothing was typed since the last Enter or Tab kept back, so there is nothing to correct before this one: it
+        // goes to the window as it is pressed, and repeats while it is held. Kept back, every Enter and Tab waited for
+        // its key to come up, a held one came once, and one held for two seconds did not come at all (a review of the
+        // Windows hook, 11.11.2026).
+        if !self.typed_since_action.swap(false, Ordering::Relaxed) {
+            return KeyDisposition::Pass;
+        }
+        KeyDisposition::Defer
     }
 
     /// `enqueue`: on the hook's thread, behind the inbox's short lock, which nothing holds while it blocks.
@@ -429,6 +478,11 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         {
             return true;
         }
+        self.application_listed(application)
+    }
+
+    /// Whether `application` is in the user's list of excluded programs.
+    pub fn application_listed(&self, application: &str) -> bool {
         let normalized = pystr::casefold(application);
         self.settings.with_value("exclusions.applications", |applications| match applications {
             Some(Value::Array(items)) => items

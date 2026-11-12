@@ -963,6 +963,10 @@ impl InputBackend for X11Backend {
     /// key can never be withheld the way the Windows hook withholds it.
     fn set_key_filter(&self, _predicate: Option<KeyFilter>) {}
 
+    fn filters_keys(&self) -> bool {
+        false
+    }
+
     /// Accepted for the shared contract; `XRecord` cannot withhold keys.
     fn hold_input(&self) {}
 

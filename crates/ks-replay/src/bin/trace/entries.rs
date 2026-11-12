@@ -263,10 +263,7 @@ pub(crate) fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, record
             done()
         }
         "_expire_learning_prompt" => answer(Value::Bool(core.expire_learning_prompt(args.float(usize::MAX, "now")))),
-        "_retry_field_wait" => {
-            core.retry_field_wait();
-            done()
-        }
+        "_retry_field_wait" => result_of(core.retry_field_wait()),
         "_report_unseen_input" => result_of(core.report_unseen_input()),
         "_report_input_delay" => {
             core.report_input_delay();

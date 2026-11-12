@@ -12,12 +12,21 @@
 //! * The engine's worker types corrections. It holds `inject_lock` across `SendInput` and across its waits for a layout,
 //!   and the hook never takes that lock. `hold` is taken by both, and never across `SendInput` or a wait.
 //!
+//! Whatever types keys holds `inject_lock`: a correction, a withheld Enter, the held keys typed again. A second thread
+//! types too, the job the hook starts to give the keyboard back (`run_release_job`), and the lock keeps the keys of the
+//! two together and in order; the engine begins its holds under it as well, so that the job never ends a hold the
+//! engine has just begun. `stop` types without it, as it always did: it runs on the window's thread, which must not
+//! stand still for as long as a worker holds the lock, through its waits for a layout and for a window to come to the
+//! front. So do the mask key (`send_mask`) and the copy keys of a selection hotkey (`copied_selection`), which are no
+//! part of any text.
+//!
 //! A panic cannot unwind into the system's call of the hook, so `call_listener` stops one there and lets the key pass.
 //! Nothing on that path indexes or unwraps all the same: what the Python's callback would have raised lets the key pass.
 
 use ks_cast::To as _;
+use std::cell::Cell;
 use std::collections::{BTreeSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, ThreadId};
@@ -37,17 +46,18 @@ use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
 
 use crate::constants::{
-    ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK, HOOK_SILENCE_MS,
+    ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK,
+    ENGINE_HOLD_MAX_MS, HELD_KEY_RETRY_POLL_SECONDS, HELD_KEY_RETRY_SECONDS, HOOK_SILENCE_MS, KEY_IN_FLIGHT_POLL_SECONDS, KEY_IN_FLIGHT_WAIT_SECONDS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
     LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
-    PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
+    KEYPAD_SLASH_KEY_NAME, KEYS_TYPED_BY_VIRTUAL_KEY, PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
-    UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
+    UNOWNED_HOLD_MAX_MS, UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
     VK_HOME, VK_INSERT, VK_LAST, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_MENU_MASK, VK_NEXT, VK_OEM_1,
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS,
-    WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
+    WITHHELD_ACTION_MAX_MS, WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
 };
 use crate::log;
 
@@ -98,6 +108,8 @@ pub struct NativeInput {
     pub unicode: bool,
     /// A replay of a key another program injected.
     pub foreign: bool,
+    /// The key is named by `virtual_key`, and `scan_code` only goes along with it (`KEYS_TYPED_BY_VIRTUAL_KEY`).
+    pub by_virtual_key: bool,
 }
 
 impl NativeInput {
@@ -112,6 +124,7 @@ impl NativeInput {
             replayed: false,
             unicode: false,
             foreign: false,
+            by_virtual_key: false,
         }
     }
 
@@ -429,11 +442,84 @@ struct HookState {
 #[derive(Default)]
 struct HoldState {
     holding: bool,
+    /// When this hold began, on the clock of `tick_count` (`Inner::abandoned`).
+    holding_since: i64,
     held: VecDeque<NativeKeyEvent>,
+    /// The keys whose key-down this hold has kept back and whose key-up it has not: while one is typed again it is out
+    /// of `held` and not yet in the hook's books of keys down.
+    held_down: KeySet,
     hold_pointer_epoch: u64,
     hold_window: i64,
     deferred_action: Option<NativeKeyEvent>,
+    /// When `deferred_action` was withheld, on the clock of `tick_count`.
+    deferred_at: i64,
     action_prior_keys: KeySet,
+    /// When the engine began this hold for a correction it has not let go of since, on the clock of `tick_count`; None
+    /// for a hold the hook began (`Inner::engine_holds`).
+    engine_hold_at: Option<i64>,
+}
+
+impl HoldState {
+    /// Keeps a key of the user's back, to be typed again in its turn.
+    fn keep(&mut self, event: NativeKeyEvent) {
+        if event.pressed {
+            self.held_down.insert(event.virtual_key);
+        } else {
+            self.held_down.remove(event.virtual_key);
+        }
+        self.held.push_back(event);
+    }
+
+    /// The hold is over: keys go to the window as they come.
+    fn let_go(&mut self) {
+        self.holding = false;
+        self.held_down.clear();
+        self.engine_hold_at = None;
+    }
+}
+
+thread_local! {
+    /// How many of the keys in flight (`Inner::keys_in_flight`) this thread is answering itself: more than none on the
+    /// hook's thread, in the middle of an answer. That thread must never wait, least of all for the key it is answering,
+    /// and `hold_input` looks here to know it.
+    static ANSWERING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// A key or a pointer press of the user's that the hook is answering: from before the hook looks at `holding` until the
+/// engine's queue has it. `hold_input` waits for these (see there).
+struct KeyInFlight<'a>(&'a AtomicUsize);
+
+impl<'a> KeyInFlight<'a> {
+    fn raise(count: &'a AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::AcqRel);
+        ANSWERING.set(ANSWERING.get() + 1);
+        KeyInFlight(count)
+    }
+}
+
+impl Drop for KeyInFlight<'_> {
+    fn drop(&mut self) {
+        ANSWERING.set(ANSWERING.get() - 1);
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The job that gives the keyboard back (`Inner::run_release_job`), from the moment it is asked for. Dropped, it says
+/// that no such job is under way any more: when it has done its work, when it could not be started, and when it failed
+/// half-way. Left set by a job that failed, `release_job` kept every later job from starting, and the next Enter the
+/// engine did not answer held the keyboard until the program was started again.
+struct ReleaseJob(Arc<Inner>);
+
+impl ReleaseJob {
+    fn run(self) {
+        self.0.run_release_job();
+    }
+}
+
+impl Drop for ReleaseJob {
+    fn drop(&mut self) {
+        self.0.release_job.store(false, Ordering::Release);
+    }
 }
 
 /// An input time the hooks have not got yet, the input times seen since it with no hook event between, and the last one
@@ -492,7 +578,14 @@ struct Inner {
     /// Atomic: the hook's thread counts pointer presses, the engine's thread compares the count.
     pointer_epoch: AtomicU64,
     hold: Mutex<HoldState>,
-    /// Held by the engine's thread across `SendInput` and layout waits. The hook's thread never takes it.
+    /// Atomic: how many keys of the user's the hook is answering right now (`KeyInFlight`). The hook's thread counts, the
+    /// engine's thread waits for none as it begins a hold.
+    keys_in_flight: AtomicUsize,
+    /// Atomic: the job that gives the keyboard back is asked for and has not ended (`start_release_job`). The hook's
+    /// thread sets it, the end of the job clears it (`ReleaseJob`).
+    release_job: AtomicBool,
+    /// Held across `SendInput` and layout waits by whichever thread types, the engine's or that job's, and by the engine
+    /// as it begins a hold. The hook's thread never takes it.
     inject_lock: Mutex<()>,
     input_delay: InputDelay,
     unseen: Mutex<UnseenState>,
@@ -553,6 +646,8 @@ impl WindowsBackend {
                 start_job: parts.start_job,
                 pointer_epoch: AtomicU64::new(0),
                 hold: Mutex::new(HoldState::default()),
+                keys_in_flight: AtomicUsize::new(0),
+                release_job: AtomicBool::new(false),
                 inject_lock: Mutex::new(()),
                 input_delay: InputDelay::new(),
                 unseen: Mutex::new(UnseenState::default()),
@@ -640,6 +735,10 @@ impl InputBackend for WindowsBackend {
 
     fn active_application(&self) -> String {
         self.inner.api.active_application()
+    }
+
+    fn types_again(&self, stroke: &KeyEvent) -> bool {
+        stroke.keycode != 0
     }
 
     fn focused_window(&self) -> Option<FocusInfo> {
@@ -794,8 +893,9 @@ impl Inner {
 
     fn stop(&self) {
         self.key_filter.set(None);
-        // The Python's stop raises here and leaves the hook in place; the trait's stop has no error to give.
-        if let Err(error) = self.complete_action(false) {
+        // The Python's stop raises here and leaves the hook in place; the trait's stop has no error to give. Without
+        // `inject_lock`: see the top of the file.
+        if let Err(error) = self.complete_action_inner(false) {
             log::error(LOGGER, &error.to_string());
             return;
         }
@@ -927,6 +1027,11 @@ impl Inner {
         hold.holding.then_some((hold.hold_pointer_epoch, hold.hold_window))
     }
 
+    /// Whether the keys held for a correction were pressed for another place than the one in front now.
+    fn typing_place_left(&self) -> bool {
+        self.holding_place().is_some_and(|(hold_pointer_epoch, hold_window)| self.input_place_changed(hold_pointer_epoch, hold_window))
+    }
+
     /// Ask the filter about a press, and hide the matching release.
     ///
     /// A window that saw no key-down must not receive the key-up either, so the release of a swallowed key is swallowed
@@ -970,8 +1075,43 @@ impl Inner {
     }
 
     /// Keep the user's keys back until the next correction has landed.
+    ///
+    /// A key the hook is answering at this moment has passed its look at `holding` and is not in the engine's queue yet:
+    /// it goes on to the window, and the engine, which takes the queue next, would not count it among the characters to
+    /// delete. With one thread typing and another beginning holds, 290 keys of 20 000 holds came so; the correction then
+    /// leaves the word's first letter and deletes that key's character instead. So the hold begins and then waits for
+    /// the keys in flight to land, `KEY_IN_FLIGHT_WAIT_SECONDS` at most.
+    ///
+    /// The hold begins under `inject_lock`. The job that gives the keyboard back types the held keys under that lock and
+    /// ends the hold (`run_release_job`). Begun while it typed, the engine's hold was ended under the engine: the keys
+    /// the job typed after the engine had counted were not counted, and the correction deleted other characters, with
+    /// no hold at all. Now the engine waits for the job to finish, and a job that comes later finds the hold marked as
+    /// the engine's (`engine_hold_at`) and leaves the held keys to it.
+    ///
+    /// All of that is for the engine's thread. The hook begins its own holds with `hold_input_in`; called from inside
+    /// the hook's answer all the same, this takes no lock a typing thread may hold and waits for nothing.
     fn hold_input(&self) {
-        self.hold_input_in(&mut lock(&self.hold));
+        if ANSWERING.get() != 0 {
+            self.hold_input_in(&mut lock(&self.hold));
+            return;
+        }
+        {
+            let _inject_inner = lock(&self.inject_lock);
+            let mut hold = lock(&self.hold);
+            self.hold_input_in(&mut hold);
+            hold.engine_hold_at = Some(self.api.tick_count());
+        }
+        if self.key_in_flight() {
+            let deadline = self.clock.monotonic() + KEY_IN_FLIGHT_WAIT_SECONDS;
+            while self.key_in_flight() && self.clock.monotonic() < deadline {
+                self.clock.sleep(KEY_IN_FLIGHT_POLL_SECONDS);
+            }
+        }
+    }
+
+    /// Whether the hook is answering a key of the user's.
+    fn key_in_flight(&self) -> bool {
+        self.keys_in_flight.load(Ordering::Acquire) != 0
     }
 
     /// Reads the focus under the mutex, as the Python does, so that the place and `holding` change together. Both calls
@@ -980,6 +1120,7 @@ impl Inner {
         if !hold.holding {
             hold.hold_window = self.input_place();
             hold.hold_pointer_epoch = self.pointer_epoch.load(Ordering::Acquire);
+            hold.holding_since = self.api.tick_count();
         }
         hold.holding = true;
     }
@@ -989,10 +1130,22 @@ impl Inner {
     /// Replays have their own native marker: they reach the engine but must never enter this buffer again. Never hold the
     /// mutex across `SendInput`, which calls the hook synchronously on another thread.
     fn release_input(&self) -> Result<i32, WindowsBackendError> {
+        let _inject_inner = lock(&self.inject_lock);
+        // The engine lets go of its hold, also where the keys stay behind a withheld Enter: from here on they are no
+        // longer the engine's to type (`engine_holds`).
+        lock(&self.hold).engine_hold_at = None;
+        self.release_input_inner()
+    }
+
+    /// `release_input` for a caller that holds `inject_lock`.
+    fn release_input_inner(&self) -> Result<i32, WindowsBackendError> {
         if lock(&self.hold).deferred_action.is_some() {
             return Ok(0);
         }
         let mut count = 0;
+        let mut give_up_at = None;
+        // The keys this call has typed down again and not up.
+        let mut down = KeySet::default();
         let outcome = loop {
             let item = {
                 let mut guard = lock(&self.hold);
@@ -1011,7 +1164,7 @@ impl Inner {
                 } else if let Some(item) = hold.held.pop_front() {
                     item
                 } else {
-                    hold.holding = false;
+                    hold.let_go();
                     break Ok(count);
                 }
             };
@@ -1025,22 +1178,75 @@ impl Inner {
                 replayed: true,
                 unicode: packet,
                 foreign: item.foreign,
+                // A held Pause typed again by its scan code was a Num Lock: the second press of a double Pause that fell
+                // into the first conversion switched Num Lock and offered no rule.
+                by_virtual_key: KEYS_TYPED_BY_VIRTUAL_KEY.contains(&item.virtual_key),
             }]);
-            if let Err(error) = sent {
+            let Err(error) = sent else {
+                count += 1;
+                // The next refusal is a new one, with its own time: counted from the first refusal of the whole call,
+                // a second one later in a long queue was given up at once.
+                give_up_at = None;
+                if item.pressed {
+                    down.insert(item.virtual_key);
+                } else {
+                    down.remove(item.virtual_key);
+                }
+                continue;
+            };
+            // One key to a call: a call that failed typed nothing, so the key is still the next one to type and trying
+            // again cannot type it twice. It is offered again for `HELD_KEY_RETRY_SECONDS`, the hold going on meanwhile.
+            lock(&self.hold).held.push_front(item);
+            let now = self.clock.monotonic();
+            if now >= *give_up_at.get_or_insert(now + HELD_KEY_RETRY_SECONDS) {
                 break Err(error);
             }
-            count += 1;
+            self.clock.sleep(HELD_KEY_RETRY_POLL_SECONDS);
         };
-        // An OS injection failure must never leave the keyboard captured.
-        let mut hold = lock(&self.hold);
-        if hold.deferred_action.is_none() {
-            hold.holding = false;
+        if outcome.is_err() {
+            // What is down for the system: the keys typed down again above, and the keys down by the hook's books, read
+            // before `hold` is taken so that the two mutexes are never held together.
+            let books = lock(&self.hook).pressed.clone();
+            for key in books.0 {
+                down.insert(key);
+            }
         }
+        let mut hold = lock(&self.hold);
+        if hold.deferred_action.is_some() {
+            // The keys wait behind the withheld Enter, as they did.
+            return outcome;
+        }
+        // An OS injection failure must never leave the keyboard captured.
+        hold.let_go();
+        if outcome.is_ok() {
+            return outcome;
+        }
+        // Nor may the keys it did not take stay in the queue to be typed at the end of the next correction, minutes
+        // later and in whatever window that is: what the system would not take now is given up, and the journal says so.
+        // All but the key-ups of keys that are down for the system. A key-up types nothing, and without it the key
+        // stays down: Ctrl+V held during a correction, Ctrl's key-down typed again and the rest refused, left Ctrl down
+        // for every window, the next letters were shortcuts, and no correction was typed (`shortcut_modifier_down`)
+        // until the user pressed Ctrl again. These key-ups stay at the head of the queue, and the next key of the
+        // user's has them typed before it goes on (`answer_native`).
+        let held = hold.held.len();
+        hold.held.retain(|item| !item.pressed && down.contains(item.virtual_key));
+        let owed = hold.held.len();
+        drop(hold);
+        log::error(
+            LOGGER,
+            &format!("SendInput не принял удержанные клавиши; не набрано заново событий: {}, отпусканий осталось набрать: {owed}", held - owed),
+        );
         outcome
     }
 
     /// Deliver a withheld Enter/Tab once, before releasing subsequent input.
     fn complete_action(&self, deliver: bool) -> Result<i32, WindowsBackendError> {
+        let _inject_inner = lock(&self.inject_lock);
+        self.complete_action_inner(deliver)
+    }
+
+    /// `complete_action` for a caller that holds `inject_lock`.
+    fn complete_action_inner(&self, deliver: bool) -> Result<i32, WindowsBackendError> {
         let (action, hold_pointer_epoch, hold_window) = {
             let hold = lock(&self.hold);
             (hold.deferred_action, hold.hold_pointer_epoch, hold.hold_window)
@@ -1066,9 +1272,88 @@ impl Inner {
             hold.action_prior_keys.clear();
         }
         // In the Python this runs in a `finally`: its failure takes the place of the one above.
-        self.release_input()?;
+        self.release_input_inner()?;
         delivered?;
         Ok(if deliver { COMPLETED_ACTION_EVENT_COUNT } else { 0 })
+    }
+
+    /// Whether an Enter or Tab has been withheld for longer than the engine ever takes over one (`WITHHELD_ACTION_MAX_MS`).
+    fn withheld_too_long(&self, hold: &HoldState) -> bool {
+        hold.deferred_action.is_some() && (self.api.tick_count() - hold.deferred_at) & DWORD_MASK >= WITHHELD_ACTION_MAX_MS
+    }
+
+    /// Whether the engine began this hold for a correction it is still making: `hold_input` marks the hold, the engine's
+    /// `release_input` and the end of the hold unmark it, and a mark older than `ENGINE_HOLD_MAX_MS` is one a failed
+    /// engine left behind.
+    fn engine_holds(&self, hold: &HoldState) -> bool {
+        hold.engine_hold_at.is_some_and(|at| (self.api.tick_count() - at) & DWORD_MASK < ENGINE_HOLD_MAX_MS)
+    }
+
+    /// Whether nobody is left to end this hold: no Enter or Tab is withheld (`complete_action` ends that hold, or
+    /// `withheld_too_long` does), no engine is typing a correction under it (`engine_holds`), and it has lasted longer
+    /// than a hold with a job on its way does (`UNOWNED_HOLD_MAX_MS`). Two ways lead here. The job failed in the middle
+    /// of a hold the hook had begun for it, or of a stale Enter's. Or an engine failed between `hold_input` and
+    /// `release_input`, also after the job had given a stale Enter up and left the held keys to that engine. Nothing
+    /// asked for the job in either state, and every key was kept until the program was started again.
+    fn abandoned(&self, hold: &HoldState) -> bool {
+        hold.holding
+            && hold.deferred_action.is_none()
+            && (self.api.tick_count() - hold.holding_since) & DWORD_MASK >= UNOWNED_HOLD_MAX_MS
+            && !self.engine_holds(hold)
+    }
+
+    /// Start the job that gives the keyboard back (`run_release_job`); whether it was started. The hook's thread starts
+    /// it and goes on: `SendInput` there would wait for the hook it is in.
+    fn start_release_job(self: &Arc<Self>) -> bool {
+        // One job at a time: it may wait for `inject_lock`, and every key pressed meanwhile would start another.
+        if self.release_job.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        let job = ReleaseJob(Arc::clone(self));
+        let started = (self.start_job)(Box::new(move || job.run()));
+        if let Err(error) = &started {
+            // The next key of the user's asks again.
+            log::info_with_error(LOGGER, "Удержанные клавиши не отпущены", error);
+        }
+        started.is_ok()
+    }
+
+    /// Give the keyboard back where nobody else will: give up an Enter or Tab withheld for too long, and type again, in
+    /// order, the keys held behind it, behind key-ups the system did not take earlier (`release_input_inner`), or in a
+    /// hold nobody is left to end (`abandoned`).
+    ///
+    /// Only `complete_action` ends the hold a withheld key begins, and the engine calls it only for a key it has taken
+    /// as an action. With a hotkey set to Tab alone the hook kept Tab back and the engine took it for the hotkey: every
+    /// key pressed after it stayed held, in every window, until the program was started again. Nothing may hold the
+    /// keyboard for ever, whatever the engine does. The key itself is not delivered: the engine has not said that the
+    /// correction before it is done, which is the condition of every delivery, and an Enter that sends a message seconds
+    /// after it was pressed cannot be taken back, while one that did not go is pressed again.
+    fn run_release_job(&self) {
+        // An injection in progress ends first: the held keys must not land among its keys. The engine may also have
+        // answered meanwhile.
+        let _inject_inner = lock(&self.inject_lock);
+        let (stale, engine_holds) = {
+            let mut hold = lock(&self.hold);
+            let stale = self.withheld_too_long(&hold);
+            if stale {
+                hold.deferred_action = None;
+                hold.action_prior_keys.clear();
+            }
+            (stale, self.engine_holds(&hold))
+        };
+        if stale {
+            let waited = quantity(WITHHELD_ACTION_MAX_MS.to::<f64>() / MILLISECONDS_PER_SECOND, SECONDS);
+            log::error(LOGGER, &format!("Enter/Tab не дождался движка за {waited}: не передан"));
+        }
+        if engine_holds {
+            // The engine has begun a correction since the job was asked for: it has counted the keys in its queue and
+            // types the held ones itself as it lets go. Typed here, they landed after its count, and the hold it types
+            // under was over.
+            return;
+        }
+        if let Err(error) = self.release_input_inner() {
+            log::error(LOGGER, &error.to_string());
+        }
     }
 
     /// How long ago input the hooks never got was made, once that is certain; None otherwise.
@@ -1110,7 +1395,7 @@ impl Inner {
         Ok(None)
     }
 
-    fn handle_native(&self, native: NativeKeyEvent) -> bool {
+    fn handle_native(self: &Arc<Self>, native: NativeKeyEvent) -> bool {
         if native.virtual_key == 0 || native.injected || native.replayed {
             return self.answer_native(native);
         }
@@ -1134,7 +1419,10 @@ impl Inner {
         answer
     }
 
-    fn answer_native(&self, native: NativeKeyEvent) -> bool {
+    fn answer_native(self: &Arc<Self>, native: NativeKeyEvent) -> bool {
+        // Whatever the user did counts as in flight until this answer is over (`hold_input`): a key until the engine's
+        // queue has it or `held` does, a pointer press from before it moves `pointer_epoch`.
+        let _in_flight = (!native.injected && !native.replayed).then(|| KeyInFlight::raise(&self.keys_in_flight));
         if native.wheel {
             // The view moves, not the caret, and no correction waits on it (pointer_epoch).
             if let Some(listener) = self.listener.get() {
@@ -1168,17 +1456,40 @@ impl Inner {
                 (hook.consumed_keys.contains(native.scan_code), hook.pressed.contains(native.virtual_key))
             };
             let mut hold = lock(&self.hold);
+            // Key-ups the system did not take wait at the head of `held` with no hold on (`release_input_inner`), and
+            // this key is the first sign that the user is back. Behind a modifier's key-up it is kept: passed on, it
+            // reached the window under a Ctrl that is down for the system alone. Behind a letter's key-up nothing is
+            // kept, the letter being down changes no other key: kept all the same, every key typed while the system
+            // went on refusing waited a quarter of a second for the job and was then given up, one after another.
+            let owed = !hold.holding && !hold.held.is_empty();
+            let behind = owed && hold.held.iter().any(|item| MODIFIER_KEYS.contains(&item.virtual_key));
+            if behind {
+                self.hold_input_in(&mut hold);
+            }
+            if owed || self.withheld_too_long(&hold) || self.abandoned(&hold) {
+                // The job takes this mutex, and a job starter may run it at once, on this thread. This key is typed again
+                // with the others if the job has not let the hold go by the lines below, and goes on as it is if it has.
+                drop(hold);
+                let started = self.start_release_job();
+                hold = lock(&self.hold);
+                if behind && !started && hold.engine_hold_at.is_none() {
+                    // No job ends the hold begun above. The key goes on as it would have, and the next one asks again;
+                    // unless the engine has begun a correction under this hold meanwhile, which then ends it.
+                    hold.let_go();
+                }
+            }
             let prior_release = !native.pressed && hold.action_prior_keys.contains(native.virtual_key);
             let action_key = hold.deferred_action.is_some() && consumed_scan_code;
             // A key-up of a key never seen going down is no keystroke of the user's to keep back. Windows sends one of Ctrl
             // to the window whose layout a correction has just switched: kept back, it reached that window only after the
             // correction's keys, and a remote session (TeamViewer) then took the correction's capitals for Ctrl+Shift
             // shortcuts on the other computer, while the layout switched by hand, with nothing held, never did that.
-            let orphan_release = !native.pressed
-                && !down
-                && !hold.held.iter().any(|item| item.pressed && item.virtual_key == native.virtual_key);
+            // A key whose key-down this hold has kept back was seen going down, also in the moment its key-down is out
+            // of `held`, on its way through `SendInput`, and not in the hook's books yet: let through then, the key-up
+            // reached the window before the key-down, and a Ctrl pressed during a correction stayed down for good.
+            let orphan_release = !native.pressed && !down && !hold.held_down.contains(native.virtual_key);
             if hold.holding && !prior_release && !action_key && !orphan_release {
-                hold.held.push_back(native);
+                hold.keep(native);
                 return true;
             }
         }
@@ -1226,6 +1537,7 @@ impl Inner {
             let mut hold = lock(&self.hold);
             self.hold_input_in(&mut hold);
             hold.deferred_action = Some(native);
+            hold.deferred_at = self.api.tick_count();
             hold.action_prior_keys = prior_keys;
             drop(hold);
             event.deferred = true;
@@ -1239,6 +1551,12 @@ impl Inner {
     fn alt_or_super_down(&self) -> bool {
         let hook = lock(&self.hook);
         hook.pressed.intersects(&ALT_KEYS) || hook.pressed.intersects(&SUPER_KEYS)
+    }
+
+    /// Whether a key that turns typed keys into shortcuts is down by the hook's books. Shift is none: a correction types
+    /// its capitals with the Shift the user holds (`held_shift`).
+    fn shortcut_modifier_down(&self) -> bool {
+        self.alt_or_super_down() || lock(&self.hook).pressed.intersects(&CONTROL_KEYS)
     }
 
     /// Forget a modifier whose release went where the hook does not reach.
@@ -1292,7 +1610,7 @@ impl Inner {
             && hold.held.iter().any(|item| item.pressed && item.virtual_key == native.virtual_key)
         {
             // An auto-repeat after Enter belongs to the held next input. Its key-up also has to follow that replay.
-            hold.held.push_back(NativeKeyEvent { replayed: false, ..native });
+            hold.keep(NativeKeyEvent { replayed: false, ..native });
         }
         hold.action_prior_keys.remove(native.virtual_key);
     }
@@ -1344,6 +1662,13 @@ impl Inner {
         if kept_tail != 0 && (kept_tail >= strokes.len() || source_group.is_none()) {
             return Err(failed("Некорректная граница сохраняемого слова; замена отменена"));
         }
+        // A key that came with no scan code (another program typed it by its virtual key alone, and
+        // `detection.injected_input` took it for typing) cannot be typed again: the Backspaces would delete it and
+        // nothing would take its place. The engine asks before it plans (`types_again`) and leaves such a word as typed;
+        // this is the same answer for a key it could not ask about, one typed after the word.
+        if strokes.iter().chain(late).chain(literal.iter().copied()).any(|stroke| stroke.keycode == 0) {
+            return Err(failed("У клавиши нет скан-кода, набрать её заново нельзя; текст не изменён"));
+        }
         let final_group = if kept_tail != 0 { rendered_source_group } else { target_group };
         let delete_count = erased.unwrap_or(strokes.len()) + literal.len() + late.len();
         let mut delete_inputs = Vec::with_capacity(delete_count * 2);
@@ -1368,13 +1693,25 @@ impl Inner {
         let held_count = {
             let _inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
+                // Under Ctrl the Backspaces delete whole words and the letters are shortcuts ("Any keys that are already
+                // pressed when the function is called might interfere with the events that this function generates",
+                // SendInput, Microsoft Learn). The engine waits for every key to come up, but by its own books: a
+                // modifier whose key-down the hook has passed on and the engine has not taken yet is down all the same.
+                if self.shortcut_modifier_down() {
+                    return Err(failed("Нажат Ctrl, Alt или Win; текст не изменён"));
+                }
                 // The layout is switched first so that the deletion and the replacement travel in one SendInput call:
                 // Windows keeps the events of a single call together, but lets the user's keys slip in between separate
                 // calls.
+                // Another window may have come to the front since the keys were held (an Enter kept back holds them for
+                // as long as its key is down): its layout is not this correction's to switch. Looked at only after the
+                // switch, the text was left alone and the layout of that window was changed all the same.
+                if self.typing_place_left() {
+                    return Err(failed("Место ввода изменилось до замены; текст не изменён"));
+                }
                 let switched = self.switch_group_inner(target_group)?;
-                if let Some((hold_pointer_epoch, hold_window)) = self.holding_place()
-                    && self.input_place_changed(hold_pointer_epoch, hold_window)
-                {
+                // The switch waits for the window to answer, and the place may change meanwhile.
+                if self.typing_place_left() {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                 }
                 if switched {
@@ -1416,7 +1753,7 @@ impl Inner {
                 failure = Some(error);
             }
             let restore: &[NativeInput] = if late_deleted && !late_typed { &late_inputs } else { &[] };
-            match self.send_exact(restore).and_then(|()| self.release_input()) {
+            match self.send_exact(restore).and_then(|()| self.release_input_inner()) {
                 Ok(count) => count,
                 Err(error) => {
                     // The primary failure explains more than a failed restore.
@@ -1475,8 +1812,12 @@ impl Inner {
         if let Some((pressed, scan_code)) = around {
             result.push(marks(NativeInput::scan(pressed, scan_code)));
         }
-        result.push(marks(NativeInput::scan(true, stroke.keycode)));
-        result.push(marks(NativeInput::scan(false, stroke.keycode)));
+        // The slash of the numeric keypad is typed again as that key: by the scan code alone it is the main slash key,
+        // which types a full stop in the Russian layout, while the engine knows this key for a slash in both layouts.
+        // Sent with the extended flag, the code arrives as the keypad's key (probe of `KEYS_TYPED_BY_VIRTUAL_KEY`).
+        let extended = stroke.key_name == KEYPAD_SLASH_KEY_NAME;
+        result.push(marks(NativeInput { extended, ..NativeInput::scan(true, stroke.keycode) }));
+        result.push(marks(NativeInput { extended, ..NativeInput::scan(false, stroke.keycode) }));
         if let Some((pressed, scan_code)) = around {
             result.push(marks(NativeInput::scan(!pressed, scan_code)));
         }
