@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- Windows: a layout asked for right after a correction waits until the window has read what the correction typed. A layout request reaches a window before the keys still waiting in its queue, so a third Pause pressed right after a conversion switched the layout under the word typed again, and `ghbdtn` came out as `ghивет`. It showed on Windows 10 in a candidate of this version: until then such presses, held back while a correction was typed, came back as Num Lock and never reached the program.
+
 ## 0.72.0 — 2026-11-12
 
 - A correction that waits for a field read a moment late (an Electron editor, a browser) is given up as soon as anything but letters of the next word is typed: a bracket, a second space, a word that was finished and kept, a Backspace. It was made all the same and counted the keys after its word by the letters alone, so it deleted too few characters and typed over the wrong ones: `gthtl (j`, with the correction of `gthtl` still waiting when `(j` was typed, became `gперед о` instead of `перед (о`. A correction that is about to run always gave way to such a key; one that waited for its field did not.
