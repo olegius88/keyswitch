@@ -3,7 +3,7 @@
 use super::logging::technical_event;
 use super::types::{Stroke, EngineSnapshot, CorrectionPlan, LearningPrompt, Hotkey, is_modifier_key, PROMPT_KEYS, Update};
 use super::layout_tap::{configured_convert_last_key, configured_layout_switch_key};
-use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, WHEEL_KEY_NAME};
+use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, POINTER_KEY_NAME, WHEEL_KEY_NAME};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
 use ks_config::pycompat::truthy;
@@ -51,6 +51,60 @@ pub(crate) enum Next {
 struct Inbox {
     events: VecDeque<QueueItem>,
     commands: VecDeque<Command>,
+    /// Keys that wait for the letters a correction types again (`put_behind`).
+    parked: Option<Parked>,
+}
+
+/// What waits while the letters a correction types again come back through the hook. The worker sees none of it until
+/// the last letter has come: it would plan on half of the word, and it would take an Enter that stands behind the letters
+/// in the window for one typed before them.
+struct Parked {
+    /// How many of the letters are still to come back.
+    left: usize,
+    /// The letters that came back, and whatever else the hook reported meanwhile, in the order it came.
+    returned: Vec<QueueItem>,
+    /// The keys that stand behind the letters in the window: an Enter or Tab the hook keeps back, and what was queued
+    /// after it. The key-up of a key that waits here waits here too, wherever it arrived.
+    behind: Vec<QueueItem>,
+}
+
+impl Parked {
+    /// Whether `event` lets go of a key whose press waits behind the letters: an Enter let go while its correction is
+    /// typed is reported at once, and queued then, it came before its own press.
+    fn lets_go(&self, event: &KeyEvent) -> bool {
+        !event.pressed && self.behind.iter().any(|item| matches!(item, QueueItem::Key(key) if key.pressed && key.keycode == event.keycode))
+    }
+}
+
+impl Inbox {
+    /// A key the hook reports while keys are parked: kept with them, and when it is the last of the letters, all of them
+    /// are queued. False when nothing is parked.
+    fn park(&mut self, event: &Arc<KeyEvent>, letter: bool) -> bool {
+        let Some(parked) = self.parked.as_mut() else {
+            return false;
+        };
+        if parked.lets_go(event) {
+            parked.behind.push(QueueItem::Key(event.clone()));
+            return true;
+        }
+        parked.returned.push(QueueItem::Key(event.clone()));
+        if letter {
+            parked.left = parked.left.saturating_sub(1);
+            if parked.left == 0 {
+                self.release_parked();
+            }
+        }
+        true
+    }
+
+    /// Everything parked is queued: the letters that came back, then the keys behind them. Gives how many letters had
+    /// not come back; None when nothing was parked.
+    fn release_parked(&mut self) -> Option<usize> {
+        let parked = self.parked.take()?;
+        self.events.extend(parked.returned);
+        self.events.extend(parked.behind);
+        Some(parked.left)
+    }
 }
 
 pub(super) type SnapshotCallback = Arc<dyn Fn(&EngineSnapshot) + Send + Sync>;
@@ -361,9 +415,15 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         // Physical events and presses are separate: a key-up is not text.
         self.typed_events.fetch_add(1, Ordering::Relaxed);
         self.typed_presses.fetch_add(i64::from(event.pressed), Ordering::Relaxed);
+        // A press that types: one of the letters a correction types again, when keys wait for those (`put_behind`).
+        let letter = event.pressed && !is_modifier_key(&event.key_name) && event.key_name != POINTER_KEY_NAME;
+        let event = Arc::new(event);
         let mut inbox = locked(&self.inbox);
-        if inbox.events.len() < ENGINE_EVENT_QUEUE_MAX_SIZE {
-            inbox.events.push_back(QueueItem::Key(Arc::new(event)));
+        if inbox.park(&event, letter) {
+            drop(inbox);
+            self.wake.notify_one();
+        } else if inbox.events.len() < ENGINE_EVENT_QUEUE_MAX_SIZE {
+            inbox.events.push_back(QueueItem::Key(event));
             drop(inbox);
             self.wake.notify_one();
         } else {
@@ -461,6 +521,35 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         }
         drop(inbox);
         self.wake.notify_one();
+    }
+
+    /// Keys that stand in the window behind letters a correction is about to type again: an Enter or Tab the hook keeps
+    /// back, and what was queued after it. The letters come back through the hook as keys just typed, at the end of the
+    /// queue; these keys are queued again right behind the last of them, as they stand in the window, and until then
+    /// the worker sees neither.
+    pub fn put_behind(&self, letters: usize, behind: Vec<QueueItem>) {
+        let mut inbox = locked(&self.inbox);
+        // Never two at once: what still waited for the letters of an earlier correction goes on first.
+        inbox.release_parked();
+        let mut parked = Parked { left: letters, returned: Vec::new(), behind };
+        // A key of `behind` let go since the queue was taken is in the queue already: it follows its press.
+        let (let_go, queued): (Vec<QueueItem>, Vec<QueueItem>) = inbox.events.drain(..).partition(|item| matches!(item, QueueItem::Key(key) if parked.lets_go(key)));
+        inbox.events.extend(queued);
+        parked.behind.extend(let_go);
+        inbox.parked = Some(parked);
+    }
+
+    /// Whether keys wait for letters a correction types again.
+    pub fn waits_behind(&self) -> bool {
+        locked(&self.inbox).parked.is_some()
+    }
+
+    /// The keys of `put_behind` are queued now, whatever has come back. Gives how many of the letters had not; None when
+    /// nothing waited.
+    pub fn release_behind(&self) -> Option<usize> {
+        let owed = locked(&self.inbox).release_parked();
+        self.wake.notify_one();
+        owed
     }
 
     pub fn qsize(&self) -> usize {

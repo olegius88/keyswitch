@@ -83,6 +83,43 @@ impl EngineCore {
         self.maybe_execute_pending(&action)
     }
 
+    /// The keys that waited for letters a correction types again are queued now: the correction failed, the letters did
+    /// not all come back in time, or the engine starts over after an error. Nothing happens when the letters came and
+    /// the keys followed them. A letter still owed stands before those keys in the window whenever it comes.
+    pub fn release_behind_late(&mut self, reason: &str) {
+        self.behind_late_until = None;
+        if let Some(owed) = self.shared.release_behind() {
+            technical_event!(self.shared, "keys_behind_late_released", "reason": reason, "letters_owed": owed);
+            self.late_letters_owed = owed;
+            self.late_letters_owed_until = self.monotonic() + LATE_KEYS_OWED_SECONDS;
+        }
+    }
+
+    pub fn expire_behind_late(&mut self) {
+        let Some(until) = self.behind_late_until else {
+            return;
+        };
+        if !self.shared.waits_behind() {
+            self.behind_late_until = None;
+        } else if self.monotonic() >= until {
+            self.release_behind_late("timeout");
+        }
+    }
+
+    /// Whether the key just pressed is a letter a correction typed again that came back too late (`release_behind_late`):
+    /// the Enter that stood behind it has gone on, and the letter is of the line before that Enter.
+    pub fn owed_late_letter(&mut self) -> bool {
+        if self.late_letters_owed == 0 {
+            return false;
+        }
+        if self.monotonic() >= self.late_letters_owed_until {
+            self.late_letters_owed = 0;
+            return false;
+        }
+        self.late_letters_owed -= 1;
+        true
+    }
+
     pub fn expire_manual_correction(&mut self) {
         if self.pending.as_ref().is_some_and(|pending| !pending.automatic)
             && self.manual_release_deadline > 0.0
