@@ -15,6 +15,8 @@ use ks_lang::detector::ProtectedTokens;
 use std::path::Path;
 
 const SAFETY_COLLISION_MIN_WORD_CHARACTERS: usize = 3;
+/// The command that writes the packaged model and its record from the sealed model.
+const PACK_FLAG: &str = "--pack";
 
 /// The stages up to the sealed dataset, each printed for comparison with another trainer's.
 pub fn dataset_stages(root: &Path) -> Result<(), String> {
@@ -57,7 +59,7 @@ pub fn command(root: &Path, arguments: &[String]) -> Result<(), String> {
     if arguments.iter().any(|argument| argument == "--dataset") {
         return dataset_stages(root);
     }
-    if arguments.iter().any(|argument| argument == "--pack") {
+    if arguments.iter().any(|argument| argument == PACK_FLAG) {
         return pack(root);
     }
     if arguments.iter().any(|argument| argument == "--verify") {

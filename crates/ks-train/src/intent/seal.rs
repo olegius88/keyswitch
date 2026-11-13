@@ -383,15 +383,15 @@ pub fn encode_model(file: &ModelFile<'_>) -> Result<Vec<u8>, String> {
         "weight_scale": scale,
     });
     manifest["metadata"] = file.metadata.clone();
-    let encoded = container(&manifest, &payload);
+    let mut manifest_bytes = canonical(&manifest);
+    manifest_bytes.pop();
+    let encoded = container(&manifest_bytes, &payload);
     LinearNgramModel::from_bytes(encoded.clone(), None).map_err(|error| format!("the encoded model does not load: {}", error.name))?;
     Ok(encoded)
 }
 
-/// The bytes of a KSLM file: the header, the manifest in its canonical form and the payload.
-pub(super) fn container(manifest: &Value, payload: &[u8]) -> Vec<u8> {
-    let mut manifest_bytes = canonical(manifest);
-    manifest_bytes.pop();
+/// The bytes of a KSLM file: the header, the manifest in its canonical form without the final newline, and the payload.
+pub(super) fn container(manifest_bytes: &[u8], payload: &[u8]) -> Vec<u8> {
     let mut encoded = Vec::with_capacity(KSLM_HEADER_BYTES + manifest_bytes.len() + payload.len());
     encoded.extend_from_slice(b"KSLM");
     encoded.extend_from_slice(&KSLM_SCHEMA_VERSION.to::<u16>().to_le_bytes());
@@ -399,8 +399,8 @@ pub(super) fn container(manifest: &Value, payload: &[u8]) -> Vec<u8> {
     encoded.extend_from_slice(&manifest_bytes.len().to::<u32>().to_le_bytes());
     encoded.extend_from_slice(&payload.len().to::<u32>().to_le_bytes());
     encoded.extend_from_slice(&crc32(payload).to_le_bytes());
-    encoded.extend_from_slice(&Sha256::digest(&manifest_bytes));
-    encoded.extend_from_slice(&manifest_bytes);
+    encoded.extend_from_slice(&Sha256::digest(manifest_bytes));
+    encoded.extend_from_slice(manifest_bytes);
     encoded.extend_from_slice(payload);
     encoded
 }

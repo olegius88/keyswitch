@@ -13,8 +13,11 @@ use super::seal::{self, KSLM_HEADER_BYTES, still};
 use crate::artifact::canonical;
 use crate::physical::hex;
 use ks_lang::intent_model::LinearNgramModel;
-use serde_json::{Value, json};
+use ks_text::json::{self, Kept};
+use ks_text::{Indent, JsonOptions};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The sealed model, as the fit wrote it: evidence, never packaged.
@@ -28,6 +31,42 @@ const KSLM_PAYLOAD_LENGTH_AT: usize = 12;
 const KSLM_WEIGHT_BYTES: usize = 2;
 const KSLM_FINGERPRINT_BYTES: usize = 8;
 const RECORD_SCHEMA_VERSION: i64 = 1;
+const RECORD_INDENT: usize = 2;
+const RECORD_SCOPE: &str = "the packaged model is the sealed one without its table of fingerprints, which gives only the coverage of a prediction; every weight and parameter a decision reads is the same to the byte";
+/// The field of a manifest and of a model's parameters that holds the digest of the payload.
+const PAYLOAD_DIGEST_FIELD: &str = "payload_sha256";
+/// The field of a manifest that counts the fingerprints of the payload, and what it reads when there are none.
+const FINGERPRINT_COUNT_FIELD: &str = "supported_fingerprint_count";
+const NO_FINGERPRINTS: &str = "0";
+
+/// The fields of a manifest, or of a model's parameters, carried as they were written. A manifest is a signed document
+/// of the fit: this module changes two of its fields and writes every other one back as it stood, known to it or not.
+type Fields = BTreeMap<String, Kept>;
+
+/// The fields in the canonical form of a manifest inside a container: keys sorted, no spaces, no final newline.
+fn written(fields: &Fields) -> Vec<u8> {
+    let options = JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), sort_keys: true, ..JsonOptions::default() };
+    json::dumps(fields, &options).into_bytes()
+}
+
+/// A file of a packaging record.
+#[derive(Serialize)]
+struct RecordedFile<'a> {
+    path: &'a str,
+    bytes: usize,
+    sha256: String,
+}
+
+/// The packaging record, its fields in the order the file holds them.
+#[derive(Serialize)]
+struct PackagingRecord<'a> {
+    schema_version: i64,
+    model_version: &'a str,
+    sealed: RecordedFile<'a>,
+    packaged: RecordedFile<'a>,
+    fingerprints_left_out: usize,
+    scope: &'a str,
+}
 
 /// A length of the header of a container that loads: four bytes, little-endian.
 fn header_length(container: &[u8], at: usize) -> usize {
@@ -36,13 +75,11 @@ fn header_length(container: &[u8], at: usize) -> usize {
 
 /// What a decision reads of a model: every runtime parameter but the digest of the payload, which covers the
 /// fingerprints too, and the weights themselves.
-fn decision_parameters(model: &LinearNgramModel) -> (Value, Vec<i16>, Value) {
-    let mut parameters = seal::runtime_parameters(model);
-    if let Some(table) = parameters.as_object_mut() {
-        table.remove("payload_sha256");
-    }
+fn decision_parameters(model: &LinearNgramModel) -> (Fields, Vec<i16>, Vec<u8>) {
+    let mut parameters: Fields = json::loads(canonical(&seal::runtime_parameters(model))).expect("the parameters of a model are a table");
+    parameters.remove(PAYLOAD_DIGEST_FIELD);
     let weights = (0..model.dimension.to::<usize>()).map(|bucket| model.weight(bucket)).collect();
-    (parameters, weights, model.metadata())
+    (parameters, weights, canonical(&model.metadata()))
 }
 
 /// The sealed model as the program is packaged with it: the same weights, bias, calibration, thresholds, veto, seeds,
@@ -57,20 +94,19 @@ pub fn pack_model(sealed: &[u8]) -> Result<Vec<u8>, String> {
     let manifest = packed_manifest(&sealed[KSLM_HEADER_BYTES..payload_start], weights)?;
     let packed = seal::container(&manifest, weights);
     let loaded = LinearNgramModel::from_bytes(packed.clone(), None).map_err(|error| format!("the packed model does not load: {}", error.name))?;
-    still(decision_parameters(&loaded) == decision_parameters(&model) && loaded.model_version == model.model_version, "the packed model decides with other parameters than the sealed one")?;
+    still((decision_parameters(&loaded), &loaded.model_version) == (decision_parameters(&model), &model.model_version), "the packed model decides with other parameters than the sealed one")?;
     Ok(packed)
 }
 
-/// The manifest of a packed container, from the bytes of the sealed one and the weights it keeps: no fingerprints, and the
-/// digest of the weights alone. The sealed manifest is written again whole, so it must be in the form this writer writes.
-fn packed_manifest(sealed: &[u8], weights: &[u8]) -> Result<Value, String> {
-    let mut manifest: Value = serde_json::from_slice(sealed).map_err(|error| format!("the sealed manifest: {error}"))?;
-    let mut written_again = canonical(&manifest);
-    written_again.pop();
-    still(written_again == sealed, "the sealed manifest is not in the form this writer writes: packing it would rewrite what was signed")?;
-    manifest["payload_sha256"] = json!(hex(&Sha256::digest(weights)));
-    manifest["supported_fingerprint_count"] = json!(0);
-    Ok(manifest)
+/// The manifest of a packed container in its canonical form, from the bytes of the sealed one and the weights it keeps:
+/// no fingerprints, and the digest of the weights alone. The sealed manifest is written again whole, so it must be in the
+/// form this writer writes.
+fn packed_manifest(sealed: &[u8], weights: &[u8]) -> Result<Vec<u8>, String> {
+    let mut manifest: Fields = json::loads(sealed).map_err(|error| format!("the sealed manifest: {error}"))?;
+    still(written(&manifest) == sealed, "the sealed manifest is not in the form this writer writes: packing it would rewrite what was signed")?;
+    manifest.insert(PAYLOAD_DIGEST_FIELD.to_owned(), Kept::text(hex(&Sha256::digest(weights))));
+    manifest.insert(FINGERPRINT_COUNT_FIELD.to_owned(), json::loads(NO_FINGERPRINTS).expect("a count"));
+    Ok(written(&manifest))
 }
 
 /// The record of a packaging: the sealed file and the packaged one by size and digest, the version they share and how
@@ -81,16 +117,17 @@ pub fn packaging_record(sealed: &[u8], packed: &[u8]) -> Result<Vec<u8>, String>
     let (_, model) = (load(sealed, "sealed")?, load(packed, "packed")?);
     // The payload of the packed model is the weights; the sealed one holds its fingerprints after them.
     let left_out = header_length(sealed, KSLM_PAYLOAD_LENGTH_AT).saturating_sub(header_length(packed, KSLM_PAYLOAD_LENGTH_AT)) / KSLM_FINGERPRINT_BYTES;
-    let file = |path: &str, bytes: &[u8]| json!({"path": path, "bytes": bytes.len(), "sha256": hex(&Sha256::digest(bytes))});
-    let record = json!({
-        "schema_version": RECORD_SCHEMA_VERSION,
-        "model_version": model.model_version,
-        "sealed": file(SEALED_ARTIFACT, sealed),
-        "packaged": file(PACKAGED_ARTIFACT, packed),
-        "fingerprints_left_out": left_out,
-        "scope": "the packaged model is the sealed one without its table of fingerprints, which gives only the coverage of a prediction; every weight and parameter a decision reads is the same to the byte",
-    });
-    Ok((super::pretty(&record) + "\n").into_bytes())
+    let file = |path: &'static str, bytes: &[u8]| RecordedFile { path, bytes: bytes.len(), sha256: hex(&Sha256::digest(bytes)) };
+    let record = PackagingRecord {
+        schema_version: RECORD_SCHEMA_VERSION,
+        model_version: &model.model_version,
+        sealed: file(SEALED_ARTIFACT, sealed),
+        packaged: file(PACKAGED_ARTIFACT, packed),
+        fingerprints_left_out: left_out,
+        scope: RECORD_SCOPE,
+    };
+    let options = JsonOptions { ensure_ascii: false, indent: Some(Indent::Spaces(RECORD_INDENT)), ..JsonOptions::default() };
+    Ok((json::dumps(&record, &options) + "\n").into_bytes())
 }
 
 /// What `--pack` and a fit publish beside the sealed model: the packaged model and its record.
@@ -147,6 +184,7 @@ mod tests {
     use super::*;
     use crate::intent::fit::{Confusion, Platt, Quantized, Selection, Selections, Veto};
     use ks_lang::intent_model::TRIGGERS;
+    use serde_json::{Value, json};
     use std::collections::BTreeSet;
 
     fn folder(name: &str) -> PathBuf {

@@ -15,6 +15,26 @@ struct Small {
     folder: PathBuf,
 }
 
+/// The check of a strict evaluation that holds the packaged model to the sealed one.
+const PACKAGED_CHECK: &str = "packaged_artifact";
+
+/// A check of provenance in the report of a strict evaluation.
+#[derive(serde::Deserialize)]
+struct ProvenanceCheck {
+    name: String,
+    passed: bool,
+}
+
+/// What this file reads of the report of a strict evaluation.
+#[derive(serde::Deserialize)]
+struct StrictReport {
+    provenance: Vec<ProvenanceCheck>,
+}
+
+fn provenance(report: &Path) -> Vec<ProvenanceCheck> {
+    ks_text::json::loads::<StrictReport>(std::fs::read(report).expect("a report")).expect("a strict report").provenance
+}
+
 fn read(path: &Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).expect("a file")).expect("json")
 }
@@ -168,7 +188,6 @@ fn a_model_that_passed_is_published_with_its_manifest_and_report() {
     // fingerprints, to the byte.
     let (sealed_path, packaged_path) = (small.tree.join(pack::SEALED_ARTIFACT), small.tree.join(pack::PACKAGED_ARTIFACT));
     let sealed = std::fs::read(&sealed_path).expect("the sealed model");
-    assert_eq!(digest(&sealed), manifest["artifact_sha256"].as_str().expect("a digest"));
     let (whole, cut) = (LinearNgramModel::load(&sealed_path).expect("it loads"), LinearNgramModel::load(&packaged_path).expect("it loads"));
     assert_eq!(std::fs::read(&packaged_path).expect("the packaged model"), pack::pack_model(&sealed).expect("a cut"));
     assert_eq!((cut.model_version.clone(), cut.metadata()), (whole.model_version.clone(), whole.metadata()));
@@ -176,7 +195,7 @@ fn a_model_that_passed_is_published_with_its_manifest_and_report() {
     assert_ne!(cut.payload_sha256, whole.payload_sha256);
     assert!(std::fs::metadata(&packaged_path).expect("a file").len() < std::fs::metadata(&sealed_path).expect("a file").len());
     let gate = ks_train::gates::intent(&small.tree).expect("the packaged model is the sealed one cut");
-    assert_eq!((gate["sealed_sha256"].as_str(), gate["packaged_sha256"].as_str()), (Some(digest(&sealed).as_str()), Some(digest(&pack::pack_model(&sealed).expect("a cut")).as_str())));
+    assert_eq!((gate.sealed_sha256, gate.packaged_sha256), (digest(&sealed), digest(&pack::pack_model(&sealed).expect("a cut"))));
     // The same run again is the same claim on the ledgers.
     let again = run(intent(&small.tree).arg("--fit").args(["--jobs", "2"]).arg("--dry-run"));
     assert!(again.status.success(), "{}", said(&again));
@@ -225,9 +244,9 @@ fn a_packaged_model_that_is_not_the_sealed_one_cut_is_refused_everywhere() {
         }
         let strict = run(&mut command);
         assert!(!strict.status.success(), "{}", said(&strict));
-        let checks = read(&report)["provenance"].clone();
-        let failed: Vec<&str> = checks.as_array().expect("the checks").iter().filter(|check| check["passed"] != json!(true)).filter_map(|check| check["name"].as_str()).collect();
-        assert_eq!(failed, ["packaged_artifact"], "{checks}");
+        let checks = provenance(&report);
+        let failed: Vec<&str> = checks.iter().filter(|check| !check.passed).map(|check| check.name.as_str()).collect();
+        assert_eq!(failed, [PACKAGED_CHECK], "{}", said(&strict));
     }
     // And the replay of the fit: the sealed file is the recorded one, the packaged file is not its cut.
     let replay = run(intent(&other).arg("--verify").args(["--jobs", "2"]));
@@ -237,10 +256,18 @@ fn a_packaged_model_that_is_not_the_sealed_one_cut_is_refused_everywhere() {
     assert!(packed.status.success() && said(&packed).contains(pack::PACKAGED_ARTIFACT), "{}", said(&packed));
     assert_eq!(std::fs::read(&packaged).expect("the packaged model"), good);
     assert!(ks_train::gates::intent(&other).is_ok());
+    // A copy of the sealed model in another place is not the model the program is packaged from: its evaluation holds
+    // no packaged file to it.
+    let copy = folder.join("copy.ksm");
+    std::fs::copy(other.join(pack::SEALED_ARTIFACT), &copy).expect("a copy");
+    let apart = run(intent(&other).arg("--evaluate").arg("--strict").arg("--provenance-only").args(["--jobs", "2"]).arg("--output").arg(&report).arg("--artifact").arg(&copy));
+    assert!(apart.status.success(), "{}", said(&apart));
+    let checks = provenance(&report);
+    assert!(!checks.is_empty() && checks.iter().all(|check| check.passed && check.name != PACKAGED_CHECK), "{}", said(&apart));
     // A record that names other files.
     let record_path = other.join(pack::PACKAGING_RECORD);
     let record = std::fs::read(&record_path).expect("the record");
-    write_json(&record_path, &json!({"schema_version": 1}));
+    std::fs::write(&record_path, "{\"schema_version\": 1}\n").expect("a record");
     assert!(ks_train::gates::intent(&other).expect_err("the record names nothing").contains(pack::PACKAGING_RECORD));
     assert!(run(intent(&other).arg("--pack")).status.success());
     assert_eq!(std::fs::read(&record_path).expect("the record"), record);
@@ -251,9 +278,10 @@ fn a_packaged_model_that_is_not_the_sealed_one_cut_is_refused_everywhere() {
     assert!(!missing.status.success(), "{}", said(&missing));
     assert!(run(intent(&other).arg("--pack")).status.success());
     let manifest_path = other.join("model/intent_v1/manifest.json");
-    let mut manifest = read(&manifest_path);
-    manifest["artifact_sha256"] = json!("0".repeat(64));
-    write_json(&manifest_path, &manifest);
+    let named = std::fs::read_to_string(&manifest_path).expect("the manifest");
+    let sealed_digest = digest(&std::fs::read(other.join(pack::SEALED_ARTIFACT)).expect("the sealed model"));
+    assert!(named.contains(&sealed_digest));
+    std::fs::write(&manifest_path, named.replace(&sealed_digest, &"0".repeat(sealed_digest.len()))).expect("a manifest");
     assert!(ks_train::gates::intent(&other).expect_err("another model is named").contains("not the one its manifest names"));
     // A sealed model that is not there, and one that is no model.
     std::fs::remove_file(other.join(pack::SEALED_ARTIFACT)).expect("removed");
