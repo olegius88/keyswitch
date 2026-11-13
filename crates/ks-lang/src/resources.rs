@@ -27,7 +27,14 @@ type PrefixIndexes = Vec<((String, String), Arc<PrefixIndex>)>;
 pub struct Resources {
     resource_dir: PathBuf,
     spellers: SpellerFactory,
-    engine_models: Mutex<Vec<(String, Arc<LanguageModel>)>>,
+    /// One dictionary of the speller is opened at a time. Two were never opened at once before the dictionaries of a
+    /// start were read side by side, and whether the library behind the speller takes two openings at once is not
+    /// written down anywhere; opening one takes milliseconds, so they wait for each other here.
+    opening_speller: Mutex<()>,
+    /// One place per locale, filled by whoever reads that locale first; the others wait for it there and take what it
+    /// read. The list is locked only to find the place, never while a model is read, so the dictionaries of a start are
+    /// read side by side (`KeySwitchEngine::new`).
+    engine_models: Mutex<Vec<(String, Arc<OnceLock<Arc<LanguageModel>>>)>>,
     plain_frequencies: Mutex<Vec<(String, Arc<WordTable>)>>,
     prefix_indexes: Mutex<PrefixIndexes>,
     identifiers: OnceLock<(Option<Arc<IdentifierLexicon>>, String)>,
@@ -47,6 +54,7 @@ impl Resources {
         Arc::new(Resources {
             resource_dir: resource_dir.into(),
             spellers,
+            opening_speller: Mutex::new(()),
             engine_models: Mutex::new(Vec::new()),
             plain_frequencies: Mutex::new(Vec::new()),
             prefix_indexes: Mutex::new(Vec::new()),
@@ -74,19 +82,35 @@ impl Resources {
 
     /// `LanguageModel.load(locale, extra_words)`, not cached: the engine's models come from `engine_language_model`.
     pub fn language_model<S: AsRef<str>, I: IntoIterator<Item = S>>(&self, locale: &str, extra_words: I) -> LanguageModel {
-        LanguageModel::load(locale, extra_words, &self.model_roots(), (self.spellers)(locale))
+        let speller = {
+            let _one_at_a_time = self.opening_speller.lock().expect("the lock is not poisoned");
+            (self.spellers)(locale)
+        };
+        LanguageModel::load(locale, extra_words, &self.model_roots(), speller)
     }
 
     /// `LanguageModel.load(locale, supplement_words(locale))`, built once per locale. A malformed supplement is an error.
+    ///
+    /// The list of models is locked only to find this locale's place in it, never while the model is read, so two
+    /// locales are read side by side; locked for the read, the second waited for the first and a start took the two in
+    /// turn. Two reads of one locale take the same place: the second waits there and takes what the first read.
     pub fn engine_language_model(&self, locale: &str) -> Result<Arc<LanguageModel>, LoadError> {
-        let mut models = self.engine_models.lock().expect("the lock is not poisoned");
-        if let Some(found) = models.iter().find(|entry| entry.0 == locale) {
-            return Ok(found.1.clone());
+        let place = self.model_place(locale);
+        if let Some(found) = place.get() {
+            return Ok(found.clone());
         }
         let words = self.supplement_words(locale)?;
-        let model = Arc::new(self.language_model(locale, words.iter()));
-        models.push((locale.to_string(), model.clone()));
-        Ok(model)
+        Ok(place.get_or_init(|| Arc::new(self.language_model(locale, words.iter()))).clone())
+    }
+
+    fn model_place(&self, locale: &str) -> Arc<OnceLock<Arc<LanguageModel>>> {
+        let mut models = self.engine_models.lock().expect("the lock is not poisoned");
+        if let Some(found) = models.iter().find(|entry| entry.0 == locale) {
+            return found.1.clone();
+        }
+        let place: Arc<OnceLock<Arc<LanguageModel>>> = Arc::new(OnceLock::new());
+        models.push((locale.to_string(), place.clone()));
+        place
     }
 
     /// The frequencies of `LanguageModel.load(locale)`: the file and the fallback words, no supplement.
