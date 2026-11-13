@@ -37,6 +37,22 @@ config `2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd`
 По development выбрана эпоха 40 из 44 выполненных; контейнер содержит
 711 340 ненулевых весов и 1 031 370 membership-отпечатков.
 
+Этот запечатанный файл лежит рядом со своими уликами:
+`model/intent_v1/layout_intent_v1.ksm`. Его называют manifest, test-report и
+реестр кандидата. Программа поставляется с тем же файлом без таблицы
+membership-отпечатков: `resources/models/layout_intent_v1.ksm`, 4 696 874 байт,
+SHA-256 `504f53329f863fccecf17cedf74d91d1de36008cf50a7b79fbc34342cfce00e5`.
+Отпечатки дают только `coverage` в ответе модели; его сообщает оценка тренера
+и не читает ни одно решение программы, а таблица занимает две трети файла.
+Веса, смещение, калибровка, пороги, veto, зёрна хэшей, версия и встроенный
+manifest в поставляемом файле те же побайтно; во встроенном описании контейнера
+отличаются два поля — `supported_fingerprint_count` (0) и `payload_sha256`
+(только веса). Поставляемый файл и запись о нём
+[`packaged-model.json`](packaged-model.json) пишет
+`ks-train intent --tree . --pack`.
+`ks-train intent --verify`, `--evaluate --strict` и `ks-train gates` сверяют
+его с запечатанным файлом байт в байт.
+
 [Сохранённый test-report](test-report.json) сообщает о прохождении внутренних
 условий обучения. Boundary_probe, space, tab, enter и punctuation не дают
 ложных срабатываний на 22 435 негативов и показывают recall 0,956004279;
@@ -419,7 +435,8 @@ bucket линейного веса. Runtime ищет точное значени
 little-endian uint64-отпечатков. Loader проверяет schema/feature version, точную
 форму payload, сортировку и уникальность membership, CRC32, SHA-256 и предел
 полного файла 14 MiB. Embedded manifest отдельно ограничен 1 MiB, payload —
-12 MiB, а число membership-отпечатков — `2^20`. `layout_intent_v1.ksm` —
+12 MiB, а число membership-отпечатков — `2^20`; отпечатков может не быть
+вовсе, так устроен поставляемый файл. `layout_intent_v1.ksm` —
 стабильное имя первого поколения
 классификатора; версия формата контейнера независимо повышена до KSLM schema 4.
 Не следует смешивать три независимых номера: training config использует

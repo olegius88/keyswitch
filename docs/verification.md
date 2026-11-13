@@ -35,7 +35,7 @@ $K verify --tree .                                # квитанция уста�
 $K boundary --tree . --verify                     # модель границ байт в байт
 $K ortho --tree . --verify                        # орфографическая модель байт в байт
 $K ortho --tree . --inputs                        # её входные данные из замороженных источников
-$K intent --tree . --verify                       # модель намерений: файл, манифест и отчёт теста байт в байт
+$K intent --tree . --verify                       # модель намерений: запечатанный файл, манифест и отчёт теста байт в байт; поставляемый файл — он же без отпечатков
 $K intent --tree . --evaluate --strict --output strict.json
 $K archive --tree .                               # файлы семейств, которые больше не обучаются
 $K detector --tree . --sample 10000 --dictionary-sample 10000 --strict

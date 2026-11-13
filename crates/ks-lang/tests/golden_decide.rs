@@ -56,6 +56,13 @@ fn resource_dir() -> Option<PathBuf> {
     }
 }
 
+/// The sealed intent model, with its table of fingerprints: the file the Python's answers were recorded with. The
+/// program is packaged with the same model without that table (`resources/models`), which decides the same and reports
+/// no coverage.
+fn sealed_model_path() -> PathBuf {
+    PathBuf::from(std::env::var("KS_SEALED_INTENT_MODEL").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../model/intent_v1/layout_intent_v1.ksm").to_string()))
+}
+
 fn reader(name: &str) -> Option<BufReader<GzDecoder<std::fs::File>>> {
     golden("decide", name).map(|path| BufReader::new(GzDecoder::new(std::fs::File::open(path).expect("open"))))
 }
@@ -128,7 +135,10 @@ fn for_each_row<F: Fn(usize, &Value) + Sync>(name: &str, visit: F) -> bool {
 
 struct Fixture {
     detector: LanguageDetector,
+    /// The sealed model: its answers and its coverage are the recorded ones.
     intent: Arc<LinearNgramModel>,
+    /// The model the program loads.
+    packaged: Arc<LinearNgramModel>,
     resource_dir: PathBuf,
     words: Vec<String>,
     pair: LayoutPair,
@@ -148,8 +158,9 @@ fn fixture() -> Option<&'static Fixture> {
             words.pop();
             let resources = Resources::new(dir.clone());
             let detector = resources.language_detector(&["en_US", "ru_RU"]).expect("detector");
-            let intent = resources.intent_model().0.expect("the packaged intent model");
-            Some(Fixture { detector, intent, resource_dir: dir, words, pair: LayoutPair::default() })
+            let packaged = resources.intent_model().0.expect("the packaged intent model");
+            let intent = Arc::new(LinearNgramModel::load(&sealed_model_path()).expect("the sealed intent model"));
+            Some(Fixture { detector, intent, packaged, resource_dir: dir, words, pair: LayoutPair::default() })
         })
         .as_ref()
 }
@@ -263,7 +274,8 @@ fn intent_model_facts() {
             fail.check("threshold", trigger.as_str(), hex(model.thresholds[index][slot]), s(&real["thresholds"][trigger.as_str()][*direction]));
         }
     }
-    let (loaded, status) = LinearNgramModel::try_load_default(&f.resource_dir, None);
+    let sealed = sealed_model_path();
+    let (loaded, status) = LinearNgramModel::try_load_default(&f.resource_dir, Some(&sealed.to_string_lossy()));
     fail.check("status", "", status.summary(), s(&meta["status_summary"]));
     fail.check("status version", "", status.version.clone().unwrap(), s(&meta["status_version"]));
     fail.check("status checksum", "", status.checksum.clone().unwrap(), s(&meta["status_checksum"]));
@@ -392,6 +404,68 @@ fn intent_loader_cases() {
         }
     }
     fail.finish("intent_loader_cases");
+}
+
+/// The model the program is packaged with is the sealed one without its table of fingerprints: the same weights and
+/// parameters, to the bit, the same answer to every question, and no coverage to report.
+#[test]
+fn the_packaged_model_answers_as_the_sealed_one() {
+    let Some(f) = fixture() else {
+        return;
+    };
+    let fail = Failures::default();
+    let (sealed, packaged) = (&f.intent, &f.packaged);
+    let bits = |value: f64| value.to_bits();
+    fail.check("dimension", "", packaged.dimension, sealed.dimension);
+    fail.check("version", "", packaged.model_version.clone(), sealed.model_version.clone());
+    fail.check("scale and bias", "", [bits(packaged.weight_scale), bits(packaged.bias), bits(packaged.veto_threshold)], [bits(sealed.weight_scale), bits(sealed.bias), bits(sealed.veto_threshold)]);
+    fail.check("seeds", "", (packaged.fnv_seed, packaged.membership_seed, packaged.ngram_orders), (sealed.fnv_seed, sealed.membership_seed, sealed.ngram_orders));
+    fail.check("metadata", "", packaged.metadata() == sealed.metadata(), true);
+    for index in 0..2 {
+        fail.check("platt", "", [bits(packaged.platt_calibration[index].scale), bits(packaged.platt_calibration[index].bias)], [bits(sealed.platt_calibration[index].scale), bits(sealed.platt_calibration[index].bias)]);
+    }
+    for index in 0..TRIGGERS.len() {
+        for slot in 0..2 {
+            fail.check("threshold", TRIGGERS[index].as_str(), [bits(packaged.threshold_logits[index][slot]), bits(packaged.thresholds[index][slot])], [bits(sealed.threshold_logits[index][slot]), bits(sealed.thresholds[index][slot])]);
+        }
+    }
+    let weights = |model: &LinearNgramModel| -> Vec<i16> { (0..model.dimension.to::<usize>()).map(|bucket| model.weight(bucket)).collect() };
+    fail.check("weights", "", weights(packaged) == weights(sealed), true);
+    // The two files differ: the packaged one is smaller, and its payload is the weights alone.
+    fail.check("another file", "", packaged.checksum != sealed.checksum && packaged.payload_sha256 != sealed.payload_sha256, true);
+    let asked = AtomicUsize::new(0);
+    let answers = |word: &str, item: &IntentModelInput<'_>| {
+        asked.fetch_add(1, Ordering::Relaxed);
+        match (sealed.predict(item), packaged.predict(item)) {
+            (Ok(whole), Ok(cut)) => {
+                fail.check("answer", word, (bits(cut.logit), bits(cut.probability), bits(cut.threshold), cut.should_switch), (bits(whole.logit), bits(whole.probability), bits(whole.threshold), whole.should_switch));
+                fail.check("no coverage", word, bits(cut.coverage), bits(0.0));
+            }
+            (Err(whole), Err(cut)) => fail.check("refusal", word, cut.message, whole.message),
+            (whole, cut) => fail.check("one answers and one refuses", word, cut.is_ok(), whole.is_ok()),
+        }
+    };
+    let groups = for_each_row("intent_groups.jsonl.gz", |_, row| {
+        let word = row[0].as_str().unwrap();
+        let trigger = CorrectionTrigger::parse(row[3].as_str().unwrap()).unwrap();
+        let alt = f.pair.translate(word, "us", "ru").unwrap();
+        let score = f.score(0, "");
+        answers(word, &f.evidence(word, &alt, row[1].as_i64().unwrap(), row[2].as_i64().unwrap(), trigger, &score));
+    });
+    // The words of real typing are not in the repository: where they are, every one is asked of both models too.
+    if !f.words.is_empty() {
+        for_each_row("words_intent.jsonl.gz", |_, row| {
+            let word = &f.words[row[0].as_u64().unwrap().to::<usize>()];
+            let (source, trigger) = (row[1].as_i64().unwrap(), TRIGGERS[row[2].as_u64().unwrap().to::<usize>()]);
+            let alt = f.alternative(word, source);
+            let score = f.score(0, "");
+            answers(word, &f.evidence(word, &alt, source, 1 - source, trigger, &score));
+        });
+    }
+    if groups {
+        assert!(asked.load(Ordering::Relaxed) > 0, "no question was asked of the two models");
+    }
+    fail.finish("the_packaged_model_answers_as_the_sealed_one");
 }
 
 // ---------------------------------------------------------------- words

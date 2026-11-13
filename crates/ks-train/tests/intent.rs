@@ -2,6 +2,8 @@
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
+use ks_lang::intent_model::LinearNgramModel;
+use ks_train::intent::pack;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -11,6 +13,26 @@ use support::{digest, recipe, scratch, small_tree, trainer, tree};
 struct Small {
     tree: PathBuf,
     folder: PathBuf,
+}
+
+/// The check of a strict evaluation that holds the packaged model to the sealed one.
+const PACKAGED_CHECK: &str = "packaged_artifact";
+
+/// A check of provenance in the report of a strict evaluation.
+#[derive(serde::Deserialize)]
+struct ProvenanceCheck {
+    name: String,
+    passed: bool,
+}
+
+/// What this file reads of the report of a strict evaluation.
+#[derive(serde::Deserialize)]
+struct StrictReport {
+    provenance: Vec<ProvenanceCheck>,
+}
+
+fn provenance(report: &Path) -> Vec<ProvenanceCheck> {
+    ks_text::json::loads::<StrictReport>(std::fs::read(report).expect("a report")).expect("a strict report").provenance
 }
 
 fn read(path: &Path) -> Value {
@@ -162,8 +184,18 @@ fn a_model_that_passed_is_published_with_its_manifest_and_report() {
     assert!(manifest["artifact_model_version"].as_str().expect("a version").starts_with("intent-v1-"));
     assert!(read(&small.tree.join("model/intent_v1/build-environment.json"))["environment_probe"].is_object());
     assert!(read(&small.tree.join("model/intent_v1/test-report.json")).get("sealed_test").is_some());
-    let model = small.tree.join("resources/models/layout_intent_v1.ksm");
-    assert!(ks_lang::intent_model::LinearNgramModel::load(&model).is_ok());
+    // The sealed model beside its evidence, and the model the program is packaged with: the sealed one without its
+    // fingerprints, to the byte.
+    let (sealed_path, packaged_path) = (small.tree.join(pack::SEALED_ARTIFACT), small.tree.join(pack::PACKAGED_ARTIFACT));
+    let sealed = std::fs::read(&sealed_path).expect("the sealed model");
+    let (whole, cut) = (LinearNgramModel::load(&sealed_path).expect("it loads"), LinearNgramModel::load(&packaged_path).expect("it loads"));
+    assert_eq!(std::fs::read(&packaged_path).expect("the packaged model"), pack::pack_model(&sealed).expect("a cut"));
+    assert_eq!((cut.model_version.clone(), cut.metadata()), (whole.model_version.clone(), whole.metadata()));
+    assert!((0..whole.dimension.try_into().expect("a size")).all(|bucket| whole.weight(bucket) == cut.weight(bucket)));
+    assert_ne!(cut.payload_sha256, whole.payload_sha256);
+    assert!(std::fs::metadata(&packaged_path).expect("a file").len() < std::fs::metadata(&sealed_path).expect("a file").len());
+    let gate = ks_train::gates::intent(&small.tree).expect("the packaged model is the sealed one cut");
+    assert_eq!((gate.sealed_sha256, gate.packaged_sha256), (digest(&sealed), digest(&pack::pack_model(&sealed).expect("a cut"))));
     // The same run again is the same claim on the ledgers.
     let again = run(intent(&small.tree).arg("--fit").args(["--jobs", "2"]).arg("--dry-run"));
     assert!(again.status.success(), "{}", said(&again));
@@ -172,9 +204,90 @@ fn a_model_that_passed_is_published_with_its_manifest_and_report() {
     assert!(replay.status.success() && said(&replay).contains("reproduces"), "{}", said(&replay));
     // Other places to write to.
     let elsewhere = small.folder.join("elsewhere");
-    let moved = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(elsewhere.join("a")).arg("--manifest").arg(elsewhere.join("m")).arg("--report").arg(elsewhere.join("r")).arg("--environment").arg(elsewhere.join("e")));
+    let moved = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(elsewhere.join("a")).arg("--packaged").arg(elsewhere.join("p")).arg("--manifest").arg(elsewhere.join("m")).arg("--report").arg(elsewhere.join("r")).arg("--environment").arg(elsewhere.join("e")));
     assert!(moved.status.success(), "{}", said(&moved));
     assert!(elsewhere.join("a").is_file());
+    let (moved_sealed, moved_packed) = (std::fs::read(elsewhere.join("a")).expect("the sealed model"), std::fs::read(elsewhere.join("p")).expect("the packaged model"));
+    assert_eq!(moved_packed, pack::pack_model(&moved_sealed).expect("a cut"));
+    assert_eq!(std::fs::read(elsewhere.join("p.json")).expect("the record beside it"), pack::packaging_record(&moved_sealed, &moved_packed).expect("a record"));
+    // The tree's own packaged model and record are untouched by a fit that wrote elsewhere.
+    assert!(ks_train::gates::intent(&small.tree).is_ok());
+    // A sealed model sent elsewhere without a place for its cut is refused: the cut would replace the tree's.
+    let alone = run(intent(&small.tree).arg("--fit").arg("--dry-run").arg("--artifact").arg(elsewhere.join("a2")));
+    assert!(!alone.status.success() && said(&alone).contains("--packaged"), "{}", said(&alone));
+    // Two outputs at one path are refused before anything is fitted.
+    let aliased = run(intent(&small.tree).arg("--fit").arg("--dry-run").arg("--packaged").arg(small.tree.join(pack::SEALED_ARTIFACT)));
+    assert!(!aliased.status.success() && said(&aliased).contains("distinct paths"), "{}", said(&aliased));
+}
+
+/// The packaged model is written from the sealed one again, and a packaged model that is anything else is refused by the
+/// replay, by the strict evaluation and by the gate of a package.
+#[test]
+fn a_packaged_model_that_is_not_the_sealed_one_cut_is_refused_everywhere() {
+    let small = &*PUBLISHED;
+    let folder = scratch("intent-packaged");
+    // A copy of the published tree, links and all: the tree itself is other tests' too.
+    let other = folder.join("tree");
+    assert!(Command::new("cp").arg("-a").arg(&small.tree).arg(&other).status().expect("cp runs").success());
+    let packaged = other.join(pack::PACKAGED_ARTIFACT);
+    let good = std::fs::read(&packaged).expect("the packaged model");
+    // The sealed model in the place of the packaged one: every byte of it is good, and it is not the cut.
+    std::fs::copy(other.join(pack::SEALED_ARTIFACT), &packaged).expect("a copy");
+    assert!(ks_train::gates::intent(&other).expect_err("the whole file is packaged").contains("without its fingerprints"));
+    let report = folder.join("strict.json");
+    // The strict evaluation refuses it, whether the sealed model is found by default or named by its path.
+    for named in [false, true] {
+        let mut command = intent(&other);
+        command.arg("--evaluate").arg("--strict").arg("--provenance-only").args(["--jobs", "2"]).arg("--output").arg(&report);
+        if named {
+            command.arg("--artifact").arg(other.join("model/intent_v1/../intent_v1/layout_intent_v1.ksm"));
+        }
+        let strict = run(&mut command);
+        assert!(!strict.status.success(), "{}", said(&strict));
+        let checks = provenance(&report);
+        let failed: Vec<&str> = checks.iter().filter(|check| !check.passed).map(|check| check.name.as_str()).collect();
+        assert_eq!(failed, [PACKAGED_CHECK], "{}", said(&strict));
+    }
+    // And the replay of the fit: the sealed file is the recorded one, the packaged file is not its cut.
+    let replay = run(intent(&other).arg("--verify").args(["--jobs", "2"]));
+    assert!(!replay.status.success() && said(&replay).contains("packaged model file: DIFFERS") && said(&replay).contains("model file: same"), "{}", said(&replay));
+    // `--pack` writes the cut again, and says what it wrote.
+    let packed = run(intent(&other).arg("--pack"));
+    assert!(packed.status.success() && said(&packed).contains(pack::PACKAGED_ARTIFACT), "{}", said(&packed));
+    assert_eq!(std::fs::read(&packaged).expect("the packaged model"), good);
+    assert!(ks_train::gates::intent(&other).is_ok());
+    // A copy of the sealed model in another place is not the model the program is packaged from: its evaluation holds
+    // no packaged file to it.
+    let copy = folder.join("copy.ksm");
+    std::fs::copy(other.join(pack::SEALED_ARTIFACT), &copy).expect("a copy");
+    let apart = run(intent(&other).arg("--evaluate").arg("--strict").arg("--provenance-only").args(["--jobs", "2"]).arg("--output").arg(&report).arg("--artifact").arg(&copy));
+    assert!(apart.status.success(), "{}", said(&apart));
+    let checks = provenance(&report);
+    assert!(!checks.is_empty() && checks.iter().all(|check| check.passed && check.name != PACKAGED_CHECK), "{}", said(&apart));
+    // A record that names other files.
+    let record_path = other.join(pack::PACKAGING_RECORD);
+    let record = std::fs::read(&record_path).expect("the record");
+    std::fs::write(&record_path, "{\"schema_version\": 1}\n").expect("a record");
+    assert!(ks_train::gates::intent(&other).expect_err("the record names nothing").contains(pack::PACKAGING_RECORD));
+    assert!(run(intent(&other).arg("--pack")).status.success());
+    assert_eq!(std::fs::read(&record_path).expect("the record"), record);
+    // No packaged model at all, and a sealed model its manifest does not name.
+    std::fs::remove_file(&packaged).expect("removed");
+    assert!(ks_train::gates::intent(&other).expect_err("nothing is packaged").contains(pack::PACKAGED_ARTIFACT));
+    let missing = run(intent(&other).arg("--evaluate").arg("--strict").arg("--provenance-only").args(["--jobs", "2"]).arg("--output").arg(&report));
+    assert!(!missing.status.success(), "{}", said(&missing));
+    assert!(run(intent(&other).arg("--pack")).status.success());
+    let manifest_path = other.join("model/intent_v1/manifest.json");
+    let named = std::fs::read_to_string(&manifest_path).expect("the manifest");
+    let sealed_digest = digest(&std::fs::read(other.join(pack::SEALED_ARTIFACT)).expect("the sealed model"));
+    assert!(named.contains(&sealed_digest));
+    std::fs::write(&manifest_path, named.replace(&sealed_digest, &"0".repeat(sealed_digest.len()))).expect("a manifest");
+    assert!(ks_train::gates::intent(&other).expect_err("another model is named").contains("not the one its manifest names"));
+    // A sealed model that is not there, and one that is no model.
+    std::fs::remove_file(other.join(pack::SEALED_ARTIFACT)).expect("removed");
+    let nothing = run(intent(&other).arg("--pack"));
+    assert!(!nothing.status.success() && said(&nothing).contains(pack::SEALED_ARTIFACT), "{}", said(&nothing));
+    assert!(pack::pack_model(b"KSLM").unwrap_err().contains("does not load"));
 }
 
 #[test]
@@ -263,10 +376,14 @@ fn what_a_fit_reads_is_checked_before_it_starts() {
     refused(&|config| config["sources"]["license_declaration"] = json!("Another"), "missing required lines");
     write_json(&path, &good);
     // Where it writes.
-    let answer = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(small.folder.join("x")).arg("--manifest").arg(small.folder.join("x")));
+    let elsewhere = small.folder.join("p");
+    let answer = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(small.folder.join("x")).arg("--packaged").arg(&elsewhere).arg("--manifest").arg(small.folder.join("x")));
     assert!(said(&answer).contains("must be distinct"), "{}", said(&answer));
-    let answer = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(&path));
+    let answer = run(intent(&small.tree).arg("--fit").arg("--artifact").arg(&path).arg("--packaged").arg(&elsewhere));
     assert!(said(&answer).contains("aliases an immutable"), "{}", said(&answer));
+    // The record of a packaged model has a place of its own too, and it is no other output's.
+    let answer = run(intent(&small.tree).arg("--fit").arg("--packaged").arg(&elsewhere).arg("--packaging").arg(&elsewhere));
+    assert!(said(&answer).contains("must be distinct"), "{}", said(&answer));
     assert!(said(&run(intent(&small.tree).arg("--fit").args(["--jobs", "many"]))).contains("takes a number"));
     // The commands.
     assert!(said(&run(&mut intent(&small.tree))).contains("--dataset, --verify"));
@@ -669,7 +786,7 @@ fn a_manifest_that_does_not_fit_stops_the_strict_evaluation_where_it_differs() {
     use ks_train::intent::evaluate::{Options, evaluate};
     let small = &*PUBLISHED;
     let manifest_path = small.tree.join("model/intent_v1/manifest.json");
-    let artifact = small.tree.join("resources/models/layout_intent_v1.ksm");
+    let artifact = small.tree.join(pack::SEALED_ARTIFACT);
     let good = read(&manifest_path);
     let folder = scratch("intent-phases");
     let with = |edit: &dyn Fn(&mut Value)| -> (String, i32) {
@@ -677,7 +794,7 @@ fn a_manifest_that_does_not_fit_stops_the_strict_evaluation_where_it_differs() {
         edit(&mut changed);
         let path = folder.join("manifest.json");
         write_json(&path, &changed);
-        evaluate(&Options { root: &small.tree, artifact: &artifact, manifest: &path, comparison_sample: 20, latency_sample: 5, strict: true, provenance_only: true, workers: 2 }).expect("a report")
+        evaluate(&Options { root: &small.tree, artifact: &artifact, packaged: true, manifest: &path, comparison_sample: 20, latency_sample: 5, strict: true, provenance_only: true, workers: 2 }).expect("a report")
     };
     let phase = |edit: &dyn Fn(&mut Value)| {
         let (report, status) = with(edit);
@@ -704,13 +821,16 @@ fn a_manifest_that_does_not_fit_stops_the_strict_evaluation_where_it_differs() {
     }
     // A model that cannot be read, a manifest that is not there.
     let missing = Path::new("/nonexistent");
-    assert!(evaluate(&Options { root: &small.tree, artifact: missing, manifest: &manifest_path, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
-    assert!(evaluate(&Options { root: &small.tree, artifact: &artifact, manifest: missing, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
+    assert!(evaluate(&Options { root: &small.tree, artifact: missing, packaged: false, manifest: &manifest_path, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
+    assert!(evaluate(&Options { root: &small.tree, artifact: &artifact, packaged: false, manifest: missing, comparison_sample: 1, latency_sample: 1, strict: false, provenance_only: false, workers: 1 }).is_err());
     let answer = run(intent(&small.tree).arg("--evaluate").arg("--artifact").arg(missing));
     assert!(!answer.status.success());
     // Against the tree a config differs from.
     let other = prepared("intent-other-config", &|config| config["ftrl"]["maximum_epochs"] = json!(1));
-    std::fs::copy(&artifact, other.tree.join("resources/models/layout_intent_v1.ksm")).expect("a copy");
+    std::fs::copy(&artifact, other.tree.join(pack::SEALED_ARTIFACT)).expect("a copy");
+    for name in [pack::PACKAGED_ARTIFACT, pack::PACKAGING_RECORD] {
+        std::fs::copy(small.tree.join(name), other.tree.join(name)).expect("a copy");
+    }
     std::fs::copy(&manifest_path, other.tree.join("model/intent_v1/manifest.json")).expect("a copy");
     let answer = run(intent(&other.tree).arg("--evaluate").args(["--comparison-sample", "5", "--latency-sample", "2"]));
     assert!(said(&answer).contains("presealed_provenance"), "{}", said(&answer));

@@ -1,6 +1,8 @@
 //! The seal of the layout-intent model (`train_intent_model`): the identity of a candidate, the one-shot ledgers of the
 //! sealed test, the KSLM container and the transactional publication of a bundle of files.
 //!
+//! The file this module writes is the sealed model. The program is packaged with a cut of it (`super::pack`).
+//!
 //! A manifest written by this trainer says so in `toolchain.implementation`, and its digests are of the Rust sources. A
 //! manifest without that field was written by the Python trainer, whose sources are not in this tree: the numeric replay
 //! (`intent --verify`) stands in for them until the first model sealed here replaces it.
@@ -20,6 +22,7 @@ pub const IMPLEMENTATION: &str = "rust";
 pub const MODEL_ID: &str = "keyswitch-layout-intent-v1";
 pub const SCOPE: &str = "lexical-synthetic-not-real-world-probability";
 pub const VERSION_HASH_CHARACTERS: usize = 12;
+pub(super) const KSLM_HEADER_BYTES: usize = 52;
 const CANDIDATE_RECORD_SCHEMA_VERSION: i64 = 2;
 const REGISTRY_MAX_BYTES: usize = 16 << 10;
 const BACKUP_MAX_BYTES: usize = 64 << 20;
@@ -220,8 +223,9 @@ fn existing_record(path: &Path, error: &std::io::Error) -> Result<Option<Vec<u8>
     if error.kind() == std::io::ErrorKind::AlreadyExists { Ok(Some(read_snapshot(path)?)) } else { Err(format!("cannot create the ledger {}: {error}", path.display())) }
 }
 
-/// A ledger read again is the one that was read: anything else wrote it meanwhile.
-fn still(same: bool, what: &str) -> Result<(), String> {
+/// What was read or written before is still what it was (a ledger read again, a manifest written again, a model packed
+/// and loaded), or the step stops with the reason.
+pub(super) fn still(same: bool, what: &str) -> Result<(), String> {
     if same { Ok(()) } else { Err(what.to_owned()) }
 }
 
@@ -381,18 +385,24 @@ pub fn encode_model(file: &ModelFile<'_>) -> Result<Vec<u8>, String> {
     manifest["metadata"] = file.metadata.clone();
     let mut manifest_bytes = canonical(&manifest);
     manifest_bytes.pop();
-    let mut encoded = Vec::with_capacity(52 + manifest_bytes.len() + payload.len());
+    let encoded = container(&manifest_bytes, &payload);
+    LinearNgramModel::from_bytes(encoded.clone(), None).map_err(|error| format!("the encoded model does not load: {}", error.name))?;
+    Ok(encoded)
+}
+
+/// The bytes of a KSLM file: the header, the manifest in its canonical form without the final newline, and the payload.
+pub(super) fn container(manifest_bytes: &[u8], payload: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(KSLM_HEADER_BYTES + manifest_bytes.len() + payload.len());
     encoded.extend_from_slice(b"KSLM");
     encoded.extend_from_slice(&KSLM_SCHEMA_VERSION.to::<u16>().to_le_bytes());
     encoded.extend_from_slice(&0_u16.to_le_bytes());
     encoded.extend_from_slice(&manifest_bytes.len().to::<u32>().to_le_bytes());
     encoded.extend_from_slice(&payload.len().to::<u32>().to_le_bytes());
-    encoded.extend_from_slice(&crc32(&payload).to_le_bytes());
-    encoded.extend_from_slice(&Sha256::digest(&manifest_bytes));
-    encoded.extend_from_slice(&manifest_bytes);
-    encoded.extend_from_slice(&payload);
-    LinearNgramModel::from_bytes(encoded.clone(), None).map_err(|error| format!("the encoded model does not load: {}", error.name))?;
-    Ok(encoded)
+    encoded.extend_from_slice(&crc32(payload).to_le_bytes());
+    encoded.extend_from_slice(&Sha256::digest(manifest_bytes));
+    encoded.extend_from_slice(manifest_bytes);
+    encoded.extend_from_slice(payload);
+    encoded
 }
 
 /// `publish_bytes_bundle`: every payload staged before the first destination changes; on failure every destination

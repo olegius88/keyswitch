@@ -3,6 +3,7 @@ pub mod dataset;
 pub mod evaluate;
 pub mod external;
 pub mod fit;
+pub mod pack;
 pub mod pipeline;
 pub mod probe;
 pub mod seal;
@@ -14,6 +15,8 @@ use ks_lang::detector::ProtectedTokens;
 use std::path::Path;
 
 const SAFETY_COLLISION_MIN_WORD_CHARACTERS: usize = 3;
+/// The command that writes the packaged model and its record from the sealed model.
+const PACK_FLAG: &str = "--pack";
 
 /// The stages up to the sealed dataset, each printed for comparison with another trainer's.
 pub fn dataset_stages(root: &Path) -> Result<(), String> {
@@ -56,6 +59,9 @@ pub fn command(root: &Path, arguments: &[String]) -> Result<(), String> {
     if arguments.iter().any(|argument| argument == "--dataset") {
         return dataset_stages(root);
     }
+    if arguments.iter().any(|argument| argument == PACK_FLAG) {
+        return pack(root);
+    }
     if arguments.iter().any(|argument| argument == "--verify") {
         let workers = arguments.iter().position(|argument| argument == "--jobs").and_then(|place| arguments.get(place + 1)).and_then(|value| value.parse().ok()).unwrap_or(4);
         return verify_replay(root, workers);
@@ -76,7 +82,7 @@ pub fn command(root: &Path, arguments: &[String]) -> Result<(), String> {
         println!("{}", pretty(&probe::measure()));
         return Ok(());
     }
-    Err("--dataset, --verify, --preseal, --freeze, --fit, --evaluate, --reject or --probe".to_owned())
+    Err("--dataset, --verify, --pack, --preseal, --freeze, --fit, --evaluate, --reject or --probe".to_owned())
 }
 
 /// The frozen dictionaries: a dictionary is an input of the evaluation, and an `apt upgrade` must not move what is pinned
@@ -113,8 +119,11 @@ fn option<'a>(arguments: &'a [String], name: &str) -> Option<&'a String> {
 fn strict_evaluation(root: &Path, arguments: &[String]) -> Result<(), String> {
     let path = |name: &str, default: &str| option(arguments, name).map_or_else(|| root.join(default), std::path::PathBuf::from);
     let size = |name: &str, default: usize| option(arguments, name).map_or(Ok(default), |value| value.parse().map_err(|_| format!("{name} takes a number")));
-    let (artifact, manifest) = (path("--artifact", "resources/models/layout_intent_v1.ksm"), path("--manifest", "model/intent_v1/manifest.json"));
-    let options = evaluate::Options { root, artifact: &artifact, manifest: &manifest, comparison_sample: size("--comparison-sample", evaluate::COMPARISON_SAMPLE)?, latency_sample: size("--latency-sample", evaluate::LATENCY_SAMPLE)?, strict: arguments.iter().any(|argument| argument == "--strict"), provenance_only: arguments.iter().any(|argument| argument == "--provenance-only"), workers: size("--jobs", 4)? };
+    let (artifact, manifest) = (path("--artifact", pack::SEALED_ARTIFACT), path("--manifest", "model/intent_v1/manifest.json"));
+    // The sealed model of the tree is evaluated with the model packaged from it, however its path is given; another
+    // artifact is evaluated alone.
+    let packaged = pack::is_sealed_artifact(root, &artifact);
+    let options = evaluate::Options { root, artifact: &artifact, packaged, manifest: &manifest, comparison_sample: size("--comparison-sample", evaluate::COMPARISON_SAMPLE)?, latency_sample: size("--latency-sample", evaluate::LATENCY_SAMPLE)?, strict: arguments.iter().any(|argument| argument == "--strict"), provenance_only: arguments.iter().any(|argument| argument == "--provenance-only"), workers: size("--jobs", 4)? };
     let (report, status) = evaluate::evaluate(&options)?;
     match option(arguments, "--output") {
         Some(output) => std::fs::write(output, report + "\n").map_err(|error| format!("{output}: {error}"))?,
@@ -130,7 +139,15 @@ fn strict_evaluation(root: &Path, arguments: &[String]) -> Result<(), String> {
 fn fit_and_publish(root: &Path, arguments: &[String]) -> Result<(), String> {
     let workers = option(arguments, "--jobs").map_or(Ok(4), |value| value.parse().map_err(|_| "--jobs takes a number".to_owned()))?;
     let mut outputs = train::Outputs::defaults(root);
-    for (name, target) in [("--artifact", &mut outputs.artifact), ("--manifest", &mut outputs.manifest), ("--report", &mut outputs.report), ("--environment", &mut outputs.environment)] {
+    // A sealed model written elsewhere is no model of this tree: its cut does not replace the one the tree is packaged with.
+    if option(arguments, "--artifact").is_some() && option(arguments, "--packaged").is_none() {
+        return Err("--artifact names another place for the sealed model: name the place of the packaged one with --packaged".to_owned());
+    }
+    // The record of a packaged model written elsewhere goes beside it, unless it is given a place of its own.
+    if let Some(packaged) = option(arguments, "--packaged") {
+        outputs.packaging = format!("{packaged}.json").into();
+    }
+    for (name, target) in [("--artifact", &mut outputs.artifact), ("--packaged", &mut outputs.packaged), ("--packaging", &mut outputs.packaging), ("--manifest", &mut outputs.manifest), ("--report", &mut outputs.report), ("--environment", &mut outputs.environment)] {
         if let Some(path) = option(arguments, name) {
             *target = path.into();
         }
@@ -140,6 +157,19 @@ fn fit_and_publish(root: &Path, arguments: &[String]) -> Result<(), String> {
     if train::train(root, workers, &outputs)? != 0 {
         return Err("the quality gates did not pass".to_owned());
     }
+    Ok(())
+}
+
+/// Writes the model the program is packaged with, and the record of the packaging, from the sealed model
+/// (`pack::pack_model`). The sealed model, its manifest and its ledgers are read only.
+fn pack(root: &Path) -> Result<(), String> {
+    let sealed = std::fs::read(root.join(pack::SEALED_ARTIFACT)).map_err(|error| format!("{}: {error}", pack::SEALED_ARTIFACT))?;
+    let outputs = pack::packaged_outputs(root, &sealed)?;
+    let size = outputs[0].1.len();
+    seal::publish_bundle(&outputs)?;
+    let (sealed_sha256, packaged_sha256) = pack::packaged_from_sealed(root)?;
+    println!("{}: {} bytes, sha256 {sealed_sha256}", pack::SEALED_ARTIFACT, sealed.len());
+    println!("{}: {size} bytes, sha256 {packaged_sha256}", pack::PACKAGED_ARTIFACT);
     Ok(())
 }
 
@@ -179,8 +209,9 @@ fn receipts(root: &Path, arguments: &[String]) -> Result<(), String> {
 }
 
 /// Replays the fit on the frozen sources. The parameters, every section of the manifest, the identity of the candidate,
-/// the answer of the sealed test and the model file itself must be the recorded ones, to the byte. The toolchain block is
-/// taken from the record: it names the sources that wrote the model.
+/// the answer of the sealed test and the sealed model file itself must be the recorded ones, to the byte, and the packaged
+/// model and its record those of the replayed model without its fingerprints. The toolchain block is taken from the record: it names the sources
+/// that wrote the model.
 pub fn verify_replay(root: &Path, workers: usize) -> Result<(), String> {
     let candidate = pipeline::fit_candidate(root, workers)?;
     if candidate.presealed_gate["passed"] != serde_json::json!(true) {
@@ -202,8 +233,9 @@ pub fn verify_replay(root: &Path, workers: usize) -> Result<(), String> {
     let mut rebuilt = train::manifest_of(&built, &config_sha256, &recorded["toolchain"], &recorded["sealed_evaluation"])?;
     let rebuilt_artifact = train::seal_artifact(&built, &mut rebuilt)?;
     let same_file = |path: &str, text: String| std::fs::read(root.join(path)).is_ok_and(|bytes| bytes == text.into_bytes());
-    let model = ks_lang::intent_model::LinearNgramModel::load(&root.join("resources/models/layout_intent_v1.ksm")).map_err(|error| error.name.to_string())?;
+    let model = ks_lang::intent_model::LinearNgramModel::load(&root.join(pack::SEALED_ARTIFACT)).map_err(|error| error.name.to_string())?;
     let parameters = seal::runtime_parameters(&model);
+    let same_bytes = |path: &str, bytes: &[u8]| std::fs::read(root.join(path)).is_ok_and(|found| found == bytes);
     let registry = read_json(&root.join(built.raw_config["sealed_evaluation"]["registry_path"].as_str().ok_or("a registry path")?))?;
     let outcome = read_json(&root.join(seal::outcome_path(built.raw_config["sealed_evaluation"]["registry_path"].as_str().ok_or("a registry path")?)?))?;
     let checks = [
@@ -211,7 +243,8 @@ pub fn verify_replay(root: &Path, workers: usize) -> Result<(), String> {
         ("candidate", registry["candidate_sha256"].as_str() == Some(candidate_sha256.as_str())),
         ("outcome", outcome["sealed_outcome_sha256"].as_str() == Some(seal::outcome_sha256(&built.sections)?.as_str())),
         ("build provenance", manifest["build_provenance_sha256"].as_str() == Some(seal::build_provenance_sha256(manifest)?.as_str())),
-        ("model file", std::fs::read(root.join("resources/models/layout_intent_v1.ksm")).is_ok_and(|bytes| bytes == rebuilt_artifact)),
+        ("model file", same_bytes(pack::SEALED_ARTIFACT, &rebuilt_artifact)),
+        ("packaged model file", pack::packaged_from(root, &rebuilt_artifact).is_ok()),
         ("manifest file", same_file("model/intent_v1/manifest.json", train::pretty_sorted(&serde_json::Value::Object(rebuilt.clone())))),
         ("test report file", same_file("model/intent_v1/test-report.json", train::pretty_sorted(&train::report_of(&rebuilt)))),
         ("gates", gates_passed),

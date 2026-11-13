@@ -557,9 +557,12 @@ data are retained only in the safety corpus: they never train the classifier,
 but prove the valid-source pre-model guard across every trigger.
 
 `layout_intent_v1.ksm` is the first classifier generation stored in KSLM
-schema 4. Alongside int16 weights, it holds sorted uint64 fingerprints for exact
-character-feature membership in an independent hash namespace, not an
-occupancy bitset of weight buckets. The loader checks the schema, shape,
+schema 4. Alongside int16 weights, the sealed file (`model/intent_v1/`) holds
+sorted uint64 fingerprints for exact character-feature membership in an
+independent hash namespace, not an occupancy bitset of weight buckets. The
+fingerprints give only the diagnostic `coverage`, which no decision reads, so
+the package holds the same model without the table of fingerprints: 4.7 MB
+instead of 12.9 MB. The loader checks the schema, shape,
 ordering, CRC32 and SHA-256, bounds the complete file at 14 MiB, and safely
 disables the layer after any validation failure. Within that limit, the
 canonical embedded manifest is capped at 1 MiB, the payload at 12 MiB, and the

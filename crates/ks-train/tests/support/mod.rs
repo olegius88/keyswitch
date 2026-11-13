@@ -63,7 +63,7 @@ pub(crate) fn refused(output: &Output, words: &str) {
 }
 
 /// The files a cycle writes or reads as its own; everything else of a small tree is the repository's, through links.
-const OWN_FILES: [&str; 37] = [
+const OWN_FILES: [&str; 39] = [
     "model/ortho_v1/web-lexicon-ru.json.gz",
     "model/ortho_v1/tokens.jsonl.gz",
     "model/ortho_v1/corpus-receipt.json",
@@ -93,6 +93,8 @@ const OWN_FILES: [&str; 37] = [
     "model/intent_v1/test-report.json",
     "model/intent_v1/build-environment.json",
     "resources/models/layout_intent_v1.ksm",
+    "model/intent_v1/layout_intent_v1.ksm",
+    "model/intent_v1/packaged-model.json",
     "model/context_v3/devchat-test-batches.json",
     "model/prefix_v2/recipe.json",
     "model/context_v3/recipe.json",

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "model_version": "intent-v1-8bccdf50b028",
+  "sealed": {
+    "path": "model/intent_v1/layout_intent_v1.ksm",
+    "bytes": 12947840,
+    "sha256": "d0b90ad59a48eb7c2aa8c89680a2bc0dd2290c1e9c717068af49087c165878bb"
+  },
+  "packaged": {
+    "path": "resources/models/layout_intent_v1.ksm",
+    "bytes": 4696874,
+    "sha256": "504f53329f863fccecf17cedf74d91d1de36008cf50a7b79fbc34342cfce00e5"
+  },
+  "fingerprints_left_out": 1031370,
+  "scope": "the packaged model is the sealed one without its table of fingerprints, which gives only the coverage of a prediction; every weight and parameter a decision reads is the same to the byte"
+}

@@ -2,7 +2,7 @@
 //! sealed before a held-out row is built, the answer of the test fixed before it is written anywhere, then a transactional
 //! publication. And the receipt of a candidate the strict evaluation rejected (`write_intent_rejection`).
 use super::pipeline::{self, Candidate};
-use super::{dataset, probe, seal};
+use super::{dataset, pack, probe, seal};
 use crate::physical::hex;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -72,7 +72,12 @@ pub fn seal_artifact(built: &Candidate, manifest: &mut Map<String, Value>) -> Re
 
 /// Where the fit writes.
 pub struct Outputs {
+    /// The sealed model: the file the manifest, the test report and the candidate's identity name.
     pub artifact: PathBuf,
+    /// The model the program is packaged with: the sealed one without its fingerprints (`pack::pack_model`).
+    pub packaged: PathBuf,
+    /// The record of the packaging (`pack::packaging_record`).
+    pub packaging: PathBuf,
     pub manifest: PathBuf,
     pub report: PathBuf,
     pub environment: PathBuf,
@@ -83,17 +88,17 @@ pub struct Outputs {
 impl Outputs {
     #[must_use]
     pub fn defaults(root: &Path) -> Outputs {
-        Outputs { artifact: root.join("resources/models/layout_intent_v1.ksm"), manifest: root.join("model/intent_v1/manifest.json"), report: root.join("model/intent_v1/test-report.json"), environment: root.join("model/intent_v1/build-environment.json"), diagnostic: None, dry_run: false }
+        Outputs { artifact: root.join(pack::SEALED_ARTIFACT), packaged: root.join(pack::PACKAGED_ARTIFACT), packaging: root.join(pack::PACKAGING_RECORD), manifest: root.join("model/intent_v1/manifest.json"), report: root.join("model/intent_v1/test-report.json"), environment: root.join("model/intent_v1/build-environment.json"), diagnostic: None, dry_run: false }
     }
 
     /// `validate_training_paths`: outputs must not alias each other, the ledgers or an input.
     fn validate(&self, root: &Path, raw_config: &Value, registry: &str) -> Result<(), String> {
         let mut seen: Vec<PathBuf> = Vec::new();
-        let mut mutable = vec![self.artifact.clone(), self.manifest.clone(), self.report.clone(), self.environment.clone(), root.join(registry), root.join(seal::outcome_path(registry)?)];
+        let mut mutable = vec![self.artifact.clone(), self.packaged.clone(), self.packaging.clone(), self.manifest.clone(), self.report.clone(), self.environment.clone(), root.join(registry), root.join(seal::outcome_path(registry)?)];
         mutable.extend(self.diagnostic.clone());
         for path in &mutable {
             if seen.contains(path) {
-                return Err("artifact, manifest, report, build environment and the two seal ledgers must be distinct paths".to_owned());
+                return Err("artifact, packaged model, its record, manifest, report, build environment and the two seal ledgers must be distinct paths".to_owned());
             }
             seen.push(path.clone());
         }
@@ -205,7 +210,9 @@ pub fn train(root: &Path, workers: usize, outputs: &Outputs) -> Result<i32, Stri
         sidecar.insert("artifact_sha256".to_owned(), manifest["artifact_sha256"].clone());
         let manifest_bytes = pretty_sorted(&Value::Object(manifest.clone())).into_bytes();
         let report_bytes = pretty_sorted(&report_of(&manifest)).into_bytes();
-        seal::publish_bundle(&[(outputs.report.clone(), report_bytes), (outputs.artifact.clone(), encoded), (outputs.manifest.clone(), manifest_bytes), (outputs.environment.clone(), pretty_sorted(&Value::Object(sidecar)).into_bytes())])?;
+        let packed = pack::pack_model(&encoded)?;
+        let packaging = pack::packaging_record(&encoded, &packed)?;
+        seal::publish_bundle(&[(outputs.report.clone(), report_bytes), (outputs.artifact.clone(), encoded), (outputs.packaged.clone(), packed), (outputs.packaging.clone(), packaging), (outputs.manifest.clone(), manifest_bytes), (outputs.environment.clone(), pretty_sorted(&Value::Object(sidecar)).into_bytes())])?;
     }
     print!("{}", pretty_sorted(&Value::Object(manifest)));
     Ok(i32::from(!gates_passed))
@@ -232,7 +239,7 @@ pub fn rejection_receipt(root: &Path, version: u32, strict_report: &Path, remedi
     let directory = root.join("model/intent_v1");
     let manifest_path = directory.join("manifest.json");
     let registry_path = directory.join(format!("seal-registry-v{version}.json"));
-    let artifact_path = root.join("resources/models/layout_intent_v1.ksm");
+    let artifact_path = root.join(pack::SEALED_ARTIFACT);
     let test_report_path = directory.join("test-report.json");
     let (manifest, registry, report) = (crate::corpus::read_json(&manifest_path)?, crate::corpus::read_json(&registry_path)?, crate::corpus::read_json(strict_report)?);
     let gates = report["strict_gates"].as_object().ok_or("strict report lacks strict_gates")?;

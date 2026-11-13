@@ -4,10 +4,12 @@
 use crate::corpus::{checksum, read_json};
 use crate::engine_reports::verify_boundary_report;
 use crate::retired;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::path::Path;
 
 const SEALED_BEFORE_TEST: &str = "sealed-before-test";
+const INTENT_MANIFEST: &str = "model/intent_v1/manifest.json";
 const ORTHO_DIRECTORY: &str = "model/ortho_v1";
 const ORTHO_EVIDENCE_SCHEMA: i64 = 2;
 /// A pin of a resource under the path it had in the Python tree.
@@ -128,6 +130,34 @@ pub fn ortho(root: &Path) -> Result<Value, String> {
     Ok(json!({"model_version": seal["model_version"], "artifact_sha256": candidate, "thresholds": seal["thresholds"], "recall": report["recall"], "test_negatives": negatives, "test_false_conversions": false_total}))
 }
 
+/// What the gate of the layout-intent model reads of the manifest of its fit.
+#[derive(Deserialize)]
+struct IntentManifest {
+    artifact_sha256: String,
+    artifact_model_version: String,
+}
+
+/// What the gate says of the layout-intent model: its version, and the digests of the sealed file and of the packaged one.
+#[derive(Debug, Serialize)]
+pub struct IntentGate {
+    pub model_version: String,
+    pub sealed_sha256: String,
+    pub packaged_sha256: String,
+}
+
+/// The layout-intent model: the sealed file is the one its manifest names, and the packaged file is the sealed one without
+/// its table of fingerprints, to the byte, with the record that names both (`intent::pack`).
+pub fn intent(root: &Path) -> Result<IntentGate, String> {
+    let (sealed, packaged) = crate::intent::pack::packaged_from_sealed(root)?;
+    let path = root.join(INTENT_MANIFEST);
+    let text = std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let manifest: IntentManifest = ks_text::json::loads(text).map_err(|error| format!("{}: {error}", path.display()))?;
+    if manifest.artifact_sha256 != sealed {
+        return Err("the sealed layout-intent model is not the one its manifest names".to_owned());
+    }
+    Ok(IntentGate { model_version: manifest.artifact_model_version, sealed_sha256: sealed, packaged_sha256: packaged })
+}
+
 pub fn run(root: &Path) -> Result<Value, String> {
     let resources = root.join("resources/models");
     let receipt = read_json(&root.join("model/context_v3/release-receipt.json"))?;
@@ -142,6 +172,7 @@ pub fn run(root: &Path) -> Result<Value, String> {
         "context": {"model_version": receipt["model_version"], "scope": receipt["scope"]},
         "boundary": boundary(root)?,
         "orthotactic": ortho(root)?,
+        "intent": intent(root)?,
         "rejected": {
             "context-v2": retired::context_v2::verify(root)?["candidate"],
             "boundary-v1": retired::boundary_v1::verify(root)?["accepted"],

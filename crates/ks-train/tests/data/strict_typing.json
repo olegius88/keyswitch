@@ -352,7 +352,7 @@
     "src/bin/trace/run.rs": {
      "literal_compares": 2,
      "string_key_index": 66,
-     "value_tokens": 69
+     "value_tokens": 70
     },
     "src/harness.rs": {
      "value_tokens": 3
@@ -423,7 +423,7 @@
    },
    "literal_compares": 24,
    "string_key_index": 269,
-   "value_tokens": 652
+   "value_tokens": 653
   },
   "ks-text": {
    "expect_roots": 2,
