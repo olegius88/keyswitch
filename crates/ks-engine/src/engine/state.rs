@@ -312,6 +312,14 @@ impl EngineCore {
 
     pub fn observe_group(&mut self, group: i64, source: &str) {
         let focus = self.track_focus();
+        self.observe_group_after(group, source, focus);
+    }
+
+    /// `observe_group` for a key whose move to another window was noticed already (`handle_key` notices it for every key
+    /// it takes). `track_focus` tells of a move once, so a second look says the window did not change, and the layout
+    /// that came with the new window was booked as a layout the user picked by hand: the first word typed there was
+    /// then left as typed, on a system that keeps a layout per window.
+    pub fn observe_group_after(&mut self, group: i64, source: &str, focus: FocusChange) {
         if !focus.ignore_layout {
             // Any look outside an own window ends the ignored episode, so the
             // next visit to the settings window is logged once again.

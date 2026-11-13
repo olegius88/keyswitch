@@ -391,3 +391,26 @@ fn a_word_of_another_window_is_not_corrected_in_the_window_in_front() {
     }
     bundle.clean();
 }
+
+/// The layout that comes with another window is that window's own, not one the user picked by hand: the word typed there
+/// is judged like any other. A system keeps a layout per window and reports it with the first key pressed there, and the
+/// engine notices the move to that window at that same key; asked a second time, it said the window had not changed,
+/// booked the layout as a manual choice and left the word typed there as typed.
+#[test]
+fn the_layout_of_another_window_is_no_choice_of_the_users() {
+    let mut bundle = Bundle::load(None);
+    let mut session = bundle.session("app", 0, Vec::new());
+    session.backend.focus(1, "app");
+    session.select_layout(1);
+    // Another window, with a layout of its own, and no look at the desktop between it and the first key pressed there.
+    session.backend.focus(2, "app");
+    session.backend.set_group(0);
+    press_in(&mut session, 'g', 0);
+    assert_eq!(session.core.manual_layout_group, None, "the layout of the window the user moved to");
+    // The layout the user picks while the window stays in front protects the word typed in it.
+    session.backend.set_group(1);
+    press_in(&mut session, 'п', 0);
+    assert_eq!(session.core.manual_layout_group, Some(1));
+    bundle.give_back(session);
+    bundle.clean();
+}
