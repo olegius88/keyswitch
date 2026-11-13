@@ -461,6 +461,11 @@ impl Shared {
             "\t".clone_into(&mut character);
         }
         let synthetic = self.consume_expected(pressed, keycode);
+        // The window that has the keyboard as this key is read. The server gave the key to its window before it told of
+        // it here, so the engine takes the key for one of this window, or leaves its word alone when another has come
+        // to the front since. Asked for a key the user pressed: a release types nothing, and KeySwitch's own keys are not
+        // the engine's to place.
+        let window = if pressed && !synthetic { self.window_in_front(api).map_or(0, |focus| focus.window) } else { 0 };
         Some(KeyEvent {
             pressed,
             keycode: u32::from(keycode),
@@ -471,6 +476,7 @@ impl Shared {
             state: u32::from(state),
             timestamp,
             synthetic,
+            window,
             ..KeyEvent::default()
         })
     }
@@ -523,12 +529,17 @@ impl Shared {
 
     fn focused_window(&self) -> Option<FocusInfo> {
         let api = self.api()?;
+        self.window_in_front(&*api)
+    }
+
+    /// The window that has the keyboard as `api` is asked.
+    fn window_in_front(&self, api: &dyn X11Api) -> Option<FocusInfo> {
         let focus = api.input_focus()?;
         if focus == 0 || focus == 1 {
             // None or PointerRoot: nobody has the focus.
             return None;
         }
-        let (window, own) = self.client_window(&*api, focus);
+        let (window, own) = self.client_window(api, focus);
         Some(FocusInfo { window: i64::from(window), own, isolated_layout: false })
     }
 

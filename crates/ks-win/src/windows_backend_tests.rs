@@ -130,6 +130,8 @@ struct FakeState {
     written: Vec<ClipboardContents>,
     text_limit: usize,
     no_control: bool,
+    /// The control that has the keyboard, when it is not the window in front itself.
+    control: Option<i64>,
 }
 
 struct FakeWindowsAPI {
@@ -194,6 +196,7 @@ impl FakeWindowsAPI {
                 written: Vec::new(),
                 text_limit: 0,
                 no_control: false,
+                control: None,
             }),
             stop_event: Condvar::new(),
             clipboard,
@@ -318,7 +321,7 @@ impl WindowsAPI for FakeWindowsAPI {
 
     fn focused_control(&self) -> i64 {
         let state = self.state();
-        if state.no_control { 0 } else { state.foreground }
+        if state.no_control { 0 } else { state.control.unwrap_or(state.foreground) }
     }
 
     fn window_process_id(&self, window: i64) -> i64 {
@@ -658,6 +661,35 @@ fn small_answers_of_the_backend() {
     let api = FakeWindowsAPI::plain();
     let shared: Arc<dyn WindowsAPI> = api.clone();
     assert!(WindowsBackend::new(Some(shared)).is_ok());
+}
+
+/// Every key the hook hears names the window it is on its way to: the window in front, as `key_window` names it for the
+/// engine, and not the control that has the keyboard, which `focused_window` names and a Tab changes inside one window.
+/// Naming it does not move the window the tray menu switches. One of KeySwitch's own keys names no window, and neither
+/// does a click or a turn of the wheel.
+#[test]
+fn a_key_names_the_window_it_is_on_its_way_to() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.start(collecting(&delivered)).unwrap();
+    let hook = api.hook();
+    let last = || delivered.lock().unwrap().last().cloned().unwrap();
+    api.state().control = Some(WINDOWS_INACTIVE_HWND);
+    assert!(!hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
+    assert_eq!((last().window, subject.key_window()), (WINDOWS_FAKE_HWND, Some(WINDOWS_FAKE_HWND)));
+    assert_eq!(subject.inner.work_window.load(Ordering::Acquire), 0);
+    assert_eq!(subject.focused_window().expect("a window").window, WINDOWS_INACTIVE_HWND);
+    api.state().foreground = WINDOWS_OTHER_HWND;
+    assert!(!hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
+    assert_eq!((last().window, subject.key_window()), (WINDOWS_OTHER_HWND, Some(WINDOWS_OTHER_HWND)));
+    assert!(!hook(native(true, VK_D, HELD_KEY_SCAN_CODE, true, 12)));
+    assert!(last().synthetic && last().window == 0);
+    assert!(!hook(native(true, 0, 0, false, 13)));
+    assert_eq!((last().key_name.as_str(), last().window), ("Pointer", 0));
+    assert!(!hook(NativeKeyEvent { wheel: true, ..native(false, 0, 0, false, 14) }));
+    assert_eq!(last().window, 0);
+    subject.stop();
 }
 
 #[test]

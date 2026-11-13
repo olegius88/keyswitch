@@ -83,6 +83,7 @@ struct FakeState {
     pids: HashMap<u32, u32>,
     classes: HashMap<u32, (String, String)>,
     pid_queries: usize,
+    focus_queries: usize,
     no_context: bool,
     no_keyboard_state: bool,
     missing_keysyms: Vec<u32>,
@@ -186,7 +187,10 @@ impl X11Api for Fake {
         self.with(|state| state.calls.push(Call::Grab(impervious)));
     }
     fn input_focus(&self) -> Option<u32> {
-        self.with(|state| state.focus)
+        self.with(|state| {
+            state.focus_queries += 1;
+            state.focus
+        })
     }
     fn pointer(&self) -> Option<(i32, i32)> {
         Some((10, 20))
@@ -278,6 +282,30 @@ fn a_key_event_carries_its_characters_in_every_group() {
     let second_group = backend.shared.decode_event(&*fake, &payload(3, A, 1 << 13 | 1, 5)).expect("a release");
     assert!(!second_group.pressed && second_group.group == 1);
     assert_eq!((second_group.character.as_str(), second_group.characters.clone()), ("Ф", vec!["A".to_owned(), "Ф".to_owned()]));
+}
+
+/// A press names the window that has the keyboard as the key is read, as `focused_window` names it: the window of the
+/// program, not the child that holds the focus. Nobody having the keyboard is no window. A release and one of
+/// KeySwitch's own keys name none, and the server is not asked for them.
+#[test]
+fn a_press_names_the_window_that_has_the_keyboard() {
+    let fake = Fake::new();
+    let backend = opened(&fake);
+    assert_eq!(backend.shared.decode_event(&*fake, &payload(2, A, 0, 1)).expect("a key").window, 0, "nobody has the keyboard");
+    fake.with(|state| {
+        state.focus = Some(300);
+        state.parents.insert(300, 200);
+        state.classes.insert(200, ("editor".to_owned(), "Editor".to_owned()));
+    });
+    let pressed = backend.shared.decode_event(&*fake, &payload(2, A, 0, 2)).expect("a key");
+    assert_eq!((pressed.window, backend.focused_window().expect("a window").window), (200, 200));
+    let asked = fake.with(|state| state.focus_queries);
+    assert_eq!(backend.shared.decode_event(&*fake, &payload(3, A, 0, 3)).expect("a release").window, 0);
+    lock(&backend.shared.expected).queue.push_back((true, A));
+    lock(&backend.shared.expected).deadline = Instant::now() + Duration::from_secs(60);
+    let own = backend.shared.decode_event(&*fake, &payload(2, A, 0, 4)).expect("a key of its own");
+    assert!(own.synthetic && own.window == 0);
+    assert_eq!(fake.with(|state| state.focus_queries), asked, "neither asks the server");
 }
 
 #[test]
