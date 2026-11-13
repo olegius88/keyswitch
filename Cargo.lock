@@ -924,15 +924,15 @@ dependencies = [
 
 [[package]]
 name = "ks-backend"
-version = "0.72.0"
+version = "0.73.0"
 
 [[package]]
 name = "ks-cast"
-version = "0.72.0"
+version = "0.73.0"
 
 [[package]]
 name = "ks-config"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "flate2",
  "indexmap",
@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "ks-context"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "flate2",
  "indexmap",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "ks-engine"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "ks-backend",
  "ks-cast",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "ks-hunspell"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "ks-config",
  "ks-lang",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "ks-lang"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "flate2",
  "indexmap",
@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "ks-linux"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "gdk4-x11",
  "gio-unix",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "ks-mac"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "ks-backend",
  "ks-cast",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "ks-replay"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "flate2",
  "ks-backend",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "ks-text"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "flate2",
  "ks-cast",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "ks-train"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "bzip2-rs",
  "flate2",
@@ -1095,7 +1095,7 @@ dependencies = [
 
 [[package]]
 name = "ks-ui"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "ks-backend",
  "ks-cast",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "ks-updates"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "ks-cast",
  "serde_json",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "ks-win"
-version = "0.72.0"
+version = "0.73.0"
 dependencies = [
  "embed-resource",
  "flate2",
