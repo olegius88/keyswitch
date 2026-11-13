@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{KeyDisposition, KeyEvent};
 use ks_config::learning::{LearnedRule, LearningStore};
-use ks_engine::engine::{EngineError, KeySwitchEngine, QueueItem, Update};
+use ks_context::ContextPolicy;
+use ks_engine::engine::{EngineCore, EngineError, KeySwitchEngine, QueueItem, Update};
 use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_engine::rule_editor::pattern_group;
 use ks_config::selection_commands::SelectionCommand;
@@ -232,6 +233,36 @@ fn an_engine_built_from_its_settings_takes_what_it_is_given() {
     let clock = ks_replay::harness::FakeClock::new();
     let engine = KeySwitchEngine::new(settings, history, Arc::new(Backend::new("app", 0, Vec::new())), learning, "test", Some(Arc::new(UnreadField)), None, &resources, clock.read());
     assert!(engine.is_ok());
+}
+
+/// The orthotactic model an engine builds answers its dictionary questions from that engine's dictionaries. It is read
+/// beside them, before they are there, and takes an answer that waits for them: were they never put in it, the model
+/// would hold every word to be unknown, argue harder for converting correctly typed words, and nothing else here would
+/// show it.
+#[test]
+fn an_engine_gives_the_orthotactic_model_its_dictionaries() {
+    use ks_config::config::SettingsStore;
+    use ks_config::history::HistoryStore;
+    use ks_lang::ortho_model::OrthoEvidence;
+    use ks_replay::harness::{Backend, UnreadField};
+    use std::path::PathBuf;
+    let root = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
+    let resources = ks_lang::Resources::new(&root);
+    let settings = Arc::new(SettingsStore::new(None));
+    let history = Arc::new(HistoryStore::new(None, 10));
+    let clock = ks_replay::harness::FakeClock::new();
+    let engine = KeySwitchEngine::new(settings, history, Arc::new(Backend::new("app", 0, Vec::new())), None, "test", Some(Arc::new(UnreadField)), None, &resources, clock.read())
+        .expect("the engine starts");
+    let built = engine.core().as_ref().expect("the core").context_policy.ortho.clone().expect("the orthotactic model");
+    let models = ["en_US", "ru_RU"].map(|locale| resources.engine_language_model(locale).expect("a dictionary")).to_vec();
+    let (knowing, _) = ContextPolicy::load_ortho(&resources, EngineCore::known_of(&models));
+    let (deaf, _) = ContextPolicy::load_ortho(&resources, Some(Arc::new(|_: &str, _: &str| false)));
+    // An English word typed in English: the model counts `source_word` for it, and only a dictionary says it is one.
+    let evidence = OrthoEvidence { keys: "test", shape: "lower", source_script: "en" };
+    let knowing = knowing.expect("the orthotactic model").score(&evidence, None);
+    let deaf = deaf.expect("the orthotactic model").score(&evidence, None);
+    assert_ne!(knowing, deaf, "a model that knows no word scores differently");
+    assert_eq!(built.score(&evidence, None), knowing, "the engine's model knows the engine's words");
 }
 
 /// The worker takes the core while it runs; what the handle says of the models stays.
