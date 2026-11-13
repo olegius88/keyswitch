@@ -143,7 +143,11 @@ impl EngineCore {
                 self.shared.dismiss_learning_prompt(Some(&prompt), "other_key");
             }
         }
-        if event.pressed {
+        // An Enter or Tab the hook keeps back has reached no window yet, and the backend passes it on only to the window
+        // it was pressed for.
+        let elsewhere = event.pressed && !event.deferred && self.typed_elsewhere(&event);
+        // A key typed into another window says nothing of the program in front, of its field or of its layout.
+        if event.pressed && !elsewhere {
             let application = self.front_application();
             if !event.character.is_empty()
                 && self.strokes.is_empty()
@@ -194,7 +198,7 @@ impl EngineCore {
         if event.pressed {
             // A key pressed before an early switch landed still reports the
             // old layout; that is a race, not the user switching back.
-            if !self.late_stroke_after_early_switch(&event) {
+            if !elsewhere && !self.late_stroke_after_early_switch(&event) {
                 self.observe_group(i64::from(event.group), "keystroke");
             }
             self.pressed.insert(event.keycode);
@@ -245,6 +249,20 @@ impl EngineCore {
             }
             saved.map_err(|error| EngineError(error.to_string()))?;
             self.clear_word(Some(if enabled { "Автокоррекция включена" } else { "Автокоррекция на паузе" }), "engine_toggled");
+            return Ok(());
+        }
+        if elsewhere {
+            // The key is in the window that was in front when it was pressed, or in this one if the hook saw the old
+            // window a moment too long: nobody knows which. It is no key of a word here and no hotkey for the text here,
+            // and what is typed up to the next boundary is left as typed: followed without its first letter, the rest
+            // would be converted beside that letter. An Enter that waits for its correction goes on without it, and a
+            // letter a correction typed again is counted as come back.
+            self.owed_late_letter();
+            self.convert_press_at = 0.0;
+            self.action_goes_on("typed_in_another_window");
+            self.clear_word(None, "typed_in_another_window");
+            self.contexts.clear();
+            self.untracked_token = !Self::_is_boundary(&event);
             return Ok(());
         }
         if is_convert {

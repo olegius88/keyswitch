@@ -86,6 +86,7 @@ struct EditorState {
     swallows: bool,
     selection: Option<String>,
     own: bool,
+    key_window: Option<i64>,
     release_fails: bool,
     stall: Duration,
     unconfirmed: bool,
@@ -116,7 +117,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, release_fails: false, stall: Duration::ZERO, unconfirmed: false }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, key_window: None, release_fails: false, stall: Duration::ZERO, unconfirmed: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -183,6 +184,12 @@ impl Backend {
     /// Whether the window in front is the program's own.
     pub fn set_own(&self, own: bool) {
         self.lock().own = own;
+    }
+
+    /// The window in front as the hook names it for a key, where it is not the window `focus` sets (Windows: the
+    /// window, and `focus` sets the control that has the keyboard).
+    pub fn set_key_window(&self, window: Option<i64>) {
+        self.lock().key_window = window;
     }
 
     /// The next corrections and layout switches fail, as when a window closes under them.
@@ -364,6 +371,10 @@ impl InputBackend for Backend {
     fn focused_window(&self) -> Option<FocusInfo> {
         let state = self.lock();
         Some(FocusInfo { window: state.window, own: state.own, isolated_layout: false })
+    }
+
+    fn key_window(&self) -> Option<i64> {
+        self.lock().key_window
     }
 
     fn probe(&self) -> BackendProbe {

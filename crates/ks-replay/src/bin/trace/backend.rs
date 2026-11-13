@@ -33,6 +33,8 @@ pub(crate) fn key_from(value: &Value) -> Option<KeyEvent> {
         synthetic: fields[8].as_bool()?,
         deferred: fields[9].as_bool()?,
         foreign: fields[10].as_bool()?,
+        // A trace was recorded before a hook told the window of a key.
+        window: 0,
     })
 }
 
