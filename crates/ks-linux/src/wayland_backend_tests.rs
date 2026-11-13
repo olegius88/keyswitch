@@ -587,6 +587,25 @@ fn a_withheld_enter_is_typed_checked_against_its_own_key() {
     assert!(!lock(&backend.inner.state).consumed_keys.contains(&EVDEV_KEY_ENTER));
 }
 
+/// A key names the window the desktop has in front as the helper asks about it. A key the helper typed without asking
+/// has reached its window before this, and names none; neither does a click or one of KeySwitch's own keys.
+#[test]
+fn a_key_names_the_window_it_is_on_its_way_to() {
+    let (api, backend, events) = make();
+    let last = || lock(&events).last().cloned().expect("a key");
+    assert!(!backend.handle_native(key(EVDEV_KEY_A, SEQ_FIRST, true)));
+    assert_eq!((last().window, backend.focused_window().expect("a window").window), (WINDOW, WINDOW));
+    api.st().window = WINDOW + 1;
+    assert!(!backend.handle_native(key(EVDEV_KEY_A, SEQ_SECOND, false)));
+    assert_eq!(last().window, WINDOW + 1);
+    assert!(!backend.handle_native(NativeKeyEvent { delivered: true, ..key(EVDEV_KEY_Q, SEQ_THIRD, true) }));
+    assert_eq!(last().window, 0);
+    assert!(!backend.handle_native(NativeKeyEvent { injected: true, ..key(EVDEV_KEY_Q, SEQ_THIRD, false) }));
+    assert_eq!(last().window, 0);
+    assert!(!backend.handle_native(NativeKeyEvent { pointer: true, ..NativeKeyEvent::new(true, 0, 1000) }));
+    assert_eq!((last().key_name.as_str(), last().window), (POINTER_KEY_NAME, 0));
+}
+
 #[test]
 fn keys_typed_unasked_reach_the_engine_and_spoil_a_hold() {
     let (_api, backend, events) = make();

@@ -136,6 +136,12 @@ struct DeskState {
     masked: bool,
     group: i32,
     window: i64,
+    /// Whether the hook names the window a key is on its way to (`KeyEvent::window`).
+    names_window: bool,
+    /// The window in front before this one, and how many of the next presses the hook still takes for keys of it: a
+    /// hook may learn of the window in front on another way than of the keys, a moment late.
+    window_before: i64,
+    presses_behind: usize,
     /// The hook can keep keys from the window (Windows, macOS, Wayland); false is X11, which only watches.
     holds: bool,
     holding: bool,
@@ -223,7 +229,20 @@ impl DeskState {
         format!("{milliseconds:.0}").parse().expect("a whole number of milliseconds")
     }
 
+    /// The window the hook names for a key: the one in front, or the one before it while the hook is behind.
+    fn window_of_key(&mut self, pressed: bool) -> i64 {
+        if !self.names_window {
+            return 0;
+        }
+        if pressed && self.presses_behind != 0 {
+            self.presses_behind -= 1;
+            return self.window_before;
+        }
+        self.window
+    }
+
     fn another_field(&mut self, masked: bool) {
+        self.window_before = self.window;
         self.window += 1;
         self.cells.clear();
         self.caret = 0;
@@ -346,6 +365,7 @@ impl DeskState {
             self.action_prior.remove(&raw.keycode);
         }
         let (mut event, typed) = self.event(raw);
+        event.window = self.window_of_key(raw.pressed);
         // A repeat of a key the hook has kept from the window is the hook's alone to answer: the real ones do not tell
         // the engine of it (`repeated_answer` in the Windows, macOS and Wayland backends).
         let repeated_answer = self.holds && self.filter.is_some() && raw.pressed && self.consumed.contains(&raw.keycode);
@@ -454,6 +474,9 @@ impl Desk {
                 masked: false,
                 group,
                 window: 1,
+                names_window: !mode.unnamed,
+                window_before: 1,
+                presses_behind: 0,
                 holds: mode.holds,
                 holding: false,
                 held: VecDeque::new(),
@@ -687,7 +710,7 @@ impl InputBackend for Desk {
         for raw in std::mem::take(&mut state.during_correction) {
             state.hook(raw, false);
         }
-        let before = state.injections % 2 == 1;
+        let before = state.dice.one_in(2);
         if before {
             state.rush();
         }
@@ -695,7 +718,8 @@ impl InputBackend for Desk {
         let mut returning: Vec<KeyEvent> = Vec::new();
         for stroke in late {
             let character = stroke.character_for(final_group).to_owned();
-            let pressed = KeyEvent { pressed: true, key_name: character.clone(), character, group: final_group, timestamp: state.stamp(), ..stroke.clone() };
+            let window = state.window_of_key(true);
+            let pressed = KeyEvent { pressed: true, key_name: character.clone(), character, group: final_group, timestamp: state.stamp(), window, ..stroke.clone() };
             returning.extend([pressed.clone(), KeyEvent { pressed: false, ..pressed }]);
         }
         if state.late_lost {
@@ -949,6 +973,20 @@ fn idle(core: &mut EngineCore, clock: &FakeClock, seconds: f64) {
     }
 }
 
+/// The person stops typing for `seconds`, or until they type again: a key pressed while a correction of that pause is
+/// typed (`rush`) ends the pause. Waited out to its end, the pause stood between that key going down and its coming up,
+/// and an Enter pressed so was held for seconds: the engine answers an Enter when the keys are up, and the walk took the
+/// time it was held for the time it waited (walk 346 of the dice thrown in `inject_correction`, 13.11.2026).
+fn pause(core: &mut EngineCore, clock: &FakeClock, desk: &Desk, seconds: f64) {
+    let rushed = desk.lock().rushed_keys;
+    let mut left = seconds;
+    while left > 0.0 && desk.lock().rushed_keys == rushed {
+        clock.advance(TIMER_STEP_SECONDS.min(left));
+        left -= TIMER_STEP_SECONDS;
+        drain(core);
+    }
+}
+
 /// What one walk found: what broke, and how much of the engine it exercised.
 #[derive(Default)]
 struct Outcome {
@@ -958,6 +996,8 @@ struct Outcome {
     deferred: usize,
     dropped: usize,
     rushed: usize,
+    /// The lines the window took with Enter, and what it shows at the end.
+    text: String,
 }
 
 #[derive(Clone, Copy)]
@@ -967,6 +1007,8 @@ struct Walk {
     typos: bool,
     /// The engine may be behind even when the person clicks, changes the window or the layout.
     stalls: bool,
+    /// The hook names no window for a key, as every hook did before 13.11.2026.
+    unnamed: bool,
 }
 
 fn walk(bundle: &mut Bundle, seed: u64, mode: Walk, verbose: bool) -> Outcome {
@@ -992,7 +1034,7 @@ fn walk(bundle: &mut Bundle, seed: u64, mode: Walk, verbose: bool) -> Outcome {
             }
             Act::Wait(seconds) => {
                 drain(&mut core);
-                idle(&mut core, &clock, seconds);
+                pause(&mut core, &clock, &desk, seconds);
             }
             Act::Click => {
                 let mut state = desk.lock();
@@ -1014,6 +1056,9 @@ fn walk(bundle: &mut Bundle, seed: u64, mode: Walk, verbose: bool) -> Outcome {
                 let mut state = desk.lock();
                 let masked = matches!(act, Act::Password);
                 state.another_field(masked);
+                if mode.stalls {
+                    state.presses_behind = dice.below(3);
+                }
                 state.note(if masked { "another window, a password field".to_owned() } else { "another window".to_owned() });
             }
             Act::Paste(text) => {
@@ -1106,6 +1151,7 @@ fn finish(bundle: &mut Bundle, core: EngineCore, desk: &Desk, violations: Vec<St
         deferred: state.deferred_actions,
         dropped: state.dropped_actions,
         rushed: state.rushed_keys,
+        text: format!("{:?} {}", state.submitted, state.shown()),
     }
 }
 
@@ -1148,7 +1194,8 @@ fn walks(mode: Walk, name: &str) {
 }
 
 /// `KS_INTEGRITY_WALK=<mode letters>:<seed>` walks one seed with every key in the journal and prints it; the letters are
-/// h (the hook keeps keys back), f (the field is read), t (typo corrections), s (the engine may stall anywhere). With
+/// h (the hook keeps keys back), f (the field is read), t (typo corrections), s (the engine may stall anywhere), u (the
+/// hook names no window for a key). With
 /// `KS_INTEGRITY_LOG=<file>` the engine's technical log goes to that file.
 #[test]
 fn one_walk_looked_at_closely() {
@@ -1157,7 +1204,7 @@ fn one_walk_looked_at_closely() {
     };
     let asked = asked.to_string_lossy().into_owned();
     let (letters, seed) = asked.split_once(':').expect("<mode letters>:<seed>");
-    let mode = Walk { holds: letters.contains('h'), reads_field: letters.contains('f'), typos: letters.contains('t'), stalls: letters.contains('s') };
+    let mode = Walk { holds: letters.contains('h'), reads_field: letters.contains('f'), typos: letters.contains('t'), stalls: letters.contains('s'), unnamed: letters.contains('u') };
     let log = std::env::var_os("KS_INTEGRITY_LOG").map(std::path::PathBuf::from);
     let mut bundle = Bundle::load(log.as_deref());
     let outcome = walk(&mut bundle, seed.parse().expect("a seed"), mode, true);
@@ -1168,29 +1215,47 @@ fn one_walk_looked_at_closely() {
     println!("{} corrections, {} violations", outcome.injections, outcome.violations.len());
 }
 
+/// A hook that names the window of each key changes nothing while the engine has taken every key by the time another
+/// window comes to the front: the same walks end in the same text after the same corrections. A key taken for a key of
+/// another window by mistake would leave its word as typed, and no walk calls a word left as typed a failure.
+#[test]
+fn naming_the_window_of_a_key_changes_nothing_while_the_engine_keeps_up() {
+    let mut bundle = Bundle::load(None);
+    let named = Walk { holds: true, reads_field: true, typos: true, stalls: false, unnamed: false };
+    for seed in 1..=NAMED_WALKS {
+        let with = walk(&mut bundle, seed, named, false);
+        let without = walk(&mut bundle, seed, Walk { unnamed: true, ..named }, false);
+        assert_eq!((&with.text, with.injections, with.deferred, with.dropped), (&without.text, without.injections, without.deferred, without.dropped), "walk {seed}");
+        assert!(with.violations.is_empty() && without.violations.is_empty(), "walk {seed}");
+    }
+    bundle.clean();
+}
+
+const NAMED_WALKS: u64 = 80;
+
 #[test]
 fn the_text_stays_the_users_where_the_hook_only_watches() {
-    walks(Walk { holds: false, reads_field: false, typos: false, stalls: false }, "watching hook");
+    walks(Walk { holds: false, reads_field: false, typos: false, stalls: false, unnamed: false }, "watching hook");
 }
 
 #[test]
 fn the_text_stays_the_users_where_the_hook_only_watches_and_the_field_is_read() {
-    walks(Walk { holds: false, reads_field: true, typos: true, stalls: false }, "watching hook, field read, typos");
+    walks(Walk { holds: false, reads_field: true, typos: true, stalls: false, unnamed: false }, "watching hook, field read, typos");
 }
 
 #[test]
 fn the_text_stays_the_users_where_the_hook_keeps_keys_back() {
-    walks(Walk { holds: true, reads_field: false, typos: false, stalls: false }, "holding hook");
+    walks(Walk { holds: true, reads_field: false, typos: false, stalls: false, unnamed: false }, "holding hook");
 }
 
 #[test]
 fn the_text_stays_the_users_where_the_hook_keeps_keys_back_and_the_field_is_read() {
-    walks(Walk { holds: true, reads_field: true, typos: true, stalls: false }, "holding hook, field read, typos");
+    walks(Walk { holds: true, reads_field: true, typos: true, stalls: false, unnamed: false }, "holding hook, field read, typos");
 }
 
 #[test]
 fn the_text_stays_the_users_when_the_engine_stalls() {
-    walks(Walk { holds: true, reads_field: true, typos: false, stalls: true }, "holding hook, field read, a stalling engine");
+    walks(Walk { holds: true, reads_field: true, typos: false, stalls: true, unnamed: false }, "holding hook, field read, a stalling engine");
 }
 
 /// One desk and its engine for a scene typed by hand: every key finds the engine caught up, unless the scene says otherwise.
@@ -1203,7 +1268,7 @@ struct Scene {
 impl Scene {
     fn new(bundle: &mut Bundle, holds: bool, reads_field: bool) -> Scene {
         let clock = FakeClock::new();
-        let mode = Walk { holds, reads_field, typos: false, stalls: false };
+        let mode = Walk { holds, reads_field, typos: false, stalls: false, unnamed: false };
         let desk = Desk::new(mode, 0, Vec::new(), 1, &clock, true);
         let core = engine_over(bundle, &desk, mode, &clock);
         Scene { desk, core, clock }
@@ -1251,6 +1316,48 @@ impl Scene {
 
     fn shown(&self) -> String {
         self.desk.lock().shown()
+    }
+
+    /// Another window comes to the front by itself, with `text` in its field: no click and no key tells the engine.
+    fn another_window(&mut self, text: &str) {
+        let mut state = self.desk.lock();
+        state.another_field(false);
+        state.cells = text.chars().map(|character| Cell { character, origin: None }).collect();
+        state.caret = state.cells.len();
+    }
+
+    /// The keys of `text` as someone who means `layout` presses them, while the engine takes none of them.
+    fn behind(&mut self, text: &str, layout: usize) {
+        for character in text.chars() {
+            let keycode = key_for(character, layout).expect("a key of the keyboard").keycode;
+            for pressed in [true, false] {
+                self.clock.advance(0.03);
+                self.desk.key(Raw { pressed, keycode, name: "" });
+            }
+        }
+    }
+
+    /// A key that went to a window which came to the front and went away again (a pop-up): the hook names that window,
+    /// the field in front has nothing of the key, and the engine has not taken it yet.
+    fn key_of_a_window_gone(&mut self, keycode: u32, name: &str, character: &str) {
+        let (group, stamp, listener) = {
+            let state = self.desk.lock();
+            (state.group, state.stamp(), state.listener.clone().expect("started"))
+        };
+        self.clock.advance(0.06);
+        for pressed in [true, false] {
+            listener(KeyEvent {
+                pressed,
+                keycode,
+                key_name: name.to_owned(),
+                character: character.to_owned(),
+                characters: vec![character.to_owned(), character.to_owned()],
+                group,
+                timestamp: stamp,
+                window: WINDOW_GONE,
+                ..KeyEvent::default()
+            });
+        }
     }
 
     /// Nothing went wrong on the way, and the keyboard is the person's again.
@@ -1651,6 +1758,89 @@ fn an_enter_already_in_the_queue_does_not_stop_the_correction_before_it() {
     assert_eq!(scene.desk.lock().dropped_actions, 0);
     scene.ends_clean(&mut bundle);
     bundle.clean();
+}
+
+/// The window of a pop-up no scene has in front.
+const WINDOW_GONE: i64 = 1_000;
+
+/// A key belongs to the window it was typed into. The engine takes a key some time after the hook saw it, and asked which
+/// window is in front only then: a letter typed just before another window came to the front by itself (no click, no
+/// key) was the first letter of the word typed there, and the correction of that word erased a character more than the
+/// window had of it. The hook names the window of each key now. A key of another window than the one in front is no key
+/// of a word here, and what is typed up to the next boundary is left as typed: the hook may have seen the old window a
+/// moment too long, and the word followed without that letter would be converted beside it.
+#[test]
+fn a_key_of_another_window_is_no_key_of_the_word_in_front() {
+    let mut bundle = Bundle::load(None);
+    let space = key_for(' ', 0).expect("the space bar").keycode;
+    for holds in [false, true] {
+        // The first letter goes to the old window and the rest to the new one, and the engine takes all of it late.
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        scene.behind("п", 1);
+        scene.another_window("было ");
+        scene.behind("ривет ", 1);
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "было hbdtn |", "the hook keeps keys back: {holds}");
+        assert_eq!(scene.desk.lock().injections, 0);
+        // The word after the boundary is followed again.
+        scene.text("привет ", 1);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "было hbdtn привет |");
+        scene.ends_clean(&mut bundle);
+
+        // The last letter of a word and its space stay behind in the old window: the first word of the new one is whole.
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        scene.text("не", 1);
+        scene.behind("т ", 1);
+        scene.another_window("");
+        scene.behind("нет ", 1);
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "нет |", "the hook keeps keys back: {holds}");
+        scene.ends_clean(&mut bundle);
+
+        // The hook is a key behind: the first key typed into the new window is named a key of the old one. The word is
+        // left whole (followed from its second letter, `ghbdtn` would be converted beside the `j`), and the next one is
+        // corrected.
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        scene.another_window("");
+        scene.desk.lock().presses_behind = 1;
+        scene.text("опривет ", 1);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "jghbdtn |", "the hook keeps keys back: {holds}");
+        scene.text("привет ", 1);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "jghbdtn привет |");
+        scene.ends_clean(&mut bundle);
+
+        // A pop-up takes a Backspace or a space and goes away, with a word standing in the window: the word is no
+        // letter shorter and has not ended, whatever the pop-up did with the key.
+        for (keycode, name, character) in [(BACKSPACE_KEYCODE, "BackSpace", ""), (space, " ", " ")] {
+            let mut scene = Scene::new(&mut bundle, holds, false);
+            scene.text("нет", 1);
+            scene.key_of_a_window_gone(keycode, name, character);
+            drain(&mut scene.core);
+            scene.idle(1.0);
+            scene.text(" ", 1);
+            scene.idle(1.0);
+            assert_eq!(scene.shown(), "ytn |", "{name}, the hook keeps keys back: {holds}");
+            assert_eq!(scene.desk.lock().injections, 0);
+            scene.ends_clean(&mut bundle);
+        }
+
+        // A letter of a pop-up waits in the queue behind the space of a word, pressed and let go: it does not stand
+        // after that word, and the word is not typed again with it.
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        scene.text("нет", 1);
+        scene.behind(" ", 1);
+        scene.key_of_a_window_gone(key_for('о', 1).expect("a key of the keyboard").keycode, "j", "j");
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "ytn |", "the hook keeps keys back: {holds}");
+        assert_eq!(scene.desk.lock().injections, 0);
+        scene.ends_clean(&mut bundle);
+    }
 }
 
 /// A lone letter that opens a message is corrected at its space, and waits for the word after it all the same: a space

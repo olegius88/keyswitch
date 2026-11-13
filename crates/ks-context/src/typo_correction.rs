@@ -705,6 +705,8 @@ impl KeyTemplates {
         key.synthetic = false;
         key.deferred = false;
         key.foreign = false;
+        // The template was pressed in whatever window it was last seen in; this key is typed where the word is.
+        key.window = 0;
         Some(key)
     }
 }
