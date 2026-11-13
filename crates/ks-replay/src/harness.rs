@@ -513,6 +513,7 @@ impl Session {
     }
 
     fn timers(&mut self) {
+        self.core.expire_behind_late();
         let result = self.core.expire_deferred_action();
         self.settled(result);
         self.core.expire_manual_correction();

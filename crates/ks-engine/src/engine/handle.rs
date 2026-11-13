@@ -386,8 +386,9 @@ impl EngineCore {
         self.context_policy
     }
 
-    /// `run_timers`: the eight timers of the live loop. The harness pumps its own five, one by one.
+    /// `run_timers`: the nine timers of the live loop. The harness pumps its own five, one by one.
     pub fn run_timers(&mut self) -> EngineResult<()> {
+        self.expire_behind_late();
         self.expire_deferred_action()?;
         self.expire_manual_correction();
         self.poll_current_group()?;
@@ -450,6 +451,7 @@ impl EngineCore {
 
     pub fn recover_from_error(&mut self, error: &EngineError) {
         let withheld = self.withheld_in_hand.take();
+        self.release_behind_late("input_error");
         self.clear_word(None, "input_error");
         if withheld == Some(self.actions_completed) {
             // The key in hand when the engine failed was an Enter or Tab the hook keeps back, and nothing has answered
@@ -471,7 +473,7 @@ impl EngineCore {
 
     /// Wake exactly when the pause delay elapses, at most every 0.5 s.
     pub fn loop_timeout(&self) -> f64 {
-        if self.field_wait.is_some() {
+        if self.field_wait.is_some() || self.behind_late_until.is_some() {
             return FIELD_CATCH_UP_RETRY_SECONDS;
         }
         let Some(last_input) = self.last_word_input_at.filter(|_| self.pause_correction_pending) else {

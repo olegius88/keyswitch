@@ -372,6 +372,13 @@ impl EngineCore {
         if self.shared.sensitive_context_window().is_some() {
             return Ok(());
         }
+        if self.owed_late_letter() {
+            // Typed by a correction before an Enter that has gone on since: taken for the start of the line after that
+            // Enter, it made a word of characters that are not there, and a correction of that word deleted others.
+            self.clear_word(None, "late_key_after_its_action");
+            self.untracked_token = !Self::_is_boundary(&event);
+            return Ok(());
+        }
         if self.untracked_token {
             if Self::_is_boundary(&event) {
                 self.untracked_token = false;

@@ -256,7 +256,6 @@ impl EngineCore {
         let queued = self.shared.take_queued();
         let mut late = rollover.clone();
         let mut kept: Vec<QueueItem> = Vec::new();
-        let mut action: Option<&Stroke> = None;
         let mut refusal: &'static str = rollover.iter().find(|stroke| !Self::_late_text_key(stroke)).map_or("", |stroke| Self::_late_key_kind(stroke));
         for item in &queued {
             match item {
@@ -277,7 +276,6 @@ impl EngineCore {
                         // pressed after it: nothing stands after the word because of it, and it is answered once this
                         // correction lands. Taken for a key typed after the word, it stopped the correction: `ytn`, a
                         // space and Enter typed faster than the engine took them sent `ytn` (a review, 12.11.2026).
-                        action = Some(key);
                         kept.push(item.clone());
                     } else if Self::_late_text_key(key) && Self::_safe_text_stroke(key) {
                         late.push(key.clone());
@@ -293,18 +291,31 @@ impl EngineCore {
                 }
             }
         }
-        if let Some(action) = action.filter(|_| !late.is_empty() && refusal.is_empty()) {
-            // The letters typed after the word are deleted with it and typed again, and come back through the hook as
-            // keys just typed: behind the Enter that already waits in the queue, though they stand before it in the
-            // window. The engine would then take them for the start of the line after the Enter. The correction is
-            // given up as it was when the Enter itself stopped it, and the journal names that key as before.
-            refusal = Self::_late_key_kind(action);
-        }
         refusal.clone_into(&mut self.late_refusal);
         let usable = refusal.is_empty();
         if !usable || late.is_empty() {
             self.shared.put_back(queued);
             return if usable { Some(Vec::new()) } else { None };
+        }
+        let action = kept.iter().enumerate().find_map(|(place, item)| match item {
+            QueueItem::Key(key) if key.deferred => Some((place, key.clone())),
+            QueueItem::Key(_) | QueueItem::LayoutSelection(_) | QueueItem::Stop => None,
+        });
+        if let Some((place, action)) = action {
+            // The letters typed after the word are deleted with it and typed again, and come back through the hook as
+            // keys just typed: at the end of the queue, behind the Enter that already waits there, though they stand
+            // before it in the window. The engine would take them for the start of the line after the Enter.
+            if plan.mode == EARLY_PLAN_MODE {
+                // A switch planned on the first letters of a word whose other letters and Enter are all typed: the
+                // Enter decides the whole word a moment later, and the switch is given up as before.
+                Self::_late_key_kind(&action).clone_into(&mut self.late_refusal);
+                self.shared.put_back(queued);
+                return None;
+            }
+            // That Enter, and what was queued after it, is queued again behind the last of the letters. Such a correction
+            // used to be given up: `ytn ghbdtn` and Enter typed faster than the engine took the keys sent the words as
+            // typed, unless the Enter then found the whole phrase to correct.
+            self.shared.put_behind(late.len(), kept.split_off(place));
         }
         self.shared.put_back(kept);
         if !rollover.is_empty() {
@@ -574,6 +585,9 @@ impl EngineCore {
                 "text_verified": false,
                 "error": error.to_string(),
             );
+            // The keys that waited for letters typed again wait no more: what the correction did type has come back or
+            // is owed (`owed_late_letter`).
+            self.release_behind_late("correction_failed");
             self.note_unconfirmed_switch(&error);
             self.early_switch_origin = None;
             self.early_switch_at = None;
@@ -591,6 +605,10 @@ impl EngineCore {
             return false;
         }
         let late = late.unwrap_or_default();
+        if self.shared.waits_behind() {
+            // The letters are typed: the time they have to come back starts now, not while the layout was switched.
+            self.behind_late_until = Some(self.monotonic() + LATE_KEYS_RETURN_SECONDS);
+        }
         let typed_events = self.shared.typed_events.load(Ordering::Relaxed);
         let typed_presses = self.shared.typed_presses.load(Ordering::Relaxed);
         // A word converted before a kept neighbour leaves the layout where the neighbour was typed.

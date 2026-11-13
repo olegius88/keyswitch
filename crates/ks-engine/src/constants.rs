@@ -69,6 +69,17 @@ pub const ENGINE_WORKER_JOIN_TIMEOUT_SECONDS: f64 = 2.0;
 pub const FIELD_CATCH_UP_RETRY_SECONDS: f64 = 0.025;
 pub const HOOK_SILENCE_MS: i64 = 10000;
 pub const INPUT_DELAY_REPORT_INTERVAL_SECONDS: f64 = 60.0;
+/// The mode of a plan made on the first letters of a word, before the word is over.
+pub const EARLY_PLAN_MODE: &str = "early";
+/// How long an Enter or Tab the hook keeps back waits behind the letters a correction types again for those letters to
+/// come back through the hook, counted from the moment the correction has typed them. On Windows and Wayland they are
+/// back by then; on macOS the event tap reports them a moment later. Letters that have not come back by then are not
+/// waited for: the key goes on without them.
+pub const LATE_KEYS_RETURN_SECONDS: f64 = 0.25;
+/// How long a letter that did not come back in that time is still taken for one of those letters when it does come:
+/// it stands before the Enter that went on without it, and is no letter of the line after that Enter. Short, because a
+/// letter the person types in that time is taken for one of them too, and the word it begins is left as typed.
+pub const LATE_KEYS_OWED_SECONDS: f64 = 0.5;
 pub const LATE_STROKE_GRACE_SECONDS: f64 = 0.5;
 /// The layout switch key (`detection.layout_switch_key`) switches the layout, and the conversion key
 /// (`detection.convert_last_key`) converts, when it comes up at most this long after it went down. Longer, it was held for

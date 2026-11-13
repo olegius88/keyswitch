@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK};
 use ks_backend::{BackendError, BackendProbe, FieldContext, FieldReader, FieldRole, FocusInfo, Injection, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
-use ks_engine::engine::{CorrectionPlan, EngineCore, Strokes};
+use ks_engine::engine::{CorrectionPlan, EngineCore, QueueItem, Strokes};
 use ks_replay::harness::{Bundle, FakeClock, KEYS, PAUSE_KEYCODE};
 
 /// An Enter or Tab kept back is answered well within this once every key is up.
@@ -161,6 +161,12 @@ struct DeskState {
     /// The field gives no answer at all, as UI Automation does at times.
     reader_silent: bool,
     failing: bool,
+    /// The letters a correction types again do not reach the hook while it is typed: the engine hears of them when
+    /// `return_lost` says so, as an event tap that reports them late does, or never.
+    late_lost: bool,
+    lost_late: Vec<KeyEvent>,
+    /// Keys the person presses or lets go of while a correction is typed, before its letters have come back.
+    during_correction: Vec<Raw>,
     /// Asking for the program in front stops whoever asks, as an error nobody foresaw does.
     panicking: bool,
     /// The same in the middle of a correction: the hook holds the keys by then.
@@ -466,6 +472,9 @@ impl Desk {
                 reader_lag: 0,
                 reader_silent: false,
                 failing: false,
+                late_lost: false,
+                lost_late: Vec::new(),
+                during_correction: Vec::new(),
                 panicking: false,
                 panicking_correction: false,
                 failing_actions: false,
@@ -496,6 +505,17 @@ impl Desk {
 
     fn key(&self, raw: Raw) {
         self.lock().hook(raw, false);
+    }
+
+    /// The letters `late_lost` kept from the hook reach it now.
+    fn return_lost(&self) {
+        let (listener, events) = {
+            let mut state = self.lock();
+            (state.listener.clone().expect("started"), std::mem::take(&mut state.lost_late))
+        };
+        for event in events {
+            listener(event);
+        }
     }
 }
 
@@ -658,16 +678,36 @@ impl InputBackend for Desk {
         state.clock.advance(seconds);
         let line = format!("a correction erases «{erased_text}» and types «{typed_text}», layout {final_group}, {} late; the window shows «{}»", late.len(), state.shown());
         state.note(line);
+        // What the person does while the correction is typed reaches the hook before the letters typed again or after
+        // them: an Enter kept back may be let go at either moment, and that key-up is reported at once. Every other
+        // correction takes the keys first; no dice is thrown for it, so a walk meets the keys it met before this was
+        // told apart (two walks of the dice thrown here, 346 and 411, are in the notes of 13.11.2026: an Enter that
+        // waited a second, and a letter typed before another window came to the front taken for the first of a word
+        // there).
+        for raw in std::mem::take(&mut state.during_correction) {
+            state.hook(raw, false);
+        }
+        let before = state.injections % 2 == 1;
+        if before {
+            state.rush();
+        }
         // The late keys come back through the hook as keys of the person's, and so the engine hears of them again.
-        if let Some(listener) = state.listener.clone() {
-            for stroke in late {
-                let character = stroke.character_for(final_group).to_owned();
-                let pressed = KeyEvent { pressed: true, key_name: character.clone(), character, group: final_group, timestamp: state.stamp(), ..stroke.clone() };
-                listener(pressed.clone());
-                listener(KeyEvent { pressed: false, ..pressed });
+        let mut returning: Vec<KeyEvent> = Vec::new();
+        for stroke in late {
+            let character = stroke.character_for(final_group).to_owned();
+            let pressed = KeyEvent { pressed: true, key_name: character.clone(), character, group: final_group, timestamp: state.stamp(), ..stroke.clone() };
+            returning.extend([pressed.clone(), KeyEvent { pressed: false, ..pressed }]);
+        }
+        if state.late_lost {
+            state.lost_late.extend(returning);
+        } else if let Some(listener) = state.listener.clone() {
+            for event in returning {
+                listener(event);
             }
         }
-        state.rush();
+        if !before {
+            state.rush();
+        }
         Ok(state.release_held())
     }
 }
@@ -886,11 +926,18 @@ fn script(dice: &mut Dice) -> Vec<Act> {
 }
 
 fn drain(core: &mut EngineCore) {
-    while core.shared.qsize() != 0 {
+    loop {
+        while core.shared.qsize() != 0 {
+            core.turn(0.0);
+        }
+        // The queue is empty: this turn is the timers'.
         core.turn(0.0);
+        // What a timer's correction let go of is in the queue now (an Enter pressed while the correction was typed), and
+        // the live loop takes it at once: left for the next call, it waited for as long as the person then paused.
+        if core.shared.qsize() == 0 {
+            break;
+        }
     }
-    // The queue is empty: this turn is the timers'.
-    core.turn(0.0);
 }
 
 fn idle(core: &mut EngineCore, clock: &FakeClock, seconds: f64) {
@@ -1507,8 +1554,9 @@ fn an_enter_is_answered_when_the_wait_of_an_earlier_word_ends() {
 
 /// A word, its space and Enter typed faster than the engine takes them: the Enter the hook keeps back is in the engine's
 /// queue when the word is about to be corrected. It has not reached the window and the hook holds every key after it, so
-/// the word is corrected and the Enter follows. With letters typed between the space and the Enter the correction is
-/// given up: typed again, they would come back to the engine behind that Enter, though they stand before it.
+/// the word is corrected and the Enter follows. Letters typed between the space and the Enter are typed again after the
+/// word and come back to the engine as keys just typed: in front of that Enter, as they stand in the window. They used to
+/// come back behind it, so such a correction was given up and the words were sent as typed.
 #[test]
 fn an_enter_already_in_the_queue_does_not_stop_the_correction_before_it() {
     let mut bundle = Bundle::load(None);
@@ -1534,31 +1582,50 @@ fn an_enter_already_in_the_queue_does_not_stop_the_correction_before_it() {
         assert_eq!(scene.shown(), "да |");
         scene.ends_clean(&mut bundle);
     }
-    // Letters between the space and the Enter, all of it in the queue: the word stays as typed, the Enter goes on, and
-    // the next line is corrected as any other.
-    let mut scene = Scene::new(&mut bundle, true, false);
-    scene.text("нет", 1);
-    scene.raw(Raw { pressed: true, keycode: space, name: "" });
+    // Letters between the space and the Enter, all of it in the queue: the word is corrected, the letters are typed again
+    // after it in the layout it was corrected to, the Enter follows them, and the next line is corrected as any other.
     let ok = [key_for('o', 0), key_for('k', 0)].map(|key| key.expect("a key of the keyboard").keycode);
-    for raw in [
-        Raw { pressed: false, keycode: space, name: "" },
-        Raw { pressed: true, keycode: ok[0], name: "" },
-        Raw { pressed: false, keycode: ok[0], name: "" },
-        Raw { pressed: true, keycode: ok[1], name: "" },
-        Raw { pressed: false, keycode: ok[1], name: "" },
-        Raw { pressed: true, keycode: RETURN_KEYCODE, name: "Return" },
-        Raw { pressed: false, keycode: RETURN_KEYCODE, name: "Return" },
-    ] {
+    // The Enter is let go before the engine takes any of it, or while the correction is typed: that key-up is reported
+    // at once, and queued in front of the Enter that waits behind the letters, it left the Enter pressed for ever in the
+    // engine's books (two seconds of a keyboard kept back, and the Enter dropped).
+    for let_go_during in [false, true] {
+        let mut scene = Scene::new(&mut bundle, true, false);
+        scene.text("нет", 1);
+        scene.raw(Raw { pressed: true, keycode: space, name: "" });
+        for raw in after_the_space(space, "привет", 1) {
+            scene.clock.advance(0.03);
+            scene.desk.key(raw);
+        }
+        if let_go_during {
+            scene.desk.lock().during_correction.push(RETURN_UP);
+        } else {
+            scene.clock.advance(0.03);
+            scene.desk.key(RETURN_UP);
+        }
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.desk.lock().submitted, ["нет привет"], "let go while the correction is typed: {let_go_during}");
+        assert_eq!(scene.desk.lock().dropped_actions, 0);
+        assert_eq!(scene.desk.lock().injections, 1, "one correction: the second word came back in the layout of the first");
+        scene.text("да ", 1);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "да |");
+        scene.ends_clean(&mut bundle);
+    }
+    // A word of one letter that waits for the word after it, all of it in the queue: the phrase is corrected before the
+    // Enter (the Python engine's `test_contextual_phrase_is_corrected_before_enter_is_delivered`, whose recorded trace
+    // gave the first correction up for the Enter in the queue and made one of the phrase at the Enter).
+    let mut scene = Scene::new(&mut bundle, true, false);
+    scene.text("я", 1);
+    scene.raw(Raw { pressed: true, keycode: space, name: "" });
+    for raw in after_the_space(space, "сегодня", 1).into_iter().chain([RETURN_UP]) {
         scene.clock.advance(0.03);
         scene.desk.key(raw);
     }
     drain(&mut scene.core);
     scene.idle(1.0);
-    assert_eq!(scene.desk.lock().submitted, ["ytn ok"]);
+    assert_eq!(scene.desk.lock().submitted, ["я сегодня"]);
     assert_eq!(scene.desk.lock().dropped_actions, 0);
-    scene.text("да ", 1);
-    scene.idle(1.0);
-    assert_eq!(scene.shown(), "да |");
     scene.ends_clean(&mut bundle);
     // The same with a capital among the letters: the Shift pressed for it has stopped the correction already.
     let mut scene = Scene::new(&mut bundle, true, false);
@@ -1582,6 +1649,170 @@ fn an_enter_already_in_the_queue_does_not_stop_the_correction_before_it() {
     scene.idle(1.0);
     assert_eq!(scene.desk.lock().submitted, ["ytn oK"]);
     assert_eq!(scene.desk.lock().dropped_actions, 0);
+    scene.ends_clean(&mut bundle);
+    bundle.clean();
+}
+
+/// A lone letter that opens a message is corrected at its space, and waits for the word after it all the same: a space
+/// typed after that word before the engine takes the first one stands in the window, and unlike a letter it is not typed
+/// again, so the correction of the letter is given up. The letter is then decided with the word after it, at that word's
+/// space: `z ctujlyz ` typed faster than the engine takes the keys is `я сегодня `.
+#[test]
+fn a_lone_letter_left_as_typed_is_corrected_with_the_word_after_it() {
+    let mut bundle = Bundle::load(None);
+    let space = key_for(' ', 0).expect("the space bar").keycode;
+    for holds in [false, true] {
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        let mut keys = vec![key_for('я', 1).expect("a key of the keyboard").keycode, space];
+        keys.extend("сегодня".chars().map(|character| key_for(character, 1).expect("a key of the keyboard").keycode));
+        keys.push(space);
+        for keycode in keys {
+            for pressed in [true, false] {
+                scene.clock.advance(0.03);
+                scene.desk.key(Raw { pressed, keycode, name: "" });
+            }
+        }
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "я сегодня |", "the hook keeps keys back: {holds}");
+        scene.ends_clean(&mut bundle);
+    }
+}
+
+/// The key-up of the space, the keys of a word as someone who means `layout` presses them, and Enter going down: what a
+/// person types after the space of a word while the engine is still behind.
+fn after_the_space(space: u32, word: &str, layout: usize) -> Vec<Raw> {
+    let mut keys = vec![Raw { pressed: false, keycode: space, name: "" }];
+    for character in word.chars() {
+        let keycode = key_for(character, layout).expect("a key of the keyboard").keycode;
+        keys.extend([Raw { pressed: true, keycode, name: "" }, Raw { pressed: false, keycode, name: "" }]);
+    }
+    keys.push(Raw { pressed: true, keycode: RETURN_KEYCODE, name: "Return" });
+    keys
+}
+
+const RETURN_UP: Raw = Raw { pressed: false, keycode: RETURN_KEYCODE, name: "Return" };
+
+/// An Enter that waits behind letters a correction types again is not left waiting when they do not come: the correction
+/// failed and typed nothing, or the letters were typed and the hook has not reported them a quarter of a second later.
+/// The Enter goes on, and the line after it is the engine's again. Letters that come back after that are of the line the
+/// Enter sent: taken for the start of the next line, they made a word of characters that are not there, and the space
+/// after them deleted what was.
+#[test]
+fn an_enter_behind_letters_typed_again_does_not_wait_for_letters_that_do_not_come() {
+    let mut bundle = Bundle::load(None);
+    let space = key_for(' ', 0).expect("the space bar").keycode;
+    for (lost, sent) in [(false, "ytn world"), (true, "нет цщкдв")] {
+        let mut scene = Scene::new(&mut bundle, true, false);
+        scene.text("нет", 1);
+        scene.raw(Raw { pressed: true, keycode: space, name: "" });
+        {
+            let mut state = scene.desk.lock();
+            state.late_lost = lost;
+            state.failing = !lost;
+        }
+        // The second word is English: typed again after `нет` it reads `цщкдв`, which the engine would turn back.
+        for raw in after_the_space(space, "world", 0).into_iter().chain([RETURN_UP]) {
+            scene.clock.advance(0.03);
+            scene.desk.key(raw);
+        }
+        drain(&mut scene.core);
+        // While the Enter waits for the letters the engine wakes often enough to let it go on time.
+        assert_eq!(scene.core.loop_timeout() < 0.1, lost, "the letters were lost: {lost}");
+        scene.idle(0.5);
+        assert_eq!(scene.desk.lock().submitted, [sent], "the letters were lost: {lost}");
+        assert_eq!(scene.desk.lock().dropped_actions, 0, "the letters were lost: {lost}");
+        if lost {
+            // The letters come back now, behind the Enter that went on without them, and a space follows.
+            scene.desk.return_lost();
+            drain(&mut scene.core);
+            scene.tap(space, "");
+            scene.idle(1.0);
+            assert_eq!(scene.shown(), " |", "nothing of the line before is corrected on this one");
+        }
+        scene.desk.lock().late_lost = false;
+        scene.text("да ", 1);
+        scene.idle(1.0);
+        assert!(scene.shown().ends_with("да |"), "the letters were lost: {lost}: {}", scene.shown());
+        scene.ends_clean(&mut bundle);
+    }
+    // The hook reports the letters a moment after the correction typed them, as the event tap of macOS does: the Enter
+    // has waited for them, the engine takes the word they make, and the Enter follows.
+    let mut scene = Scene::new(&mut bundle, true, false);
+    scene.text("нет", 1);
+    scene.raw(Raw { pressed: true, keycode: space, name: "" });
+    scene.desk.lock().late_lost = true;
+    for raw in after_the_space(space, "привет", 1).into_iter().chain([RETURN_UP]) {
+        scene.clock.advance(0.03);
+        scene.desk.key(raw);
+    }
+    drain(&mut scene.core);
+    assert!(scene.desk.lock().submitted.is_empty(), "the Enter waits for the letters");
+    scene.idle(0.1);
+    scene.desk.lock().late_lost = false;
+    scene.desk.return_lost();
+    drain(&mut scene.core);
+    scene.idle(1.0);
+    assert_eq!(scene.desk.lock().submitted, ["нет привет"]);
+    assert_eq!(scene.desk.lock().dropped_actions, 0);
+    scene.ends_clean(&mut bundle);
+    bundle.clean();
+}
+
+/// A switch planned on the first letters of a word, with the rest of the word and the Enter typed already: the Enter
+/// decides the whole word a moment later, so the switch is given up and nothing is typed twice.
+#[test]
+fn a_switch_on_the_first_letters_is_left_to_the_enter_that_is_already_typed() {
+    let mut bundle = Bundle::load(None);
+    let mut scene = Scene::new(&mut bundle, true, false);
+    let mut keys: Vec<Raw> = Vec::new();
+    for character in "привет".chars() {
+        let keycode = key_for(character, 1).expect("a key of the keyboard").keycode;
+        keys.extend([Raw { pressed: true, keycode, name: "" }, Raw { pressed: false, keycode, name: "" }]);
+    }
+    keys.extend([Raw { pressed: true, keycode: RETURN_KEYCODE, name: "Return" }, RETURN_UP]);
+    for raw in keys {
+        scene.clock.advance(0.03);
+        scene.desk.key(raw);
+    }
+    drain(&mut scene.core);
+    scene.idle(1.0);
+    assert_eq!(scene.desk.lock().submitted, ["привет"]);
+    assert_eq!(scene.desk.lock().injections, 1, "the word is corrected once, at its Enter");
+    assert_eq!(scene.desk.lock().dropped_actions, 0);
+    scene.ends_clean(&mut bundle);
+    bundle.clean();
+}
+
+/// The keys that wait behind letters typed again, at the queue itself: the key-up of an Enter that waits there follows
+/// its press even when it reached the queue first, and keys that still waited for an earlier correction go on before
+/// others take their place.
+#[test]
+fn keys_parked_behind_letters_keep_their_order() {
+    let mut bundle = Bundle::load(None);
+    let scene = Scene::new(&mut bundle, true, false);
+    let shared = scene.core.shared.clone();
+    let key = |pressed: bool, keycode: u32, name: &str| KeyEvent { pressed, keycode, key_name: name.to_owned(), characters: vec![String::new(), String::new()], ..KeyEvent::default() };
+    let order = || -> Vec<(bool, String)> {
+        shared.take_queued().iter().filter_map(|item| if let QueueItem::Key(key) = item { Some((key.pressed, key.key_name.clone())) } else { None }).collect()
+    };
+    let parked = |name: &str| vec![QueueItem::Key(Arc::new(KeyEvent { deferred: true, ..key(true, RETURN_KEYCODE, name) }))];
+    // The Enter was let go after the queue was taken and before the Enter was parked: its key-up is in the queue.
+    shared.enqueue(key(false, 38, "a"));
+    shared.enqueue(key(false, RETURN_KEYCODE, "Return"));
+    shared.put_behind(1, parked("Return"));
+    assert!(shared.waits_behind());
+    shared.enqueue(key(true, 38, "a"));
+    assert!(!shared.waits_behind());
+    assert_eq!(order(), [(false, "a".to_owned()), (true, "a".to_owned()), (true, "Return".to_owned()), (false, "Return".to_owned())]);
+    // Two letters awaited and one come: the keys of a second correction are parked, and the first ones go on.
+    shared.put_behind(2, parked("Return"));
+    shared.enqueue(key(true, 38, "a"));
+    shared.put_behind(1, parked("Tab"));
+    assert_eq!(order(), [(true, "a".to_owned()), (true, "Return".to_owned())]);
+    assert_eq!(shared.release_behind(), Some(1));
+    assert_eq!(shared.release_behind(), None);
+    assert_eq!(order(), [(true, "Tab".to_owned())]);
     scene.ends_clean(&mut bundle);
     bundle.clean();
 }
