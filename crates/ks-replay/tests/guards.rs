@@ -20,7 +20,17 @@ const BOUNDARIES: &[&str] = &[" ", ",", ".", "Return", "Tab", "deferred Return",
 
 const STATES: usize = 18;
 
+/// The engine writes its technical log: the lines that say why a correction was not made run only then.
+fn log_technically(session: &mut Session) {
+    session.core.settings.set("diagnostics.technical_logging", json!(true), false).expect("in memory");
+}
+
 fn press(session: &mut Session, character: char) {
+    press_in(session, character, 0);
+}
+
+/// A press of the key of `character` that the hook saw on its way to `window`; 0 for a hook that names none.
+fn press_in(session: &mut Session, character: char, window: i64) {
     let Some((key, group)) = KEYS.iter().find_map(|key| Some((key, key.characters.iter().position(|typed| *typed == character)?))) else {
         return;
     };
@@ -35,6 +45,7 @@ fn press(session: &mut Session, character: char) {
         characters: key.strings(),
         group: session.backend.group(),
         state: if key.shift { SHIFT_MASK } else { 0 },
+        window,
         ..KeyEvent::default()
     });
 }
@@ -103,7 +114,7 @@ fn a_word_meets_everything_at_its_boundary() {
                 session.recovers = true;
                 let backend = session.backend.clone();
                 session.core.context_policy.reader = Some(Arc::new(CaretReader { backend }));
-                session.core.settings.set("diagnostics.technical_logging", json!(true), false).expect("in memory");
+                log_technically(&mut session);
                 // A word typed before it, so that the word has something to go with.
                 if (index + place).is_multiple_of(2) {
                     type_text(&mut session, "ytn ");
@@ -194,7 +205,7 @@ fn a_waiting_word_settles_only_with_nothing_in_its_way() {
                 session.recovers = true;
                 let backend = session.backend.clone();
                 session.core.context_policy.reader = Some(Arc::new(CaretReader { backend }));
-                session.core.settings.set("diagnostics.technical_logging", json!(true), false).expect("in memory");
+                log_technically(&mut session);
                 type_text(&mut session, first);
                 type_text(&mut session, " ");
                 if session.core.context_waiting.is_some() {
@@ -332,6 +343,51 @@ fn a_quote_closed_after_a_word_is_a_quote_at_a_pause() {
                 bundle.give_back(session);
             }
         }
+    }
+    bundle.clean();
+}
+
+/// A correction erases no key the hook saw on its way to another window than the one in front. KeySwitch's own window in
+/// front is no change of the window the user works in, so the word typed there is still the engine's: asked to convert
+/// it, the engine typed the conversion into its own window. While the backend names no window in front, a key is a key
+/// of the window in front whatever its hook named.
+#[test]
+fn a_word_of_another_window_is_not_corrected_in_the_window_in_front() {
+    let mut bundle = Bundle::load(None);
+    for own in [false, true] {
+        let mut session = bundle.session("app", 0, Vec::new());
+        log_technically(&mut session);
+        for character in "ytn".chars() {
+            press_in(&mut session, character, 1);
+        }
+        assert!(session.backend.corrections().is_empty(), "three letters are not converted as they are typed");
+        session.backend.set_own(own);
+        session.backend.focus(if own { 2 } else { 1 }, "app");
+        end_word(&mut session, "pause");
+        session.idle(1.0);
+        assert_eq!(session.backend.corrections().len(), usize::from(!own), "KeySwitch's own window in front: {own}");
+        bundle.give_back(session);
+    }
+
+    let mut session = bundle.session("app", 0, Vec::new());
+    session.backend.focus(0, "app");
+    for character in "ytn ".chars() {
+        press_in(&mut session, character, 7);
+    }
+    assert_eq!(session.backend.corrections().len(), 1);
+    bundle.give_back(session);
+
+    // A backend that names the window for a key and a field of it for the engine (Windows): a word typed into the next
+    // field of one window is a word of the window in front, and a word of another window is not.
+    for (window, corrected) in [(7, 1), (8, 0)] {
+        let mut session = bundle.session("app", 0, Vec::new());
+        session.backend.set_key_window(Some(7));
+        session.backend.focus(70, "app");
+        for character in "ytn ".chars() {
+            press_in(&mut session, character, window);
+        }
+        assert_eq!(session.backend.corrections().len(), corrected, "typed into window {window}, window 7 in front");
+        bundle.give_back(session);
     }
     bundle.clean();
 }

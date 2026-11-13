@@ -53,6 +53,10 @@ pub struct KeyEvent {
     /// Injected by another program (remote control, a macro, an on-screen keyboard),
     /// not typed on this keyboard; only the Windows backend can tell.
     pub foreign: bool,
+    /// The window the key was on its way to when the hook saw it, as `InputBackend::key_window` names the window in
+    /// front; 0 when the hook does not say (a release on X11 and macOS, a key KeySwitch typed, a recorded trace). The
+    /// engine takes a key some time after it was pressed, and another window may have come to the front by then.
+    pub window: i64,
 }
 
 impl KeyEvent {
@@ -184,6 +188,13 @@ pub trait InputBackend: Send + Sync {
     fn switch_group(&self, group: i32) -> Result<(), BackendError>;
     fn active_application(&self) -> String;
     fn focused_window(&self) -> Option<FocusInfo>;
+    /// The window in front as the hook names it for a key (`KeyEvent::window`), where that is not the window
+    /// `focused_window` names; 0 for no window. Windows names the focused control for the engine, which a Tab changes
+    /// inside one window, and the window itself for a key: a key typed behind a Tab is stamped before the program has
+    /// taken the Tab, and is typed into the next field all the same.
+    fn key_window(&self) -> Option<i64> {
+        None
+    }
     fn probe(&self) -> BackendProbe;
     /// Types a correction and says how many key events it sent.
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError>;

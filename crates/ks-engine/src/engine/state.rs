@@ -238,7 +238,9 @@ impl EngineCore {
 
     /// Notice the user moving to another window.
     pub fn track_focus(&mut self) -> FocusChange {
-        let Some(focus) = self.shared.focused_window().filter(|focus| focus.window != 0) else {
+        let focus = self.shared.focused_window().filter(|focus| focus.window != 0);
+        self.window_in_front = focus.as_ref().map_or(0, |focus| focus.window);
+        let Some(focus) = focus else {
             return FocusChange { changed: false, ignore_layout: false };
         };
         if focus.own && !self.shared.test_field_focused() {
@@ -253,6 +255,22 @@ impl EngineCore {
             }
             _ => FocusChange { changed: false, ignore_layout: false },
         }
+    }
+
+    /// Whether the hook saw this key on its way to another window than the one `track_focus` has just found in front
+    /// (`KeyEvent::window`). The engine takes a key some time after it was pressed: a moment later as a rule, and long
+    /// after when it types a correction or reads a field meanwhile. A window that came to the front by itself in that
+    /// time (no click, no key) made the key a letter of the word typed there: `п` typed in one window and `шы` in the
+    /// next were the word `пшы`, and its correction erased a character more than the second window had (a walk of
+    /// `tests/integrity.rs`, 13.11.2026). A key of a hook that names no window is of the window in front, as it was,
+    /// and the backend is asked nothing more for it.
+    #[must_use]
+    pub fn typed_elsewhere(&self, event: &KeyEvent) -> bool {
+        if event.window == 0 {
+            return false;
+        }
+        let front = self.backend.key_window().unwrap_or(self.window_in_front);
+        front != 0 && event.window != front
     }
 
     /// The unfinished word and the last committed one stay in the old window.

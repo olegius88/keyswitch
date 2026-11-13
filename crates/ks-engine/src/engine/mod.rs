@@ -54,7 +54,7 @@ use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 pub(crate) use logging::technical_event;
 
@@ -109,6 +109,9 @@ pub struct EngineCore {
     pub context_wait_sequence: i64,
     pub correction_sequence: i64,
     pub late_refusal: String,
+    /// The window in front as `track_focus` last read it, an own one included; 0 when the backend named none. A key the
+    /// hook saw on its way to a window is compared with it (`typed_elsewhere`).
+    pub window_in_front: i64,
     /// Until when keys wait behind the letters a correction types again (`Shared::put_behind`).
     pub behind_late_until: Option<f64>,
     /// Letters of such a correction that had not come back when the keys behind them went on, and until when one that
@@ -272,6 +275,7 @@ impl EngineCore {
             context_wait_sequence: 0,
             correction_sequence: 0,
             late_refusal: String::new(),
+            window_in_front: 0,
             behind_late_until: None,
             late_letters_owed: 0,
             late_letters_owed_until: 0.0,
@@ -450,6 +454,22 @@ impl EngineCore {
 
     pub fn minimum_word_length(&self) -> i64 {
         self.bounded_setting("detection.minimum_length", DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX).to::<i64>()
+    }
+
+    /// `known_of` for an orthotactic model read beside the dictionaries, before they are there: the answer comes from
+    /// `dictionaries` once they are set, which `KeySwitchEngine::new` does while it alone holds the model. `locales`
+    /// are the locales the dictionaries are asked for, which is what `known_of` sees in them once they are read: a
+    /// model names the locale it was asked for.
+    #[must_use]
+    pub fn known_later(locales: &[String], dictionaries: &Arc<OnceLock<Vec<Arc<LanguageModel>>>>) -> Option<KnownWord> {
+        let same = locales.iter().map(String::as_str).eq(ORTHO_LOCALES.iter().map(|(_, locale)| *locale));
+        let dictionaries = dictionaries.clone();
+        same.then(|| -> KnownWord {
+            Arc::new(move |script, word| {
+                let group = ORTHO_LOCALES.iter().position(|(name, _)| *name == script).unwrap_or(0);
+                dictionaries.get().and_then(|models| models.get(group)).is_some_and(|model| model.score(word).known)
+            })
+        })
     }
 
     /// `known` of the policy built with an engine's models, as `KeySwitchEngine.__init__` hands it over: the orthotactic

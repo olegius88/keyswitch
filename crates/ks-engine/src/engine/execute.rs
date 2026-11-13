@@ -277,6 +277,9 @@ impl EngineCore {
                         // correction lands. Taken for a key typed after the word, it stopped the correction: `ytn`, a
                         // space and Enter typed faster than the engine took them sent `ytn` (a review, 12.11.2026).
                         kept.push(item.clone());
+                    } else if self.typed_elsewhere(key) {
+                        // The hook saw it on its way to another window: it does not stand after the word.
+                        refusal = "another_window";
                     } else if Self::_late_text_key(key) && Self::_safe_text_stroke(key) {
                         late.push(key.clone());
                     } else if refusal.is_empty() {
@@ -459,6 +462,17 @@ impl EngineCore {
         }
         if self.track_focus().changed {
             technical_event!(self.shared, "correction_aborted", "mode": plan.mode, "reason": "focus_changed");
+            return false;
+        }
+        let erased = plan.strokes.iter().chain(&plan.replaced_strokes).chain(&plan.replaced).chain(&plan.head).chain(&plan.trailing).chain(&plan.boundary);
+        if erased.into_iter().any(|stroke| self.typed_elsewhere(stroke)) {
+            // A key of this word went to another window than the one in front (KeySwitch's own window came to the
+            // front, which is no change of the window the user works in): its character is not there to erase.
+            // Nothing is typed, so an Enter kept back for this correction goes on: the backend passes it only to the
+            // window it was pressed for.
+            self.action_goes_on("key_of_another_window");
+            self.clear_word(None, "typed_in_another_window");
+            technical_event!(self.shared, "correction_aborted", "mode": plan.mode, "reason": "key_of_another_window");
             return false;
         }
         if self.shared.input_overflow.load(Ordering::Relaxed) {

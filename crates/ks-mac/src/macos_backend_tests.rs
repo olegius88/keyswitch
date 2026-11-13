@@ -402,6 +402,30 @@ fn a_filtered_key_is_withheld_and_so_is_its_release() {
     assert_eq!(events.lock().unwrap().len(), 4);
 }
 
+/// A press names the window in front as the tap answers it, as `focused_window` names it. A release, one of KeySwitch's
+/// own keys, a click and a turn of the wheel name none.
+#[test]
+fn a_press_names_the_window_in_front() {
+    let api = FakeMac::new();
+    let backend = backend(&api);
+    let (listener, events) = collector();
+    backend.set_listener(Some(listener));
+    let last = || events.lock().unwrap().last().cloned().unwrap();
+    assert!(!backend.handle_native(native(true, KEY_Z)));
+    assert_eq!((last().window, backend.focused_window().unwrap().window), (10, 10));
+    api.window.store(99, Ordering::SeqCst);
+    assert!(!backend.handle_native(native(false, KEY_Z)));
+    assert_eq!(last().window, 0);
+    assert!(!backend.handle_native(native(true, KEY_Z)));
+    assert_eq!(last().window, 99);
+    assert!(!backend.handle_native(NativeKeyEvent { injected: true, ..native(true, KEY_Z) }));
+    assert!(last().synthetic && last().window == 0);
+    assert!(!backend.handle_native(NativeKeyEvent { pointer: true, ..native(true, 0) }));
+    assert_eq!((last().key_name.as_str(), last().window), (POINTER_KEY_NAME, 0));
+    assert!(!backend.handle_native(NativeKeyEvent { event_type: EVENT_SCROLL_WHEEL, ..native(false, 0) }));
+    assert_eq!(last().window, 0);
+}
+
 #[test]
 fn the_backends_own_keys_are_never_filtered() {
     let api = FakeMac::new();

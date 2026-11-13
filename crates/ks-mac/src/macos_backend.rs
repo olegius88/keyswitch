@@ -909,6 +909,11 @@ impl Inner {
             synthetic: native.injected,
             deferred: false,
             foreign: false,
+            // The window in front as the tap answers: the key goes on to its window after this. A Mac names that window
+            // by the list of the windows on screen, a millisecond or two of the tap's time (1.2 ms with seventy windows
+            // on a 2017 MacBook Pro, 2.5 ms at worst of 600 calls, 13.11.2026), so it is asked for a key the user
+            // pressed: a release types nothing, and KeySwitch's own keys are not the engine's to place.
+            window: if native.pressed && !native.injected { self.api.focused_window() } else { 0 },
         };
         let repeated_answer = !event.synthetic && event.pressed && lock(&self.tap).consumed_keys.contains(&event.keycode);
         let consumed = self.consumes(&event);

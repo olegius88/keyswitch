@@ -438,6 +438,7 @@ fn key_event(value: &Value) -> KeyEvent {
         synthetic: a[8].as_bool().expect("flag"),
         deferred: a[9].as_bool().expect("flag"),
         foreign: a[10].as_bool().expect("flag"),
+        window: 0,
     }
 }
 
