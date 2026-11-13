@@ -184,8 +184,13 @@ pub trait MacAPI: Send + Sync {
     /// How many of the events the system took, in order.
     fn post_inputs(&self, inputs: &[NativeInput]) -> usize;
     fn active_application(&self) -> String;
-    fn focused_window(&self) -> i64;
-    fn window_process_id(&self, window: i64) -> i32;
+    /// The window in front and the process it belongs to. A Mac names its window in front by the list of every window on
+    /// screen, which takes a millisecond or two; asked for the two apart, a key cost two such lists where one answers
+    /// both (`focused_window` is asked twice for every key the engine takes).
+    fn front_window(&self) -> (i64, i32);
+    fn focused_window(&self) -> i64 {
+        self.front_window().0
+    }
     fn current_process_id(&self) -> i32;
     fn input_anchor(&self) -> Option<ScreenAnchor>;
     fn caps_lock_enabled(&self) -> bool;
@@ -560,11 +565,11 @@ impl InputBackend for MacBackend {
 
     fn focused_window(&self) -> Option<FocusInfo> {
         let api = &self.inner.api;
-        let window = api.focused_window();
+        let (window, owner) = api.front_window();
         if window == 0 {
             return None;
         }
-        let own = api.window_process_id(window) == api.current_process_id();
+        let own = owner == api.current_process_id();
         Some(FocusInfo { window, own, isolated_layout: api.layout_follows_window() })
     }
 

@@ -141,11 +141,9 @@ impl MacAPI for FakeMac {
     fn active_application(&self) -> String {
         "TextEdit".to_owned()
     }
-    fn focused_window(&self) -> i64 {
-        self.window.load(Ordering::SeqCst).bits::<i64>()
-    }
-    fn window_process_id(&self, window: i64) -> i32 {
-        if window == 99 { 4242 } else { 1 }
+    fn front_window(&self) -> (i64, i32) {
+        let window = self.window.load(Ordering::SeqCst).bits::<i64>();
+        (window, if window == 99 { 4242 } else { 1 })
     }
     fn current_process_id(&self) -> i32 {
         4242
