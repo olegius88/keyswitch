@@ -66,22 +66,31 @@ impl KeySwitchEngine {
         };
         let reader: Option<Arc<dyn FieldReader>> = context_reader.or_else(|| platform_reader.clone().map(|reader| -> Arc<dyn FieldReader> { reader }));
         // The program corrects nothing until all of this is read, and read one file after another it took about two
-        // seconds on a fast computer (11.11.2026). What does not need the dictionaries is read beside them: the intent
-        // model and the context model while the dictionaries load, the prefix indexes while the orthotactic model, which
-        // asks the dictionaries, is read after them. Every part is what it was, read by the same call.
+        // seconds on a fast computer (11.11.2026). So the four large files are read side by side: the dictionaries, the
+        // orthotactic model, the context model and the intent model, each on its own thread. The orthotactic model asks
+        // the dictionaries about words, but not while it is read: it is given an answer that waits for them
+        // (`known_later`), and nobody else holds the model until this thread joins it, which it does after the
+        // dictionaries stand in that answer. The prefix indexes, which need the dictionaries, follow them here. Every
+        // part is what it was, read by the same call.
         let models_dir = resources.resource_dir().join("models");
+        let wanted: Vec<String> = locales.into_iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()).collect();
         let (models, (intent_model, intent_model_status), context_policy, prefix_indexes) = std::thread::scope(|scope| -> EngineResult<_> {
             let intent = scope.spawn(|| resources.intent_model());
             let context = scope.spawn(|| ks_context::ContextModel::try_load(&models_dir));
+            let dictionaries: Arc<OnceLock<Vec<Arc<LanguageModel>>>> = Arc::new(OnceLock::new());
+            let known = EngineCore::known_later(&wanted, &dictionaries);
+            let ortho = scope.spawn(|| ContextPolicy::load_ortho(resources, known));
+            // Each dictionary on a thread of its own: a start reads them side by side.
+            let readings: Vec<_> = wanted.iter().map(|locale| scope.spawn(move || resources.engine_language_model(locale))).collect();
             let mut models = Vec::new();
-            for locale in locales.iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()) {
-                models.push(resources.engine_language_model(locale)?);
+            for reading in readings {
+                models.push(joined(reading)?);
             }
-            let dictionaries = models.clone();
-            let indexes = scope.spawn(move || dictionaries.iter().map(|model| resources.prefix_index(model)).collect::<Vec<_>>());
-            let ortho = ContextPolicy::load_ortho(resources, EngineCore::known_of(&models));
-            let context_policy = ContextPolicy::with_models(resources, reader, ortho, joined(context), Some(clock.clone()));
-            Ok((models, joined(intent), context_policy, joined(indexes)))
+            let indexes = models.iter().map(|model| resources.prefix_index(model)).collect::<Vec<_>>();
+            // Before the orthotactic model is joined, and so before anything can ask it a word.
+            let _ = dictionaries.set(models.clone());
+            let context_policy = ContextPolicy::with_models(resources, reader, joined(ortho), joined(context), Some(clock.clone()));
+            Ok((models, joined(intent), context_policy, indexes))
         })?;
         let core = EngineCore::from_parts(EngineParts {
             settings,
