@@ -281,8 +281,8 @@ impl NativeMacAPI {
         NativeMacAPI { state: Arc::new(State::default()) }
     }
 
-    /// The window id, its owning process and its program name.
-    fn front_window(&self) -> (i64, i32, String) {
+    /// The window id, its owning process and its program name, from one list of the windows on screen.
+    fn window_in_front(&self) -> (i64, i32, String) {
         let (focused, name) = frontmost_application();
         if focused == 0 {
             // Naming the wrong program is worse than naming none: the engine would apply another application's
@@ -460,16 +460,12 @@ impl MacAPI for NativeMacAPI {
     }
 
     fn active_application(&self) -> String {
-        self.front_window().2
+        self.window_in_front().2
     }
 
-    fn focused_window(&self) -> i64 {
-        self.front_window().0
-    }
-
-    fn window_process_id(&self, window: i64) -> i32 {
-        let (number, process, _) = self.front_window();
-        if number == window { process } else { 0 }
+    fn front_window(&self) -> (i64, i32) {
+        let (window, process, _) = self.window_in_front();
+        (window, process)
     }
 
     fn current_process_id(&self) -> i32 {

@@ -78,9 +78,9 @@ impl EngineCore {
         }
         self.take_hook_gap();
         self.follow_layout_tap(&event);
-        if event.pressed {
-            self.track_focus();
-        }
+        // Noticed once for this key: `observe_group_after` below is told of it, because a second look says the window
+        // did not change.
+        let focus = if event.pressed { self.track_focus() } else { FocusChange { changed: false, ignore_layout: false } };
         if event.key_name == "Pointer" {
             if event.pressed {
                 self.log_input_edit(&event, &self.backend.active_application());
@@ -199,7 +199,7 @@ impl EngineCore {
             // A key pressed before an early switch landed still reports the
             // old layout; that is a race, not the user switching back.
             if !elsewhere && !self.late_stroke_after_early_switch(&event) {
-                self.observe_group(i64::from(event.group), "keystroke");
+                self.observe_group_after(i64::from(event.group), "keystroke", focus);
             }
             self.pressed.insert(event.keycode);
             let now = self.monotonic();
