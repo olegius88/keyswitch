@@ -668,6 +668,10 @@ impl Inner {
             state: state_mask,
             timestamp: i64::from(native.timestamp),
             synthetic: native.injected,
+            // The window the desktop last named as the one in front: the helper types this key only after the answer
+            // given here, so the key is on its way there. A key the helper typed without asking has reached a window
+            // already, maybe another one by now, and KeySwitch's own keys are not the engine's to place.
+            window: if native.injected || native.delivered { 0 } else { self.api.focused_window() },
             ..KeyEvent::default()
         };
         let repeated_answer = !event.synthetic && event.pressed && self.state().consumed_keys.contains(&event.keycode);

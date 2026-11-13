@@ -750,6 +750,10 @@ impl InputBackend for WindowsBackend {
         self.inner.focused_window()
     }
 
+    fn key_window(&self) -> Option<i64> {
+        Some(self.inner.api.foreground_window())
+    }
+
     fn probe(&self) -> BackendProbe {
         self.inner.probe()
     }
@@ -1530,6 +1534,11 @@ impl Inner {
             synthetic: native.injected,
             deferred: false,
             foreign: native.foreign,
+            // The window this key is on its way to: the system has not queued it for a window yet. The window, not
+            // the focused control: a key typed behind a Tab is seen here before the program has taken the Tab, and goes
+            // to the next field. A key kept back comes here again when it is typed again, with the window of that
+            // moment. KeySwitch's own keys are not the engine's to place.
+            window: if native.injected { 0 } else { self.api.foreground_window() },
         };
         let repeated_answer = !event.synthetic && event.pressed && lock(&self.hook).consumed_keys.contains(event.keycode);
         let consumed = self.consumes(&event);
