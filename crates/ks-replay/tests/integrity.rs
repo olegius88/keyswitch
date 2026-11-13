@@ -1653,6 +1653,32 @@ fn an_enter_already_in_the_queue_does_not_stop_the_correction_before_it() {
     bundle.clean();
 }
 
+/// A lone letter that opens a message is corrected at its space, and waits for the word after it all the same: a space
+/// typed after that word before the engine takes the first one stands in the window, and unlike a letter it is not typed
+/// again, so the correction of the letter is given up. The letter is then decided with the word after it, at that word's
+/// space: `z ctujlyz ` typed faster than the engine takes the keys is `я сегодня `.
+#[test]
+fn a_lone_letter_left_as_typed_is_corrected_with_the_word_after_it() {
+    let mut bundle = Bundle::load(None);
+    let space = key_for(' ', 0).expect("the space bar").keycode;
+    for holds in [false, true] {
+        let mut scene = Scene::new(&mut bundle, holds, false);
+        let mut keys = vec![key_for('я', 1).expect("a key of the keyboard").keycode, space];
+        keys.extend("сегодня".chars().map(|character| key_for(character, 1).expect("a key of the keyboard").keycode));
+        keys.push(space);
+        for keycode in keys {
+            for pressed in [true, false] {
+                scene.clock.advance(0.03);
+                scene.desk.key(Raw { pressed, keycode, name: "" });
+            }
+        }
+        drain(&mut scene.core);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "я сегодня |", "the hook keeps keys back: {holds}");
+        scene.ends_clean(&mut bundle);
+    }
+}
+
 /// The key-up of the space, the keys of a word as someone who means `layout` presses them, and Enter going down: what a
 /// person types after the space of a word while the engine is still behind.
 fn after_the_space(space: u32, word: &str, layout: usize) -> Vec<Raw> {
