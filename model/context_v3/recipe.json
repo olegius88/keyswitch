@@ -1527,6 +1527,10 @@
         [
           "model/context_v1/captured/manifest.json",
           "tatoeba-chat-en-wrong-ru-line.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-common.json",
+          "so-common-train.jsonl.xz"
         ]
       ],
       "development": [
@@ -1564,8 +1568,8 @@
       "щк"
     ],
     "sample_weight": 1.0,
-    "token_cap": 16,
-    "convert_weight": 5.0,
-    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the common-reading head's class (context_action_features.common_question; a word the lexicon knows is left out) the engine asked while the train parts of ru.stackoverflow 2023, Tatoeba chat and UD Taiga were typed (the captured questions of model/context_v1/captured the short-token head reads: Russian tokens typed as meant, kept; English sentences typed in the Russian layout under a Russian line and English words in Russian messages typed in the Russian layout, converted), and for DEVELOPMENT the development parts of ru.stackoverflow 2023 typed the four ways, of Tatoeba chat in English typed in the Russian layout under a Russian sentence and of UD Taiga chat typed as meant (model/context_v3/captured/manifest-common.json, schema 2); at most token_cap frames of one token with one answer. The tokens of one half of each family of the battery crates/ks-replay/tests/common_readings.rs, by hash of their Cyrillic letters, give no frame (held_out): the battery counts them apart."
+    "token_cap": 64,
+    "convert_weight": 2.83,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the common-reading head's class (context_action_features.common_question; a word the lexicon knows is left out) the engine asked while the train parts of ru.stackoverflow 2023, Tatoeba chat and UD Taiga were typed (the captured questions of model/context_v1/captured the short-token head reads: Russian tokens typed as meant, kept; English sentences typed in the Russian layout under a Russian line and English words in Russian messages typed in the Russian layout, converted) and while the ru.stackoverflow training messages holding a token of the class the lexicon does not know were typed the four ways (ks-train select --class common, every developer-chat question left out; model/context_v3/captured/manifest-common.json), and for DEVELOPMENT the development messages of ru.stackoverflow 2023 selected the same way typed the four ways, of Tatoeba chat in English typed in the Russian layout under a Russian sentence and of UD Taiga chat typed as meant (model/context_v3/captured/manifest-common.json, schema 2); at most token_cap frames of one token with one answer. The tokens of one half of each family of the battery crates/ks-replay/tests/common_readings.rs, by hash of their Cyrillic letters, give no frame (held_out): the battery counts them apart."
   }
 }
