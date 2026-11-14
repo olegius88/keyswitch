@@ -4,7 +4,7 @@ use ks_context::context_action_features::{
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, brief_dominant, brief_question, brief_settled, capitals_question, cyrletter_question, dash_question, digit_dot_question,
     dotted_question, first_question, joined_parts, joined_question, kept_context_reachable, known_reply_question, latin_abbreviation_question, letter_question, letters_and_digits, nearest_count, quote_question,
     resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
-    variable_question, words_of,
+    upper_question, upper_shape, variable_question, words_of,
 };
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::context_action_features::{FeatureMap, extract_action_features};
@@ -20,6 +20,7 @@ const TOKENS: &[(&str, &str)] = &[
     ("tot", "еще"), ("ещу", "tot"), ("qr", "йк"), ("йк", "qr"), ("pr", "зк"), ("зк", "pr"), ("ci", "сш"), ("сш", "ci"), ("кз", "rp"), ("rp", "кз"), ("тыв", "nsd"), ("nsd", "тыв"), ("doesn't", "вщуытэе"), ("вщуытэе", "doesn't"),
     ("й", "q"), ("q", "й"), ("Й", "Q"), ("Q", "Й"), ("ъ", "]"), ("]", "ъ"), ("[", "х"), ("х", "["), ("ё", "`"), ("`", "ё"), ("é", "é"), ("中文", "中文"), ("тест", "ntcn"), ("ntcn", "тест"), ("Ntcn", "Тест"), ("NTCN", "ТЕСТ"), ("ТЕСТ", "NTCN"),
     ("n/a", "т.ф"), ("т.ф", "n/a"), ("I/O", "Ш.Щ"), ("usr/bin", "гык.ишт"), ("e.g.", "у.п."), ("т.к.", "n/r/"), ("n/r/", "т.к."),
+    ("USD", "ГЫВ"), ("ГЫВ", "USD"), ("США", "CIF"), ("CIF", "США"), ("ФСБ", "AC<"), ("AC<", "ФСБ"), ("ΑΒΓ", "ΑΒΓ"),
 ];
 
 const PLACES: &[&str] = &["", " ", "\n", "x ", "в ", "принимай все ", "Привет, как дела? ", "I use ", "the quick brown fox ", "git ", "x = 2 ", "seek() , ", "а = 1\n// ", "hello\n", "Hello world.\n\n", "ссылка https://x.y/ ", "123 "];
@@ -70,6 +71,8 @@ fn every_question_answers_for_every_token_in_every_place() {
             count(latin_abbreviation_question(original, alternative, before, &tables));
             count(letter_question(original, alternative, before));
             count(capitals_question(original, before));
+            count(upper_shape(original, alternative, before));
+            count(upper_question(original, alternative, before, &tables).unwrap_or(false));
             count(unknown_question(original, before, &tables));
             count(term_question(original, before, &tables));
             count(slip_question(original, before, &tables));

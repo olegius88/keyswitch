@@ -44,6 +44,9 @@ pub const MAX_CONTEXT_ALNUM_FREQUENCY_BYTES: usize = 2_097_152;
 // Largest table of short Russian tokens counted in web and news text that the short-token head reads.
 pub const MAX_CONTEXT_SHORT_FREQUENCY_BYTES: usize = 2_097_152;
 
+// Largest table of tokens spelled in capitals that the upper-case head reads.
+pub const MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES: usize = 4_194_304;
+
 // ---- constants/models.py
 
 // The context model's features. Feature schema 3 (context_action_features) and the frozen feature
@@ -450,6 +453,33 @@ pub const DIGIT_DOT_SIGN_LETTERS: &str = "ю";
 
 pub const DIGIT_DOT_SIGNS: &str = ".";
 
+// A token of UPPER_HEAD_MIN_LETTERS to UPPER_HEAD_MAX_LETTERS letters, all capitals, of one script, whose other reading is
+// letters too, with no letter before it in the field or with more Cyrillic letters than Latin ones before it, has evidence
+// of its own under this prefix: the upper-case head (context_action_features.upper_question). Every count the other heads
+// and the shared features read is caseless, and a word in capitals is another word: the installed pair of 0.71.2 kept 9 of
+// 74 Latin abbreviations typed in the Russian layout alone (`ЛЯЕ` for `KZT` at p=0.992: `ляе` is no word, but nothing said
+// `KZT` is one), converted `BYN` typed as meant into `ИНТ` at p=0.994 (the short-message head counted `инт` 217 times and
+// `byn` 6, none of them in capitals), turned `ЦА` sent alone into `WF` (the lone-word head, +10.8 to convert from caseless
+// counts) and left 40 of 56 Russian abbreviations typed in the English layout alone as typed (`CCCH` for `СССР` kept at
+// p=0.994; an authored battery on the engine, 10.11.2026). The head reads how often Russian web and news text and Russian
+// technical text spell each reading in capitals (CAPITALS_FREQUENCY_FILE), whether the Latin one is a currency code of
+// ISO 4217 and the Cyrillic one a form the Russian lexicon writes in capitals, how often Russian prose uses the Cyrillic
+// one in any case against how often English prose or Russian technical text use the Latin one (a word typed with Caps
+// Lock is that word: `YTN` for `НЕТ`), and no letters and no copy of the shared features: a head reading the letters of
+// abbreviations learned the corpus's kinds by heart (`ТЗ` became `NP`, the abbreviation head). The lone-word,
+// short-message and known-reply heads, which read caseless counts, no longer answer such a token.
+pub const UPPER_FEATURE_PREFIX: &str = "upper|";
+
+pub const UPPER_HEAD_MIN_LETTERS: usize = 2;
+
+pub const UPPER_HEAD_MAX_LETTERS: usize = 5;
+
+// The binary order of magnitude of a count is read up to this (`РФ` is spelled 84 627 times in capitals, 17 binary orders),
+// and the difference of two readings' orders up to UPPER_RATIO_BOUND either way.
+pub const UPPER_MAGNITUDE_MAX: i64 = 16;
+
+pub const UPPER_RATIO_BOUND: i64 = 8;
+
 // The "length" feature buckets every word length from here up together (schemas 2 and 3).
 pub const ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: usize = 6;
 
@@ -591,8 +621,8 @@ pub const MAX_CONTEXT_MODEL_FEATURES: usize = 50000;
 // (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
 // sign head (SIGN_FEATURE_PREFIX), the resume head (RESUME_FEATURE_PREFIX), the Cyrillic-letter head
 // (CYRLETTER_FEATURE_PREFIX), the dash head (DASH_FEATURE_PREFIX), the digit-dot head (DIGIT_DOT_FEATURE_PREFIX), the
-// quote head (QUOTE_FEATURE_PREFIX) and the known-reply head (KNOWN_REPLY_FEATURE_PREFIX), each with its own budget in
-// the recipe.
+// quote head (QUOTE_FEATURE_PREFIX), the known-reply head (KNOWN_REPLY_FEATURE_PREFIX) and the upper-case head
+// (UPPER_FEATURE_PREFIX), each with its own budget in the recipe.
 // Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 // and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 // MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.

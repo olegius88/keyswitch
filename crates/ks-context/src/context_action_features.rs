@@ -4,7 +4,7 @@
 //! name set twice keeps its first place, as in a Python `dict`. `FeatureMap` is an `IndexMap` for that.
 
 use ks_cast::To as _;
-use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX};
+use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, UPPER_HEAD_MIN_LETTERS, UPPER_HEAD_MAX_LETTERS, UPPER_MAGNITUDE_MAX, UPPER_RATIO_BOUND};
 use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, TERM_EDGE_SIGNS};
 use indexmap::IndexMap;
 use ks_text::layouts::LayoutPair;
@@ -639,6 +639,11 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
             let evidence = digit_dot_evidence(item, direction, &kept, tables);
             update(&mut kept, evidence);
         }
+        if upper_question(&item.original, &item.alternative, &item.field.before, tables)? {
+            // Nor a token in capitals waiting before a word kept as typed: `ФШ` (`AI`) before `курс` was left a suggestion
+            // at p=0.53 by the kept-neighbour weights alone. The upper-case head answers it beside every next word.
+            update(&mut kept, upper_evidence(item, direction, tables)?);
+        }
         return Ok(kept);
     }
     let mut result = FeatureMap::new();
@@ -813,6 +818,12 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
         // did reading whether the lexicon knows the token (corpora v62 and v63).
         update(&mut result, term_evidence(item, tables));
     }
+    if upper_question(&item.original, &item.alternative, &item.field.before, tables)? {
+        // The class the upper-case head answers: a token in capitals alone or after Russian text. Every count the shared
+        // features and the other heads read is caseless: `ЛЯЕ` (`KZT`) stayed at p=0.992, `BYN` typed as meant became
+        // `ИНТ` and `CCCH` (`СССР`) stayed. The head reads how often each reading is spelled in capitals.
+        update(&mut result, upper_evidence(item, direction, tables)?);
+    }
     Ok(result)
 }
 
@@ -900,11 +911,13 @@ fn latin_abbreviation_evidence(item: &ContextEvidence, direction: &str, tables: 
 /// A token of `ALONE_HEAD_LETTERS` letters, letters in both layouts, with no letter before or after it in the field, at a
 /// boundary that ends it for good: a message of one such word (`гш` for `ui`) sent, or left at a pause. At a space the
 /// next word may still come and decide it with its neighbour, so the frozen model's wait stands there. `хз` is no member:
-/// its Latin keys `[p` are no word.
+/// its Latin keys `[p` are no word. Nor is a token in capitals (`ЦА`, `UI`): the head read caseless counts and turned `ЦА`
+/// sent alone into `WF`; the upper-case head answers it (`upper_shape`).
 #[must_use]
 pub fn alone_question(original: &str, alternative: &str, before: &str, after: &str, trigger: &str) -> bool {
     count(original) == ALONE_HEAD_LETTERS
         && pystr::isalpha(original)
+        && !pystr::isupper(original)
         && pystr::isalpha(alternative)
         && trigger != "space"
         && !has_alpha(before)
@@ -1865,12 +1878,14 @@ pub fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pa
 /// A token of `BRIEF_HEAD_LETTERS` Latin letters with no letter before or after it in the field, whose keys in the Russian
 /// layout are Russian letters: a short message typed in the English layout, `ytn` for `нет`, `jr` for `ок`, `tot` for
 /// `еще`. The message-start head starts at four letters, because at three it turned Russian words typed as meant into Latin
-/// (`чук`, `дес`): this head answers Latin letters alone, and a Russian token stays with the frozen model. The question
+/// (`чук`, `дес`): this head answers Latin letters alone, and a Russian token stays with the frozen model. A token in
+/// capitals is no member: counted without case, `BYN` typed as meant became `ИНТ`; the upper-case head answers it
+/// (`upper_shape`), and so the known-reply head, whose class is a part of this one, does not either. The question
 /// reads only the typed token and the text around it, as the trainer and the GPU path route frames by them (`head_question`,
 /// `context_action_cuda.heads_question`).
 #[must_use]
 pub fn brief_question(original: &str, before: &str, after: &str) -> bool {
-    if !(BRIEF_HEAD_LETTERS.contains(&count(original)) && original.is_ascii() && pystr::isalpha(original)) {
+    if !(BRIEF_HEAD_LETTERS.contains(&count(original)) && original.is_ascii() && pystr::isalpha(original) && !pystr::isupper(original)) {
         return false;
     }
     !has_alpha(before) && !has_alpha(after)
@@ -1954,6 +1969,110 @@ fn brief_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
         format!("{seen}:trigger:{}", item.trigger),
     ];
     head_pairs(BRIEF_FEATURE_PREFIX, &names, "")
+}
+
+/// A token of `UPPER_HEAD_MIN_LETTERS` to `UPPER_HEAD_MAX_LETTERS` letters, all capitals, all Latin or all Cyrillic, whose
+/// other reading is letters too, with no letter before it in the field or with more Cyrillic letters than Latin ones in
+/// the text before it: the shape of the upper-case head's class (`upper_question`). It is an abbreviation typed in either
+/// layout (`ЛЯЕ` for `KZT`, `CCCH` for `СССР`) or as meant (`USD`, `США`, `OK`), or a word typed with Caps Lock (`YTN` for
+/// `НЕТ`). After Latin text the capitals and Latin-context abbreviation heads answer the same shape. A Russian abbreviation
+/// with a letter whose key is a sign (`ФСБ` is `AC<`) is no member: the boundary model cuts such a token at the sign before
+/// any question is asked. The lone-word and short-message heads answer no token of this shape.
+#[must_use]
+pub fn upper_shape(original: &str, alternative: &str, before: &str) -> bool {
+    (UPPER_HEAD_MIN_LETTERS..=UPPER_HEAD_MAX_LETTERS).contains(&count(original))
+        && pystr::isalpha(original)
+        && pystr::isupper(original)
+        && (original.is_ascii() || all_cyrillic(original))
+        && pystr::isalpha(alternative)
+        && (!has_alpha(before) || dominant(&pystr::casefold(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS))) == "ru")
+}
+
+/// The Latin and the Cyrillic reading of a token in capitals, each in capitals.
+fn capital_readings(original: &str, alternative: &str) -> (String, String) {
+    let (latin, cyrillic) = if original.is_ascii() { (original, alternative) } else { (alternative, original) };
+    (pystr::upper(latin), pystr::upper(cyrillic))
+}
+
+/// A token of the upper-case head's shape (`upper_shape`) one of whose readings a source of the capitals table spells in
+/// capitals, a Latin one a currency code of ISO 4217 or a Cyrillic one a form the Russian lexicon writes in capitals: the
+/// upper-case head's class. A token no source spells so is the frozen model's, as an abbreviation Russian text does not use
+/// is for the abbreviation head: fitted on it, the head read no counts as a reason to keep the token as typed and kept
+/// `ДПЕЬ` meant as `LGTM` and `ФАЛ` meant as `AFK` (the battery of words in capitals; candidate a0f89d4b1acd of corpus
+/// v86), where the frozen model read the letters and converted them. The question reads the token, its other reading, the
+/// text before it and the capitals table, as the trainer routes frames by them; a table that does not load is an error.
+pub fn upper_question(original: &str, alternative: &str, before: &str, tables: &TermTables) -> Checked<bool> {
+    if !upper_shape(original, alternative, before) {
+        return Ok(false);
+    }
+    let capitals = tables.capitals().map_err(|_| FeatureError("invalid capitals frequency table"))?;
+    let (latin, cyrillic) = capital_readings(original, alternative);
+    Ok([&latin, &cyrillic].iter().any(|reading| capitals.web(reading) > 0 || capitals.technical(reading) > 0) || capitals.currency(&latin) || capitals.lexicon(&cyrillic))
+}
+
+/// The upper-case head's evidence, all it reads: the binary order of magnitude (`UPPER_MAGNITUDE_MAX` at most) of how often
+/// Russian web and news text and Russian technical text spell each reading in capitals, and by how many orders the Latin
+/// reading's larger count outnumbers the Cyrillic one's (`UPPER_RATIO_BOUND` either way); whether either reading is spelled
+/// so anywhere; how often Russian prose uses the Cyrillic reading in any case, and by how many orders that outnumbers how
+/// often English prose or Russian technical text use the Latin one in any case: a word typed with Caps Lock is the word
+/// typed in lower case (`YTN` is `нет`, 123 712 times against none), which the counts in capitals alone left a suggestion at
+/// p=0.94 where the short-message head had converted it (candidate 937ccc525c13 of corpus v86); whether the lexicons know
+/// each reading; whether the Latin reading is a currency code of ISO 4217 and the Cyrillic one a form the Russian lexicon
+/// writes in capitals; the letters; whether the Cyrillic reading has a letter no Russian word starts with
+/// (`ABBREVIATION_NON_INITIAL_LETTERS`), which no abbreviation of Russian words has; the boundary and how the word after it
+/// was given. Every piece is read with where the token stands, alone or after Russian text: the head's weights are what
+/// the frozen model's verdict lacks, and that verdict differs there. Read without it, weights learned after Russian text,
+/// where the frozen model converts a token whose Latin reading the lexicon knows, pushed such a token sent alone to stay
+/// as typed, where the frozen model waits (candidate a0f89d4b1acd). The orders of magnitude and the differences are read
+/// with the rest. No letter of its own and no copy of the shared features: a head reading the letters of abbreviations
+/// learned the corpus's kinds by heart and turned `ТЗ` into `NP` (the abbreviation head).
+fn upper_evidence(item: &ContextEvidence, direction: &str, tables: &TermTables) -> Checked<Pairs> {
+    let capitals = tables.capitals().map_err(|_| FeatureError("invalid capitals frequency table"))?;
+    let (latin, cyrillic) = capital_readings(&item.original, &item.alternative);
+    let (latin_known, cyrillic_known) = if item.original.is_ascii() { (item.source_known, item.target_known) } else { (item.target_known, item.source_known) };
+    let order = |value: u64| magnitude(value, UPPER_MAGNITUDE_MAX);
+    let web = (order(capitals.web(&latin)), order(capitals.web(&cyrillic)));
+    let technical = (order(capitals.technical(&latin)), order(capitals.technical(&cyrillic)));
+    let sides = (web.0.max(technical.0), web.1.max(technical.1));
+    let ratio = format!("ratio:{}", clamp_int(sides.0 - sides.1, UPPER_RATIO_BOUND));
+    let seen = format!("seen:{}:{}", flag(sides.0 > 0), flag(sides.1 > 0));
+    let russian = order(tables.term("russian").count(&pystr::casefold(&cyrillic)));
+    let folded = pystr::casefold(&latin);
+    let english = order(tables.term("english").count(&folded).max(tables.term("latin").count(&folded)));
+    let prose = format!("prose:{russian}");
+    let caseless = format!("caseless:{}", clamp_int(russian - english, UPPER_RATIO_BOUND));
+    let non_initial = format!("non_initial:{}", flag(cyrillic.chars().any(|c| ABBREVIATION_NON_INITIAL_LETTERS.contains(&c))));
+    let known = format!("known:{}:{}", flag(latin_known), flag(cyrillic_known));
+    let listed = format!("iso:{}:lexicon:{}", flag(capitals.currency(&latin)), flag(capitals.lexicon(&cyrillic)));
+    let letters = format!("letters:{}", count(&item.original));
+    let trigger = format!("trigger:{}", first(&item.trigger, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS));
+    let after = format!("after:{}", item.after_origin.as_str());
+    let place = format!("before:{}", if has_alpha(&item.field.before) { "ru" } else { "none" });
+    let mut names = vec![
+        format!("web:latin:{}", web.0),
+        format!("web:cyrillic:{}", web.1),
+        format!("technical:latin:{}", technical.0),
+        format!("technical:cyrillic:{}", technical.1),
+        ratio.clone(),
+        seen.clone(),
+        prose.clone(),
+        caseless.clone(),
+        known.clone(),
+        listed.clone(),
+        letters.clone(),
+        non_initial.clone(),
+        trigger.clone(),
+        after.clone(),
+    ];
+    for head in [&ratio, &caseless] {
+        names.extend([&prose, &known, &listed, &letters, &after].iter().map(|name| format!("{head}:{name}")));
+    }
+    names.push(format!("{ratio}:{caseless}"));
+    names.push(format!("{seen}:{known}"));
+    names.push(format!("{non_initial}:{seen}"));
+    let mut pairs = head_pairs(UPPER_FEATURE_PREFIX, &["bias".to_owned(), place.clone()], &format!(":direction:{direction}"));
+    pairs.extend(head_pairs(UPPER_FEATURE_PREFIX, &names, &format!(":{place}:direction:{direction}")));
+    Ok(pairs)
 }
 
 const RUSSIAN_LETTERS: &str = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";

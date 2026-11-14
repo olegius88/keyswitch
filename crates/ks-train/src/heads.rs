@@ -6,15 +6,16 @@ use crate::curricula::{self, Curriculum};
 use crate::physical::reading;
 use crate::rows::ActionRow;
 use crate::tools::{Options, Tools};
-use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX};
+use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX};
 use ks_context::context_action_features as f;
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextEvidence};
 use ks_text::pystr;
+use serde::Deserialize as _;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 /// The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-pub const HEAD_PREFIXES: [(&str, &str); 24] = [
+pub const HEAD_PREFIXES: [(&str, &str); 25] = [
     ("capitals", CAPITALS_FEATURE_PREFIX),
     ("alone", ALONE_FEATURE_PREFIX),
     ("start", START_FEATURE_PREFIX),
@@ -39,11 +40,12 @@ pub const HEAD_PREFIXES: [(&str, &str); 24] = [
     ("digitdot", DIGIT_DOT_FEATURE_PREFIX),
     ("quote", QUOTE_FEATURE_PREFIX),
     ("knownreply", KNOWN_REPLY_FEATURE_PREFIX),
+    ("upper", UPPER_FEATURE_PREFIX),
 ];
 
 /// The heads whose own frames of DEVELOPMENT choose their epoch, by feature prefix: the name their epoch goes by in the
 /// seal and the recipe's key of their curriculum.
-pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 17] = [
+pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 18] = [
     (JOINED_FEATURE_PREFIX, "joined", "joined_token_curriculum"),
     (TERM_FEATURE_PREFIX, "term", "term_curriculum"),
     (BRIEF_FEATURE_PREFIX, "brief", "brief_curriculum"),
@@ -61,6 +63,7 @@ pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 17] = [
     (DIGIT_DOT_FEATURE_PREFIX, "digitdot", "digitdot_curriculum"),
     (QUOTE_FEATURE_PREFIX, "quote", "quote_curriculum"),
     (KNOWN_REPLY_FEATURE_PREFIX, "knownreply", "brief_curriculum"),
+    (UPPER_FEATURE_PREFIX, "upper", "upper_curriculum"),
 ];
 
 /// A recipe without a curriculum's options frames nothing.
@@ -99,6 +102,16 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
         "dash" => captured_head_curriculum(tools, split, options, &|item| f::dash_question(&item.original, &item.alternative, &item.trigger), "dash"),
         "digitdot" => captured_head_curriculum(tools, split, options, &|item| f::digit_dot_question(&item.original, &item.alternative, &item.trigger), "digitdot"),
         "quote" => captured_head_curriculum(tools, split, options, &|item| f::quote_question(&item.original, &item.alternative, &item.trigger), "quote"),
+        "upper" => {
+            // The engine's questions about tokens in capitals while real messages were typed, and the authored frames of
+            // the currency codes, which the messages hold too rarely.
+            let held = options.held_out();
+            let free = |text: &str| !held.contains(&pystr::casefold(text));
+            let asked = |item: &ContextEvidence| f::upper_question(&item.original, &item.alternative, &item.field.before, t).expect("the packaged capitals table");
+            let captured = captured_head_curriculum(tools, split, options, &|item| asked(item) && free(&item.original) && free(&item.alternative), "upper")?;
+            let currencies = options.get("currencies").map(|part| curricula::CurrencyOptions::deserialize(part).expect("the recipe's currencies: contexts_per_code and sample_weight"));
+            Ok(curricula::currency_curriculum(tools, split, source_rows, currencies.as_ref(), &held, captured))
+        }
         "knownreply" => {
             let (rows, mut report) = curricula::brief_curriculum(tools, split, options);
             let rows: Vec<ActionRow> = rows.into_iter().filter(|row| f::known_reply_question(&row.original, &reading(&row.original, 0), "", "", t)).collect();
@@ -121,9 +134,10 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
     let alnum = has(ALNUM_FEATURE_PREFIX) && f::alnum_question(original, alternative, before, t).expect("a question");
     let cyrletter = has(CYRLETTER_FEATURE_PREFIX) && f::cyrletter_question(original, alternative, before, trigger);
     let digit_dot = has(DIGIT_DOT_FEATURE_PREFIX) && f::digit_dot_question(original, alternative, trigger);
+    let upper = has(UPPER_FEATURE_PREFIX) && f::upper_question(original, alternative, before, t).expect("the packaged capitals table");
     if origin == AfterOrigin::KeptNextWord {
         let sign = has(SIGN_FEATURE_PREFIX) && f::sign_question(original, alternative, before, after, trigger, origin);
-        return has(KEPT_FEATURE_PREFIX) || letter || variable || alnum || sign || cyrletter || digit_dot;
+        return has(KEPT_FEATURE_PREFIX) || letter || variable || alnum || sign || cyrletter || digit_dot || upper;
     }
     letter
         || (has(CAPITALS_FEATURE_PREFIX) && f::capitals_question(original, before))
@@ -147,4 +161,5 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || digit_dot
         || (has(QUOTE_FEATURE_PREFIX) && f::quote_question(original, alternative, trigger))
         || (has(KNOWN_REPLY_FEATURE_PREFIX) && f::known_reply_question(original, alternative, before, after, t))
+        || upper
 }

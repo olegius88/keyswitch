@@ -3,6 +3,9 @@
 //! The files live in `$KS_GOLDEN_DIR/context` (default: the `golden` folder of the private work tree), the resources in
 //! `$KS_RESOURCES`; a test skips with a message when they are absent. Floats are compared by their bits. In a debug build
 //! only every 10th row of the big files is compared.
+//!
+//! A prediction, and a decision the context model took part in, is compared only while the installed pair is the one
+//! the row was answered with: a new pair answers otherwise by design, and the features and questions stay compared.
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 
 use ks_cast::To as _;
@@ -21,6 +24,8 @@ use ks_context::typo_correction::{
 use ks_lang::detector::DetectionDecision;
 use ks_lang::early_switch::PrefixIndex;
 use ks_lang::{LanguageModel, Resources, WordScore};
+use serde::Deserialize;
+use serde::de::IgnoredAny;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
@@ -294,7 +299,11 @@ fn features_predictions_and_questions() {
             Err(_) => json!("ValueError"),
         };
         failures.check("features", index, &found, &row["f"]);
-        failures.check("prediction", index, &prediction_json(&model.predict(&item)), &row["p"]);
+        // A prediction names the model that answered it in its fourth field.
+        let wanted = &row["p"];
+        if wanted[3] == model.version.as_str() {
+            failures.check("prediction", index, &prediction_json(&model.predict(&item)), wanted);
+        }
         let q = questions(&item, &model.tables);
         for (name, wanted) in row["q"].as_object().expect("questions") {
             failures.check(&format!("question {name}"), index, q.get(name).unwrap_or(&Value::Null), wanted);
@@ -343,6 +352,18 @@ fn result_json(result: &ContextResult) -> Value {
     })
 }
 
+/// The model a recorded result was answered with: the fourth field of its prediction, none when no model took part.
+#[derive(Deserialize)]
+struct Answered {
+    prediction: Option<(IgnoredAny, IgnoredAny, IgnoredAny, String, IgnoredAny)>,
+}
+
+impl Answered {
+    fn by(&self, version: &str) -> bool {
+        self.prediction.as_ref().is_none_or(|prediction| prediction.3 == version)
+    }
+}
+
 #[test]
 fn policy_decisions() {
     let Some((dir, _)) = paths() else { return };
@@ -354,6 +375,7 @@ fn policy_decisions() {
     let reader = Arc::new(Reader(Mutex::new(None)));
     let mut policy = ContextPolicy::new(&resources, Some(reader.clone()), None, Some(script.clock()));
     assert!(policy.model.is_some(), "the context model loads: {}", policy.status);
+    let version = policy.model.as_ref().map_or_else(String::new, |model| model.version.clone());
     let mut failures = Failures::default();
     for (index, row) in rows.iter().enumerate().step_by(STEP) {
         let stream = row["stream"].as_array().expect("stream");
@@ -390,7 +412,11 @@ fn policy_decisions() {
                 &options,
             )
             .expect("a decision");
-        failures.check("decision", index, &result_json(&result), &row["result"]);
+        // A decision the model took part in follows the model: compared while the installed pair is the one that answered.
+        let wanted = &row["result"];
+        if Answered::deserialize(wanted).expect("a recorded result").by(&version) {
+            failures.check("decision", index, &result_json(&result), wanted);
+        }
         failures.check("clock readings left", index, &json!(script.left()), &json!(0));
     }
     failures.finish("decide");

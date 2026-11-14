@@ -12,7 +12,8 @@
 //! `ks-train engine boundary|prefix --tree <root> [--verify|--refresh-runtime|--output <file>] [--jobs N]`
 //! `ks-train messages --out <dir> [--so <zst> --tatoeba <dir>] [--taiga <dir>]`, `terms --messages <dir> --out <file>`, `alnum --messages <dir> [--members <file>...] --out <file>`,
 //! `short --leipzig <dir> --out <file>`, `sources --manifest <file> --messages <dir> --tatoeba <dir>`,
-//! `select --messages <file> [--members <file>...] --class <name> --development-share R --out <dir> [--prefix P] [--only-ids <file>]`,
+//! `capitals --leipzig <dir> --messages <dir> [--members <file>...] --iso4217 <xml> --minimum-count N --out <file>`,
+//! `select --messages <file>|--leipzig <dir> [--members <file>...] --class <name> --development-share R --out <dir> [--prefix P] [--only-ids <file>]`,
 //! `devchat-messages --comments <dir> --dump <zst> --out <dir> [--earlier <file>...]` (each with `--tree <root>`)
 //! `ks-train typo-frequency --tree <root> [--private <folder>] [--verify]`
 //! `ks-train carry --tree <root> --pair <file> --refit <head>... --output <file>`, `doctor --tree <root> [--corpus <folder>] [--ledger <folder>] [--stage <name>...]`,
@@ -95,7 +96,7 @@ fn main() {
             }
         }
     }
-    if matches!(arguments.first().map(String::as_str), Some("messages" | "terms" | "alnum" | "short" | "sources" | "select" | "devchat-messages")) {
+    if matches!(arguments.first().map(String::as_str), Some("messages" | "terms" | "alnum" | "short" | "capitals" | "sources" | "select" | "devchat-messages")) {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::with_speller(root.join("resources"), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         match ks_train::messages::command(&arguments, &root, &resources) {
