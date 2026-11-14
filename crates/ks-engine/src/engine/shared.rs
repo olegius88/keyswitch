@@ -112,6 +112,7 @@ pub(super) type CorrectionCallback = Arc<dyn Fn(&CorrectionPlan) + Send + Sync>;
 pub(super) type SelectionNoticeCallback = Arc<dyn Fn(&str) + Send + Sync>;
 pub(super) type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
 pub(super) type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
+pub(super) type KeptByChoiceCallback = Arc<dyn Fn() + Send + Sync>;
 
 /// What the Python's `_lock` guards. It is never held while calling a callback, the backend or the settings.
 struct Guarded {
@@ -123,6 +124,7 @@ struct Guarded {
     learning_prompt_deadline: Option<f64>,
     learning_prompt_callbacks: Vec<LearningPromptCallback>,
     rule_request_callbacks: Vec<RuleRequestCallback>,
+    kept_by_choice_callbacks: Vec<KeptByChoiceCallback>,
 }
 
 pub struct Shared {
@@ -202,6 +204,7 @@ impl Shared {
                 learning_prompt: None,
                 learning_prompt_deadline: None,
                 learning_prompt_callbacks: Vec::new(),
+                kept_by_choice_callbacks: Vec::new(),
                 rule_request_callbacks: Vec::new(),
             }),
             log_redactor: Mutex::new(ks_config::log_privacy::LogRedactor::new()),
@@ -614,6 +617,17 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
 
     pub fn correction_callbacks(&self) -> Vec<CorrectionCallback> {
         locked(&self.guarded).correction_callbacks.clone()
+    }
+
+    /// Told on the engine's thread of a word left as typed only because the user picked its layout by hand, where the
+    /// model would have converted it: `gfgefcs` typed right after switching to the English layout, which the user may
+    /// not know is kept for that reason.
+    pub fn subscribe_kept_by_choice(&self, callback: KeptByChoiceCallback) {
+        locked(&self.guarded).kept_by_choice_callbacks.push(callback);
+    }
+
+    pub fn kept_by_choice_callbacks(&self) -> Vec<KeptByChoiceCallback> {
+        locked(&self.guarded).kept_by_choice_callbacks.clone()
     }
 
     /// `self.learning_prompt`.

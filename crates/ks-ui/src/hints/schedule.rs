@@ -1,6 +1,7 @@
 //! When a hint shows. One rule set, with time and the typing handed in, so that every rule is tested without a desktop:
 //!
-//! - a hint shows only while `general.hints` is on, on its platforms, and once (the news of an update once per version);
+//! - a hint shows only while `general.hints` is on, on its platforms, and once (the news of an update once per version;
+//!   a hint that repeats each time its event comes, until «Больше не показывать» turns that hint alone off);
 //! - one at a time: while one is on screen, the others wait;
 //! - at the caret only once the typing stopped (`HINT_TYPING_SETTLE_SECONDS` without a key press), waiting at most
 //!   `HINT_SETTLE_WAIT_MAX_SECONDS`, and never while a rule prompt is open: a prompt that opens takes such a hint away;
@@ -22,7 +23,8 @@ use crate::constants::{
     HINT_WHATS_NEW_DELAY_SECONDS, HINTS_PER_DAY_MAX, TIMESTAMP_DATE_CHARACTERS,
 };
 use super::catalogue::{
-    Condition, CorrectionInfo, Counted, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, Hint, Hotkeys, MODE_MANUAL, Opens, Place, Platform,
+    Condition, CorrectionInfo, Counted, HINT_NEVER_AGAIN_LABEL, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, Hint, Hotkeys, MODE_MANUAL, Opens,
+    Place, Platform,
     SettingsPage, Trigger, Wording,
 };
 use super::store::{Counter, HintState, How};
@@ -68,7 +70,7 @@ pub struct HintView {
     pub place: Place,
     pub title: &'static str,
     pub text: String,
-    /// The two buttons: «Понятно» and «Больше не показывать подсказки».
+    /// The two buttons: «Понятно» and «Больше не показывать подсказки» («Больше не показывать» for a hint that repeats).
     pub ok: &'static str,
     pub never: &'static str,
     /// What a click on the text opens.
@@ -167,10 +169,11 @@ impl<A: Clone> Scheduler<A> {
         &self.settings
     }
 
-    /// Whether a platform should look for the caret when a correction is made: some hint at the caret may still show.
+    /// Whether a platform should look for the caret when a correction is made: some hint at the caret that a correction
+    /// sets off may still show. A hint that repeats is set off by another event, which looks for the caret itself.
     #[must_use]
     pub fn wants_caret_anchor(&self) -> bool {
-        self.catalogue.iter().any(|hint| hint.places.contains(&Place::Caret) && self.may_show(hint))
+        self.catalogue.iter().any(|hint| hint.places.contains(&Place::Caret) && !hint.repeats() && self.may_show(hint))
     }
 
     /// Whether `tick` has anything to do: a hint waits or is on screen.
@@ -180,6 +183,9 @@ impl<A: Clone> Scheduler<A> {
     }
 
     fn seen(&self, hint: &Hint) -> bool {
+        if hint.repeats() {
+            return self.state.how(hint.id).as_deref() == Some(How::Forever.name());
+        }
         if hint.trigger == Trigger::Updated {
             return self.state.seen_in(hint.id) == Some(self.version.to_string());
         }
@@ -289,6 +295,21 @@ impl<A: Clone> Scheduler<A> {
         }
     }
 
+    /// A word left as typed only because its layout was picked by hand, where the model would have converted it; `anchor`
+    /// is where the caret was.
+    pub fn kept_by_choice(&mut self, anchor: Option<A>, moment: &Moment) {
+        let catalogue = self.catalogue;
+        for (index, hint) in catalogue.iter().enumerate() {
+            if hint.trigger != Trigger::KeptByChoice || !self.may_show(hint) {
+                continue;
+            }
+            match anchor.clone() {
+                Some(anchor) => self.queue(index, Place::Caret, Some(anchor), moment, moment.seconds),
+                None => self.caret_missed(index, moment),
+            }
+        }
+    }
+
     /// The rule prompt shown or gone. One shown right after a manual conversion means the user found the double press
     /// alone; a hint at the caret on screen gives way to it.
     pub fn prompt(&mut self, shown: bool, moment: &Moment) -> Option<Step<A>> {
@@ -349,7 +370,8 @@ impl<A: Clone> Scheduler<A> {
                 | Trigger::ManualConversion
                 | Trigger::AutomaticCorrections { .. }
                 | Trigger::ManualConversions { .. }
-                | Trigger::Updated => false,
+                | Trigger::Updated
+                | Trigger::KeptByChoice => false,
             };
             if !due || !self.may_show(hint) {
                 continue;
@@ -373,7 +395,7 @@ impl<A: Clone> Scheduler<A> {
             title: HINT_TITLE,
             text: hint.text(&wording)?,
             ok: HINT_OK_LABEL,
-            never: HINT_NEVER_LABEL,
+            never: if hint.repeats() { HINT_NEVER_AGAIN_LABEL } else { HINT_NEVER_LABEL },
             opens: hint.opens.map(|destination| destination.resolve(self.version)),
             index,
         })
@@ -452,14 +474,14 @@ impl<A: Clone> Scheduler<A> {
     }
 
     /// The user closed a hint. «Больше не показывать подсказки» turns them off: true then, and the caller writes
-    /// `general.hints`.
+    /// `general.hints`. On a hint that repeats, «Больше не показывать» turns off that hint alone.
     pub fn dismissed(&mut self, id: &str, how: How) -> bool {
         if self.visible.is_some_and(|visible| visible.id == id) {
             self.visible = None;
         }
         self.state.set_how(id, how);
         self.dirty = true;
-        if how != How::Forever {
+        if how != How::Forever || self.catalogue.iter().any(|hint| hint.id == id && hint.repeats()) {
             return false;
         }
         self.settings.enabled = false;
@@ -835,6 +857,38 @@ mod tests {
         assert_eq!(scheduler.state().how("first_correction_undo").as_deref(), Some("forever"));
         scheduler.correction(info(MODE_EARLY, true), Some(AT), &at(700.0));
         assert!(!scheduler.needs_tick());
+    }
+
+    #[test]
+    fn a_word_kept_for_a_layout_picked_by_hand_is_told_each_time_until_never_again() {
+        let mut scheduler = with(only(&["kept_by_choice"]));
+        // It looks for the caret itself: corrections need not.
+        assert!(!scheduler.wants_caret_anchor());
+        scheduler.kept_by_choice(Some(AT), &at(0.0));
+        let Some(Step::Caret(view, _)) = scheduler.tick(&at(1.0)) else { panic!("a hint at the caret") };
+        assert_eq!((view.id, view.never), ("kept_by_choice", HINT_NEVER_AGAIN_LABEL));
+        scheduler.drawn(&view, &at(1.0));
+        assert!(!scheduler.dismissed("kept_by_choice", How::Ok));
+        // Shown, it comes again the next time, after the quiet period.
+        scheduler.kept_by_choice(Some(AT), &at(700.0));
+        assert_eq!(show(&mut scheduler, &at(701.0)), "caret kept_by_choice");
+        // «Больше не показывать» turns off this hint alone.
+        assert!(!scheduler.dismissed("kept_by_choice", How::Forever));
+        assert!(scheduler.settings().enabled);
+        scheduler.kept_by_choice(Some(AT), &at(1400.0));
+        assert!(!scheduler.needs_tick());
+        // With no caret found it waits, and goes to the tray as any hint at the caret.
+        let mut lost = with(only(&["kept_by_choice"]));
+        lost.kept_by_choice(None, &at(0.0));
+        lost.kept_by_choice(None, &at(1.0));
+        assert!(!lost.needs_tick());
+        lost.kept_by_choice(None, &at(2.0));
+        assert_eq!(show(&mut lost, &at(2.0)), "tray kept_by_choice");
+        // With the hints off, nothing.
+        let mut off = with(only(&["kept_by_choice"]));
+        assert_eq!(off.set_settings(HintSettings { enabled: false, ..on() }), None);
+        off.kept_by_choice(Some(AT), &at(0.0));
+        assert!(!off.needs_tick());
     }
 
     #[test]

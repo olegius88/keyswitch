@@ -357,6 +357,10 @@ fn replay(battery: &Path, report: &Path, limit: Option<usize>, speller: bool) {
             field_ref.session.idle(0.3);
             let fixed = field_ref.session.backend.slice(start, start + length) == intended.chars().collect::<Vec<_>>();
             counts.add(if fixed { "opening:owner_fix" } else { "opening:owner_fix_failed" });
+            // On the logged screen that reading was the engine's own unless the owner's hotkey made it (an event `manual:…`
+            // of the word): the Pause above only stands in for it.
+            let by_hand = field_ref.last_item.as_ref().and_then(|item| item.get("events")).is_some_and(|events| events.to_string().contains("\"manual:"));
+            field_ref.session.book_last_correction(by_hand);
         }
         if mode == "carry" || mode == "restore" {
             let pre_text = field_ref.session.backend.text();

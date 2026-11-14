@@ -50,6 +50,13 @@ fn press_in(session: &mut Session, character: char, window: i64) {
     });
 }
 
+/// A press of the key that types `character` in the layout the window is in: no layout is picked for it.
+fn press_as_laid_out(session: &mut Session, character: char) {
+    let group = session.backend.group();
+    let key = KEYS.iter().find(|key| usize::try_from(group).ok().and_then(|place| key.characters.get(place)) == Some(&character)).expect("a key of the layout");
+    session.tap(KeyEvent { pressed: true, keycode: key.keycode, key_name: character.to_string(), character: character.to_string(), characters: key.strings(), group, ..KeyEvent::default() });
+}
+
 fn type_text(session: &mut Session, text: &str) {
     for character in text.chars() {
         press(session, character);
@@ -412,5 +419,121 @@ fn the_layout_of_another_window_is_no_choice_of_the_users() {
     press_in(&mut session, 'п', 0);
     assert_eq!(session.core.manual_layout_group, Some(1));
     bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A word that stands as a hotkey of the user's left it is theirs when they go back into it. `ру` after a Russian word
+/// became `he`, Pause brought `ру` back, and a full stop typed over the space after it made it `he/` again: Backspace
+/// took the space away, the word was open again and was judged at the full stop as a word just typed.
+#[test]
+fn a_word_a_hotkey_left_as_it_stands_is_not_converted_when_the_user_goes_back_into_it() {
+    let mut bundle = Bundle::load(None);
+    for (undo, sign) in [(false, '.'), (true, ','), (false, ' ')] {
+        let mut session = bundle.session("app", 0, Vec::new());
+        type_text(&mut session, "ghbdtn ");
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), "привет ");
+        let hotkey = if undo { "undo" } else { "Pause" };
+        if undo {
+            session.core.schedule_undo_hotkey(i64::from(PAUSE_KEYCODE));
+            session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+        } else {
+            session.tap_named(hotkey);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), "ghbdtn ", "{hotkey} puts the keys back as typed");
+        session.tap_named("BackSpace");
+        assert_eq!(session.core.manual_layout_group, Some(0), "the word is open again, and it is the user's");
+        press_as_laid_out(&mut session, sign);
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), format!("ghbdtn{sign}"), "after {hotkey}, Backspace and {sign:?}");
+        // The next word is judged as any other.
+        type_text(&mut session, if sign == ' ' { "ghbdtn " } else { " ghbdtn " });
+        session.idle(1.0);
+        assert!(session.backend.text().iter().collect::<String>().ends_with(" привет "), "the word after it, after {hotkey}, Backspace and {sign:?}");
+        bundle.give_back(session);
+    }
+    // The hotkey left another word, not the one the user goes back into: that one is judged as any word.
+    let mut session = bundle.session("app", 0, Vec::new());
+    type_text(&mut session, "ghbdtn ");
+    session.idle(1.0);
+    session.tap_named("Pause");
+    session.idle(1.0);
+    type_text(&mut session, "hello ");
+    session.idle(1.0);
+    session.tap_named("BackSpace");
+    assert_eq!(session.core.manual_layout_group, None, "a word no hotkey touched");
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+
+/// A pause after the first letters of a word is a pause to think: the word is decided at its boundary. `ин` after a
+/// Russian word became `by` at the pause, in the middle of `инструкция`, and the layout changed under the rest of it;
+/// the letters were judged there because their other reading is a word of English prose.
+#[test]
+fn a_pause_after_the_first_letters_of_a_word_decides_nothing() {
+    let mut bundle = Bundle::load(None);
+    for (before, start, rest) in [("в ", "ин", "струкция "), ("идет ", "уд", "ачно "), ("вот ", "рез", "ультат ")] {
+        let mut session = bundle.session("app", 1, Vec::new());
+        for character in before.chars().chain(start.chars()) {
+            press_as_laid_out(&mut session, character);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), format!("{before}{start}"), "at the pause");
+        for character in rest.chars() {
+            press_as_laid_out(&mut session, character);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), format!("{before}{start}{rest}"), "the word typed on");
+        // What tells a start of a word from a word: how many letters, of which layout, after what.
+        let core = &session.core;
+        assert!(core.word_begun(start, 1, "x", 0, "app").expect("no failure"), "{start}");
+        assert!(!core.word_begun("инст", 1, "x", 0, "app").expect("no failure"), "four letters are judged at a pause");
+        assert!(!core.word_begun("и", 1, "x", 0, "app").expect("no failure"), "and one letter");
+        assert!(!core.word_begun("и1", 1, "x", 0, "app").expect("no failure"), "letters only");
+        assert!(!core.word_begun("ъы", 1, "x", 0, "app").expect("no failure"), "no word begins so");
+        assert!(!core.word_begun("by", 0, "ин", 1, "app").expect("no failure"), "the word before was left in the other layout");
+        assert!(!core.word_begun("рез", 1, "htp", 0, "another").expect("no failure"), "three letters with nothing typed there");
+        bundle.give_back(session);
+    }
+    // With no word before them two letters wait only when their other reading is no word of English prose (`иг` for `bu`
+    // waits, `ша` for `if` does not), and three letters are judged as before: two letters and a wait are as often a whole
+    // word, an address typed into a browser.
+    let session = bundle.session("app", 1, Vec::new());
+    assert!(session.core.word_begun("иг", 1, "bu", 0, "app").expect("no failure"));
+    assert!(!session.core.word_begun("ша", 1, "if", 0, "app").expect("no failure"));
+    assert!(!session.core.word_begun("рез", 1, "htp", 0, "app").expect("no failure"));
+    assert!(!session.core.word_begun("иг", 1, "bu", 2, "app").expect("no failure"), "a layout with no prose");
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A word left as typed only because its layout was picked by hand is told to the windows when the model would have
+/// converted it, and only then: `gfgefcs` typed right after switching to English is `папуасы` to the model, and the user
+/// testing the program that way sees nothing happen. `hello` there is what the pick was for, and `gfgefcs` with no pick
+/// is converted.
+#[test]
+fn a_word_kept_for_a_layout_picked_by_hand_is_told_when_the_model_would_convert_it() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut bundle = Bundle::load(None);
+    for (picked, typed, told, shown) in [(true, "gfgefcs ", 1, "gfgefcs "), (true, "hello ", 0, "hello "), (false, "gfgefcs ", 0, "папуасы ")] {
+        let mut session = bundle.session("app", if picked { 1 } else { 0 }, Vec::new());
+        let count = Arc::new(AtomicUsize::new(0));
+        let counter = count.clone();
+        session.core.shared.subscribe_kept_by_choice(Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        // The window is in front a moment before the user switches: the layout it came with is its own, not a pick.
+        session.idle(1.0);
+        if picked {
+            session.select_layout(0);
+        }
+        type_text(&mut session, typed);
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), shown, "{typed:?}, picked by hand: {picked}");
+        assert_eq!(count.load(Ordering::SeqCst), told, "{typed:?}, picked by hand: {picked}");
+        bundle.give_back(session);
+    }
     bundle.clean();
 }

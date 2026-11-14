@@ -14,6 +14,23 @@ fn characters_of(strokes: &[&[Stroke]]) -> String {
 }
 
 impl EngineCore {
+    /// The word stays as typed because the user picked its layout by hand: when the model would have converted it, the
+    /// windows are told (`Shared::subscribe_kept_by_choice`). The model is asked only while someone listens.
+    fn tell_kept_by_choice(
+        &mut self, original: &str, alternatives: &Alternatives, group: i64, application: &str, trigger: ks_lang::intent_model::CorrectionTrigger,
+    ) -> EngineResult<()> {
+        let callbacks = self.shared.kept_by_choice_callbacks();
+        if callbacks.is_empty() {
+            return Ok(());
+        }
+        if self.decide_word(original, alternatives, group, application, trigger, WordOptions::default())?.should_convert {
+            for callback in callbacks {
+                callback();
+            }
+        }
+        Ok(())
+    }
+
     pub fn commit_word(&mut self, boundary: &Stroke) -> EngineResult<()> {
         if self.strokes.is_empty() {
             return Ok(());
@@ -445,6 +462,7 @@ impl EngineCore {
                 && shown.is_none()
                 && !self.insertion.as_ref().is_some_and(InsertionPoint::inside_word)
             {
+                self.tell_kept_by_choice(&original, &alternatives, source_group, &application, trigger)?;
                 // The layout the user chose keeps the word in it, but a slip in the word and Shift held one letter
                 // too long belong to no layout: they are fixed as in a word the model kept (`нромально`, `ПРивет`
                 // typed right after switching to the Russian layout).

@@ -49,6 +49,9 @@ pub const NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS: usize = 4;
 pub const WHOLE_TOKEN_WORD_MIN_LETTERS: usize = 4;
 pub const NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR: f64 = -0.25;
 pub const PAUSE_TRAILING_MAX_KEYS: usize = 8;
+/// The longest run of letters a pause takes for the start of a word still being typed (`word_begun`); the shortest is
+/// `PAUSE_WORD_START_LETTERS`, and as many words begin with either: `PAUSE_WORD_START_MIN_WORDS`.
+pub const PAUSE_WORD_START_MAX_LETTERS: usize = 3;
 pub const PAUSE_WORD_START_LETTERS: usize = 2;
 pub const PAUSE_WORD_START_MIN_WORDS: u32 = 100;
 pub const REPLAYED_SIGNS_MIN_STEM_LETTERS: usize = 2;

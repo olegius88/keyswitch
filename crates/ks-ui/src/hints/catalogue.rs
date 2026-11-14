@@ -12,7 +12,7 @@ use ks_updates::{RELEASE_PAGE_PREFIX, SemanticVersion};
 
 use crate::constants::{
     AUTOMATIC_CORRECTIONS_FOR_HISTORY_HINT, AUTOMATIC_CORRECTIONS_FOR_NOTIFICATIONS_HINT, AUTOMATIC_CORRECTIONS_FOR_PAUSE_HINT,
-    HINTS_INTRODUCED_VERSION, LAYOUT_SWITCH_KEY_VERSION, MANUAL_CONVERSIONS_FOR_SELECTION_HINT,
+    HINTS_INTRODUCED_VERSION, KEPT_BY_CHOICE_VERSION, LAYOUT_SWITCH_KEY_VERSION, MANUAL_CONVERSIONS_FOR_SELECTION_HINT,
 };
 use crate::tray_model::{EXCLUSIONS_LABEL, HISTORY_LABEL, NOTIFICATIONS_LABEL, SOUND_LABEL};
 use crate::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_TITLE, MAC_SYSTEM_PAGE_TITLE, PAGE_NAMES};
@@ -21,6 +21,8 @@ use crate::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_TITLE, MAC_SYSTE
 pub const HINT_TITLE: &str = "KeySwitch";
 pub const HINT_OK_LABEL: &str = "Понятно";
 pub const HINT_NEVER_LABEL: &str = "Больше не показывать подсказки";
+/// The second button of a hint that shows again each time its event comes: it turns off that hint alone.
+pub const HINT_NEVER_AGAIN_LABEL: &str = "Больше не показывать";
 /// The button of the Windows 11 taskbar behind which it puts the icons of new programs (README, «Установка в Windows»).
 pub const WINDOWS_HIDDEN_ICONS_BUTTON: &str = "Показать скрытые значки";
 /// `detection.layout_switch_key` of 0.70.0 and its title in every settings window, on the hotkeys page.
@@ -142,6 +144,9 @@ pub enum Trigger {
     WhatsNew,
     /// Any update: once for every version updated to.
     Updated,
+    /// A word left as typed only because its layout was picked by hand, where the model would have converted it
+    /// (`Shared::subscribe_kept_by_choice`). Shown each time, until «Больше не показывать».
+    KeptByChoice,
 }
 
 /// What a click on the text of a hint opens.
@@ -274,6 +279,12 @@ impl Hint {
         Some((self.text)(wording))
     }
 
+    /// Whether it shows each time its event comes, until the user turns it off, instead of once.
+    #[must_use]
+    pub fn repeats(&self) -> bool {
+        self.trigger == Trigger::KeptByChoice
+    }
+
     #[must_use]
     pub fn shows_on(&self, platform: Platform) -> bool {
         self.platforms.contains(&platform)
@@ -309,7 +320,7 @@ impl Hint {
                 correction.automatic && counted.automatic_corrections >= at_least && holds(condition)
             }
             Trigger::ManualConversions { at_least } => correction.manual() && counted.manual_conversions >= at_least,
-            Trigger::FirstStart | Trigger::SettingsPage | Trigger::WhatsNew | Trigger::Updated => false,
+            Trigger::FirstStart | Trigger::SettingsPage | Trigger::WhatsNew | Trigger::Updated | Trigger::KeptByChoice => false,
         }
     }
 
@@ -329,7 +340,8 @@ impl Hint {
             | Trigger::ManualConversion
             | Trigger::SettingsPage
             | Trigger::WhatsNew
-            | Trigger::Updated => Counted::default(),
+            | Trigger::Updated
+            | Trigger::KeptByChoice => Counted::default(),
         }
     }
 }
@@ -469,6 +481,13 @@ fn layout_switch_key(wording: &Wording<'_>) -> String {
     )
 }
 
+fn kept_by_choice(wording: &Wording<'_>) -> String {
+    format!(
+        "Слово не исправлено: раскладку перед ним переключили вручную, и такое слово KeySwitch не трогает. Перевести его — {}.",
+        wording.key(HotkeyName::ConvertLast)
+    )
+}
+
 fn updated(wording: &Wording<'_>) -> String {
     format!("KeySwitch обновлён до {}. Настройки, правила и история сохранены.", wording.version)
 }
@@ -476,7 +495,7 @@ fn updated(wording: &Wording<'_>) -> String {
 // --------------------------------------------------------------------------------------------------------- catalogue
 
 /// The hints in the order they are shown when several are due at once.
-pub static CATALOGUE: [Hint; 13] = [
+pub static CATALOGUE: [Hint; 14] = [
     Hint {
         id: "first_start",
         group: Group::Intro,
@@ -592,6 +611,17 @@ pub static CATALOGUE: [Hint; 13] = [
         opens: Some(Destination::Settings { page: SettingsPage::Hotkeys, setting: Some("hotkeys.selection_layout") }),
         hotkeys: &[HotkeyName::SelectionLayout, HotkeyName::SelectionCase, HotkeyName::SelectionTransliterate],
         text: selection_commands,
+    },
+    Hint {
+        id: "kept_by_choice",
+        group: Group::Intro,
+        version: Some(KEPT_BY_CHOICE_VERSION),
+        trigger: Trigger::KeptByChoice,
+        places: &[Place::Caret],
+        platforms: EVERY_PLATFORM,
+        opens: None,
+        hotkeys: &[HotkeyName::ConvertLast],
+        text: kept_by_choice,
     },
     Hint {
         id: "hints_intro",
@@ -728,6 +758,7 @@ mod tests {
         assert!(news.starts_with("Новое в 0.70:") && news.contains(&format!("«{LAYOUT_SWITCH_KEY_TITLE}» на странице «{HOTKEYS_PAGE_TITLE}»")), "{news}");
         assert!(text_of("updated", Platform::Linux, &windows).contains(&format!("обновлён до {}.", version())));
         assert!(text_of("first_correction_undo", Platform::Linux, &windows).contains("Ctrl+Alt+Z вернёт его как набрано. Доступно 10 секунд"));
+        assert!(text_of("kept_by_choice", Platform::Windows, &windows).ends_with("Перевести его — Pause."));
     }
 
     #[test]
@@ -849,7 +880,7 @@ mod tests {
         assert!(three.fired_by(correction(MODE_SYMBOLS, false, false), counted(0, 3), always));
         assert!(!three.fired_by(correction(MODE_SYMBOLS, false, false), counted(0, 2), always));
         assert!(!three.fired_by(correction(MODE_UNDO, false, false), counted(0, 3), always));
-        for trigger in [Trigger::FirstStart, Trigger::SettingsPage, Trigger::WhatsNew, Trigger::Updated] {
+        for trigger in [Trigger::FirstStart, Trigger::SettingsPage, Trigger::WhatsNew, Trigger::Updated, Trigger::KeptByChoice] {
             assert!(!hint(trigger).fired_by(correction("boundary", true, false), counted(99, 99), always));
             assert_eq!(hint(trigger).needs(), Counted::default());
         }

@@ -253,7 +253,7 @@ impl EngineCore {
         let inside_word = self.insertion.as_ref().is_some_and(InsertionPoint::inside_word);
         let target = alternatives.first().map_or(source_group, |entry| entry.0);
         let alternative = alternatives.iter().find(|entry| entry.0 == target).map_or("", |entry| entry.1.as_str()).to_owned();
-        if trailing.is_empty() && head == 0 && !inside_word && self.word_begun(&original, source_group, &alternative, target)? {
+        if trailing.is_empty() && head == 0 && !inside_word && self.word_begun(&original, source_group, &alternative, target, &application)? {
             // A pause in the middle of a word is a pause to think: the word is decided at its boundary.
             technical_event!(self.shared, "pause_correction_skipped", "reason": "word_begun", "idle_ms": idle_ms, "word_characters": pystr::len(&original));
             return Ok(());

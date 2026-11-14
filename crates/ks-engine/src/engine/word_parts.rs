@@ -11,6 +11,13 @@ use ks_lang::detector::DecideOptions as DetectorOptions;
 use ks_lang::intent_model::CorrectionTrigger;
 use ks_lang::short_words::is_short_word_override;
 
+/// How many words of `model` longer than `start` begin with it. The lexicon is sorted: they stand between the first
+/// string after `start` and the last one that begins with it.
+fn words_begun_with(model: &LanguageModel, start: &str) -> usize {
+    let words = model.frequencies.words();
+    words.lower_bound(&format!("{start}{}", char::MAX)).saturating_sub(words.lower_bound(&format!("{start}\0")))
+}
+
 impl EngineCore {
     // Resolve a key that is punctuation here but a letter in another layout.
     //
@@ -265,7 +272,7 @@ impl EngineCore {
         let alternatives: Alternatives = targets.iter().map(|group| (*group, text_for_group(tail, *group))).collect();
         if trigger == CorrectionTrigger::Pause
             && signs.is_empty()
-            && self.word_begun(&original, source_group, &alternatives[0].1, targets[0])?
+            && self.word_begun(&original, source_group, &alternatives[0].1, targets[0], application)?
         {
             // A pause in the middle of the part is a pause to think, as in the middle of a word.
             return Ok(None);
@@ -489,14 +496,30 @@ impl EngineCore {
             .map_or_else(String::new, |field| field.field_id.clone())
     }
 
-    /// The start of a word still being typed: `PAUSE_WORD_START_LETTERS` letters that many words of
-    /// their own language begin with, whose other reading is no word of the other language's prose.
-    /// `иг` is the start of `игру` and `bu` no English word, while `ша` typed for `if` is.
-    pub fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64) -> EngineResult<bool> {
-        if pystr::len(original) != PAUSE_WORD_START_LETTERS || !pystr::isalpha(original) || !self.in_models(group) {
+    /// The start of a word still being typed: `PAUSE_WORD_START_LETTERS` to `PAUSE_WORD_START_MAX_LETTERS` letters that
+    /// many words of their own language begin with. A pause after them is a pause to think, and the word is decided at
+    /// its boundary: after a word left in the same layout, whatever the letters read in the other one; with none before
+    /// them, when they are two whose other reading is no word of the other language's prose. `иг` is the start of `игру`
+    /// and `bu` no English word, while `ша` typed for `if` is.
+    ///
+    /// After a word, the letters used to be judged at the pause when their other reading was a word of prose: `ин` became
+    /// `by` in the middle of `инструкция`, `уд` became `el`, `рез` became `htp`, and the layout changed under the rest of
+    /// the word. Of the words of a user's field batteries stopped at so, 22 were starts of the word typed on and 9 were
+    /// erased and typed again (13.11.2026). Alone in a field two letters and a wait are as often a whole word: an address
+    /// typed into a browser.
+    pub fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64, application: &str) -> EngineResult<bool> {
+        let letters = pystr::len(original);
+        if !(PAUSE_WORD_START_LETTERS..=PAUSE_WORD_START_MAX_LETTERS).contains(&letters)
+            || !pystr::isalpha(original)
+            || !self.in_models(group)
+            || words_begun_with(self.model(group), &pystr::casefold(original)) < PAUSE_WORD_START_MIN_WORDS.to::<usize>()
+        {
             return Ok(false);
         }
-        if ks_lang::short_words::word_starts(self.model(group)).count(&pystr::casefold(original)) < PAUSE_WORD_START_MIN_WORDS {
+        if self.context_for(application).1 == Some(group) {
+            return Ok(true);
+        }
+        if letters != PAUSE_WORD_START_LETTERS {
             return Ok(false);
         }
         let prose = match self.layout_name(target).as_str() {
@@ -568,6 +591,14 @@ impl EngineCore {
             return None;
         }
         Some(plan.clone())
+    }
+
+    /// Whether `word`, the last word, stands as a hotkey of the user's left it: converted with the conversion hotkey, or
+    /// put back by undo. The keys are those very keys, not keys typed again.
+    pub fn left_by_hand(&self, word: &CorrectionPlan) -> bool {
+        self.last_correction
+            .as_ref()
+            .is_some_and(|last| !last.automatic && last.strokes.first().zip(word.strokes.first()).is_some_and(|(theirs, typed)| Arc::ptr_eq(theirs, typed)))
     }
 
     pub fn layout_name(&self, group: i64) -> String {

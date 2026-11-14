@@ -593,6 +593,18 @@ impl Session {
             ..KeyEvent::default()
         });
     }
+
+    /// The last correction booked as the engine's own unless the user's own action made it (`by_hand`). A replay types
+    /// with the conversion hotkey the reading the log shows on screen, which the engine may have made, and a word the
+    /// hotkey left counts as the user's when they go back into it (`EngineCore::left_by_hand`).
+    pub fn book_last_correction(&mut self, by_hand: bool) {
+        if by_hand {
+            return;
+        }
+        if let Some(made) = self.core.last_correction.take() {
+            self.core.last_correction = Some(made.replaced_with(|plan| plan.automatic = true));
+        }
+    }
 }
 
 /// The locales of a replay, in the order of their layouts.

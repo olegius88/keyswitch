@@ -305,6 +305,11 @@ impl EngineCore {
                     self.reset_pause_correction();
                     self.early_switch_origin = None;
                     self.early_switch_at = None;
+                    if self.manual_layout_word {
+                        // The reading a hotkey gave the word went with its last letter: what is typed now is another word.
+                        self.manual_layout_group = None;
+                        self.manual_layout_word = false;
+                    }
                 } else {
                     // Erasing is editing, not typing: the letters left are a word the
                     // user is still changing, and a pause over them is a pause to think,
@@ -332,6 +337,15 @@ impl EngineCore {
                 // judgement of the same letters. The next letter arms it.
                 self.strokes.clone_from(&reopenable.strokes);
                 self.source_group = reopenable.source_group;
+                if self.left_by_hand(&reopenable) {
+                    // The word stands as the user's own hotkey left it, and going back into it changes no mind: `ру`
+                    // became `he`, Pause brought `ру` back, and the full stop typed over its space made it `he/`
+                    // again (a user's log, 13.11.2026). It is theirs as a word converted while it was typed is.
+                    self.manual_layout_group = Some(reopenable.source_group);
+                    self.manual_layout_observed_at = Some(self.monotonic());
+                    "reopened_word".clone_into(&mut self.manual_layout_source);
+                    self.manual_layout_word = true;
+                }
                 technical_event!(
                     self.shared, "committed_word_reopened",
                     "characters": self.strokes.len(),

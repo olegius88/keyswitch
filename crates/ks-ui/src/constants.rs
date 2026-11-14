@@ -52,3 +52,5 @@ pub const TIMESTAMP_DATE_CHARACTERS: usize = 10;
 /// The release that brought the hints themselves, and the one that brought the layout switch key a hint of news is about.
 pub const HINTS_INTRODUCED_VERSION: &str = "0.71.0";
 pub const LAYOUT_SWITCH_KEY_VERSION: &str = "0.70.0";
+/// The release that tells of a word left as typed for a layout picked by hand.
+pub const KEPT_BY_CHOICE_VERSION: &str = "0.74.0";

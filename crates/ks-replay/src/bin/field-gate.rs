@@ -23,7 +23,10 @@ const EXCLUDED: [&str; 2] = ["ambiguous", "partial"];
 const OWNER: &str = "owner";
 const AUTHORS: [&str; 2] = ["llm", OWNER];
 const REVIEW_BEFORE_GATE: &str = "review-2026-10-15";
-const REASON_CODES: [&str; 8] = ["garbage-in-prompt", "code-identifier", "retyped-elsewhere", "russian-typo", "mixed-script", "remote-echo", "owner-decision", REVIEW_BEFORE_GATE];
+/// Why a verdict changes what the log implies. `intent-unknown`: the log shows nothing the user did about the word that
+/// tells what they meant (they clicked away, the field was cleared), so the word is taken out until the owner rules.
+const REASON_CODES: [&str; 9] =
+    ["garbage-in-prompt", "code-identifier", "retyped-elsewhere", "russian-typo", "mixed-script", "remote-echo", "owner-decision", "intent-unknown", REVIEW_BEFORE_GATE];
 const ERROR_EXIT_CODE: i32 = 2;
 
 /// One word of a battery as an engine typed it.

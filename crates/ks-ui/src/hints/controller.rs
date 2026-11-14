@@ -61,11 +61,14 @@ pub enum EngineInput<A> {
     Snapshot { running: bool },
     Correction { correction: CorrectionInfo, anchor: Option<A> },
     Prompt { shown: bool },
+    /// A word left as typed only because its layout was picked by hand, where the model would have converted it.
+    KeptByChoice { anchor: Option<A> },
 }
 
 /// The engine's subscriptions the hints need, made once the engine is built. On the engine's thread the caret is looked
-/// for with `anchor`, only while `wants_anchor` says a hint at the caret may still show (`Hints::caret_anchor_wanted`);
-/// `post` carries each input to the main thread.
+/// for with `anchor`: at a correction only while `wants_anchor` says a hint at the caret may still show
+/// (`Hints::caret_anchor_wanted`), at a word kept for a layout picked by hand always, which is seldom. `post` carries each
+/// input to the main thread.
 pub fn subscribe<A: Send + 'static>(
     shared: &Shared, wants_anchor: Arc<AtomicBool>, anchor: Arc<dyn Fn() -> Option<A> + Send + Sync>,
     post: Arc<dyn Fn(EngineInput<A>) + Send + Sync>,
@@ -73,10 +76,13 @@ pub fn subscribe<A: Send + 'static>(
     let deliver = post.clone();
     shared.subscribe(Arc::new(move |snapshot: &EngineSnapshot| deliver(EngineInput::Snapshot { running: snapshot.running })));
     let deliver = post.clone();
+    let find = anchor.clone();
     shared.subscribe_corrections(Arc::new(move |plan: &CorrectionPlan| {
-        let found = if wants_anchor.load(Ordering::Relaxed) { anchor() } else { None };
+        let found = if wants_anchor.load(Ordering::Relaxed) { find() } else { None };
         deliver(EngineInput::Correction { correction: CorrectionInfo::of(plan), anchor: found });
     }));
+    let deliver = post.clone();
+    shared.subscribe_kept_by_choice(Arc::new(move || deliver(EngineInput::KeptByChoice { anchor: anchor() })));
     shared.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| post(EngineInput::Prompt { shown: prompt.is_some() })));
 }
 
@@ -242,6 +248,10 @@ impl<A: Clone> Hints<A> {
                 None
             }
             EngineInput::Prompt { shown } => self.scheduler.prompt(shown, moment),
+            EngineInput::KeptByChoice { anchor } => {
+                self.scheduler.kept_by_choice(anchor, moment);
+                None
+            }
         };
         self.settle(presenter, step, moment);
     }
@@ -273,7 +283,8 @@ impl<A: Clone> Hints<A> {
         card
     }
 
-    /// What the user did to the hint `id`: it goes away, and «Больше не показывать подсказки» turns `general.hints` off.
+    /// What the user did to the hint `id`: it goes away, and «Больше не показывать подсказки» turns `general.hints` off
+    /// («Больше не показывать» of a hint that repeats turns off that hint alone).
     pub fn clicked(&mut self, presenter: &mut dyn HintPresenter<A>, id: &str, click: Click, moment: &Moment) {
         let how = match click {
             Click::Ok | Click::Closed => How::Ok,
@@ -456,6 +467,20 @@ mod tests {
     }
 
     #[test]
+    fn a_word_kept_for_a_layout_picked_by_hand_shows_at_the_caret_and_never_again_keeps_the_other_hints() {
+        let setup = setup("kept");
+        let mut hints = hints(&setup);
+        let mut screen = Screen::new(true);
+        hints.engine_input(&mut screen, EngineInput::KeptByChoice { anchor: Some(AT) }, &at(0.0));
+        hints.tick(&mut screen, &at(1.0));
+        assert_eq!(screen.log, ["caret kept_by_choice at (100, 200)"]);
+        hints.clicked(&mut screen, "kept_by_choice", Click::Never, &at(2.0));
+        assert_ne!(setup.settings.get(HINTS_SETTING), Some(Value::Bool(false)));
+        assert_eq!(hints.state().how("kept_by_choice").as_deref(), Some("forever"));
+        assert!(hints.caret_anchor_wanted().load(Ordering::Relaxed), "the other hints at the caret still show");
+    }
+
+    #[test]
     fn a_hint_the_presenter_could_not_draw_stays_unseen() {
         let setup = setup("undrawn");
         let mut hints = hints(&setup);
@@ -566,6 +591,9 @@ mod tests {
         for callback in shared.correction_callbacks() {
             callback(&plan);
         }
+        for callback in shared.kept_by_choice_callbacks() {
+            callback();
+        }
         shared.show_learning_prompt(LearningPrompt {
             source_group: 0,
             target_group: 1,
@@ -582,6 +610,7 @@ mod tests {
                 EngineInput::Prompt { shown: false },
                 EngineInput::Correction { correction: LAYOUT, anchor: Some(AT) },
                 EngineInput::Correction { correction: LAYOUT, anchor: None },
+                EngineInput::KeptByChoice { anchor: Some(AT) },
                 EngineInput::Prompt { shown: true },
             ]
         );

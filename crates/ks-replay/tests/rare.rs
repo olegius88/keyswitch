@@ -473,7 +473,7 @@ fn double_capitals_are_fixed_only_where_shift_was_held_too_long() {
     assert_eq!(core.fix_double_capitals(&of("HEllo"), &space).original, "HEllo");
     assert_eq!(core.layout_name(5), "");
     assert!(core.layout_letters(0).is_empty());
-    assert!(!core.word_begun("иг", 1, "bu", 0).expect("no failure"));
+    assert!(!core.word_begun("иг", 1, "bu", 0, "firefox").expect("no failure"));
     set(core, "detection.layouts", json!("us"));
     assert_eq!(core.layout_name(1), "ru");
     assert_eq!(core.layout_name(-1), "");
@@ -698,8 +698,8 @@ fn a_word_part_is_cut_only_where_a_word_could_end() {
     assert_eq!(core.literal_head(&word, 2), 0);
     assert_eq!(core.joined_head(&keys("a-b"), 2), 0);
     assert_eq!(core.replayed_signs(&word, 0), 0);
-    assert!(!core.word_begun("иг", 2, "bu", 0).expect("no failure"));
-    assert!(!core.word_begun("ьь", 1, "mm", 0).expect("no failure"));
+    assert!(!core.word_begun("иг", 2, "bu", 0, "firefox").expect("no failure"));
+    assert!(!core.word_begun("ьь", 1, "mm", 0, "firefox").expect("no failure"));
     let empty_meaning = Arc::new(KeyEvent { characters: vec![",".to_owned(), String::new()], character: ",".to_owned(), ..(*comma).clone() });
     assert_eq!(core.replayed_signs(&[empty_meaning.clone()], 0), 0);
     let space_meaning = Arc::new(KeyEvent { characters: vec![",".to_owned(), " ".to_owned()], character: ",".to_owned(), ..(*comma).clone() });
@@ -1507,6 +1507,24 @@ fn a_waiting_word_and_its_neighbour_may_disagree() {
             }
         }
     }
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+/// A reading a replay types with the conversion hotkey is booked as the engine's own unless the user's own action made
+/// it on the logged screen: only then is the word the user's when they go back into it.
+#[test]
+fn a_reading_the_replay_types_is_booked_as_the_engines_unless_the_user_made_it() {
+    let mut bundle = Bundle::load(None);
+    let mut session = bundle.session("app", 0, Vec::new());
+    session.book_last_correction(false);
+    assert!(session.core.last_correction.is_none(), "nothing to book");
+    session.core.last_correction =
+        Some(Arc::new(CorrectionPlan { automatic: false, ..CorrectionPlan::new(Vec::new(), None, 0, 1, "f".into(), "а".into(), 1.0, "app") }));
+    session.book_last_correction(true);
+    assert!(session.core.last_correction.as_ref().is_some_and(|plan| !plan.automatic), "the user's own");
+    session.book_last_correction(false);
+    assert!(session.core.last_correction.as_ref().is_some_and(|plan| plan.automatic), "the engine's");
     bundle.give_back(session);
     bundle.clean();
 }
