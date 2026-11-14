@@ -4,8 +4,8 @@
 //! name set twice keeps its first place, as in a Python `dict`. `FeatureMap` is an `IndexMap` for that.
 
 use ks_cast::To as _;
-use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, UPPER_HEAD_MIN_LETTERS, UPPER_HEAD_MAX_LETTERS, UPPER_MAGNITUDE_MAX, UPPER_RATIO_BOUND};
-use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, TERM_EDGE_SIGNS};
+use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, UPPER_HEAD_MIN_LETTERS, UPPER_HEAD_MAX_LETTERS, UPPER_MAGNITUDE_MAX, UPPER_RATIO_BOUND, COMMON_FEATURE_PREFIX};
+use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, SHORT_AFTER_CYRILLIC, TERM_EDGE_SIGNS};
 use indexmap::IndexMap;
 use ks_text::layouts::LayoutPair;
 use ks_text::{pystr, ucd};
@@ -796,6 +796,12 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
         // `говорит он ` into `rp` at p=0.997 (the owner's typing, 22.10.2026), and `дз` and `ср` into `lp` and `ch` in
         // Russian phrases; the head reads how often Russian web and news text writes the token.
         update(&mut result, short_evidence(item, tables)?);
+    } else if common_question(&item.original, &item.field.before, tables)? && !item.source_known {
+        // The class the common-reading head answers: the same shape, whose Latin reading is a common word. The frozen model
+        // turned `ру` after a Russian word into `he` at p=1.00 (14 times in two days of a user's typing), having learned `ру` from
+        // English sentences typed in the Russian layout, where it opens the line; the head reads where the token stands
+        // and how often each reading follows a Russian word.
+        update(&mut result, common_evidence(item, tables));
     }
     let known = item.source_known && !tail_like(&item.original, tables);
     if first_question(&item.original, &item.field.before, &item.field.after, tables) && item.field.role != ks_backend::FieldRole::Unknown && !known {
@@ -1252,7 +1258,7 @@ fn term_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let before = format!("before:{}", dominant(&before_tail(item)));
     let ending = format!("ending:{}", russian_ending_bucket(&item.original, tables));
     let delta = format!("delta:{}", band(item.score_delta, START_DELTA_BAND_WIDTH, START_DELTA_BANDS));
-    let boundary = format!("{before}:boundary:{}", if item.trigger == "space" { "space" } else { "end" });
+    let boundary = format!("{before}:boundary:{}", boundary_name(&item.trigger));
     let after = format!("after:{}", item.after_origin.as_str());
     let names = [
         "bias".to_string(),
@@ -1324,7 +1330,7 @@ pub fn first_question(original: &str, before: &str, _after: &str, tables: &TermT
 fn first_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let latin = item.alternative.as_str();
     let letters = format!("letters:{}", item.original.chars().filter(|&c| ucd::isalpha(c)).count());
-    let boundary = format!("boundary:{}", if item.trigger == "space" { "space" } else { "end" });
+    let boundary = format!("boundary:{}", boundary_name(&item.trigger));
     let counts = format!("latin:{}:english:{}", term_bucket(latin, "latin", tables), term_bucket(latin, "english", tables));
     let ending = format!("ending:{}", russian_ending_bucket(&item.original, tables));
     let start = format!("start:{}", russian_start_bucket(&item.original, tables));
@@ -2169,7 +2175,7 @@ fn hypothesis_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let held = format!("waiting:{}", magnitude_ratio(prose_count(&waiting, typed_language, tables), prose_count(reading, other_language, tables)));
     let letters = format!("letters:{}", item.original.chars().filter(|&c| ucd::isalpha(c)).count().min(ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS));
     let delta = format!("delta:{}", band(item.score_delta, START_DELTA_BAND_WIDTH, START_DELTA_BANDS));
-    let boundary = format!("boundary:{}", if item.trigger == "space" { "space" } else { "end" });
+    let boundary = format!("boundary:{}", boundary_name(&item.trigger));
     let names = [
         "bias".to_string(),
         word.clone(),
@@ -2206,12 +2212,152 @@ pub fn short_question(original: &str, before: &str, tables: &TermTables) -> Chec
     if !(latin.is_ascii() && pystr::isalpha(&latin) && dominant(&pystr::casefold(last(before, ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS))) == "ru") {
         return Ok(false);
     }
+    let (russian, other) = short_counts(original, &latin, tables)?;
+    Ok(bucket_of(russian) >= SHORT_HEAD_MIN_RUSSIAN_BUCKET && bucket_of(other) <= SHORT_HEAD_MAX_LATIN_BUCKET && !term_question(original, before, tables))
+}
+
+/// How often Russian text writes a short token (web and news text, prose or technical text, whichever counts it most) and
+/// how often English prose or Russian technical text use its Latin reading: what decides the classes of the short-token
+/// and common-reading heads.
+fn short_counts(original: &str, latin: &str, tables: &TermTables) -> Checked<(u64, u64)> {
     let cyrillic = pystr::casefold(original);
     let short = tables.short().map_err(|_| FeatureError("invalid term frequency table"))?;
     let russian = short.alphabet("cyrillic").count(&cyrillic).max(tables.term("russian").count(&cyrillic)).max(tables.term("cyrillic").count(&cyrillic));
-    let folded = pystr::casefold(&latin);
-    let other = tables.term("latin").count(&folded).max(tables.term("english").count(&folded));
-    Ok(bucket_of(russian) >= SHORT_HEAD_MIN_RUSSIAN_BUCKET && bucket_of(other) <= SHORT_HEAD_MAX_LATIN_BUCKET && !term_question(original, before, tables))
+    let folded = pystr::casefold(latin);
+    Ok((russian, tables.term("latin").count(&folded).max(tables.term("english").count(&folded))))
+}
+
+/// The name of a boundary as the heads read it: the space after a token, or any other end (Enter, a pause, a sign).
+fn boundary_name(trigger: &str) -> &'static str {
+    if trigger == "space" { "space" } else { "end" }
+}
+
+/// Where a token stands on its line: first on it, under a line of text (`Line`), or right after a word of Cyrillic
+/// letters, of Latin letters or of both (`Cyrillic`, `Latin`, `Mixed`), digits and signs between them aside (`купил 5 шт`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinePlace {
+    Line,
+    Cyrillic,
+    Latin,
+    Mixed,
+}
+
+impl LinePlace {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LinePlace::Line => "line",
+            LinePlace::Cyrillic => "cyrillic",
+            LinePlace::Latin => "latin",
+            LinePlace::Mixed => "mixed",
+        }
+    }
+}
+
+/// The place of a token on its line (`LinePlace`) and the word before it there, "" first on the line.
+#[must_use]
+pub fn line_place(before: &str) -> (LinePlace, &str) {
+    let line = before.rsplit('\n').next().unwrap_or("");
+    let Some(&word) = words_of(line).last() else { return (LinePlace::Line, "") };
+    let place = if all_cyrillic(word) {
+        LinePlace::Cyrillic
+    } else if word.is_ascii() {
+        LinePlace::Latin
+    } else {
+        LinePlace::Mixed
+    };
+    (place, word)
+}
+
+/// A token of `SHORT_HEAD_LETTERS` Russian letters, not all capitals, whose keys are Latin letters, with a letter before it
+/// in the field, that Russian text uses at least in bucket `SHORT_HEAD_MIN_RUSSIAN_BUCKET` while English prose or Russian
+/// technical text use its Latin reading above bucket `SHORT_HEAD_MAX_LATIN_BUCKET`: the common-reading head's class, the
+/// rest of the short-token head's shape (the lexicon's own words are left out where the features are made). `ру` (`he`),
+/// `ща` (`of`), `ин` (`by`) and `сс` (`cc`) are; a token with nothing before it is the lone-word, message-start and
+/// short-message heads', a term of Russian technical text the term head's. The question reads only the typed token, the
+/// text before it and the packaged tables, as the trainer routes frames by them (`head_question`).
+pub fn common_question(original: &str, before: &str, tables: &TermTables) -> Checked<bool> {
+    if !(SHORT_HEAD_LETTERS.contains(&count(original)) && all_cyrillic(original) && !pystr::isupper(original) && has_alpha(before)) {
+        return Ok(false);
+    }
+    let latin = translate(original, "ru", "us");
+    if !(latin.is_ascii() && pystr::isalpha(&latin)) {
+        return Ok(false);
+    }
+    let (russian, other) = short_counts(original, &latin, tables)?;
+    Ok(bucket_of(russian) >= SHORT_HEAD_MIN_RUSSIAN_BUCKET && bucket_of(other) > SHORT_HEAD_MAX_LATIN_BUCKET && !term_question(original, before, tables))
+}
+
+/// The sign of a difference of two readings' orders of magnitude, as the pairs of the common-reading head read it.
+fn lean(difference: i64) -> &'static str {
+    match difference.signum() {
+        1 => "ru",
+        -1 => "en",
+        _ => "even",
+    }
+}
+
+/// By how many binary orders of magnitude (`SHORT_MAGNITUDE_MAX` at most, `SHORT_RATIO_BOUND` either way) Russian prose uses
+/// the Cyrillic reading of a word more than English prose uses its Latin one: how Russian the word before a token reads
+/// (`майл` +6; `шы`, the keys of `is`, −8).
+fn russian_lean(word: &str, tables: &TermTables) -> i64 {
+    let (cyrillic, latin) = if word.is_ascii() { (translate(word, "us", "ru"), word.to_owned()) } else { (word.to_owned(), translate(word, "ru", "us")) };
+    let russian = magnitude(prose_count(&cyrillic, "russian", tables), SHORT_MAGNITUDE_MAX);
+    clamp_int(russian - magnitude(prose_count(&latin, "english", tables), SHORT_MAGNITUDE_MAX), SHORT_RATIO_BOUND)
+}
+
+/// The common-reading head's evidence, all it reads, every piece with where the token stands on its line (`line_place`):
+/// by how many binary orders of magnitude Russian text uses the token more than English prose or Russian technical text use
+/// its Latin reading (the short-token head's counts); how often each reading comes right after a word of Cyrillic letters
+/// in Russian technical text (`SHORT_AFTER_CYRILLIC`: `ру` 276 times, `he` 15; `ин` 23, `by` 154) and by how many orders
+/// one outnumbers the other; how Russian the word before it reads (`russian_lean`): after a word of the Russian layout that
+/// is the keys of an English word (`шы ру` for `is he`) the token is English too; whether the English lexicon knows the
+/// Latin reading and the identifier index holds it; the letters, the boundary and how the text after it was given; and the
+/// pairs of these that decide together. First on its line under a Russian line the token opens an English sentence typed
+/// in the Russian layout (`He …`), which the frozen model converts, and after a Russian word it is a Russian token
+/// (`сайт майл ру`, `у нас ща`), which it converted as well: the place tells the two apart. No letter of its own and no copy of
+/// the shared features: the unknown-token head, reading a copy, learned the corpus's tokens by heart (cycle v57). Nor a
+/// weight every place shares: what the frames of one place teach would move the others.
+fn common_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
+    let short = tables.short().expect("the question has read the table");
+    let (cyrillic, latin) = (pystr::casefold(&item.original), pystr::casefold(&item.alternative));
+    let order = |value: u64| magnitude(value, SHORT_MAGNITUDE_MAX);
+    let russian = order(short.alphabet("cyrillic").count(&cyrillic)).max(order(tables.term("russian").count(&cyrillic))).max(order(tables.term("cyrillic").count(&cyrillic)));
+    let english = order(tables.term("latin").count(&latin)).max(order(tables.term("english").count(&latin)));
+    let after = short.alphabet(SHORT_AFTER_CYRILLIC);
+    let follows_counts = (order(after.count(&cyrillic)), order(after.count(&latin)));
+    let difference = clamp_int(russian - english, SHORT_RATIO_BOUND);
+    let following = clamp_int(follows_counts.0 - follows_counts.1, SHORT_RATIO_BOUND);
+    let (place, word) = line_place(&item.field.before);
+    let reading = match place {
+        LinePlace::Cyrillic | LinePlace::Latin => Some(russian_lean(word, tables)),
+        LinePlace::Line | LinePlace::Mixed => None,
+    };
+    let ratio = format!("ratio:{difference}");
+    let follows = format!("follows:{following}");
+    let previous = format!("previous:{}", reading.map_or_else(|| "na".to_owned(), |value| value.to_string()));
+    let leaning = format!("follows:{}:previous:{}", lean(following), reading.map_or("na", lean));
+    let known = format!("known:{}:identifier:{}", flag(item.target_known), flag(item.target_identifier));
+    let after_origin = format!("after:{}", item.after_origin.as_str());
+    let names = [
+        ratio.clone(),
+        follows.clone(),
+        format!("follows:cyrillic:{}", follows_counts.0),
+        format!("follows:latin:{}", follows_counts.1),
+        previous.clone(),
+        known.clone(),
+        after_origin.clone(),
+        format!("letters:{}", count(&item.original)),
+        format!("boundary:{}", boundary_name(&item.trigger)),
+        leaning.clone(),
+        format!("{ratio}:{follows}"),
+        format!("{ratio}:{known}"),
+        format!("{leaning}:{after_origin}"),
+        format!("{previous}:{after_origin}"),
+    ];
+    let mut pairs = head_pairs(COMMON_FEATURE_PREFIX, &[format!("place:{}", place.as_str())], "");
+    pairs.extend(head_pairs(COMMON_FEATURE_PREFIX, &names, &format!(":place:{}", place.as_str())));
+    pairs
 }
 
 /// The short-token head's evidence, all it reads: the binary order of magnitude of how often Russian web and news text
@@ -2238,7 +2384,7 @@ fn short_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs>
     let known = format!("known:{}:identifier:{}", flag(item.target_known), flag(item.target_identifier));
     let letters = format!("letters:{}", count(&item.original));
     let seen = format!("seen:{}", [web, russian, technical, english].iter().map(|&value| flag(value > 0).to_string()).collect::<Vec<_>>().join(":"));
-    let boundary = format!("boundary:{}", if item.trigger == "space" { "space" } else { "end" });
+    let boundary = format!("boundary:{}", boundary_name(&item.trigger));
     let mut names = vec!["bias".to_string()];
     names.extend(magnitudes.iter().map(|(name, value)| format!("{name}:{value}")));
     names.push(ratio.clone());

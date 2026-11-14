@@ -11,7 +11,8 @@ use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use indexmap::IndexMap;
 use ks_context::constants::{ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS, UPPER_HEAD_MAX_LETTERS, UPPER_HEAD_MIN_LETTERS};
-use ks_context::context_action_features::{dotted_question, letters_and_digits, sign_token_asked};
+use ks_context::context_action_features::{common_question, dotted_question, letters_and_digits, sign_token_asked, words_of};
+use ks_context::context_model::TermTables;
 use ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
 use ks_lang::Resources;
 use ks_text::{Indent, JsonOptions, json_dumps, pystr};
@@ -629,8 +630,32 @@ fn leipzig_files(leipzig: &Path, suffix: &str, nested: bool) -> Result<Vec<PathB
     Ok(paths)
 }
 
-/// `build_short`: tokens of two or three Russian letters in the Leipzig word lists unpacked under the directory.
-pub fn build_short(leipzig: &Path) -> Result<Value, String> {
+/// The table `ks-train short` writes (`context-short-frequency.json`): how often Russian web and news text writes each token
+/// of two or three Russian letters (`cyrillic`, the short-token head's counts), and how often each token of two or three
+/// letters, Cyrillic or Latin, comes right after a word of Cyrillic letters on a line of Russian technical text
+/// (`after_cyrillic`, the common-reading head's counts: `ру` 291 times, `he` 16).
+#[derive(Serialize, Debug)]
+pub struct ShortTable {
+    pub after_cyrillic: BTreeMap<String, i64>,
+    pub cyrillic: BTreeMap<String, i64>,
+}
+
+/// Two or three letters of one script, casefolded: a token whose counts the short-token and common-reading heads read.
+fn short_token(core: &str) -> bool {
+    SHORT_HEAD_LETTERS.contains(&core.chars().count()) && (core.chars().all(russian_letter) || core.chars().all(|character| character.is_ascii_lowercase()))
+}
+
+/// `а` to `я` or `ё`: a letter of a casefolded Russian word.
+fn russian_letter(character: char) -> bool {
+    ('а'..='я').contains(&character) || character == 'ё'
+}
+
+/// `build_short`: tokens of two or three Russian letters in the Leipzig word lists unpacked under the directory, and the
+/// words of two or three letters that come right after a word of Cyrillic letters on a line of the ru.stackoverflow
+/// training messages, every developer-chat question left out (`members`). The words of a line are its runs of letters
+/// (`words_of`), digits and signs between them aside, as the head reads the last word of the line before a token (`купил 5
+/// шт`); a count under `TERM_FREQUENCY_LEAST` is cut, as in the other tables.
+pub fn build_short(leipzig: &Path, messages: &Path, members: &[PathBuf]) -> Result<ShortTable, String> {
     let paths = leipzig_files(leipzig, "-words.txt", true)?;
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
     for path in paths {
@@ -641,12 +666,30 @@ pub fn build_short(leipzig: &Path) -> Result<Value, String> {
                 continue;
             }
             let word = pystr::casefold(parts[1]);
-            if SHORT_HEAD_LETTERS.contains(&word.chars().count()) && word.chars().all(|character| ('а'..='я').contains(&character) || character == 'ё') {
+            if SHORT_HEAD_LETTERS.contains(&word.chars().count()) && word.chars().all(russian_letter) {
                 *counts.entry(word).or_insert(0) += parts[2].trim().parse::<i64>().map_err(|_| "a count")?;
             }
         }
     }
-    Ok(json!({"cyrillic": Value::Object(counts.into_iter().filter(|(_, count)| *count >= TERM_FREQUENCY_LEAST).map(|(token, count)| (token, json!(count))).collect())}))
+    let left_out = excluded_questions(members)?;
+    let mut after: BTreeMap<String, i64> = BTreeMap::new();
+    for line in gz_text(&messages.join("so-train.jsonl.gz"))?.lines() {
+        let row: QuestionText = ks_text::json::loads(line).map_err(|error| error.to_string())?;
+        if left_out.contains(&row.qid) {
+            continue;
+        }
+        for text_line in row.text.split('\n') {
+            let mut after_cyrillic = false;
+            for word in words_of(text_line) {
+                let word = pystr::casefold(word);
+                if after_cyrillic && short_token(&word) {
+                    *after.entry(word.clone()).or_insert(0) += 1;
+                }
+                after_cyrillic = word.chars().all(russian_letter);
+            }
+        }
+    }
+    Ok(ShortTable { after_cyrillic: at_least(after, TERM_FREQUENCY_LEAST), cyrillic: at_least(counts, TERM_FREQUENCY_LEAST) })
 }
 
 /// A token the upper-case head may be asked about, spelled as written: `UPPER_HEAD_MIN_LETTERS` to `UPPER_HEAD_MAX_LETTERS`
@@ -1117,6 +1160,17 @@ fn holds(text: &str, class: TokenClass) -> bool {
     tokens.iter().enumerate().any(|(index, token)| class(if index == 0 { "" } else { tokens[index - 1] }, token))
 }
 
+/// A token whose Cyrillic reading (the token itself, or the keys of a Latin one in the Russian layout) is of the
+/// common-reading head's class after the token before it (`common_question`): `ру` in `майл ру`, `he` in `and he`.
+fn holds_common(text: &str, tables: &TermTables) -> bool {
+    let tokens = pystr::split(text);
+    tokens.iter().enumerate().skip(1).any(|(index, token)| {
+        let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
+        let cyrillic = if pystr::isascii(core) { crate::physical::translated(core, 0).unwrap_or_default() } else { core.to_owned() };
+        common_question(&cyrillic, tokens[index - 1], tables).unwrap_or(false)
+    })
+}
+
 fn capture_split(question: i64, development_share: f64) -> &'static str {
     let digest = hex_digest(&format!("capture-split:{question}"));
     let draw = u64::from_str_radix(digest.get(..CHOICE_HEX_DIGITS).unwrap_or_default(), 16).expect("a digest").to::<f64>() / 16_f64.powi(CHOICE_HEX_DIGITS.to::<i32>());
@@ -1139,12 +1193,15 @@ pub struct SelectRequest<'a> {
     pub out: &'a Path,
     pub prefix: &'a str,
     pub only: Option<&'a Path>,
+    /// The packaged count tables, which the class `common` reads (`holds_common`).
+    pub tables: Option<&'a TermTables>,
 }
 
 /// `select`: the messages of a class, in two files by question.
 pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let (message, token) = (message_class(request.name), token_class(request.name));
-    if message.is_none() && token.is_none() {
+    let common = request.tables.filter(|_| matches!(request.name, "common"));
+    if message.is_none() && token.is_none() && common.is_none() {
         return Err(format!("unknown class: {}", request.name));
     }
     let other = match request.name {
@@ -1161,7 +1218,7 @@ pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let mut take = |line: &str| -> Result<(), String> {
         let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
         let text = row["text"].as_str().ok_or("a text")?;
-        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) {
+        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) || common.is_some_and(|tables| !holds_common(text, tables)) {
             return Ok(());
         }
         let question = row["qid"].as_i64().ok_or("a question")?;
@@ -1366,7 +1423,11 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
             Ok(Value::Object(table.as_object().ok_or("a table")?.iter().map(|(name, words)| (name.clone(), json!(words.as_object().map_or(0, Map::len)))).collect()))
         }
         Some("alnum") => write_table(&build_alnum(&required("--messages")?, &repeated("--members"))?, &required("--out")?),
-        Some("short") => write_table(&build_short(&required("--leipzig")?)?, &required("--out")?),
+        Some("short") => {
+            let table = build_short(&required("--leipzig")?, &required("--messages")?, &repeated("--members"))?;
+            std::fs::write(required("--out")?, ks_text::json::dumps(&table, &indented) + "\n").map_err(|error| error.to_string())?;
+            Ok(json!({"after_cyrillic": table.after_cyrillic.len(), "cyrillic": table.cyrillic.len()}))
+        }
         Some("capitals") => {
             let minimum: i64 = required("--minimum-count")?.to_string_lossy().parse().map_err(|_| "--minimum-count is a number")?;
             let request = CapitalsRequest { root, leipzig: &required("--leipzig")?, messages: &required("--messages")?, members: &repeated("--members"), iso4217: &required("--iso4217")?, iso4217_sha256: ISO_4217_LIST_SHA256, minimum };
@@ -1383,7 +1444,12 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
             let only = option("--only-ids");
             let leipzig = option("--leipzig");
             let messages = if leipzig.is_some() { PathBuf::new() } else { required("--messages")? };
-            select(&SelectRequest { messages: &messages, leipzig: leipzig.as_deref(), members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref() })
+            // The class of the common-reading head reads the packaged count tables of the tree.
+            let tables = match name.as_str() {
+                "common" => Some(TermTables::load(&root.join("resources/models")).map_err(|error| error.message)?),
+                _ => None,
+            };
+            select(&SelectRequest { messages: &messages, leipzig: leipzig.as_deref(), members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref(), tables: tables.as_ref() })
         }
         Some("devchat-messages") => build_devchat(root, &required("--comments")?, &required("--dump")?, &required("--out")?, &repeated("--earlier")),
         other => Err(format!("unknown command: {other:?}")),

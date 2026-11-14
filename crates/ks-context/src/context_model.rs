@@ -11,7 +11,7 @@
 
 use ks_cast::To as _;
 use crate::constants::{
-    ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX, ALNUM_FEATURE_PREFIX, BOUNDARY_MISSING_LETTERS, CONTEXT_ACTION_FEATURE_VERSION,
+    ACTION_FEATURE_CHARACTER_TEXT_FIELD_INDEX, ALNUM_FEATURE_PREFIX, BOUNDARY_MISSING_LETTERS, COMMON_FEATURE_PREFIX, CONTEXT_ACTION_FEATURE_VERSION,
     CONTEXT_DOUBTFUL_KEEP_PROBABILITY, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, CONTEXT_TYPO_MIN_CHARACTERS, CYRLETTER_FEATURE_PREFIX,
     DIGIT_DOT_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, MAX_CONTEXT_ACTION_MODEL_BYTES,
     MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES,
@@ -107,7 +107,11 @@ pub const ARTIFACT_FILE: &str = "context_policy_v1.json";
 pub const BASELINE_FEATURE_VERSION: i64 = 2;
 pub const TERM_ALPHABETS: [&str; 4] = ["cyrillic", "english", "latin", "russian"];
 pub const ALNUM_ALPHABETS: [&str; 2] = ["cyrillic", "latin"];
-pub const SHORT_ALPHABETS: [&str; 1] = ["cyrillic"];
+/// The section of the short-token table that counts the words of two or three letters, Cyrillic or Latin, right after a
+/// word of Cyrillic letters on a line of Russian technical text: the common-reading head reads it. The short-token head
+/// reads `cyrillic`.
+pub const SHORT_AFTER_CYRILLIC: &str = "after_cyrillic";
+pub const SHORT_ALPHABETS: [&str; 2] = [SHORT_AFTER_CYRILLIC, "cyrillic"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ContextEvidence {
@@ -596,9 +600,9 @@ impl ContextModel {
             _ => return Err(LoadError::value("unsafe context threshold")),
         };
         let table = weights.table;
-        if table.names().any(|name| name.starts_with(SHORT_FEATURE_PREFIX)) {
-            // The short-token head asks its table about many a short word typed after Russian text: it is read here,
-            // before the keyboard hook starts, as the term table is.
+        if table.names().any(|name| name.starts_with(SHORT_FEATURE_PREFIX) || name.starts_with(COMMON_FEATURE_PREFIX)) {
+            // The short-token and common-reading heads ask their table about many a short word typed after text: it is
+            // read here, before the keyboard hook starts, as the term table is.
             tables.short()?;
         }
         if table.names().any(|name| name.starts_with(UPPER_FEATURE_PREFIX)) {

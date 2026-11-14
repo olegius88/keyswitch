@@ -64,7 +64,7 @@
 
 ## Сообщения для обучения
 
-`ks-train messages` строит сообщения из дампа ru.stackoverflow, Tatoeba и UD Russian-Taiga. `terms`, `alnum`, `short` считают частоты, `capitals` — как часто токен пишется заглавными (списки слов Leipzig и учебная часть ru.stackoverflow, коды валют ISO 4217 по закреплённому списку, заглавные формы словаря `ru_RU.lm`; `resources/models/context-capitals-frequency.json`), `select` отбирает сообщения одного класса (с `--leipzig` — из предложений корпусов Leipzig), `capture` записывает вопросы движка, `sources` пишет авторов, `devchat-messages` собирает комментарии для чат-стенда. Файлы частей `test` не печатаются и не открываются для чтения глазами.
+`ks-train messages` строит сообщения из дампа ru.stackoverflow, Tatoeba и UD Russian-Taiga. `terms`, `alnum`, `short` считают частоты (`short` — ещё и как часто слово из двух-трёх букв стоит сразу после слова кириллицей в учебной части ru.stackoverflow, без вопросов чат-стенда: раздел `after_cyrillic` таблицы `resources/models/context-short-frequency.json`; `--leipzig`, `--messages`, `--members`), `capitals` — как часто токен пишется заглавными (списки слов Leipzig и учебная часть ru.stackoverflow, коды валют ISO 4217 по закреплённому списку, заглавные формы словаря `ru_RU.lm`; `resources/models/context-capitals-frequency.json`), `select` отбирает сообщения одного класса (с `--leipzig` — из предложений корпусов Leipzig), `capture` записывает вопросы движка, `sources` пишет авторов, `devchat-messages` собирает комментарии для чат-стенда. Файлы частей `test` не печатаются и не открываются для чтения глазами.
 
 ## Выпуск
 

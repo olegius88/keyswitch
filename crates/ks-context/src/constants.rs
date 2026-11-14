@@ -342,6 +342,19 @@ pub const SHORT_MAGNITUDE_MAX: i64 = 16;
 
 pub const SHORT_RATIO_BOUND: i64 = 8;
 
+// A token of two or three Russian letters typed in the Russian layout after text with letters, that Russian text uses at
+// least in bucket SHORT_HEAD_MIN_RUSSIAN_BUCKET while English prose or Russian technical text use its Latin reading above
+// bucket SHORT_HEAD_MAX_LATIN_BUCKET, has evidence of its own under this prefix: the common-reading head
+// (context_action_features.common_question), the rest of the short-token head's shape. The installed pair of 0.71.2
+// turned `ру` after a Russian word into `he` at p=1.00 (14 times in two days of a user's typing): the questions it was fitted
+// on hold 1 543 conversions of `ру` first on its line under a Russian line (English sentences typed in the Russian layout,
+// `He …`) against 12 frames that keep it, and nothing told the two places apart. The head reads where the token stands
+// on its line, how Russian the word before it reads, how often each reading comes right after a word of Cyrillic letters
+// in Russian technical text (the after_cyrillic section of SHORT_FREQUENCY_FILE: `ру` 276 times, `he` 15) and the counts
+// the short-token head reads, each by the binary order of magnitude (SHORT_MAGNITUDE_MAX) and their differences
+// (SHORT_RATIO_BOUND); no letters and no copy of the shared features.
+pub const COMMON_FEATURE_PREFIX: &str = "common|";
+
 // A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
 // at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
 // uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of
@@ -618,7 +631,8 @@ pub const MAX_CONTEXT_MODEL_FEATURES: usize = 50000;
 // (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
 // (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
 // (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
-// (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
+// (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the common-reading head
+// (COMMON_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
 // sign head (SIGN_FEATURE_PREFIX), the resume head (RESUME_FEATURE_PREFIX), the Cyrillic-letter head
 // (CYRLETTER_FEATURE_PREFIX), the dash head (DASH_FEATURE_PREFIX), the digit-dot head (DIGIT_DOT_FEATURE_PREFIX), the
 // quote head (QUOTE_FEATURE_PREFIX), the known-reply head (KNOWN_REPLY_FEATURE_PREFIX) and the upper-case head

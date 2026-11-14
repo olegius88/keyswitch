@@ -1,0 +1,111 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 4000,
+    "russian_share": 1.0,
+    "seed": "capture-common-so-dev",
+    "prefix_rate": 0.4,
+    "code": "code-dev.txt.gz",
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "4 000 messages with Latin words and 4 000 Russian ones of the development split, four typing modes, 40 % under a previous line; the common-reading head's questions alone",
+   "sha256": "c1da2bd844c9e9f806cd070404e08e32ac1029df1d2b9d3275dbc71562e6140e",
+   "rows": 2189,
+   "unique": 872
+  },
+  {
+   "file": "tatoeba-chat-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "tatoeba-chat-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 5000,
+    "russian_share": 0.0,
+    "seed": "capture-common-en-wrong-ru-line-dev",
+    "prefix_rate": 1.0,
+    "modes": [
+     "start_wrong"
+    ],
+    "lines_above": {
+     "messages": "tatoeba-dev.jsonl.gz",
+     "kinds": [
+      "tatoeba"
+     ],
+     "mix": "russian",
+     "count": 5000,
+     "seed": "lines-above-ru-common-dev"
+    },
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR)",
+   "origin": "Tatoeba (https://tatoeba.org), eng_sentences and rus_sentences of 2026-09-26",
+   "typing": "5 000 English sentences of the development split typed in the Russian layout under a Russian sentence (start_wrong); the common-reading head's questions alone",
+   "sha256": "2221092a4838a6de6c9f1f1a79d5ec1700e6f36f7e333c3f610be77013a8ac53",
+   "rows": 283,
+   "unique": 278
+  },
+  {
+   "file": "taiga-chat-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "balance": false,
+   "recipe": {
+    "messages": "taiga-chat-dev.jsonl.gz",
+    "kinds": [
+     "taiga_chat"
+    ],
+    "count": 1000,
+    "russian_share": 10.0,
+    "seed": "capture-common-taiga-chat-dev",
+    "prefix_rate": 0.6,
+    "labels": [
+     "keep"
+    ],
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (UD Russian-Taiga: CC BY-SA 4.0; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "origin": "UD Russian-Taiga r2.18 (d1e48cd2), development part",
+   "typing": "chat style: lowercase, no final sign; only keep answers; the common-reading head's questions alone",
+   "sha256": "8311e095b384aadcd846d7c6b727b37d5182c5089939d562476faf6faf2f9731",
+   "rows": 179,
+   "unique": 96
+  }
+ ]
+}

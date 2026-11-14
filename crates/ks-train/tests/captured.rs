@@ -226,6 +226,25 @@ fn the_heads_on_captured_questions_leave_out_what_they_were_told_to() {
 }
 
 #[test]
+fn the_common_reading_head_frames_its_class_and_leaves_out_what_it_was_told_to() {
+    // A token of the class after a Russian word; the same token a lexicon knows, asked with a hypothesis before it, held
+    // out; and the short-token head's `кз`.
+    let rows = vec![
+        question(2, "ру", "he", 1, &[("before", json!("сайт майл "))]),
+        question(2, "ру", "he", 1, &[("before", json!("сайт майл ")), ("source_known", json!(true))]),
+        question(2, "ру", "he", 1, &[("before", json!("сайт майл ")), ("before_origin", json!("planned_previous_reading"))]),
+        question(2, "ща", "of", 1, &[("before", json!("у нас "))]),
+        question(2, "кз", "rp", 1, &[("before", json!("говорит он "))]),
+    ];
+    let manifest = manifest_of("common.jsonl.xz", 2, &rows);
+    let mut wanted = recipe();
+    wanted["common_curriculum"] = json!({"captured": {"train": [[manifest, "common.jsonl.xz"]]}, "sample_weight": 1.0, "held_out": ["ща"]});
+    let (frames, report) = own_curriculum(&TOOLS, "common", "train", &[], &wanted).expect("the frames");
+    let originals: Vec<(&str, &str)> = frames.iter().map(|frame| (frame.original.as_str(), frame.field.before.as_str())).collect();
+    assert_eq!(originals, [("ру", "сайт майл ")], "{report}");
+}
+
+#[test]
 fn a_curated_letter_alone_in_a_field_keeps_its_answer() {
     let alone = [("before", json!("")), ("after", json!(""))];
     let rows = vec![question(1, "я", "z", 1, &alone), question(1, "z", "я", 0, &[("before", json!("")), ("after", json!("")), ("label", json!("convert"))])];

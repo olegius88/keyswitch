@@ -10,7 +10,7 @@ use ks_context::constants::{
     MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_MODEL_BYTES, MAX_CONTEXT_MODEL_FEATURES, MAX_PREFIX_WEIGHTS, TYPO_ALPHABETS, TYPO_COUNT_LOG_SCALE, TYPO_FREQUENCY_SCHEMA_VERSION,
 };
 use ks_context::context_model::{BeforeOrigin, CapitalCounts, ContextModel, TermTables, CAPITALS_FREQUENCY_FILE};
-use ks_context::constants::{MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES, UPPER_FEATURE_PREFIX};
+use ks_context::constants::{COMMON_FEATURE_PREFIX, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES, UPPER_FEATURE_PREFIX};
 use ks_context::flat_table::{WeightSpec, load_artifact};
 use ks_context::prefix_schema::{VersionedPrefixModel, prefix_diagnostics};
 use ks_context::typo_correction::{TypoLexicon, keyboard_neighbours, packaged_lexicon};
@@ -470,4 +470,22 @@ fn a_model_with_the_upper_case_head_reads_its_table_before_the_first_word() {
     assert!(ContextModel::load_artifact(&written(context_artifact().to_string().as_bytes()), &missing).is_ok());
     let tables = TermTables::load(&missing).expect("the term tables");
     assert!(tables.capitals().is_err());
+}
+
+#[test]
+fn a_model_with_the_common_reading_head_reads_the_short_token_table_before_the_first_word() {
+    let weights = BTreeMap::from([(format!("{COMMON_FEATURE_PREFIX}place:line"), [0.5, -0.5, 0.0, 0.0]), ("f0".to_owned(), [0.5, -0.5, 0.0, 0.0])]);
+    let artifact = Artifact {
+        feature_version: 3,
+        actions: ["keep", "convert", "wait", "suggest"],
+        weights_sha256: digest(&weights),
+        weights,
+        version: "context-v3-test",
+        conversion_threshold: 0.99,
+    };
+    let path = written(ks_text::json::dumps(&artifact, &ks_text::JsonOptions::default()).as_bytes());
+    assert!(ContextModel::load_artifact(&path, &models_with_capitals(None)).is_ok());
+    let without = models_with_capitals(None);
+    std::fs::remove_file(without.join("context-short-frequency.json")).expect("the short-token table removed");
+    assert_eq!(ContextModel::load_artifact(&path, &without).err().expect("refused").name, "FileNotFoundError");
 }

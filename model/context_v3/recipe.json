@@ -1,7 +1,7 @@
 {
-  "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-and-rare-reading-capital-citations-and-closing-quotes-and-stranded-previous-words-and-words-in-capitals-v16",
+  "data_revision": "symmetric-short-actions-balanced-legacy-actions-debian-commands-natural-lookahead-three-letter-ambiguity-deferral-lexical-short-pairs-and-unambiguous-latin-citations-after-russian-prose-and-rare-reading-capital-citations-and-closing-quotes-and-stranded-previous-words-and-words-in-capitals-and-common-readings-v17",
   "epochs": 50,
-  "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-and-capitals-and-capital-spellings-v9",
+  "feature_revision": "learned-ortho-script-length-right-context-origin-identifier-lexicon-line-opening-and-term-frequency-and-capitals-and-capital-spellings-and-common-readings-v10",
   "training_revision": "identifier-evidence-dropout-one-family-in-three-planned-mass-balance-and-model-verdict-stands-and-threshold-plateau-under-authored-ceiling",
   "lexicon_supplement": {
     "name": "opensubtitles-2018-ru-full-min10-outside-onboard-v2",
@@ -200,9 +200,12 @@
     "heads": {
       "upper": {
         "maximum_features": 4000
+      },
+      "common": {
+        "maximum_features": 3000
       }
     },
-    "scope": "The pair context-v3-48a863e75bb6 of 0.65.0 to 0.71.2, every weight fixed: its kept-neighbour question and every head are carried as shipped, and the upper-case head is fitted onto it. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The upper-case head: a token of two to five letters in capitals, all Latin or all Cyrillic, whose other reading is letters too, with no letter before it in the field or with more Cyrillic letters than Latin ones before it, one of whose readings a source of the capitals table spells in capitals, a currency code or a form the Russian lexicon writes in capitals (a token no source spells so stays the frozen model's), asked at its own boundary, again beside its next word and beside a next word kept as typed (context_action_features.upper_question); it reads how often Russian web and news text and Russian technical text spell each reading in capitals (resources/models/context-capitals-frequency.json, ks-train capitals), by how many binary orders the Latin reading's count outnumbers the Cyrillic one's, whether the Latin reading is a currency code of ISO 4217 and the Cyrillic one a form the Russian lexicon writes in capitals, how often Russian prose uses the Cyrillic reading in any case against how often English prose or Russian technical text use the Latin one (a word typed with Caps Lock is that word), whether the lexicons know each reading, the letters, a letter no Russian word starts with, the boundary and how the word after it was given, each read with whether text stands before it; no letters and no copy of the shared features. The lone-word, short-message and known-reply heads, which read caseless counts, no longer answer such a token. Motivation (an authored battery on the engine, 10.11.2026): the pair of 0.71.2 left 9 of 74 Latin abbreviations typed in the Russian layout alone as typed (`ЛЯЕ` for `KZT` kept at p=0.992), converted `BYN` typed as meant into `ИНТ` (the short-message head counted `инт` 217 times and `byn` 6, in no case), turned `ЦА` sent alone into `WF` (the lone-word head) and left 40 of 56 Russian abbreviations typed in the English layout alone as typed (`CCCH` for `СССР` at p=0.994): every count it read was caseless, and in capitals a token is another word."
+    "scope": "The pair context-v3-48a863e75bb6 of 0.65.0 to 0.71.2, every weight fixed: its kept-neighbour question and every head are carried as shipped, and the upper-case head is fitted onto it. The lone-word head's frames are labelled with the counts it was fitted with (carried.alone) and the answers of the corpus v37 model (labels). The upper-case head: a token of two to five letters in capitals, all Latin or all Cyrillic, whose other reading is letters too, with no letter before it in the field or with more Cyrillic letters than Latin ones before it, one of whose readings a source of the capitals table spells in capitals, a currency code or a form the Russian lexicon writes in capitals (a token no source spells so stays the frozen model's), asked at its own boundary, again beside its next word and beside a next word kept as typed (context_action_features.upper_question); it reads how often Russian web and news text and Russian technical text spell each reading in capitals (resources/models/context-capitals-frequency.json, ks-train capitals), by how many binary orders the Latin reading's count outnumbers the Cyrillic one's, whether the Latin reading is a currency code of ISO 4217 and the Cyrillic one a form the Russian lexicon writes in capitals, how often Russian prose uses the Cyrillic reading in any case against how often English prose or Russian technical text use the Latin one (a word typed with Caps Lock is that word), whether the lexicons know each reading, the letters, a letter no Russian word starts with, the boundary and how the word after it was given, each read with whether text stands before it; no letters and no copy of the shared features. The lone-word, short-message and known-reply heads, which read caseless counts, no longer answer such a token. The common-reading head is fitted onto it too: a token of two or three Russian letters typed in the Russian layout after text with letters, that Russian text uses at least fifty times while English prose or Russian technical text use its Latin reading at least fifty times too and the lexicon does not hold it (context_action_features.common_question); it reads where the token stands on its line, how Russian the word before it reads, how often each reading comes right after a word of Cyrillic letters in Russian technical text (the after_cyrillic section of resources/models/context-short-frequency.json, ks-train short) and the counts the short-token head reads; no letters and no copy of the shared features. Motivation: the pair of 0.71.2 turned `ру` after a Russian word into `he` at p=1.00, having learned `ру` from English sentences typed in the Russian layout, where it opens the line. Motivation (an authored battery on the engine, 10.11.2026): the pair of 0.71.2 left 9 of 74 Latin abbreviations typed in the Russian layout alone as typed (`ЛЯЕ` for `KZT` kept at p=0.992), converted `BYN` typed as meant into `ИНТ` (the short-message head counted `инт` 217 times and `byn` 6, in no case), turned `ЦА` sent alone into `WF` (the lone-word head) and left 40 of 56 Russian abbreviations typed in the English layout alone as typed (`CCCH` for `СССР` at p=0.994): every count it read was caseless, and in capitals a token is another word."
   },
   "letter_curriculum": {
     "term_sentences": 1500,
@@ -1489,5 +1492,80 @@
     "token_cap": 32,
     "convert_weight": 4.17,
     "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of two to five letters in capitals alone or after Russian text (context_action_features.upper_question) the engine asked while ru.stackoverflow messages of 2023 (every developer-chat question left out), Russian sentences of the Leipzig corpora and the listed Tatoeba sentences holding such a token were typed six ways: as meant with the layout switched by hand, with a switch to English or to Russian forgotten, from the start in the other layout, with a Russian word in capitals typed in the English layout after a Russian word and no switch by hand (slip_capitals), and as meant with the manual-layout protection off (ks-train select --class capitals; ks-train capture; model/context_v3/captured/manifest-upper.json, schema 2), by question and sentence into TRAIN and DEVELOPMENT; at most token_cap frames of one token with one answer. The currency codes of ISO 4217, which messages hold too rarely to teach (`UAH`, `UZS` and `KGS` are spelled no more than once in the Leipzig word lists), are framed by rule (currencies, currency_curriculum): alone and after contexts_per_code - 1 left contexts of Russian rows, as written keep, their keys in the Russian layout convert unless that reading is spelled in capitals in a table or is a Russian word; one code in five to DEVELOPMENT. A converted frame weighs convert_weight = keep_importance x kept frames / converted frames of TRAIN (4 x 10 212 / 9 801), so both answers weigh the same. The tokens of one half of each family of the battery crates/ks-replay/tests/capitals.rs, by hash, and their keys give no frame (held_out): the battery counts them apart."
+  },
+  "common_curriculum": {
+    "captured": {
+      "train": [
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-previous-line.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "so-typing-typos.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typing.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-typos.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "taiga-chat-typing-keep.jsonl.xz"
+        ],
+        [
+          "model/context_v1/captured/manifest.json",
+          "tatoeba-chat-en-wrong-ru-line.jsonl.xz"
+        ]
+      ],
+      "development": [
+        [
+          "model/context_v3/captured/manifest-common.json",
+          "so-common-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-common.json",
+          "tatoeba-chat-common-dev.jsonl.xz"
+        ],
+        [
+          "model/context_v3/captured/manifest-common.json",
+          "taiga-chat-common-dev.jsonl.xz"
+        ]
+      ]
+    },
+    "held_out": [
+      "ащк",
+      "вс",
+      "вщ",
+      "еру",
+      "ещ",
+      "зп",
+      "ии",
+      "ин",
+      "ой",
+      "ру",
+      "тз",
+      "тп",
+      "тще",
+      "фку",
+      "ше",
+      "ща",
+      "щк"
+    ],
+    "sample_weight": 1.0,
+    "token_cap": 16,
+    "convert_weight": 5.0,
+    "scope": "TRAIN, and DEVELOPMENT for the head's epoch: the questions about a token of the common-reading head's class (context_action_features.common_question; a word the lexicon knows is left out) the engine asked while the train parts of ru.stackoverflow 2023, Tatoeba chat and UD Taiga were typed (the captured questions of model/context_v1/captured the short-token head reads: Russian tokens typed as meant, kept; English sentences typed in the Russian layout under a Russian line and English words in Russian messages typed in the Russian layout, converted), and for DEVELOPMENT the development parts of ru.stackoverflow 2023 typed the four ways, of Tatoeba chat in English typed in the Russian layout under a Russian sentence and of UD Taiga chat typed as meant (model/context_v3/captured/manifest-common.json, schema 2); at most token_cap frames of one token with one answer. The tokens of one half of each family of the battery crates/ks-replay/tests/common_readings.rs, by hash of their Cyrillic letters, give no frame (held_out): the battery counts them apart."
   }
 }
