@@ -98,7 +98,7 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
             // The engine's questions about such a token while real messages were typed, among them the English sentences
             // typed in the Russian layout under a Russian line that open with it (`He …`).
             let held = options.held_out();
-            captured_head_curriculum(tools, split, options, &|item| item.before_origin == BeforeOrigin::Field && !item.source_known && f::common_question(&item.original, &item.field.before, t).expect("a question") && !held.contains(&pystr::casefold(&item.original)), "common")
+            captured_head_curriculum(tools, split, options, &|item| item.before_origin == BeforeOrigin::Field && !item.source_known && f::common_question(&item.original, &item.field.before, &item.trigger, t).expect("a question") && !held.contains(&pystr::casefold(&item.original)), "common")
         }
         "slip" => {
             let held = options.held_out();
@@ -162,7 +162,7 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || (has(DOTTED_FEATURE_PREFIX) && f::dotted_question(original, alternative))
         || alnum
         || (has(SHORT_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::short_question(original, before, t).expect("a question"))
-        || (has(COMMON_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::common_question(original, before, t).expect("a question"))
+        || (has(COMMON_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::common_question(original, before, trigger, t).expect("a question"))
         || (has(SLIP_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::slip_question(original, before, t))
         || (has(RESUME_FEATURE_PREFIX) && f::resume_question(original, alternative, before, after, origin))
         || cyrletter

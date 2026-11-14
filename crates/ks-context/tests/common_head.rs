@@ -52,12 +52,17 @@ fn the_class_is_the_rest_of_the_short_token_shape() {
     let tables = tables();
     // Both readings common, a letter before it: after a Russian word, after Latin text, first on a line.
     for (original, before) in [("ру", "сайт майл "), ("ща", "у нас "), ("ин", "and then "), ("Ру", "Вот что он написал.\n"), ("сс", "запусти ")] {
-        assert_eq!(common_question(original, before, &tables), Ok(true), "{original} after {before:?}");
+        assert_eq!(common_question(original, before, "space", &tables), Ok(true), "{original} after {before:?}");
     }
     // Nothing before it; capitals; a Latin token; a Latin reading that is no word (`ё`); too long or too short; Russian text
     // that hardly uses it (`гы`); a Latin reading too rare (the short-token head's `кз`); a term (`сш`).
     for (original, before) in [("ру", ""), ("ру", "  "), ("РУ", "сайт "), ("he", "сайт "), ("ёж", "сайт "), ("руку", "сайт "), ("р", "сайт "), ("гы", "он такой "), ("кз", "говорит он "), ("сш", "запусти ")] {
-        assert_eq!(common_question(original, before, &tables), Ok(false), "{original} after {before:?}");
+        assert_eq!(common_question(original, before, "space", &tables), Ok(false), "{original} after {before:?}");
+    }
+    // At a sign as at a space; at a pause or Enter the frozen model decides.
+    assert_eq!(common_question("ру", "сайт майл ", "punctuation", &tables), Ok(true));
+    for trigger in ["pause", "enter", "tab"] {
+        assert_eq!(common_question("ру", "сайт майл ", trigger, &tables), Ok(false), "{trigger}");
     }
     // The two classes do not meet.
     assert_eq!(short_question("кз", "говорит он ", &tables), Ok(true));
@@ -67,10 +72,10 @@ fn the_class_is_the_rest_of_the_short_token_shape() {
     std::fs::create_dir_all(&folder).expect("a folder");
     std::fs::copy(models().join("context-term-frequency.json"), folder.join("context-term-frequency.json")).expect("the term table");
     let without = TermTables::load(&folder).expect("the term table loads");
-    assert!(common_question("ру", "сайт майл ", &without).is_err());
+    assert!(common_question("ру", "сайт майл ", "space", &without).is_err());
     std::fs::write(folder.join(SHORT_FREQUENCY_FILE), "{\"cyrillic\": {\"ру\": 2842}}").expect("a table of one section");
     let one_section = TermTables::load(&folder).expect("the term table loads");
-    assert!(common_question("ру", "сайт майл ", &one_section).is_err());
+    assert!(common_question("ру", "сайт майл ", "space", &one_section).is_err());
     assert!(extract_action_features(&evidence("ру", "he", "сайт майл "), &one_section).is_err());
     std::fs::remove_dir_all(&folder).expect("cleaned");
 }
@@ -109,10 +114,12 @@ fn the_head_reads_where_the_token_stands_and_what_follows_a_russian_word() {
     assert!(opening.contains("previous:na:place:line") && opening.contains("follows:ru:previous:na:place:line"), "{opening:?}");
     let mixed = head(&evidence("ру", "he", "testтест "), &tables);
     assert!(mixed.contains("previous:na:place:mixed"), "{mixed:?}");
-    // At a pause, and asked again with the next word planned for conversion.
+    // At a sign, not at a pause, and asked again with the next word planned for conversion.
     let mut paused = evidence("ру", "he", "сайт майл ");
-    "pause".clone_into(&mut paused.trigger);
+    "punctuation".clone_into(&mut paused.trigger);
     assert!(head(&paused, &tables).contains("boundary:end:place:cyrillic"));
+    "pause".clone_into(&mut paused.trigger);
+    assert!(head(&paused, &tables).is_empty());
     let mut planned = evidence("ру", "he", "сайт майл ");
     planned.after_origin = AfterOrigin::PlannedNextConversion;
     "is".clone_into(&mut planned.field.after);

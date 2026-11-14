@@ -78,7 +78,9 @@ fn every_question_answers_for_every_token_in_every_place() {
             count(slip_question(original, before, &tables));
             count(alnum_question(original, alternative, before, &tables).unwrap_or(false));
             count(short_question(original, before, &tables).unwrap_or(false));
-            count(common_question(original, before, &tables).unwrap_or(false));
+            for trigger in TRIGGERS {
+                count(common_question(original, before, trigger, &tables).unwrap_or(false));
+            }
             count(!line_place(before).1.is_empty());
             for trigger in TRIGGERS {
                 count(variable_question(original, alternative, before, trigger));

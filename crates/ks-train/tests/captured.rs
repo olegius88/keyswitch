@@ -206,8 +206,12 @@ fn a_head_takes_the_questions_of_its_class_from_its_files() {
 
 #[test]
 fn the_heads_on_captured_questions_leave_out_what_they_were_told_to() {
-    // A hypothesis, a short Russian word, a slip: asked with the left text given, or planned.
+    // A hypothesis, a short Russian word, a slip: asked with the left text given, or planned. A token of the common-reading
+    // head's class after a Russian word, the same token a lexicon knows, and one held out.
     let rows = vec![
+        question(2, "ру", "he", 1, &[("before", "сайт майл ".into())]),
+        question(2, "ру", "he", 1, &[("before", "сайт майл ".into()), ("source_known", true.into())]),
+        question(2, "ща", "of", 1, &[("before", "у нас ".into())]),
         question(2, "да", "lf", 1, &[("before", json!("это очень важная вещь для всех "))]),
         question(2, "да", "lf", 1, &[("before", json!("это очень важная вещь для всех ")), ("before_origin", json!("planned_previous_reading"))]),
         question(2, "вы", "ds", 1, &[("before", json!("это очень важная вещь для всех ")), ("before_origin", json!("planned_previous_reading")), ("baseline_convert", json!(true))]),
@@ -215,33 +219,18 @@ fn the_heads_on_captured_questions_leave_out_what_they_were_told_to() {
     ];
     let manifest = manifest_of("planned.jsonl.xz", 2, &rows);
     let mut wanted = recipe();
-    for head in ["hypothesis", "short", "slip"] {
-        let options = json!({"captured": {"train": [[manifest, "planned.jsonl.xz"]]}, "sample_weight": 1.0, "held_out": ["да"]});
+    let held = ["да", "ща"];
+    let mut framed = std::collections::BTreeMap::new();
+    for head in ["hypothesis", "short", "slip", "common"] {
+        let options = json!({"captured": {"train": [[manifest, "planned.jsonl.xz"]]}, "sample_weight": 1.0, "held_out": held});
         let name = format!("{head}_curriculum");
         wanted[name.as_str()] = options.clone();
         let (frames, report) = own_curriculum(&TOOLS, head, "train", &[], &wanted).expect("the frames");
         assert!(report.is_object());
-        assert!(frames.iter().all(|frame| frame.original != "да"), "{head}: {report}");
+        assert!(frames.iter().all(|frame| !held.contains(&frame.original.as_str())), "{head}: {report}");
+        framed.insert(head, frames.iter().map(|frame| (frame.original.clone(), frame.field.before.clone())).collect::<Vec<_>>());
     }
-}
-
-#[test]
-fn the_common_reading_head_frames_its_class_and_leaves_out_what_it_was_told_to() {
-    // A token of the class after a Russian word; the same token a lexicon knows, asked with a hypothesis before it, held
-    // out; and the short-token head's `кз`.
-    let rows = vec![
-        question(2, "ру", "he", 1, &[("before", json!("сайт майл "))]),
-        question(2, "ру", "he", 1, &[("before", json!("сайт майл ")), ("source_known", json!(true))]),
-        question(2, "ру", "he", 1, &[("before", json!("сайт майл ")), ("before_origin", json!("planned_previous_reading"))]),
-        question(2, "ща", "of", 1, &[("before", json!("у нас "))]),
-        question(2, "кз", "rp", 1, &[("before", json!("говорит он "))]),
-    ];
-    let manifest = manifest_of("common.jsonl.xz", 2, &rows);
-    let mut wanted = recipe();
-    wanted["common_curriculum"] = json!({"captured": {"train": [[manifest, "common.jsonl.xz"]]}, "sample_weight": 1.0, "held_out": ["ща"]});
-    let (frames, report) = own_curriculum(&TOOLS, "common", "train", &[], &wanted).expect("the frames");
-    let originals: Vec<(&str, &str)> = frames.iter().map(|frame| (frame.original.as_str(), frame.field.before.as_str())).collect();
-    assert_eq!(originals, [("ру", "сайт майл ")], "{report}");
+    assert_eq!(framed.get("common"), Some(&vec![("ру".to_owned(), "сайт майл ".to_owned())]));
 }
 
 #[test]

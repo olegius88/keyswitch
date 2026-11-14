@@ -355,6 +355,11 @@ pub const SHORT_RATIO_BOUND: i64 = 8;
 // (SHORT_RATIO_BOUND); no letters and no copy of the shared features.
 pub const COMMON_FEATURE_PREFIX: &str = "common|";
 
+// The boundaries the common-reading head answers at: those its frames are asked at. The typing bench types no pause and
+// no Enter, and at a pause the token may be the first letters of a word (`ес` of `если`), which the frozen model, fitted
+// on the corpus's frames at a pause, waits on.
+pub const COMMON_HEAD_TRIGGERS: &[&str] = &["space", "punctuation"];
+
 // A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
 // at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
 // uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of

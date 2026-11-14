@@ -900,7 +900,7 @@ fn captured_question(name: &str, row: &[Value], fields: &[&'static str], tables:
         "alnum" => features::alnum_question(original, alternative, before, tables).map_err(|error| format!("{error:?}"))?,
         "hypothesis" => fields.contains(&"before_origin") && at("before_origin") == BeforeOrigin::PlannedPreviousReading.as_str(),
         "short" => left_field && features::short_question(original, before, tables).map_err(|error| format!("{error:?}"))?,
-        "common" => left_field && features::common_question(original, before, tables).map_err(|error| format!("{error:?}"))?,
+        "common" => left_field && features::common_question(original, before, trigger, tables).map_err(|error| format!("{error:?}"))?,
         "slip" => left_field && features::slip_question(original, before, tables),
         "sign" => features::sign_question(original, alternative, before, after, trigger, origin),
         "resume" => features::resume_question(original, alternative, before, after, origin),

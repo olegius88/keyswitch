@@ -1160,14 +1160,21 @@ fn holds(text: &str, class: TokenClass) -> bool {
     tokens.iter().enumerate().any(|(index, token)| class(if index == 0 { "" } else { tokens[index - 1] }, token))
 }
 
+/// What the class `common` of `select` reads: the packaged count tables and whether the Russian lexicon knows a word.
+pub struct CommonReadings<'a> {
+    pub tables: &'a TermTables,
+    pub known: &'a dyn Fn(&str) -> bool,
+}
+
 /// A token whose Cyrillic reading (the token itself, or the keys of a Latin one in the Russian layout) is of the
-/// common-reading head's class after the token before it (`common_question`): `ру` in `майл ру`, `he` in `and he`.
-fn holds_common(text: &str, tables: &TermTables) -> bool {
+/// common-reading head's class after the token before it (`common_question`) and no word the Russian lexicon knows, which
+/// the head leaves to the frozen model: `ру` in `майл ру`, `he` in `and he`, not `вы` in `а вы`.
+fn holds_common(text: &str, readings: &CommonReadings<'_>) -> bool {
     let tokens = pystr::split(text);
     tokens.iter().enumerate().skip(1).any(|(index, token)| {
         let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
         let cyrillic = if pystr::isascii(core) { crate::physical::translated(core, 0).unwrap_or_default() } else { core.to_owned() };
-        common_question(&cyrillic, tokens[index - 1], tables).unwrap_or(false)
+        !(readings.known)(&pystr::casefold(&cyrillic)) && common_question(&cyrillic, tokens[index - 1], "space", readings.tables).unwrap_or(false)
     })
 }
 
@@ -1193,14 +1200,14 @@ pub struct SelectRequest<'a> {
     pub out: &'a Path,
     pub prefix: &'a str,
     pub only: Option<&'a Path>,
-    /// The packaged count tables, which the class `common` reads (`holds_common`).
-    pub tables: Option<&'a TermTables>,
+    /// What the class `common` reads (`holds_common`).
+    pub common: Option<&'a CommonReadings<'a>>,
 }
 
 /// `select`: the messages of a class, in two files by question.
 pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let (message, token) = (message_class(request.name), token_class(request.name));
-    let common = request.tables.filter(|_| matches!(request.name, "common"));
+    let common = request.common.filter(|_| matches!(request.name, "common"));
     if message.is_none() && token.is_none() && common.is_none() {
         return Err(format!("unknown class: {}", request.name));
     }
@@ -1218,7 +1225,7 @@ pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let mut take = |line: &str| -> Result<(), String> {
         let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
         let text = row["text"].as_str().ok_or("a text")?;
-        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) || common.is_some_and(|tables| !holds_common(text, tables)) {
+        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) || common.is_some_and(|readings| !holds_common(text, readings)) {
             return Ok(());
         }
         let question = row["qid"].as_i64().ok_or("a question")?;
@@ -1444,12 +1451,14 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
             let only = option("--only-ids");
             let leipzig = option("--leipzig");
             let messages = if leipzig.is_some() { PathBuf::new() } else { required("--messages")? };
-            // The class of the common-reading head reads the packaged count tables of the tree.
-            let tables = match name.as_str() {
-                "common" => Some(TermTables::load(&root.join("resources/models")).map_err(|error| error.message)?),
-                _ => None,
+            // The class of the common-reading head reads the packaged count tables and the Russian lexicon of the tree.
+            let (tables, russian) = match name.as_str() {
+                "common" => (Some(TermTables::load(&root.join("resources/models")).map_err(|error| error.message)?), Some(resources.engine_language_model("ru_RU").map_err(|error| error.message)?)),
+                _ => (None, None),
             };
-            select(&SelectRequest { messages: &messages, leipzig: leipzig.as_deref(), members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref(), tables: tables.as_ref() })
+            let known = |word: &str| russian.as_ref().is_some_and(|model| model.score(word).known);
+            let readings = tables.as_ref().map(|tables| CommonReadings { tables, known: &known });
+            select(&SelectRequest { messages: &messages, leipzig: leipzig.as_deref(), members: &repeated("--members"), name, development_share: share, out: &required("--out")?, prefix, only: only.as_deref(), common: readings.as_ref() })
         }
         Some("devchat-messages") => build_devchat(root, &required("--comments")?, &required("--dump")?, &required("--out")?, &repeated("--earlier")),
         other => Err(format!("unknown command: {other:?}")),
