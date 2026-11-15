@@ -480,6 +480,30 @@ pub const UPPER_MAGNITUDE_MAX: i64 = 16;
 
 pub const UPPER_RATIO_BOUND: i64 = 8;
 
+// The head answers only a pair its counts settle (context_action_features.upper_settled), as the abbreviation and
+// short-message heads do. A pair both of whose readings are spelled in capitals at least UPPER_ALIVE_MIN_CAPITALS times
+// in one source of the capitals table, the larger within UPPER_ALIVE_MAX_ORDERS binary orders of the smaller, is alive:
+// `СШ` 214 times and `CI` 389, `ЗК` 121 and `PR` 393, `ФЗ` 278 and `AP` 235, `ТП` 118 and `NG` 48. Its counts cannot tell
+// such a pair's readings apart. A pair whose Cyrillic reading Russian prose uses at least UPPER_WORD_MIN_PROSE times in any
+// case is alive too, whatever the capitals say: a word that common typed with Caps Lock is that word, which the capitals
+// table does not count (`мы` 66 830 times against `VS` 3 141 in capitals). An alive pair stays with the frozen model, and
+// the lone-word, short-message and known-reply heads answer it as in 0.73.0. Fitted on every pair, development candidate
+// a4d2e926e7d0 of corpus v86 left `VS`, `NS`, `TOT` and `JY` sent alone for `МЫ`, `ТЫ`, `ЕЩЕ` and `ОН` (10 of 56 cases of
+// the held-out half of the authored battery of words typed with Caps Lock, which 0.73.0 typed right). The values were
+// chosen on that battery and on the calibration and development frames of corpus v86 (15.11.2026, a development candidate
+// fitted for each): with 3 orders instead of 2, `AG` (576 in capitals) and `ФП` (90), `ФК` and `AR` are alive, and the
+// calibration frames lose the two false conversions of `AG` to `ФП` and the lost conversion of `ФК` to `AR` that the head
+// made (net 13 833 against 13 829, false 19 against 21, the pair of 0.73.0 13 825 and 19); with 32 instead of 50 the held-out
+// half of the battery is right in 1 195 cases instead of 1 190 (0.73.0: 1 100), the frames are the same. The prose count
+// is the least power of two above every abbreviation of the battery (`ок` 7 180, `ос` 6 526 times) and below every word of
+// it typed with Caps Lock (`мы` 66 830 is the least); 65 536 would separate them as well, and no frame or case tells the
+// two apart.
+pub const UPPER_ALIVE_MIN_CAPITALS: u64 = 32;
+
+pub const UPPER_ALIVE_MAX_ORDERS: i64 = 3;
+
+pub const UPPER_WORD_MIN_PROSE: u64 = 8192;
+
 // The "length" feature buckets every word length from here up together (schemas 2 and 3).
 pub const ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS: usize = 6;
 

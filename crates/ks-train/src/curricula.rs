@@ -1143,7 +1143,7 @@ pub fn alone_labels(tools: &Tools, rows: Vec<ActionRow>, evidence: Option<&Value
     for mut row in rows {
         if matches!(row.action, Wait | Suggest) && row.after_origin != AfterOrigin::PlannedNextConversion {
             let alternate = reading(&row.original, row.group);
-            if features::alone_question(&row.original, &alternate, &row.field.before, &row.field.after, row.trigger) {
+            if features::alone_question(&row.original, &alternate, &row.field.before, &row.field.after, row.trigger, &tools.tables).expect("the packaged capitals table") {
                 let strong = tools.counted_reading(&row.original, &alternate, row.group, evidence.int("minimum_count").to::<u64>(), evidence.int("other_maximum_count").to::<u64>(), evidence.float("dominance"));
                 if let Some(strong) = strong {
                     row.action = if strong == row.group { Keep } else { Convert };

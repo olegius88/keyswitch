@@ -1,7 +1,9 @@
 //! Words in capitals typed in either layout, alone and in Russian prose, through the engine: abbreviations, currency codes
 //! and words typed with Caps Lock, the class of the upper-case head (context_action_features.upper_question). Each case says
 //! by its meaning whether the text should be converted, kept, or either is right (both readings are abbreviations in use:
-//! `РК` and `HR`, `США` and `CIF`). Half of each family is held out of the head's training frames by hash (the recipe's
+//! `РК` and `HR`, `США` and `CIF`). A token of a pair the counts leave alive (context_action_features.upper_settled: `CI`
+//! and `СШ`, `МЫ` typed with Caps Lock) is no question of the head: it is typed as the pair of 0.73.0 typed it, which the
+//! case records (`RELEASED`). Half of each family is held out of the head's training frames by hash (the recipe's
 //! upper_curriculum.held_out) and counted apart from the other half. The numbers are printed by group; the floors hold
 //! for a pair that carries the head, and a pair without it is only measured.
 #![cfg(any(not(debug_assertions), coverage))]
@@ -12,7 +14,9 @@ use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
 use ks_config::constants::{DETECTION_CONTEXT_READ_FIELD, DETECTION_EARLY_SWITCH, DETECTION_RESPECT_MANUAL_LAYOUT};
 use ks_context::constants::UPPER_FEATURE_PREFIX;
-use ks_replay::harness::{Bundle, KEYS, PhysicalKey, Session};
+use ks_context::context_action_features::{upper_settled, upper_shape};
+use ks_context::context_model::TermTables;
+use ks_replay::harness::{Bundle, KEYS, PhysicalKey, Session, reference_tree};
 use sha2::{Digest, Sha256};
 
 /// One step of a case: the keys that print a text in a layout, typed in whatever layout is on; a layout picked by hand;
@@ -29,6 +33,16 @@ enum Want {
     Convert,
     Keep,
     Either,
+    /// What the pair of 0.73.0 typed, with the field unread and read.
+    Released([Answer; 2]),
+}
+
+/// What a case typed: the converted text, the kept one, or neither.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Answer {
+    Converted,
+    Kept,
+    Neither,
 }
 
 struct Case {
@@ -138,6 +152,33 @@ const ON_PURPOSE: &[&str] = &["OK", "NO", "TODO"];
 /// Tokens both of whose readings are abbreviations in use: either answer is right.
 const BOTH_LIVE: &[&str] = &["HR", "PR", "UI", "CI", "RUB", "RFC", "США", "ДТП", "ОК", "ЗП", "ЧСВ", "XCD"];
 
+/// What the pair of 0.73.0 (context-v3-48a863e75bb6 with the code of tag v0.73.0) typed for each case of a token whose pair
+/// the counts leave alive, in the order the cases of its family are made, two letters a case: the field unread, then read;
+/// `c` the converted text, `k` the kept one, `n` neither. The upper-case head answers no such token, and the lone-word,
+/// short-message and known-reply heads answer it as they did in 0.73.0: a pair with the head types the same.
+const RELEASED: &[(&str, &str)] = &[
+    ("CI", "cc cc cc cc kk kk kk kk"),
+    ("PR", "cc cc cc cc kk kk kk kk"),
+    ("ПО", "cc cc cc kk kk kk"),
+    ("ТП", "kk cc cc kk kk kk"),
+    ("ЦА", "kk cc kk cc kk kk"),
+    ("НЕ", "cc kk cc kk"),
+    ("НЕТ", "cc kk cc kk"),
+    ("ВСЕ", "kk kk cc kk"),
+    ("ДА", "cc kk cc kk"),
+    ("ЧТО", "cc kk cc kk"),
+    ("КАК", "cc kk cc kk"),
+    ("ТАК", "cc kk cc kk"),
+    ("ИЛИ", "cc kk cc kk"),
+    ("НО", "cc kk cc kk"),
+    ("ДЛЯ", "cc kk cc kk"),
+    ("ЕЩЕ", "cc kk cc kk"),
+    ("ОН", "cc kk cc kk"),
+    ("МЫ", "cc kk cc kk"),
+    ("ТЫ", "cc kk cc kk"),
+    ("ГДЕ", "cc kk cc kk"),
+];
+
 /// Whether the head's training frames hold a token out: half of each family, by hash.
 fn held_out(token: &str) -> bool {
     Sha256::digest(format!("upper-held-out:{token}").as_bytes())[0] % 2 == 0
@@ -215,7 +256,41 @@ fn caps_lock_cases(token: &str, cases: &mut Vec<Case>) {
     }
 }
 
-fn all_cases() -> Vec<Case> {
+/// The readings of a token in capitals, Latin first.
+fn readings(token: &str) -> (String, String) {
+    if token.is_ascii() { (token.to_owned(), keys_of(token, 0)) } else { (keys_of(token, 1), token.to_owned()) }
+}
+
+/// Whether the counts leave a token's pair alive, so that the head does not answer it (`upper_settled`).
+fn alive(token: &str, tables: &TermTables) -> bool {
+    let (latin, cyrillic) = readings(token);
+    let other = if token.is_ascii() { &cyrillic } else { &latin };
+    upper_shape(token, other, "") && !upper_settled(&latin, &cyrillic, tables).expect("the shipped capitals table")
+}
+
+/// A token of an alive pair expects what 0.73.0 typed, case by case (`RELEASED`).
+fn released(cases: &mut [Case], tables: &TermTables) {
+    let mut place: BTreeMap<(&str, String), usize> = BTreeMap::new();
+    for case in cases.iter_mut().filter(|case| alive(&case.token, tables)) {
+        let index = place.entry((case.family, case.token.clone())).or_insert(0);
+        let answers = RELEASED.iter().find(|entry| entry.0 == case.token).unwrap_or_else(|| panic!("no answer of 0.73.0 for {}", case.token)).1;
+        let pair: Vec<Answer> = answers
+            .split_whitespace()
+            .nth(*index)
+            .unwrap_or_else(|| panic!("too few answers of 0.73.0 for {}", case.token))
+            .chars()
+            .map(|letter| match letter {
+                'c' => Answer::Converted,
+                'k' => Answer::Kept,
+                _ => Answer::Neither,
+            })
+            .collect();
+        case.want = Want::Released([pair[0], pair[1]]);
+        *index += 1;
+    }
+}
+
+fn all_cases(tables: &TermTables) -> Vec<Case> {
     let mut cases = Vec::new();
     for token in LATIN {
         latin_cases("latin", token, &mut cases);
@@ -246,32 +321,34 @@ fn all_cases() -> Vec<Case> {
         latin_cases("on-purpose", token, &mut purpose);
         cases.extend(purpose.into_iter().filter(|case| case.frame.starts_with("kept")));
     }
+    released(&mut cases, tables);
     cases
 }
 
 /// The least right answers of each family and half (every frame and both field settings pooled) a pair carrying the head
-/// gives: the numbers of the development candidate context-v3-a4d2e926e7d0 on corpus v86 (10.11.2026). The pair of 0.71.2
-/// gave, in the same order: 23, 16, 56, 62, 116, 127, 264, 208, 51, 30, 14, 8, 505, 535, 48, 66, 106, 8, 16. Words whose
-/// letters are on the keys of signs (`cyrillic-sign-keys`) are cut by the boundary model before any question: their floor
-/// only keeps them where they are.
+/// gives: the numbers of the development candidate context-v3-f4b757d19b17 on corpus v86 (15.11.2026). In the same order,
+/// the pair of 0.73.0 gave 23, 16, 56, 64, 116, 127, 266, 214, 51, 30, 14, 8, 505, 535, 48, 66, 106, 8, 16, and candidate
+/// context-v3-a4d2e926e7d0, whose head answered the alive pairs too, 22, 16, 46, 62, 151, 168, 313, 251, 51, 30, 14, 8,
+/// 518, 563, 48, 66, 109, 8, 16. Words whose letters are on the keys of signs (`cyrillic-sign-keys`) are cut by the
+/// boundary model before any question: their floor only keeps them where they are.
 const FLOORS: &[(&str, usize)] = &[
     ("capslock-english | held-out", 22),
     ("capslock-english | seen", 16),
-    ("capslock-russian | held-out", 46),
+    ("capslock-russian | held-out", 56),
     ("capslock-russian | seen", 64),
-    ("currency | held-out", 151),
-    ("currency | seen", 168),
-    ("cyrillic | held-out", 313),
-    ("cyrillic | seen", 253),
+    ("currency | held-out", 148),
+    ("currency | seen", 165),
+    ("cyrillic | held-out", 315),
+    ("cyrillic | seen", 261),
     ("cyrillic-sign-keys | held-out", 51),
     ("cyrillic-sign-keys | seen", 30),
     ("cyrillic-uncounted | held-out", 14),
     ("cyrillic-uncounted | seen", 8),
-    ("latin | held-out", 523),
-    ("latin | seen", 566),
+    ("latin | held-out", 520),
+    ("latin | seen", 565),
     ("latin-long | held-out", 48),
     ("latin-uncounted | held-out", 66),
-    ("latin-uncounted | seen", 109),
+    ("latin-uncounted | seen", 106),
     ("on-purpose | held-out", 8),
     ("on-purpose | seen", 16),
 ];
@@ -294,7 +371,8 @@ fn words_in_capitals() {
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
     let mut families: BTreeMap<String, Tally> = BTreeMap::new();
     let mut misses: Vec<String> = Vec::new();
-    for case in all_cases() {
+    let tables = TermTables::load(&reference_tree().join("resources/models")).expect("the shipped tables");
+    for case in all_cases(&tables) {
         let half = if held_out(&case.token) { "held-out" } else { "seen" };
         for field in [false, true] {
             let shown = typed(&mut bundle, &case, field);
@@ -304,6 +382,11 @@ fn words_in_capitals() {
                 Want::Convert => converted,
                 Want::Keep => kept,
                 Want::Either => converted || kept,
+                Want::Released(answers) => match answers[usize::from(field)] {
+                    Answer::Converted => converted,
+                    Answer::Kept => kept,
+                    Answer::Neither => !converted && !kept,
+                },
             };
             for tally in [tallies.entry(format!("{} | {} | {half}", case.family, case.frame)).or_default(), families.entry(format!("{} | {half}", case.family)).or_default()] {
                 tally.total += 1;

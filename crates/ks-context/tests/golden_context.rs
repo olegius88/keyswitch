@@ -244,15 +244,15 @@ fn questions(e: &ContextEvidence, tables: &TermTables) -> serde_json::Map<String
     put("quote", json!(quote_question(o, a, &e.trigger)));
     put("dash", json!(dash_question(o, a, &e.trigger)));
     put("resume", json!(resume_question(o, a, b, af, e.after_origin)));
-    put("alone", json!(alone_question(o, a, b, af, &e.trigger)));
+    put("alone", guard(alone_question(o, a, b, af, &e.trigger, tables)));
     put("start", json!(start_question(o, a, b, af)));
     put("capitals", json!(capitals_question(o, b)));
     put("abbreviation", json!(abbreviation_question(o, a, b, tables)));
     put("latin_abbreviation", json!(latin_abbreviation_question(o, a, b, tables)));
     put("unknown", json!(unknown_question(o, b, tables)));
     put("joined", json!(joined_question(o)));
-    put("brief", json!(brief_question(o, b, af)));
-    put("known_reply", json!(known_reply_question(o, a, b, af, tables)));
+    put("brief", guard(brief_question(o, a, b, af, tables)));
+    put("known_reply", guard(known_reply_question(o, a, b, af, tables)));
     put("dotted", json!(dotted_question(o, a)));
     put("alnum", guard(alnum_question(o, a, b, tables)));
     put("hypothesis", json!(hypothesis_question(e)));

@@ -114,7 +114,7 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
         }
         "knownreply" => {
             let (rows, mut report) = curricula::brief_curriculum(tools, split, options);
-            let rows: Vec<ActionRow> = rows.into_iter().filter(|row| f::known_reply_question(&row.original, &reading(&row.original, 0), "", "", t)).collect();
+            let rows: Vec<ActionRow> = rows.into_iter().filter(|row| f::known_reply_question(&row.original, &reading(&row.original, 0), "", "", t).expect("the packaged capitals table")).collect();
             report["frames"] = json!(rows.len());
             Ok((rows, report))
         }
@@ -143,12 +143,12 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || (has(CAPITALS_FEATURE_PREFIX) && f::capitals_question(original, before))
         || (has(ABBREVIATION_FEATURE_PREFIX) && f::abbreviation_question(original, alternative, before, t))
         || (has(LATIN_ABBREVIATION_FEATURE_PREFIX) && f::latin_abbreviation_question(original, alternative, before, t))
-        || (has(ALONE_FEATURE_PREFIX) && f::alone_question(original, alternative, before, after, trigger))
+        || (has(ALONE_FEATURE_PREFIX) && f::alone_question(original, alternative, before, after, trigger, t).expect("the packaged capitals table"))
         || (has(START_FEATURE_PREFIX) && f::start_question(original, alternative, before, after))
         || (has(UNKNOWN_FEATURE_PREFIX) && f::unknown_question(original, before, t))
         || (has(JOINED_FEATURE_PREFIX) && f::joined_question(original))
         || (has(TERM_FEATURE_PREFIX) && f::term_question(original, before, t))
-        || (has(BRIEF_FEATURE_PREFIX) && f::brief_question(original, before, after))
+        || (has(BRIEF_FEATURE_PREFIX) && f::brief_question(original, alternative, before, after, t).expect("the packaged capitals table"))
         || (has(FIRST_FEATURE_PREFIX) && f::first_question(original, before, after, t))
         || variable
         || (has(DOTTED_FEATURE_PREFIX) && f::dotted_question(original, alternative))
@@ -160,6 +160,6 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || (has(DASH_FEATURE_PREFIX) && f::dash_question(original, alternative, trigger))
         || digit_dot
         || (has(QUOTE_FEATURE_PREFIX) && f::quote_question(original, alternative, trigger))
-        || (has(KNOWN_REPLY_FEATURE_PREFIX) && f::known_reply_question(original, alternative, before, after, t))
+        || (has(KNOWN_REPLY_FEATURE_PREFIX) && f::known_reply_question(original, alternative, before, after, t).expect("the packaged capitals table"))
         || upper
 }

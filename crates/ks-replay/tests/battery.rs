@@ -3,7 +3,9 @@
 //! battery-public.jsonl <report> [--speller]`, the report gzipped as the fixture). The upper-case head wrote them on
 //! 10.11.2026 with the installed pair, which has no weights for it yet: the lone-word and short-message heads no longer
 //! answer a token in capitals, and 7 rows (4 with Hunspell) came out otherwise; a pair with the head installed writes them
-//! again.
+//! again. Written once more on 15.11.2026, when the head came to answer only a pair its counts settle and those heads
+//! answer the rest as before: of the Python's rows 2 differ in either mode, `ШЕ` alone before a colon, whose pair (`IT`) the
+//! head answers, and the word after it.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;

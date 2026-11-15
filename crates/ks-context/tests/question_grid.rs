@@ -83,12 +83,12 @@ fn every_question_answers_for_every_token_in_every_place() {
                 count(cyrletter_question(original, alternative, before, trigger));
             }
             for after in AFTER {
-                count(alone_question(original, alternative, before, after, "space"));
-                count(alone_question(original, alternative, before, after, "pause"));
+                count(alone_question(original, alternative, before, after, "space", &tables).unwrap_or(false));
+                count(alone_question(original, alternative, before, after, "pause", &tables).unwrap_or(false));
                 count(start_question(original, alternative, before, after));
                 count(first_question(original, before, after, &tables));
-                count(brief_question(original, before, after));
-                count(known_reply_question(original, alternative, before, after, &tables));
+                count(brief_question(original, alternative, before, after, &tables).unwrap_or(false));
+                count(known_reply_question(original, alternative, before, after, &tables).unwrap_or(false));
                 for origin in ORIGINS {
                     count(resume_question(original, alternative, before, after, *origin));
                     count(sign_question(original, alternative, before, after, "space", *origin));

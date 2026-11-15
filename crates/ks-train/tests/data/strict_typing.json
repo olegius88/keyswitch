@@ -82,7 +82,7 @@
      "expect_roots": 1,
      "literal_compares": 2,
      "string_key_index": 77,
-     "value_tokens": 130
+     "value_tokens": 127
     },
     "tests/loaders.rs": {
      "expect_roots": 1,
@@ -92,7 +92,7 @@
    },
    "literal_compares": 32,
    "string_key_index": 135,
-   "value_tokens": 239
+   "value_tokens": 236
   },
   "ks-engine": {
    "expect_roots": 1,

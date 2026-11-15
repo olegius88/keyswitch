@@ -1,9 +1,9 @@
-//! The upper-case head: its class, its evidence at a word's own boundary and beside a next word kept as typed, and the
-//! classes of capitals it took from the lone-word, short-message and known-reply heads.
+//! The upper-case head: its class, the pairs its counts settle, its evidence at a word's own boundary and beside a next
+//! word kept as typed, and the tokens in capitals it took from the lone-word, short-message and known-reply heads.
 
 use ks_backend::{FieldContext, FieldRole};
-use ks_context::constants::UPPER_FEATURE_PREFIX;
-use ks_context::context_action_features::{alone_question, brief_question, extract_action_features, known_reply_question, upper_question, upper_shape};
+use ks_context::constants::{ALONE_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, UPPER_FEATURE_PREFIX};
+use ks_context::context_action_features::{alone_question, brief_question, extract_action_features, known_reply_question, upper_question, upper_settled, upper_shape};
 use ks_context::context_model::{AfterOrigin, ContextEvidence, TermTables};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -64,7 +64,15 @@ fn the_class_is_a_token_some_source_spells_in_capitals() {
     std::fs::copy(models().join("context-term-frequency.json"), folder.join("context-term-frequency.json")).expect("the term table");
     let without = TermTables::load(&folder).expect("the term table loads");
     assert!(upper_question("USD", "ГЫВ", "", &without).is_err());
+    assert!(upper_settled("USD", "ГЫВ", &without).is_err());
+    assert!(alone_question("ЦА", "WF", "", "", "pause", &without).is_err());
+    assert!(brief_question("BYN", "ИНТ", "", "", &without).is_err());
+    assert!(known_reply_question("TOT", "ЕЩЕ", "", "", &without).is_err());
     assert!(extract_action_features(&evidence("USD", "ГЫВ", ""), &without).is_err());
+    let mut lone = evidence("ЦА", "WF", "");
+    "pause".clone_into(&mut lone.trigger);
+    assert!(extract_action_features(&lone, &without).is_err());
+    assert!(extract_action_features(&evidence("BYN", "ИНТ", ""), &without).is_err());
     let mut kept = evidence("ФШ", "AI", "");
     "курс".clone_into(&mut kept.field.after);
     kept.after_origin = AfterOrigin::KeptNextWord;
@@ -84,12 +92,14 @@ fn the_head_reads_how_often_each_reading_is_spelled_in_capitals_where_it_stands(
     assert!(typed_latin.contains("before:none:direction:0"));
     assert!(typed_latin.contains("ratio:-8:before:none:direction:0"), "{typed_latin:?}");
     assert!(head(&evidence("ЫЫР", "SSH", ""), &tables).contains("non_initial:1:before:none:direction:1"));
-    let caps_lock = head(&evidence("YTN", "НЕТ", "я "), &tables);
-    assert!(caps_lock.iter().any(|name| name.starts_with("prose:") && !name.starts_with("prose:0")));
-    assert!(caps_lock.contains("caseless:8:before:ru:direction:0"), "{caps_lock:?}");
-    // Outside the class the head says nothing.
+    // How often prose uses each reading in any case: `ос` 6 526 times in Russian prose, `jc` 11 times in technical text.
+    let caseless = head(&evidence("JC", "ОС", "я "), &tables);
+    assert!(caseless.contains("prose:13:before:ru:direction:0"), "{caseless:?}");
+    assert!(caseless.contains("caseless:8:before:ru:direction:0"), "{caseless:?}");
+    // Outside the class the head says nothing: a token in lower case, one no source spells, an alive pair.
     assert!(head(&evidence("usd", "гыв", ""), &tables).is_empty());
     assert!(head(&evidence("LGTM", "ДПЕЬ", ""), &tables).is_empty());
+    assert!(head(&evidence("YTN", "НЕТ", "я "), &tables).is_empty());
 }
 
 #[test]
@@ -108,12 +118,66 @@ fn the_head_answers_beside_a_next_word_kept_as_typed() {
 }
 
 #[test]
-fn capitals_left_the_lone_word_and_short_message_heads() {
+fn the_head_answers_only_a_pair_its_counts_settle() {
     let tables = tables();
-    assert!(!alone_question("ЦА", "WF", "", "", "pause"));
-    assert!(alone_question("ца", "wf", "", "", "pause"));
-    assert!(!brief_question("BYN", "", ""));
-    assert!(brief_question("byn", "", ""));
-    assert!(!known_reply_question("JR", "ОК", "", "", &tables));
-    assert!(known_reply_question("jr", "ок", "", "", &tables));
+    // Both readings spelled in capitals, within three binary orders: alive, in either layout, alone or after Russian text.
+    for (original, alternative) in [("СШ", "CI"), ("CI", "СШ"), ("ЗК", "PR"), ("PR", "ЗК"), ("ФЗ", "AP"), ("AP", "ФЗ"), ("NG", "ТП"), ("AG", "ФП"), ("ЦА", "WF")] {
+        assert!(upper_shape(original, alternative, ""), "{original}");
+        assert_eq!(upper_question(original, alternative, "", &tables), Ok(false), "{original}");
+        assert_eq!(upper_question(original, alternative, "мы обсуждали ", &tables), Ok(false), "{original}");
+    }
+    // A Cyrillic reading Russian prose uses that often is a word typed with Caps Lock, whatever the capitals say.
+    for (original, alternative) in [("VS", "МЫ"), ("МЫ", "VS"), ("NS", "ТЫ"), ("TOT", "ЕЩЕ"), ("JY", "ОН"), ("YTN", "НЕТ"), ("DCT", "ВСЕ")] {
+        assert_eq!(upper_question(original, alternative, "", &tables), Ok(false), "{original}");
+    }
+    // One reading far more often, or one spelled too rarely to be alive: settled.
+    assert_eq!(upper_settled("KC", "ЛС", &tables), Ok(true));
+    assert_eq!(upper_settled("UI", "ГШ", &tables), Ok(true));
+    assert_eq!(upper_settled("HR", "РК", &tables), Ok(true));
+    assert_eq!(upper_settled("CI", "СШ", &tables), Ok(false));
+    assert_eq!(upper_settled("NG", "ТП", &tables), Ok(false));
+    assert_eq!(upper_settled("VS", "МЫ", &tables), Ok(false));
+    for (original, alternative) in [("ЛС", "KC"), ("KC", "ЛС"), ("UI", "ГШ"), ("ОС", "JC"), ("ДР", "LH")] {
+        assert_eq!(upper_question(original, alternative, "", &tables), Ok(true), "{original}");
+    }
+}
+
+#[test]
+fn the_lone_word_and_short_message_heads_give_up_only_what_the_head_takes() {
+    let tables = tables();
+    // Taken by the head.
+    assert_eq!(alone_question("ЛС", "KC", "", "", "pause", &tables), Ok(false));
+    assert_eq!(brief_question("BYN", "ИНТ", "", "", &tables), Ok(false));
+    assert_eq!(known_reply_question("JR", "ОК", "", "", &tables), Ok(false));
+    // Alive pairs and tokens no source spells stay where they were before the head.
+    assert_eq!(alone_question("ФЗ", "AP", "", "", "pause", &tables), Ok(true));
+    assert_eq!(alone_question("VS", "МЫ", "", "", "enter", &tables), Ok(true));
+    assert_eq!(alone_question("ЭЭ", "''", "", "", "pause", &tables), Ok(false));
+    assert_eq!(brief_question("TOT", "ЕЩЕ", "", "", &tables), Ok(true));
+    assert_eq!(brief_question("NS", "ТЫ", "", "", &tables), Ok(true));
+    assert_eq!(known_reply_question("TOT", "ЕЩЕ", "", "", &tables), Ok(true));
+    assert_eq!(brief_question("TOT", "ЕЩЕ", "я ", "", &tables), Ok(false));
+    assert_eq!(brief_question("TOT", "ЕЩЕ", "", "и", &tables), Ok(false));
+    // Lower case, as before.
+    assert_eq!(alone_question("ца", "wf", "", "", "pause", &tables), Ok(true));
+    assert_eq!(alone_question("ца", "wf", "", "", "space", &tables), Ok(false));
+    assert_eq!(brief_question("byn", "инт", "", "", &tables), Ok(true));
+    assert_eq!(known_reply_question("jr", "ок", "", "", &tables), Ok(true));
+    // The features say the same: an alive pair sent alone reads the lone-word head and not this one.
+    let mut alive = evidence("ФЗ", "AP", "");
+    "pause".clone_into(&mut alive.trigger);
+    let features = extract_action_features(&alive, &tables).expect("features");
+    assert!(features.keys().any(|name| name.starts_with(ALONE_FEATURE_PREFIX)));
+    assert!(!features.keys().any(|name| name.starts_with(UPPER_FEATURE_PREFIX)));
+    let mut settled = evidence("ЛС", "KC", "");
+    "pause".clone_into(&mut settled.trigger);
+    let features = extract_action_features(&settled, &tables).expect("features");
+    assert!(!features.keys().any(|name| name.starts_with(ALONE_FEATURE_PREFIX)));
+    assert!(features.keys().any(|name| name.starts_with(UPPER_FEATURE_PREFIX)));
+    let mut caps_lock = evidence("TOT", "ЕЩЕ", "");
+    "enter".clone_into(&mut caps_lock.trigger);
+    let features = extract_action_features(&caps_lock, &tables).expect("features");
+    assert!(features.keys().any(|name| name.starts_with(BRIEF_FEATURE_PREFIX)));
+    assert!(features.keys().any(|name| name.starts_with(KNOWN_REPLY_FEATURE_PREFIX)));
+    assert!(!features.keys().any(|name| name.starts_with(UPPER_FEATURE_PREFIX)));
 }
