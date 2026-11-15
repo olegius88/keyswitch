@@ -6,5 +6,8 @@ the upper-case head (10.11.2026), not by the Python: the head's features, and th
 heads, which no longer answer such a token, changed them on purpose (132 rows of the five `predict` and `decide` files,
 written by these tests run once with every differing row written back). Since the head answers only a pair its counts
 settle (15.11.2026), the 42 of those rows whose pair the counts leave alive (`НЕ`, `ЧТО`, `BP` for `ИЗ`) hold the Python's
-answer again, written back the same way. Every other row is still the Python's answer. A prediction is compared only while
-the installed pair is the one that answered it.
+answer again, written back the same way. The features of a token of two or three Russian letters whose Latin reading is a
+common word, with a letter before it and a space or a sign after it, are the Rust code's that added the common-reading head
+(14.11.2026): 7 rows of `predict_synthetic`, written back the same way; their predictions are the installed pair's as
+before. Every other row is still the Python's answer. A prediction is compared only while the installed pair is the one
+that answered it.

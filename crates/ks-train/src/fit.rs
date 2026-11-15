@@ -255,7 +255,7 @@ fn tail_curricula(inputs: &FitInputs) -> Result<Curriculum, String> {
         ("joined_token_curriculum", "joined"), ("term_curriculum", "term"), ("brief_curriculum", "brief"), ("first_curriculum", "first"), ("variable_curriculum", "variable"),
         ("dotted_curriculum", "dotted"), ("alnum_curriculum", "alnum"), ("hypothesis_curriculum", "hypothesis"), ("short_curriculum", "short"), ("slip_curriculum", "slip"),
         ("sign_curriculum", "sign"), ("resume_curriculum", "resume"), ("cyrletter_curriculum", "cyrletter"), ("dash_curriculum", "dash"), ("digitdot_curriculum", "digitdot"),
-        ("quote_curriculum", "quote"), ("upper_curriculum", "upper"),
+        ("quote_curriculum", "quote"), ("upper_curriculum", "upper"), ("common_curriculum", "common"),
     ] {
         add(key, own_curriculum(tools, label, TRAIN, rows, &inputs.options)?);
     }

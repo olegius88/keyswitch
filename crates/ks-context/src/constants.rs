@@ -342,6 +342,36 @@ pub const SHORT_MAGNITUDE_MAX: i64 = 16;
 
 pub const SHORT_RATIO_BOUND: i64 = 8;
 
+// A token of two or three Russian letters typed in the Russian layout after text with letters, that Russian text uses at
+// least in bucket SHORT_HEAD_MIN_RUSSIAN_BUCKET while English prose or Russian technical text use its Latin reading above
+// bucket SHORT_HEAD_MAX_LATIN_BUCKET, has evidence of its own under this prefix: the common-reading head
+// (context_action_features.common_question), the rest of the short-token head's shape. The installed pair of 0.71.2
+// turned `ру` after a Russian word into `he` at p=1.00 (14 times in two days of a user's typing): the questions it was fitted
+// on hold 1 543 conversions of `ру` first on its line under a Russian line (English sentences typed in the Russian layout,
+// `He …`) against 12 frames that keep it, and nothing told the two places apart. The head reads where the token stands
+// on its line, how Russian the word before it reads, how often each reading comes right after a word of Cyrillic letters
+// in Russian technical text (the after_cyrillic section of SHORT_FREQUENCY_FILE: `ру` 276 times, `he` 15) and the counts
+// the short-token head reads, each by the binary order of magnitude (SHORT_MAGNITUDE_MAX) and their differences
+// (SHORT_RATIO_BOUND); no letters and no copy of the shared features.
+pub const COMMON_FEATURE_PREFIX: &str = "common|";
+
+// The boundaries the common-reading head answers at: those its frames are asked at. The typing bench types no pause and
+// no Enter, and at a pause the token may be the first letters of a word (`ес` of `если`), which the frozen model, fitted
+// on the corpus's frames at a pause, waits on.
+pub const COMMON_HEAD_TRIGGERS: &[&str] = &["space", "punctuation"];
+
+// The head answers a token whose Cyrillic reading comes right after a word of Cyrillic letters in Russian technical text at
+// least this many binary orders of magnitude more often than its Latin reading (four times as often; `ру` 276 times, `he`
+// 15: five orders): a token the counts settle as a Russian one after a Russian word, the error the head is for. Where the
+// Latin reading follows a Russian word as often or more often (`сс` 232 and `cc` 151, `ва` 896 and `df` 1 414), the token
+// after a Russian word is as often a Latin term typed in the Russian layout, and the frozen model, which reads its letters,
+// decides it. On the head's development questions (candidate context-v3-1a3e7c017630 of corpus v86, fitted on every token
+// of the shape) the head gave 17 right answers more and 23 false conversions fewer among the 542 after a Cyrillic word
+// whose orders differ by two or more; among the 126 that differ by one or not at all it gave two right answers fewer and
+// three false conversions more; among the 449 where the Latin reading leads it gave 17 right answers more, learned from
+// the frames of a few terms of technical text (`гд` for `ul` is 96 of the 425 to convert).
+pub const COMMON_HEAD_MIN_FOLLOWING_LEAN: i64 = 2;
+
 // A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
 // at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
 // uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of
@@ -642,7 +672,8 @@ pub const MAX_CONTEXT_MODEL_FEATURES: usize = 50000;
 // (JOINED_FEATURE_PREFIX), the term heads (TERM_FEATURE_PREFIX, FIRST_FEATURE_PREFIX), the short-message head
 // (BRIEF_FEATURE_PREFIX), the variable head (VARIABLE_FEATURE_PREFIX), the dotted-abbreviation head
 // (DOTTED_FEATURE_PREFIX), the letters-and-digits head (ALNUM_FEATURE_PREFIX), the hypothesis head
-// (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
+// (HYPOTHESIS_FEATURE_PREFIX), the short-token head (SHORT_FEATURE_PREFIX), the common-reading head
+// (COMMON_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
 // sign head (SIGN_FEATURE_PREFIX), the resume head (RESUME_FEATURE_PREFIX), the Cyrillic-letter head
 // (CYRLETTER_FEATURE_PREFIX), the dash head (DASH_FEATURE_PREFIX), the digit-dot head (DIGIT_DOT_FEATURE_PREFIX), the
 // quote head (QUOTE_FEATURE_PREFIX), the known-reply head (KNOWN_REPLY_FEATURE_PREFIX) and the upper-case head

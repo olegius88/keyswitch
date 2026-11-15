@@ -3,7 +3,7 @@
 use ks_context::context_action_features::{
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, brief_dominant, brief_question, brief_settled, capitals_question, cyrletter_question, dash_question, digit_dot_question,
     dotted_question, first_question, joined_parts, joined_question, kept_context_reachable, known_reply_question, latin_abbreviation_question, letter_question, letters_and_digits, nearest_count, quote_question,
-    resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
+    common_question, common_shape, line_place, resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
     upper_question, upper_shape, variable_question, words_of,
 };
 use ks_backend::{FieldContext, FieldRole};
@@ -20,10 +20,10 @@ const TOKENS: &[(&str, &str)] = &[
     ("tot", "еще"), ("ещу", "tot"), ("qr", "йк"), ("йк", "qr"), ("pr", "зк"), ("зк", "pr"), ("ci", "сш"), ("сш", "ci"), ("кз", "rp"), ("rp", "кз"), ("тыв", "nsd"), ("nsd", "тыв"), ("doesn't", "вщуытэе"), ("вщуытэе", "doesn't"),
     ("й", "q"), ("q", "й"), ("Й", "Q"), ("Q", "Й"), ("ъ", "]"), ("]", "ъ"), ("[", "х"), ("х", "["), ("ё", "`"), ("`", "ё"), ("é", "é"), ("中文", "中文"), ("тест", "ntcn"), ("ntcn", "тест"), ("Ntcn", "Тест"), ("NTCN", "ТЕСТ"), ("ТЕСТ", "NTCN"),
     ("n/a", "т.ф"), ("т.ф", "n/a"), ("I/O", "Ш.Щ"), ("usr/bin", "гык.ишт"), ("e.g.", "у.п."), ("т.к.", "n/r/"), ("n/r/", "т.к."),
-    ("USD", "ГЫВ"), ("ГЫВ", "USD"), ("США", "CIF"), ("CIF", "США"), ("ФСБ", "AC<"), ("AC<", "ФСБ"), ("ΑΒΓ", "ΑΒΓ"),
+    ("ру", "he"), ("he", "ру"), ("Ру", "He"), ("ща", "of"), ("ин", "by"), ("USD", "ГЫВ"), ("ГЫВ", "USD"), ("США", "CIF"), ("CIF", "США"), ("ФСБ", "AC<"), ("AC<", "ФСБ"), ("ΑΒΓ", "ΑΒΓ"),
 ];
 
-const PLACES: &[&str] = &["", " ", "\n", "x ", "в ", "принимай все ", "Привет, как дела? ", "I use ", "the quick brown fox ", "git ", "x = 2 ", "seek() , ", "а = 1\n// ", "hello\n", "Hello world.\n\n", "ссылка https://x.y/ ", "123 "];
+const PLACES: &[&str] = &["", " ", "\n", "x ", "в ", "принимай все ", "Привет, как дела? ", "I use ", "the quick brown fox ", "git ", "x = 2 ", "seek() , ", "а = 1\n// ", "hello\n", "Hello world.\n\n", "ссылка https://x.y/ ", "123 ", "сайт майл ", "and then ", "testтест ", "Вот что он написал.\n"];
 const AFTER: &[&str] = &["", " ", "потом", "redis", "= 0", "2", "-", "b", "и ещё"];
 const TRIGGERS: &[&str] = &["space", "pause", "punctuation", "enter", "tab", "boundary_probe"];
 const ORIGINS: &[AfterOrigin] = &[AfterOrigin::None, AfterOrigin::Field, AfterOrigin::PlannedNextConversion, AfterOrigin::KeptNextWord];
@@ -78,6 +78,11 @@ fn every_question_answers_for_every_token_in_every_place() {
             count(slip_question(original, before, &tables));
             count(alnum_question(original, alternative, before, &tables).unwrap_or(false));
             count(short_question(original, before, &tables).unwrap_or(false));
+            for trigger in TRIGGERS {
+                count(common_question(original, before, trigger, &tables).unwrap_or(false));
+                count(common_shape(original, before, trigger, &tables).unwrap_or(false));
+            }
+            count(!line_place(before).1.is_empty());
             for trigger in TRIGGERS {
                 count(variable_question(original, alternative, before, trigger));
                 count(cyrletter_question(original, alternative, before, trigger));

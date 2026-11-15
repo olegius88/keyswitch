@@ -6,7 +6,7 @@ use crate::curricula::{self, Curriculum};
 use crate::physical::reading;
 use crate::rows::ActionRow;
 use crate::tools::{Options, Tools};
-use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX};
+use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, COMMON_FEATURE_PREFIX};
 use ks_context::context_action_features as f;
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextEvidence};
 use ks_text::pystr;
@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 /// The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-pub const HEAD_PREFIXES: [(&str, &str); 25] = [
+pub const HEAD_PREFIXES: [(&str, &str); 26] = [
     ("capitals", CAPITALS_FEATURE_PREFIX),
     ("alone", ALONE_FEATURE_PREFIX),
     ("start", START_FEATURE_PREFIX),
@@ -41,11 +41,12 @@ pub const HEAD_PREFIXES: [(&str, &str); 25] = [
     ("quote", QUOTE_FEATURE_PREFIX),
     ("knownreply", KNOWN_REPLY_FEATURE_PREFIX),
     ("upper", UPPER_FEATURE_PREFIX),
+    ("common", COMMON_FEATURE_PREFIX),
 ];
 
 /// The heads whose own frames of DEVELOPMENT choose their epoch, by feature prefix: the name their epoch goes by in the
 /// seal and the recipe's key of their curriculum.
-pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 18] = [
+pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 19] = [
     (JOINED_FEATURE_PREFIX, "joined", "joined_token_curriculum"),
     (TERM_FEATURE_PREFIX, "term", "term_curriculum"),
     (BRIEF_FEATURE_PREFIX, "brief", "brief_curriculum"),
@@ -64,6 +65,7 @@ pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 18] = [
     (QUOTE_FEATURE_PREFIX, "quote", "quote_curriculum"),
     (KNOWN_REPLY_FEATURE_PREFIX, "knownreply", "brief_curriculum"),
     (UPPER_FEATURE_PREFIX, "upper", "upper_curriculum"),
+    (COMMON_FEATURE_PREFIX, "common", "common_curriculum"),
 ];
 
 /// A recipe without a curriculum's options frames nothing.
@@ -91,6 +93,12 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
         "short" => {
             let held = options.held_out();
             captured_head_curriculum(tools, split, options, &|item| item.before_origin == BeforeOrigin::Field && f::short_question(&item.original, &item.field.before, t).expect("a question") && !held.contains(&pystr::casefold(&item.original)), "short")
+        }
+        "common" => {
+            // The engine's questions about such a token while real messages were typed, among them the English sentences
+            // typed in the Russian layout under a Russian line that open with it (`He …`).
+            let held = options.held_out();
+            captured_head_curriculum(tools, split, options, &|item| item.before_origin == BeforeOrigin::Field && !item.source_known && f::common_question(&item.original, &item.field.before, &item.trigger, t).expect("a question") && !held.contains(&pystr::casefold(&item.original)), "common")
         }
         "slip" => {
             let held = options.held_out();
@@ -154,6 +162,7 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || (has(DOTTED_FEATURE_PREFIX) && f::dotted_question(original, alternative))
         || alnum
         || (has(SHORT_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::short_question(original, before, t).expect("a question"))
+        || (has(COMMON_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::common_question(original, before, trigger, t).expect("a question"))
         || (has(SLIP_FEATURE_PREFIX) && before_origin == BeforeOrigin::Field && f::slip_question(original, before, t))
         || (has(RESUME_FEATURE_PREFIX) && f::resume_question(original, alternative, before, after, origin))
         || cyrletter

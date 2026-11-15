@@ -376,10 +376,10 @@ fn planned_frames_carry_the_mass_of_the_isolated_frames_of_their_class() {
 fn each_head_asks_its_question_of_the_frames_it_is_for_and_of_no_others() {
     use ks_context::context_model::{AfterOrigin, BeforeOrigin};
     use std::collections::BTreeMap;
-    const WORDS: [(&str, i64); 50] = [
+    const WORDS: [(&str, i64); 51] = [
         ("ГИК", 1), ("ДКМ", 1), ("ЗОР", 1),
         ("СУБД", 1), ("ГОСТ", 1), ("ООО", 1), ("ОС", 1), ("СССР", 1), ("API", 0), ("b", 0), ("c", 0), ("j", 0), ("f", 0), ("1ю", 1), ("n/t/", 0), ("n/l/", 0), ("lf", 0), ("ytn", 0), ("да", 1), ("вы", 1), ("что", 1), ("это", 1),
-        ("on", 0), ("щт", 1), ("a", 0), ("ф", 1), ("ю", 1), ("I", 0), ("Ш", 1), ("Б", 1), ("DKRCV", 0), ("ЗОР", 1), ("weather", 0), ("цуферук", 1), ("mongo-cthdbcf", 0), ("ьщтпщ-сервиса", 1), ("7a", 0),
+        ("on", 0), ("щт", 1), ("ру", 1), ("a", 0), ("ф", 1), ("ю", 1), ("I", 0), ("Ш", 1), ("Б", 1), ("DKRCV", 0), ("ЗОР", 1), ("weather", 0), ("цуферук", 1), ("mongo-cthdbcf", 0), ("ьщтпщ-сервиса", 1), ("7a", 0),
         ("a1", 0), ("1ф", 1), ("t.", 0), ("е.", 1), ("7.", 0), ("\"цуфер", 1), ("-ф", 1), ("ghbdtn", 0), ("ruby", 0), ("БД", 1), ("[ybn", 0), ("Mx", 0), ("дом,", 1),
     ];
     const BEFORE: [&str; 7] = ["", "это очень важная вещь для всех ", "the weather is good today and ", "Он сказал. ", "1 ", "\n", "x = "];

@@ -177,7 +177,7 @@ fn manifest(folder: &Path, schema: i64, classes: &[Option<&str>]) -> PathBuf {
 fn a_capture_keeps_the_questions_a_recipe_names_and_verifies_against_its_files() {
     let bench = &*BENCH;
     let folder = scratch("capture");
-    let classes = [None, Some("variable"), Some("dotted"), Some("alnum"), Some("hypothesis"), Some("short"), Some("slip"), Some("sign"), Some("resume"), Some("cyrletter"), Some("dash"), Some("digitdot"), Some("quote"), Some("upper")];
+    let classes = [None, Some("variable"), Some("dotted"), Some("alnum"), Some("hypothesis"), Some("short"), Some("slip"), Some("sign"), Some("resume"), Some("cyrletter"), Some("dash"), Some("digitdot"), Some("quote"), Some("upper"), Some("common")];
     let path = manifest(&folder, 2, &classes);
     let results = capture(&bench.resources, &path, &bench.folder, &bench.model, None, false, 2).expect("captured");
     assert_eq!(results.as_object().expect("a table").len(), classes.len());

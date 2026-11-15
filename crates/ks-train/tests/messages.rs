@@ -229,17 +229,57 @@ fn the_tables_of_words_count_what_the_pools_hold() {
     std::fs::write(leipzig.join("x-1/notes.txt"), b"").expect("a file");
     std::fs::write(inner.join("notes.txt"), b"").expect("a file");
     std::fs::write(inner.join("ru-words.txt"), "1\tда\t10\n2\tнет\t3\n3\tдлинное\t100\n4\tya\t100\nкороткая\n5\tДА\t2\n").expect("a file");
+    // The words right after a word of Cyrillic letters on a line of the ru.stackoverflow messages: digits and signs between
+    // them aside, nothing first on a line or after a Latin word, no question of the developer chat.
+    let short_messages = sources.folder.join("short-messages");
+    std::fs::create_dir_all(&short_messages).expect("a folder");
+    let mut lines: Vec<String> = (1..=6).map(|qid| format!("{{\"qid\": {qid}, \"text\": \"почта майл ру работает\"}}")).collect();
+    lines.extend((7..=11).map(|qid| format!("{{\"qid\": {qid}, \"text\": \"купил 5 шт, и if\"}}")));
+    lines.push("{\"qid\": 12, \"text\": \"ру\\nhe ру\"}".to_owned());
+    lines.push("{\"qid\": 100, \"text\": \"майл ру\"}".to_owned());
+    gz_write(&short_messages.join("so-train.jsonl.gz"), (lines.join("\n") + "\n").as_bytes());
     let table = sources.folder.join("short.json");
-    let output = tool("short", &["--leipzig".as_ref(), leipzig.as_os_str(), "--out".as_ref(), table.as_os_str()]);
+    let short_arguments = |leipzig: &Path, messages: &Path| -> Vec<std::ffi::OsString> {
+        ["--leipzig".into(), leipzig.into(), "--messages".into(), messages.into(), "--members".into(), members.clone().into(), "--out".into(), table.clone().into()].to_vec()
+    };
+    let run_short = |arguments: &[std::ffi::OsString]| tool("short", &arguments.iter().map(std::ffi::OsString::as_os_str).collect::<Vec<_>>());
+    let output = run_short(&short_arguments(&leipzig, &short_messages));
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-    let short: Value = serde_json::from_slice(&std::fs::read(&table).expect("a table")).expect("json");
-    assert_eq!(short["cyrillic"]["да"], json!(12));
-    assert!(short["cyrillic"].get("нет").is_none());
+    let short: ShortTable = serde_json::from_slice(&std::fs::read(&table).expect("a table")).expect("json");
+    assert_eq!(short.cyrillic, BTreeMap::from([("да".to_owned(), 12)]));
+    assert_eq!(short.after_cyrillic, BTreeMap::from([("if".to_owned(), 5), ("ру".to_owned(), 6), ("шт".to_owned(), 5)]));
+    assert!(!run_short(&short_arguments(&leipzig, Path::new("/nonexistent"))).status.success());
     std::fs::write(inner.join("ru-words.txt"), "1\tда\tmany\n").expect("a file");
-    assert!(!tool("short", &["--leipzig".as_ref(), leipzig.as_os_str(), "--out".as_ref(), table.as_os_str()]).status.success());
-    assert!(!tool("short", &["--leipzig".as_ref(), "/nonexistent".as_ref(), "--out".as_ref(), table.as_os_str()]).status.success());
+    assert!(!run_short(&short_arguments(&leipzig, &short_messages)).status.success());
+    assert!(!run_short(&short_arguments(Path::new("/nonexistent"), &short_messages)).status.success());
+    gz_write(&short_messages.join("so-train.jsonl.gz"), b"{\"text\": \"no question\"}\n");
+    std::fs::write(inner.join("ru-words.txt"), "1\tда\t10\n").expect("a file");
+    assert!(!run_short(&short_arguments(&leipzig, &short_messages)).status.success());
+    let bad_members = sources.folder.join("bad-members-short.jsonl.gz");
+    gz_write(&bad_members, b"{}\n");
+    let output = tool("short", &["--leipzig".as_ref(), leipzig.as_os_str(), "--messages".as_ref(), short_messages.as_os_str(), "--members".as_ref(), bad_members.as_os_str(), "--out".as_ref(), table.as_os_str()]);
+    assert!(!output.status.success());
     assert!(!tool("terms", &["--messages".as_ref(), "/nonexistent".as_ref(), "--out".as_ref(), table.as_os_str()]).status.success());
     assert!(!tool("short", &[]).status.success());
+}
+
+/// The short-token table as `ks-train short` writes it.
+#[derive(serde::Deserialize)]
+struct ShortTable {
+    after_cyrillic: BTreeMap<String, i64>,
+    cyrillic: BTreeMap<String, i64>,
+}
+
+/// How many messages `ks-train select` wrote to each part.
+#[derive(serde::Deserialize)]
+struct SelectSummary {
+    messages: SelectedCounts,
+}
+
+#[derive(serde::Deserialize)]
+struct SelectedCounts {
+    train: i64,
+    dev: i64,
 }
 
 #[test]
@@ -277,6 +317,16 @@ fn a_class_selects_its_messages() {
         let output = tool("select", &["--messages".as_ref(), own.as_os_str(), "--class".as_ref(), class.as_ref(), "--development-share".as_ref(), "1.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "own".as_ref()]);
         assert!(output.status.success(), "{class}: {}", String::from_utf8_lossy(&output.stderr));
     }
+    // The class of the common-reading head reads the packaged tables and the lexicon: a Russian token after a word, an
+    // English one typed as meant, neither first in a message nor a word of the lexicon (`вы`, the keys of `ds`).
+    let common = sources.folder.join("common.jsonl.gz");
+    gz_write(&common, "{\"qid\": 1, \"text\": \"сайт майл ру тут\"}\n{\"qid\": 2, \"text\": \"and then he left\"}\n{\"qid\": 3, \"text\": \"ру в начале\"}\n{\"qid\": 4, \"text\": \"а вы тут\"}\n".as_bytes());
+    let output = tool("select", &["--messages".as_ref(), common.as_os_str(), "--class".as_ref(), "common".as_ref(), "--development-share".as_ref(), "0.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "common".as_ref()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let said: SelectSummary = serde_json::from_slice(&output.stdout).expect("json");
+    assert_eq!((said.messages.train, said.messages.dev), (2, 0));
+    let no_tables = trainer().arg("select").arg("--tree").arg(sources.folder.join("no-tree")).args(["--class", "common", "--development-share", "0.0"]).arg("--messages").arg(&common).arg("--out").arg(&out).output().expect("the trainer starts");
+    assert!(!no_tables.status.success());
     // With a list of the questions allowed, and with some of them left out.
     let list = sources.folder.join("allowed.txt.xz");
     let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 1);

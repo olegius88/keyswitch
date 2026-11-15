@@ -1,0 +1,137 @@
+{
+ "schema_version": 2,
+ "columns": [
+  "count",
+  "original",
+  "alternative",
+  "source_group",
+  "trigger",
+  "baseline_convert",
+  "source_known",
+  "target_known",
+  "score_delta",
+  "literal_tail",
+  "boundary_text",
+  "after_origin",
+  "before_origin",
+  "source_typo",
+  "target_typo",
+  "source_opening",
+  "target_opening",
+  "inside",
+  "before",
+  "after",
+  "role",
+  "label"
+ ],
+ "sources": [
+  {
+   "file": "so-common-train.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-common-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 13000,
+    "russian_share": 1.0,
+    "seed": "capture-common-so-train",
+    "prefix_rate": 0.4,
+    "code": "code-train.txt.gz",
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "selection": "ks-train select --class common (a token of the class after a word, its Cyrillic reading no word of the Russian lexicon) over so-train.jsonl.gz (--development-share 0.0 --prefix so), every developer-chat question left out (--members of devchat-dev and devchat-test to devchat-test-5): 15 287 messages",
+   "typing": "every message of the selection (12 989 with Latin words, 2 298 Russian ones), four typing modes, 40 % under a previous line; the common-reading head's questions alone",
+   "sha256": "aa60e348f0d68a4d4e3fe7e5640d88d957b1eebb4506b12372a262fb83469761",
+   "rows": 21296,
+   "unique": 10699
+  },
+  {
+   "file": "so-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "sodev-common-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 1700,
+    "russian_share": 1.0,
+    "seed": "capture-common-so-dev",
+    "prefix_rate": 0.4,
+    "code": "code-dev.txt.gz",
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "typing": "every message of the selection (1 645 with Latin words, 283 Russian ones), four typing modes, 40 % under a previous line; the common-reading head's questions alone",
+   "selection": "ks-train select --class common (a token of the class after a word, its Cyrillic reading no word of the Russian lexicon) over so-dev.jsonl.gz (--development-share 1.0 --prefix sodev), every developer-chat question left out (--members of devchat-dev and devchat-test to devchat-test-5): 1 928 messages",
+   "sha256": "a0c3fcb452acf0ebdd8a87cc4c9bdc1a1148aff9a50b70e819b540f0fd876fbb",
+   "rows": 2637,
+   "unique": 1302
+  },
+  {
+   "file": "tatoeba-chat-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "tatoeba-chat-dev.jsonl.gz",
+    "kinds": [
+     "tatoeba_chat"
+    ],
+    "count": 5000,
+    "russian_share": 0.0,
+    "seed": "capture-common-en-wrong-ru-line-dev",
+    "prefix_rate": 1.0,
+    "modes": [
+     "start_wrong"
+    ],
+    "lines_above": {
+     "messages": "tatoeba-dev.jsonl.gz",
+     "kinds": [
+      "tatoeba"
+     ],
+     "mix": "russian",
+     "count": 5000,
+     "seed": "lines-above-ru-common-dev"
+    },
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (Tatoeba sentences: CC BY 2.0 FR)",
+   "origin": "Tatoeba (https://tatoeba.org), eng_sentences and rus_sentences of 2026-09-26",
+   "typing": "5 000 English sentences of the development split typed in the Russian layout under a Russian sentence (start_wrong); the common-reading head's questions alone",
+   "sha256": "2221092a4838a6de6c9f1f1a79d5ec1700e6f36f7e333c3f610be77013a8ac53",
+   "rows": 283,
+   "unique": 278
+  },
+  {
+   "file": "taiga-chat-common-dev.jsonl.xz",
+   "weight": 1.0,
+   "balance": false,
+   "recipe": {
+    "messages": "taiga-chat-dev.jsonl.gz",
+    "kinds": [
+     "taiga_chat"
+    ],
+    "count": 1000,
+    "russian_share": 10.0,
+    "seed": "capture-common-taiga-chat-dev",
+    "prefix_rate": 0.6,
+    "labels": [
+     "keep"
+    ],
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (UD Russian-Taiga: CC BY-SA 4.0; code lines above them: ru.stackoverflow.com, CC BY-SA)",
+   "origin": "UD Russian-Taiga r2.18 (d1e48cd2), development part",
+   "typing": "chat style: lowercase, no final sign; only keep answers; the common-reading head's questions alone",
+   "sha256": "8311e095b384aadcd846d7c6b727b37d5182c5089939d562476faf6faf2f9731",
+   "rows": 179,
+   "unique": 96
+  }
+ ]
+}
