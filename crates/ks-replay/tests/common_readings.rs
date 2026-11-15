@@ -1,7 +1,7 @@
 //! Tokens of two or three Russian letters whose Latin reading is a common word, typed through the engine: the class of
 //! the common-reading head (context_action_features.common_question). A Russian token after a Russian word stays (`сайт
 //! майл ру`, `у нас ща`); an English word typed in the Russian layout after English text, or first on a line under a
-//! Russian line (`He said`), is converted. The gate words of the owner's typing are counted apart, a token outside the
+//! Russian line (`He said`), is converted. The words of the release barrier's recorded typing are counted apart, a token outside the
 //! class (`гы`, too rare in Russian text) and words of the lexicon (`шт`) only measured. Half of each family is held out of
 //! the head's training frames by hash of the token's Cyrillic letters (the recipe's common_curriculum.held_out) and
 //! counted apart from the other half. The numbers are printed by group; the floors hold for a pair that carries the head,
@@ -164,7 +164,7 @@ const OPENINGS: &[(&str, &str)] = &[
 /// The Russian line above an opening.
 const LINE_ABOVE: &str = "Вот что он написал вчера.\n";
 
-/// Tokens of the class the owner's typing converts after Russian words, at a pause or a space (the field gate): they
+/// Tokens of the shape the recorded typing of the release barrier converts after Russian words, at a pause or a space: they
 /// stay converted.
 const GATE: &[(&str, &str)] = &[("ин", "проверь сортировку"), ("сс", "запусти")];
 
