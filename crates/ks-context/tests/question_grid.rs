@@ -3,7 +3,7 @@
 use ks_context::context_action_features::{
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, brief_dominant, brief_question, brief_settled, capitals_question, cyrletter_question, dash_question, digit_dot_question,
     dotted_question, first_question, joined_parts, joined_question, kept_context_reachable, known_reply_question, latin_abbreviation_question, letter_question, letters_and_digits, nearest_count, quote_question,
-    common_question, line_place, resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
+    common_question, common_shape, line_place, resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
     upper_question, upper_shape, variable_question, words_of,
 };
 use ks_backend::{FieldContext, FieldRole};
@@ -80,6 +80,7 @@ fn every_question_answers_for_every_token_in_every_place() {
             count(short_question(original, before, &tables).unwrap_or(false));
             for trigger in TRIGGERS {
                 count(common_question(original, before, trigger, &tables).unwrap_or(false));
+                count(common_shape(original, before, trigger, &tables).unwrap_or(false));
             }
             count(!line_place(before).1.is_empty());
             for trigger in TRIGGERS {

@@ -360,6 +360,18 @@ pub const COMMON_FEATURE_PREFIX: &str = "common|";
 // on the corpus's frames at a pause, waits on.
 pub const COMMON_HEAD_TRIGGERS: &[&str] = &["space", "punctuation"];
 
+// The head answers a token whose Cyrillic reading comes right after a word of Cyrillic letters in Russian technical text at
+// least this many binary orders of magnitude more often than its Latin reading (four times as often; `ру` 276 times, `he`
+// 15: five orders): a token the counts settle as a Russian one after a Russian word, the error the head is for. Where the
+// Latin reading follows a Russian word as often or more often (`сс` 232 and `cc` 151, `ва` 896 and `df` 1 414), the token
+// after a Russian word is as often a Latin term typed in the Russian layout, and the frozen model, which reads its letters,
+// decides it. On the head's development questions (candidate context-v3-1a3e7c017630 of corpus v86, fitted on every token
+// of the shape) the head gave 17 right answers more and 23 false conversions fewer among the 542 after a Cyrillic word
+// whose orders differ by two or more; among the 126 that differ by one or not at all it gave two right answers fewer and
+// three false conversions more; among the 449 where the Latin reading leads it gave 17 right answers more, learned from
+// the frames of a few terms of technical text (`гд` for `ul` is 96 of the 425 to convert).
+pub const COMMON_HEAD_MIN_FOLLOWING_LEAN: i64 = 2;
+
 // A token of Latin letters after a line of Russian text, whose Latin reading English prose and Russian technical text use
 // at most in this bucket of the counts (CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS) and whose Cyrillic reading Russian prose
 // uses, has evidence of its own under this prefix: the slip head (context_action_features.slip_question). A word of

@@ -253,8 +253,20 @@ fn all_cases() -> Vec<Case> {
 }
 
 /// The least right answers of each family and half (every frame and both field settings pooled) a pair carrying the head
-/// gives.
-const FLOORS: &[(&str, usize)] = &[];
+/// gives: the numbers of the development candidate context-v3-8b77864d52b9 on corpus v86 (15.11.2026). The pair of 0.71.2
+/// gave, in the same order: 21, 26, 44, 44, 2, 4, 14, 0, 38, 22.
+const FLOORS: &[(&str, usize)] = &[
+    ("english-line-start | held-out", 21),
+    ("english-line-start | seen", 26),
+    ("english-midline | held-out", 44),
+    ("english-midline | seen", 44),
+    ("gate | held-out", 2),
+    ("gate | seen", 4),
+    ("lexicon-word | seen", 14),
+    ("outside-class | seen", 0),
+    ("russian-after-word | held-out", 40),
+    ("russian-after-word | seen", 24),
+];
 
 #[derive(Default)]
 struct Tally {

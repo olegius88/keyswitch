@@ -11,7 +11,7 @@ use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use indexmap::IndexMap;
 use ks_context::constants::{ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS, UPPER_HEAD_MAX_LETTERS, UPPER_HEAD_MIN_LETTERS};
-use ks_context::context_action_features::{common_question, dotted_question, letters_and_digits, sign_token_asked, words_of};
+use ks_context::context_action_features::{common_shape, dotted_question, letters_and_digits, sign_token_asked, words_of};
 use ks_context::context_model::TermTables;
 use ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
 use ks_lang::Resources;
@@ -1167,14 +1167,14 @@ pub struct CommonReadings<'a> {
 }
 
 /// A token whose Cyrillic reading (the token itself, or the keys of a Latin one in the Russian layout) is of the
-/// common-reading head's class after the token before it (`common_question`) and no word the Russian lexicon knows, which
+/// common-reading head's shape after the token before it (`common_shape`) and no word the Russian lexicon knows, which
 /// the head leaves to the frozen model: `ру` in `майл ру`, `he` in `and he`, not `вы` in `а вы`.
 fn holds_common(text: &str, readings: &CommonReadings<'_>) -> bool {
     let tokens = pystr::split(text);
     tokens.iter().enumerate().skip(1).any(|(index, token)| {
         let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
         let cyrillic = if pystr::isascii(core) { crate::physical::translated(core, 0).unwrap_or_default() } else { core.to_owned() };
-        !(readings.known)(&pystr::casefold(&cyrillic)) && common_question(&cyrillic, tokens[index - 1], "space", readings.tables).unwrap_or(false)
+        !(readings.known)(&pystr::casefold(&cyrillic)) && common_shape(&cyrillic, tokens[index - 1], "space", readings.tables).unwrap_or(false)
     })
 }
 

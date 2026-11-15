@@ -4,7 +4,7 @@
 //! name set twice keeps its first place, as in a Python `dict`. `FeatureMap` is an `IndexMap` for that.
 
 use ks_cast::To as _;
-use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, UPPER_HEAD_MIN_LETTERS, UPPER_HEAD_MAX_LETTERS, UPPER_MAGNITUDE_MAX, UPPER_RATIO_BOUND, COMMON_FEATURE_PREFIX, COMMON_HEAD_TRIGGERS};
+use crate::constants::{ACTION_FEATURE_BEFORE_CONTEXT_CHARACTERS, ACTION_FEATURE_NGRAM_ORDERS, ACTION_FEATURE_CHARACTER_WEIGHT_CAP, ACTION_FEATURE_WORD_SCORE_BOUND, ACTION_FEATURE_RAW_NGRAM_SCORE_BOUND, ACTION_FEATURE_FREQUENCY_CAP, ACTION_FEATURE_AFTER_CONTEXT_CHARACTERS, ACTION_FEATURE_CAPITALS_MIN_LETTERS, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_AFTER_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, ACTION_FEATURE_LENGTH_BUCKET_MAX_CHARACTERS, ACTION_FEATURE_FIELD_LABEL_MAX_CHARACTERS, ACTION_FEATURE_WORD_MAX_CHARACTERS, ACTION_FEATURE_NEIGHBOUR_WORD_COUNT, ACTION_FEATURE_NEIGHBOUR_WORD_MAX_CHARACTERS, ACTION_FEATURE_WHITESPACE_MAX_CHARACTERS, ACTION_FEATURE_SHORT_TEXT_CHARACTERS, ACTION_FEATURE_APPLICATION_NAME_CHARACTERS, ACTION_FEATURE_APPLICATION_TOKEN_COUNT, ACTION_FEATURE_ORTHO_SCORE_BOUND, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, CAPITALS_HEAD_MIN_LETTERS, CAPITALS_HEAD_MAX_LETTERS, ALONE_COUNT_RATIO_BOUND, ABBREVIATION_NON_INITIAL_LETTERS, LATIN_ABBREVIATION_FEATURE_PREFIX, ALONE_HEAD_LETTERS, START_HEAD_MIN_LETTERS, START_DELTA_BAND_WIDTH, START_DELTA_BANDS, RESUME_LEADING_SIGNS, OPENING_SHORT_MAX_LETTERS, RESUME_FEATURE_PREFIX, UNKNOWN_HEAD_MIN_CHARACTERS, UNKNOWN_HEAD_SIGN_KEY_LETTERS, TERM_HEAD_MIN_LETTERS, TERM_HEAD_TRAILING_SIGNS, TERM_HEAD_LEADING_SIGN, TERM_HEAD_MIN_LATIN_BUCKET, TERM_FEATURE_PREFIX, TERM_HEAD_ENDING_LETTERS, TERM_HEAD_ENDING_BUCKET_MAX, TERM_FRAGMENT_MIN_ENDING_BUCKET, FIRST_FEATURE_PREFIX, VARIABLE_HEAD_TRIGGERS, VARIABLE_CODE_CONTEXT_CHARACTERS, VARIABLE_CODE_SIGNS, VARIABLE_FEATURE_PREFIX, CYRLETTER_HEAD_TRIGGERS, CYRLETTER_FEATURE_PREFIX, DIGIT_DOT_HEAD_TRIGGERS, DIGIT_DOT_SIGN_LETTERS, DIGIT_DOT_SIGNS, DIGIT_DOT_FEATURE_PREFIX, QUOTE_HEAD_TRIGGERS, QUOTE_HEAD_SIGNS, QUOTE_FEATURE_PREFIX, DASH_HEAD_TRIGGERS, DASH_HEAD_MAX_DASHES, DASH_FEATURE_PREFIX, SIGN_DASH, SIGN_TOKEN_MAX_CHARACTERS, SIGN_OPERATOR_SIGNS, SIGN_FEATURE_PREFIX, DOTTED_PART_MAX_LETTERS, DOTTED_FEATURE_PREFIX, ALNUM_HEAD_MAX_CHARACTERS, ALNUM_SHAPE_MAX_RUNS, ALNUM_RUN_LENGTH_MAX, ALNUM_RATIO_BOUND, ALNUM_FEATURE_PREFIX, BRIEF_HEAD_LETTERS, BRIEF_SETTLED_MIN_COUNT, BRIEF_SETTLED_OTHER_MAXIMUM, BRIEF_SETTLED_DOMINANCE, BRIEF_KNOWN_MIN_COUNT, BRIEF_KNOWN_DOMINANCE, KNOWN_REPLY_FEATURE_PREFIX, BRIEF_RATIO_BOUND, BRIEF_FEATURE_PREFIX, HYPOTHESIS_MAGNITUDE_MAX, HYPOTHESIS_RATIO_BOUND, HYPOTHESIS_FEATURE_PREFIX, SHORT_HEAD_LETTERS, SHORT_HEAD_MIN_RUSSIAN_BUCKET, SHORT_HEAD_MAX_LATIN_BUCKET, SHORT_MAGNITUDE_MAX, SHORT_RATIO_BOUND, SHORT_FEATURE_PREFIX, SLIP_HEAD_MIN_LETTERS, SLIP_HEAD_MAX_LATIN_BUCKET, SLIP_PROBABILITY_BANDS, SLIP_ORTHO_BAND_WIDTH, SLIP_ORTHO_BANDS, SLIP_BEFORE_MAGNITUDE_STEP, SLIP_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, UPPER_HEAD_MIN_LETTERS, UPPER_HEAD_MAX_LETTERS, UPPER_MAGNITUDE_MAX, UPPER_RATIO_BOUND, COMMON_FEATURE_PREFIX, COMMON_HEAD_TRIGGERS, COMMON_HEAD_MIN_FOLLOWING_LEAN};
 use crate::context_model::{bucket_of, term_bucket, AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, SHORT_AFTER_CYRILLIC, TERM_EDGE_SIGNS};
 use indexmap::IndexMap;
 use ks_text::layouts::LayoutPair;
@@ -2270,14 +2270,15 @@ pub fn line_place(before: &str) -> (LinePlace, &str) {
 }
 
 /// A token of `SHORT_HEAD_LETTERS` Russian letters, not all capitals, whose keys are Latin letters, with a letter before it
-/// in the field, ended by a space or a sign (`COMMON_HEAD_TRIGGERS`), that Russian text uses at least in bucket `SHORT_HEAD_MIN_RUSSIAN_BUCKET` while English prose or Russian
-/// technical text use its Latin reading above bucket `SHORT_HEAD_MAX_LATIN_BUCKET`: the common-reading head's class, the
-/// rest of the short-token head's shape (the lexicon's own words are left out where the features are made). `ру` (`he`),
-/// `ща` (`of`), `ин` (`by`) and `сс` (`cc`) are; a token with nothing before it is the lone-word, message-start and
-/// short-message heads', a term of Russian technical text the term head's, and one left at a pause or ended by Enter the
-/// frozen model's. The question reads only the typed token, the text before it, the boundary and the packaged tables, as
-/// the trainer routes frames by them (`head_question`).
-pub fn common_question(original: &str, before: &str, trigger: &str, tables: &TermTables) -> Checked<bool> {
+/// in the field, ended by a space or a sign (`COMMON_HEAD_TRIGGERS`), that Russian text uses at least in bucket
+/// `SHORT_HEAD_MIN_RUSSIAN_BUCKET` while English prose or Russian technical text use its Latin reading above bucket
+/// `SHORT_HEAD_MAX_LATIN_BUCKET`: the rest of the short-token head's shape, of which the common-reading head answers the
+/// tokens its counts settle (`common_question`). `ру` (`he`), `ща` (`of`), `ин` (`by`) and `сс` (`cc`) are of the shape;
+/// a token with nothing before it is the lone-word, message-start and short-message heads', a term of Russian technical text
+/// the term head's, and one left at a pause or ended by Enter the frozen model's. The engine's questions about such tokens
+/// were captured for the head (`ks-train select --class common`, `capture`), and the question reads only the typed token,
+/// the text before it, the boundary and the packaged tables.
+pub fn common_shape(original: &str, before: &str, trigger: &str, tables: &TermTables) -> Checked<bool> {
     if !(COMMON_HEAD_TRIGGERS.contains(&trigger) && SHORT_HEAD_LETTERS.contains(&count(original)) && all_cyrillic(original) && !pystr::isupper(original) && has_alpha(before)) {
         return Ok(false);
     }
@@ -2287,6 +2288,23 @@ pub fn common_question(original: &str, before: &str, trigger: &str, tables: &Ter
     }
     let (russian, other) = short_counts(original, &latin, tables)?;
     Ok(bucket_of(russian) >= SHORT_HEAD_MIN_RUSSIAN_BUCKET && bucket_of(other) > SHORT_HEAD_MAX_LATIN_BUCKET && !term_question(original, before, tables))
+}
+
+/// By how many binary orders of magnitude (`SHORT_MAGNITUDE_MAX` at most, `SHORT_RATIO_BOUND` either way) the Cyrillic
+/// reading comes right after a word of Cyrillic letters in Russian technical text more often than the Latin one
+/// (`SHORT_AFTER_CYRILLIC`).
+fn following_lean(cyrillic: &str, latin: &str, tables: &TermTables) -> i64 {
+    let after = tables.short().expect("the shape has read the table").alphabet(SHORT_AFTER_CYRILLIC);
+    let order = |text: &str| magnitude(after.count(&pystr::casefold(text)), SHORT_MAGNITUDE_MAX);
+    clamp_int(order(cyrillic) - order(latin), SHORT_RATIO_BOUND)
+}
+
+/// A token of the common-reading head's shape (`common_shape`) whose Cyrillic reading comes right after a Russian word at
+/// least `COMMON_HEAD_MIN_FOLLOWING_LEAN` binary orders more often than its Latin one (`following_lean`): the head's class.
+/// `ру` (276 against `he` 15) and `ща` (242 against `of` 57) are; `сс` (232 against `cc` 151) and `ин` (23 against `by`
+/// 154) stay with the frozen model, which converts them where they are meant so.
+pub fn common_question(original: &str, before: &str, trigger: &str, tables: &TermTables) -> Checked<bool> {
+    Ok(common_shape(original, before, trigger, tables)? && following_lean(original, &translate(original, "ru", "us"), tables) >= COMMON_HEAD_MIN_FOLLOWING_LEAN)
 }
 
 /// The sign of a difference of two readings' orders of magnitude, as the pairs of the common-reading head read it.
@@ -2328,7 +2346,7 @@ fn common_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let after = short.alphabet(SHORT_AFTER_CYRILLIC);
     let follows_counts = (order(after.count(&cyrillic)), order(after.count(&latin)));
     let difference = clamp_int(russian - english, SHORT_RATIO_BOUND);
-    let following = clamp_int(follows_counts.0 - follows_counts.1, SHORT_RATIO_BOUND);
+    let following = following_lean(&cyrillic, &latin, tables);
     let (place, word) = line_place(&item.field.before);
     let reading = match place {
         LinePlace::Cyrillic | LinePlace::Latin => Some(russian_lean(word, tables)),

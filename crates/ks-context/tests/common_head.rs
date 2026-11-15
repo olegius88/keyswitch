@@ -3,7 +3,7 @@
 
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::constants::{COMMON_FEATURE_PREFIX, SHORT_FEATURE_PREFIX};
-use ks_context::context_action_features::{LinePlace, common_question, extract_action_features, line_place, short_question};
+use ks_context::context_action_features::{LinePlace, common_question, common_shape, extract_action_features, line_place, short_question};
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextEvidence, TermTables, SHORT_ALPHABETS, SHORT_FREQUENCY_FILE};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -51,8 +51,14 @@ fn the_table_counts_what_follows_a_cyrillic_word() {
 fn the_class_is_the_rest_of_the_short_token_shape() {
     let tables = tables();
     // Both readings common, a letter before it: after a Russian word, after Latin text, first on a line.
-    for (original, before) in [("ру", "сайт майл "), ("ща", "у нас "), ("ин", "and then "), ("Ру", "Вот что он написал.\n"), ("сс", "запусти ")] {
+    for (original, before) in [("ру", "сайт майл "), ("ща", "у нас "), ("ру", "and then "), ("Ру", "Вот что он написал.\n")] {
         assert_eq!(common_question(original, before, "space", &tables), Ok(true), "{original} after {before:?}");
+        assert_eq!(common_shape(original, before, "space", &tables), Ok(true), "{original} after {before:?}");
+    }
+    // Of the shape, but the Latin reading follows a Russian word as often or more often: the frozen model's.
+    for (original, before) in [("ин", "and then "), ("сс", "запусти ")] {
+        assert_eq!(common_shape(original, before, "space", &tables), Ok(true), "{original}");
+        assert_eq!(common_question(original, before, "space", &tables), Ok(false), "{original}");
     }
     // Nothing before it; capitals; a Latin token; a Latin reading that is no word (`ё`); too long or too short; Russian text
     // that hardly uses it (`гы`); a Latin reading too rare (the short-token head's `кз`); a term (`сш`).
