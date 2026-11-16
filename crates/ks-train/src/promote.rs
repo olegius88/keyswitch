@@ -2,10 +2,12 @@
 //! (`promote_context_action_pair`). A sealed test is read once, so everything the candidate's seal pins has to be final
 //! before that read: this refuses to touch the test until every check holds.
 use ks_cast::To as _;
+use crate::artifact::typed;
 use crate::corpus::read_json;
 use crate::evaluate::{EvaluationRequest, FIRST_PLANS_VERSION, evaluate, validate_candidate_seal, validate_prefix_seal};
 use crate::mixed::{DevchatRequest, devchat};
 use crate::receipt::{export_receipt, validate_receipt};
+use crate::sequence_report::{PairCounts, Profiles, Report};
 use ks_text::{Indent, JsonOptions};
 use serde::Deserialize;
 use serde_json::Value;
@@ -182,19 +184,24 @@ fn installed_files(request: &PromoteRequest<'_>) -> [(PathBuf, &'static str); 4]
 /// `restoration_shortfall`: where the sealed test leaves the candidate short of the release receipt's floors. From
 /// protocol 5 on the default mode is held to its first plans, where every wrong word stands at the start of a text and so
 /// can be restored; its protocol-4 plans keep their gates.
-fn restoration_shortfall(report: &Value) -> Vec<String> {
+fn restoration_shortfall(report: &Report) -> Vec<String> {
     let mut failures = Vec::new();
-    let first_plans = report["protocol"]["version"].as_i64().is_some_and(|version| version >= FIRST_PLANS_VERSION);
-    for (name, profile) in report["profiles"].as_object().into_iter().flatten() {
-        let default = if first_plans { &profile["first"]["counts"] } else { &profile["counts"] };
-        for (mode, counts) in [("default", default), ("early_off", &profile["early_off"]["counts"])] {
-            let (candidate, baseline) = (&counts["candidate"], &counts["baseline"]);
-            let restored = candidate["exactly_restored"].as_i64().unwrap_or(0);
+    let first_plans = report.protocol_version().is_some_and(|version| version >= FIRST_PLANS_VERSION);
+    let none = PairCounts::default();
+    for (name, profile) in report.profiles.iter().flat_map(Profiles::each) {
+        let default = match (first_plans, &profile.first) {
+            (false, _) => (&profile.counts.candidate, &profile.counts.baseline),
+            (true, Some(first)) => (&first.counts.candidate, &first.counts.baseline),
+            (true, None) => (&none, &none),
+        };
+        let control = (&profile.early_off.counts.candidate, &profile.early_off.counts.baseline);
+        for (mode, (candidate, baseline)) in [("default", default), ("early_off", control)] {
+            let restored = candidate.exactly_restored;
             let margin = RECEIPT_MIN_RESTORATION_MARGIN.iter().find(|entry| entry.0 == mode).map_or(0, |entry| entry.1);
-            if restored - baseline["exactly_restored"].as_i64().unwrap_or(0) < margin {
+            if restored - baseline.exactly_restored < margin {
                 failures.push(format!("{name}/{mode}: the margin over the baseline pair"));
             }
-            if mode == "early_off" && restored.to::<f64>() < RECEIPT_MIN_RESTORED_SHARE * (candidate["initially_wrong"].as_i64().unwrap_or(0)).to::<f64>() {
+            if mode == "early_off" && restored.to::<f64>() < RECEIPT_MIN_RESTORED_SHARE * candidate.initially_wrong.to::<f64>() {
                 failures.push(format!("{name}/{mode}: the share restored"));
             }
         }
@@ -220,8 +227,8 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let resource_dir = root.join("resources");
     let (artifact, seal, prefix, prefix_seal) = (request.candidate.join(CONTEXT_ARTIFACT), request.candidate.join(CONTEXT_SEAL), request.prefix_candidate.join(PREFIX_ARTIFACT), request.prefix_candidate.join(PREFIX_SEAL));
     let evaluation = EvaluationRequest { root, resource_dir: &resource_dir, artifact: &artifact, seal: &seal, prefix: &prefix, prefix_seal: &prefix_seal, corpus: request.corpus, split: "test", output: request.report, ledger: request.ledger, jobs: request.jobs, unsealed: false };
-    let report = if request.report.exists() { read_json(request.report)? } else { evaluate(&evaluation)? };
-    if report["promotion_passed"] != Value::Bool(true) {
+    let report = if request.report.exists() { typed::<Report, _>(&read_json(request.report)?)? } else { evaluate(&evaluation)? };
+    if !report.promotion_passed {
         println!("the sealed test did not pass; nothing is installed");
         return Ok(1);
     }
@@ -257,6 +264,8 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::evaluate::Earliness;
+    use crate::sequence_report::{AllPairs, EarlyOff, FirstBlock, FirstGates, Gated, Gates, Profile};
 
     fn comparison(text: &str) -> Comparison {
         ks_text::json::loads(text).expect("a comparison")
@@ -277,17 +286,62 @@ mod tests {
     /// Protocol 4 holds the default mode to its sequences, protocol 5 to its first plans; early_off is held as before.
     #[test]
     fn the_default_floor_is_read_where_the_protocol_of_the_report_puts_it() {
-        let counts = |candidate: i64, baseline: i64| serde_json::json!({"candidate": {"exactly_restored": candidate, "initially_wrong": candidate}, "baseline": {"exactly_restored": baseline}});
-        let report = |version: i64, sequences: Value, first: Value| {
-            serde_json::json!({"protocol": {"version": version}, "profiles": {"portable": {"counts": sequences, "first": {"counts": first}, "early_off": {"counts": counts(10, 9)}}}})
+        let counts = |candidate: i64, baseline: i64| Gated { candidate: PairCounts { exactly_restored: candidate, initially_wrong: candidate, ..PairCounts::default() }, baseline: PairCounts { exactly_restored: baseline, ..PairCounts::default() } };
+        let held = || Gates {
+            correct_text_preserved: true,
+            length_preserved: true,
+            net_restorations_at_least_baseline: true,
+            enough_documents_us: true,
+            enough_documents_ru: true,
+            execution_succeeded: true,
+            correction_layouts_match: true,
         };
-        let short = vec!["portable/default: the margin over the baseline pair".to_owned()];
-        assert_eq!(restoration_shortfall(&report(4, counts(5, 6), counts(9, 9))), short);
+        let profile = |sequences: Gated<PairCounts>, first: Gated<PairCounts>, control: Gated<PairCounts>| {
+            let by_pair = |pairs: Gated<PairCounts>| AllPairs { baseline: pairs.baseline.clone(), candidate: pairs.candidate.clone(), candidate_context_baseline_prefix: pairs.candidate, installed: pairs.baseline };
+            let none = || Gated { baseline: Vec::new(), candidate: Vec::new() };
+            Profile {
+                counts: sequences,
+                cases: none(),
+                gates: held(),
+                ablation: None,
+                installed: None,
+                first: Some(FirstBlock {
+                    counts: by_pair(first),
+                    earliness: AllPairs { baseline: Earliness::default(), candidate: Earliness::default(), candidate_context_baseline_prefix: Earliness::default(), installed: Earliness::default() },
+                    cases: AllPairs { baseline: Vec::new(), candidate: Vec::new(), candidate_context_baseline_prefix: Vec::new(), installed: Vec::new() },
+                    gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
+                }),
+                early_off: EarlyOff { counts: control, cases: none(), gates: held() },
+            }
+        };
+        let report = |version: i64, sequences: Gated<PairCounts>, first: Gated<PairCounts>| {
+            let same = || profile(sequences.clone(), first.clone(), counts(10, 9));
+            Report {
+                schema_version: 1,
+                split: "test".to_owned(),
+                identity: ks_text::json::loads(r#"{"unsealed": true}"#).expect("a tree"),
+                protocol: ks_text::json::loads(format!(r#"{{"version": {version}}}"#)).expect("a tree"),
+                gate_policy: ks_text::json::loads("{}").expect("a tree"),
+                promotion_passed: true,
+                installed_reference: None,
+                selection: None,
+                profiles: Some(Profiles { portable: same(), reference_hunspell: same() }),
+                execution_error: None,
+                scope: None,
+            }
+        };
+        let short = |profile: &str| vec![format!("{profile}/default: the margin over the baseline pair")];
+        let mut names = short("portable");
+        names.extend(short("reference_hunspell"));
+        assert_eq!(restoration_shortfall(&report(4, counts(5, 6), counts(9, 9))), names);
         assert!(restoration_shortfall(&report(4, counts(6, 6), counts(5, 9))).is_empty());
-        assert_eq!(restoration_shortfall(&report(5, counts(9, 9), counts(5, 6))), short);
+        assert_eq!(restoration_shortfall(&report(5, counts(9, 9), counts(5, 6))), names);
         assert!(restoration_shortfall(&report(5, counts(5, 6), counts(6, 6))).is_empty());
         // early_off keeps its margin of one row and its share.
-        let behind = serde_json::json!({"protocol": {"version": 5}, "profiles": {"portable": {"first": {"counts": counts(6, 6)}, "early_off": {"counts": counts(9, 9)}}}});
-        assert_eq!(restoration_shortfall(&behind), ["portable/early_off: the margin over the baseline pair"]);
+        let mut behind = report(5, counts(9, 9), counts(6, 6));
+        for (_, profile) in behind.profiles.iter_mut().flat_map(Profiles::each_mut) {
+            profile.early_off.counts = counts(9, 9);
+        }
+        assert_eq!(restoration_shortfall(&behind), ["portable/early_off: the margin over the baseline pair", "reference_hunspell/early_off: the margin over the baseline pair"]);
     }
 }

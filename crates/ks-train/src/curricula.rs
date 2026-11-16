@@ -74,11 +74,7 @@ impl Counts {
 
     #[must_use]
     pub fn report(&self) -> Value {
-        let mut map = Map::new();
-        for (name, count) in &self.0 {
-            map.insert(name.clone(), json!(count));
-        }
-        Value::Object(map)
+        ks_text::json::loads(ks_text::json::dumps(&self.0, &ks_text::JsonOptions::default())).expect("the text of a table of counts is JSON")
     }
 }
 

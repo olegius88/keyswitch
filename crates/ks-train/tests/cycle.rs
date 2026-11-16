@@ -2,10 +2,12 @@
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "temporary: these tests still build and read their JSON as untyped trees; step 7 of the strict-json plan types them and removes this")]
 mod support;
 
-use ks_train::evaluate::{EvaluationRequest, FIRST_PUBLIC_PAIRS, INSTALLED, PROFILES, earliness, evaluation_identity, first_gates, protocol, validate_candidate_seal, validate_prefix_seal};
-use ks_train::artifact::canonical;
+use ks_cast::To as _;
+use ks_train::evaluate::{EvaluationRequest, earliness, evaluation_identity, protocol, validate_candidate_seal, validate_prefix_seal};
+use ks_train::artifact::{canonical, tree_of, typed};
 use ks_train::corpus::checksum;
 use ks_train::receipt::{export_receipt, validate_full_report};
+use ks_train::sequence_report::{AllPairs, Case, CorrectionRecord, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile, PublicFirst, PublicTest, Report, protocol_version};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -380,92 +382,77 @@ static SEALED: LazyLock<Sealed> = LazyLock::new(|| {
     Sealed { report, identity: identity.value, key: identity.key }
 });
 
-const BLOCKS: [(&str, bool); 4] = [("portable", false), ("portable", true), ("reference_hunspell", false), ("reference_hunspell", true)];
-
-fn block_of<'a>(report: &'a mut Value, profile: &str, early: bool) -> &'a mut Value {
-    let block = &mut report["profiles"][profile];
-    if early { &mut block["early_off"] } else { block }
+/// A report read as its type, to change by its fields; `tree_of` gives the tree back.
+fn parsed(report: &Value) -> Report {
+    typed(report).expect("a report of the shape the evaluation writes")
 }
 
-/// The pairs of a block whose cases the checks recount: in the default mode the installed reference's too.
-fn models_of(early: bool) -> &'static [&'static str] {
-    if early { &["baseline", "candidate"] } else { &FIRST_PUBLIC_PAIRS }
+fn portable(report: &mut Report) -> &mut Profile {
+    &mut report.profiles.as_mut().expect("the profiles").portable
 }
 
-/// The cases of a pair in a block, and its counts: the installed pair's stand beside the gated ones.
-fn cases_of<'a>(block: &'a mut Value, model: &str) -> &'a mut Value {
-    if model == INSTALLED { &mut block[INSTALLED]["cases"] } else { &mut block["cases"][model] }
+/// The first plans of the portable profile, in the default mode.
+fn first_block(report: &mut Report) -> &mut FirstBlock {
+    portable(report).first.as_mut().expect("the first plans")
 }
 
-fn counts_of<'a>(block: &'a mut Value, model: &str) -> &'a mut Value {
-    if model == INSTALLED { &mut block[INSTALLED]["counts"] } else { &mut block["counts"][model] }
+fn first_cases(report: &mut Report) -> &mut AllPairs<Vec<Case>> {
+    &mut first_block(report).cases
 }
 
-/// The counts of a list of cases, as the check recomputes them.
-fn counted(cases: &[Value]) -> Value {
-    let count = |test: &dyn Fn(&Value) -> i64| cases.iter().map(test).sum::<i64>();
-    let wrong = |case: &Value| case["initially_wrong"].as_bool().expect("a mode");
-    let exact = |case: &Value| case["exact"].as_bool().expect("a result");
-    json!({
-        "rows": cases.len(), "initially_correct": count(&|case| i64::from(!wrong(case))), "initially_wrong": count(&|case| i64::from(wrong(case))),
-        "preserved_correct": count(&|case| i64::from(!wrong(case) && exact(case))), "exactly_restored": count(&|case| i64::from(wrong(case) && exact(case))),
-        "correct_text_corruptions": count(&|case| i64::from(!wrong(case) && !exact(case))), "length_mismatches": count(&|case| i64::from(case["length_mismatch"].as_bool().expect("a result"))),
-        "injections": count(&|case| i64::try_from(case["corrections"].as_array().expect("corrections").len()).expect("few")), "execution_errors": count(&|case| i64::from(!case["error"].is_null())),
-        "correction_layout_mismatches": count(&|case| i64::try_from(case["corrections"].as_array().expect("corrections").iter().filter(|item| item["actual_group"] != item["target_group"]).count()).expect("few")),
-        "final_layout_mismatches": count(&|case| i64::from(!case["final_layout_matches"].as_bool().expect("a result"))),
-    })
+fn first_ineligible(report: &mut Report) -> &mut Vec<String> {
+    &mut report.selection.as_mut().expect("the selection").first_ineligible
 }
 
-/// The counts of every block recomputed from its cases, and the counts and the earliness of the first plans, as the check
-/// does.
-fn recount(report: &mut Value) {
-    for (profile, early) in BLOCKS {
-        let block = block_of(report, profile, early);
-        for model in models_of(early) {
-            let cases = cases_of(block, model).as_array().expect("cases").clone();
-            *counts_of(block, model) = counted(&cases);
+/// The counts of every block recomputed from its cases, and the counts, the earliness and the gates of the first plans, as
+/// the check does.
+fn recounted(report: &mut Report) {
+    for (_, profile) in report.profiles.as_mut().expect("the profiles").each_mut() {
+        profile.counts = Gated { baseline: PairCounts::of_cases(&profile.cases.baseline), candidate: PairCounts::of_cases(&profile.cases.candidate) };
+        profile.early_off.counts = Gated { baseline: PairCounts::of_cases(&profile.early_off.cases.baseline), candidate: PairCounts::of_cases(&profile.early_off.cases.candidate) };
+        if let Some(installed) = &mut profile.installed {
+            installed.counts = PairCounts::of_cases(&installed.cases);
         }
-    }
-    for profile in PROFILES {
-        let block = block_of(report, profile, false);
-        for pair in FIRST_PUBLIC_PAIRS {
-            let first = block["first"]["cases"][pair].as_array().expect("first cases").clone();
-            let sequence = cases_of(block, pair).as_array().expect("cases").clone();
-            block["first"]["counts"][pair] = counted(&first);
-            block["first"]["earliness"][pair] = json!(earliness(&first, &sequence).expect("the earliness of the cases"));
-        }
-        let held = block["first"]["counts"].clone();
-        let counts = &held;
-        let of = |pair: &'static str| move |name: &str| counts[pair][name].as_i64().expect("a count");
-        block["first"]["gates"] = first_gates(of("candidate"), of("baseline"));
+        let Some(first) = &profile.first else { continue };
+        let counts = AllPairs::build(|pair| Ok::<_, String>(PairCounts::of_cases(first.cases.named(pair).expect("a pair")))).expect("counts of the cases");
+        let early = AllPairs::build(|pair| earliness(first.cases.named(pair).expect("a pair"), profile.sequence_cases(pair).expect("cases"))).expect("the earliness of the cases");
+        let gates = FirstGates::of(&counts.candidate, &counts.baseline);
+        let first = profile.first.as_mut().expect("the first plans");
+        (first.counts, first.earliness, first.gates) = (counts, early, gates);
     }
 }
 
-/// The same edit of the cases of every block and model, and the counts that follow from it.
-fn everywhere(report: &mut Value, edit: &dyn Fn(&mut Vec<Value>)) {
-    for (profile, early) in BLOCKS {
-        for model in models_of(early) {
-            edit(cases_of(block_of(report, profile, early), model).as_array_mut().expect("cases"));
+/// The same edit of the cases of every block and pair, and the counts that follow from it.
+fn everywhere(report: &mut Value, edit: &dyn Fn(&mut Vec<Case>)) {
+    let mut changed = parsed(report);
+    for (_, profile) in changed.profiles.as_mut().expect("the profiles").each_mut() {
+        for cases in [&mut profile.cases.baseline, &mut profile.cases.candidate, &mut profile.early_off.cases.baseline, &mut profile.early_off.cases.candidate] {
+            edit(cases);
+        }
+        if let Some(installed) = &mut profile.installed {
+            edit(&mut installed.cases);
         }
     }
-    recount(report);
+    recounted(&mut changed);
+    *report = tree_of(&changed);
 }
 
 /// The same edit of the first cases of every pair the check reads, and the counts that follow from it.
-fn everywhere_first(report: &mut Value, edit: &dyn Fn(&mut Vec<Value>)) {
-    for profile in PROFILES {
-        for pair in FIRST_PUBLIC_PAIRS {
-            edit(block_of(report, profile, false)["first"]["cases"][pair].as_array_mut().expect("first cases"));
+fn everywhere_first(report: &mut Report, edit: &dyn Fn(&mut Vec<Case>)) {
+    for (_, profile) in report.profiles.as_mut().expect("the profiles").each_mut() {
+        for (_, cases) in profile.first.as_mut().expect("the first plans").cases.published_mut() {
+            edit(cases);
         }
     }
-    recount(report);
+    recounted(report);
 }
 
 #[test]
 fn a_report_is_recomputed_from_its_private_cases() {
     let sealed = &*SEALED;
     let good = read(&sealed.report);
-    assert_eq!(good["identity"], sealed.identity);
+    let good_typed = parsed(&good);
+    assert_eq!(good_typed.identity, Report::carry(&sealed.identity).expect("an identity"));
     validate_full_report(&good, &sealed.identity).expect("the report holds");
     let refused = |words: &str, edit: &dyn Fn(&mut Value)| {
         let mut changed = good.clone();
@@ -554,78 +541,66 @@ fn a_report_is_recomputed_from_its_private_cases() {
     // All blocks alike, and still not what was selected.
     refused("case coverage", &|report| {
         everywhere(report, &|cases| {
-            let at = cases.iter().position(|case| case["initially_wrong"] == json!(false)).expect("a correct case");
+            let at = cases.iter().position(|case| !case.initially_wrong).expect("a correct case");
             cases.remove(at);
         });
     });
     refused("paired correct/wrong", &|report| {
         everywhere(report, &|cases| {
-            let at = cases.iter().position(|case| case["initially_wrong"] == json!(true)).expect("a wrong case");
-            let cell = &mut cases[at]["trimmed_left"];
-            *cell = json!(cell.as_i64().expect("a count") + 1);
+            let at = cases.iter().position(|case| case.initially_wrong).expect("a wrong case");
+            cases[at].trimmed_left += 1;
         });
     });
     refused("document counts", &|report| report["selection"]["replayed_documents"]["0"] = json!(0));
     // Protocol 5: every correction says what made it, and the first plans are recomputed as the rest is.
-    refused("without its kind", &|report| {
-        let corrections = report["profiles"]["portable"]["cases"]["baseline"][restored]["corrections"].as_array_mut().expect("corrections");
-        corrections[0].as_object_mut().expect("a correction").remove("kind");
-    });
-    refused("invalid first-plan selection", &|report| report["selection"]["first_ineligible"] = json!(1));
-    refused("invalid first-plan selection", &|report| report["selection"]["first_ineligible"] = json!([1]));
-    refused("invalid first-plan selection", &|report| report["selection"]["first_ineligible"] = json!(["nobody"]));
-    refused("missing first-plan case rows", &|report| report["profiles"]["portable"]["first"]["cases"]["installed"] = json!(1));
-    let first = good["profiles"]["portable"]["first"]["cases"]["baseline"].as_array().expect("first cases");
-    let first_right = first.iter().position(|case| case["initially_wrong"] == json!(false)).expect("a correct first case");
-    let first_wrong = first.iter().position(|case| case["initially_wrong"] == json!(true)).expect("a wrong first case");
-    let first_edited = |at: usize, words: &str, edit: &dyn Fn(&mut Value)| {
-        refused(words, &|report| edit(&mut report["profiles"]["portable"]["first"]["cases"]["baseline"][at]));
+    let refused_typed = |words: &str, edit: &dyn Fn(&mut Report)| {
+        refused(words, &|report| {
+            let mut changed = parsed(report);
+            edit(&mut changed);
+            *report = tree_of(&changed);
+        });
     };
+    refused_typed("without its kind", &|report| portable(report).cases.baseline[restored].corrections[0].kind = None);
+    for shape in [tree_of::<Value, _>(&1), tree_of::<Value, _>(&[1])] {
+        refused("invalid first-plan selection", &|report| report["selection"]["first_ineligible"] = shape.clone());
+    }
+    refused_typed("invalid first-plan selection", &|report| first_ineligible(report).push("nobody".to_owned()));
+    refused_typed("missing first-plan case rows", &|report| portable(report).first = None);
+    refused("invalid first-plan block", &|report| report["profiles"]["portable"]["first"]["cases"] = tree_of(&1));
+    let first = &good_typed.profiles.as_ref().expect("the profiles").portable.first.as_ref().expect("the first plans").cases.baseline;
+    let first_right = first.iter().position(|case| !case.initially_wrong).expect("a correct first case");
+    let first_wrong = first.iter().position(|case| case.initially_wrong).expect("a wrong first case");
+    let first_edited = |at: usize, words: &str, edit: &dyn Fn(&mut Case)| refused_typed(words, &|report| edit(&mut first_cases(report).baseline[at]));
     const OTHER: &str = "first-plan case of a row without first plans";
-    first_edited(first_right, "invalid count", &|case| case["focus_letters"] = json!(-1));
-    first_edited(first_right, OTHER, &|case| case["focus_letters"] = json!(0));
-    first_edited(first_right, OTHER, &|case| case["focus_letters"] = json!(100_000));
-    first_edited(first_right, OTHER, &|case| case["document"] = json!("nowhere"));
-    first_edited(first_right, OTHER, &|case| case["identifier"] = json!("nobody"));
+    first_edited(first_right, "invalid count", &|case| case.focus_letters = Some(-1));
+    first_edited(first_right, OTHER, &|case| case.focus_letters = Some(0));
+    first_edited(first_right, OTHER, &|case| case.focus_letters = Some(100_000));
+    first_edited(first_right, OTHER, &|case| case.document = "nowhere".to_owned());
+    first_edited(first_right, OTHER, &|case| case.identifier = "nobody".to_owned());
     first_edited(first_wrong, OTHER, &|case| {
-        let text: String = case["expected"].as_str().expect("a text").to_owned();
-        case["expected"] = json!(format!("1{text}"));
-        case["actual"] = json!(format!("1{}", case["actual"].as_str().expect("a text")));
-        case["intervention"]["event"] = json!(2);
+        case.expected.insert(0, '1');
+        case.actual.insert(0, '1');
+        case.intervention.as_mut().expect("an intervention").event = 2;
     });
-    refused(OTHER, &|report| {
-        let cell = report["profiles"]["portable"]["first"]["cases"]["baseline"][first_right]["identifier"].clone();
-        report["selection"]["first_ineligible"] = json!([cell]);
+    refused_typed(OTHER, &|report| *first_ineligible(report) = vec![first_cases(report).baseline[first_right].identifier.clone()]);
+    refused_typed("duplicate first-plan case", &|report| {
+        let cases = &mut first_cases(report).baseline;
+        cases.push(cases[first_right].clone());
     });
-    refused("duplicate first-plan case", &|report| {
-        let list = report["profiles"]["portable"]["first"]["cases"]["baseline"].as_array_mut().expect("first cases");
-        let copy = list[first_right].clone();
-        list.push(copy);
-    });
-    refused("claimed first-plan counts differ", &|report| {
-        let cell = &mut report["profiles"]["portable"]["first"]["counts"]["baseline"]["rows"];
-        *cell = json!(cell.as_i64().expect("a count") + 1);
-    });
-    refused("claimed earliness differs", &|report| {
-        let cell = &mut report["profiles"]["portable"]["first"]["earliness"]["candidate"]["never"];
-        *cell = json!(cell.as_i64().expect("a count") + 1);
-    });
-    refused("first-plan gates contradicted", &|report| report["profiles"]["reference_hunspell"]["first"]["gates"]["length_preserved"] = json!("no"));
-    refused("different first-plan inputs", &|report| {
-        let cell = &mut report["profiles"]["portable"]["first"]["cases"]["candidate"][first_right]["trimmed_right"];
-        *cell = json!(cell.as_i64().expect("a count") + 1);
-    });
-    refused("first-plan coverage", &|report| {
+    refused_typed("claimed first-plan counts differ", &|report| first_block(report).counts.baseline.rows += 1);
+    refused_typed("claimed earliness differs", &|report| first_block(report).earliness.candidate.never += 1);
+    refused_typed("first-plan gates contradicted", &|report| first_block(report).gates.length_preserved = false);
+    refused_typed("different first-plan inputs", &|report| first_cases(report).candidate[first_right].trimmed_right += 1);
+    refused_typed("first-plan coverage", &|report| {
         everywhere_first(report, &|cases| {
-            let at = cases.iter().position(|case| case["initially_wrong"] == json!(false)).expect("a correct case");
+            let at = cases.iter().position(|case| !case.initially_wrong).expect("a correct case");
             cases.remove(at);
         });
     });
-    refused("first-plan coverage", &|report| {
+    refused_typed("first-plan coverage", &|report| {
         everywhere_first(report, &|cases| {
-            let at = cases.iter().position(|case| case["initially_wrong"] == json!(true)).expect("a wrong case");
-            let cell = &mut cases[at]["trimmed_right"];
-            *cell = json!(cell.as_i64().expect("a count") + 1);
+            let at = cases.iter().position(|case| case.initially_wrong).expect("a wrong case");
+            cases[at].trimmed_right += 1;
         });
     });
 }
@@ -660,46 +635,52 @@ fn chat_ledger(fitted: &Fitted, tree: &Path, folder: &Path) {
     std::fs::write(folder.join(format!("{}.dev.json", checksum(&fitted.model).expect("a checksum"))), serde_json::to_vec(&development).expect("json")).expect("a record");
 }
 
-/// The candidate's cases typed every text right, and the baseline lost one it had restored; every gate holds.
-fn accept(block: &mut Value) {
-    for case in block["cases"]["candidate"].as_array_mut().expect("cases") {
-        case["actual"] = case["expected"].clone();
-        case["exact"] = json!(true);
-        case["length_mismatch"] = json!(false);
-        case["error"] = json!(null);
-        if case["initially_wrong"] == json!(true) && case["corrections"].as_array().expect("corrections").is_empty() {
-            let target = case["group"].clone();
-            case["corrections"] = json!([{"event": 1, "source_group": 0, "target_group": target.clone(), "actual_group": target, "before": "", "after": "", "caret_before": 0, "caret_after": 0, "kind": "early"}]);
+/// The candidate's cases typed every text right, and the baseline lost one it had restored.
+fn accept(candidate: &mut [Case], baseline: &mut [Case]) {
+    for case in candidate {
+        case.actual = case.expected.clone();
+        case.exact = true;
+        case.length_mismatch = false;
+        case.error = None;
+        if case.initially_wrong && case.corrections.is_empty() {
+            let target = case.group.expect("a wrong case has a layout");
+            case.corrections =
+                vec![CorrectionRecord { event: 1, before: String::new(), after: String::new(), source_group: 0, target_group: target, actual_group: target, caret_before: 0, caret_after: 0, kind: Some("early".to_owned()) }];
         }
-        for correction in case["corrections"].as_array_mut().expect("corrections") {
-            correction["actual_group"] = correction["target_group"].clone();
+        for correction in &mut case.corrections {
+            correction.actual_group = correction.target_group;
         }
     }
-    let cases = block["cases"]["baseline"].as_array_mut().expect("cases");
-    if let Some(case) = cases.iter_mut().find(|case| case["initially_wrong"] == json!(true) && case["exact"] == json!(true)) {
-        let text = case["expected"].as_str().expect("a text");
-        let spoiled: String = std::iter::once('?').chain(text.chars().skip(1)).collect();
-        case["actual"] = json!(spoiled);
-        case["exact"] = json!(false);
-    }
-    for gate in block["gates"].as_object_mut().expect("the gates").values_mut() {
-        *gate = json!(true);
+    if let Some(case) = baseline.iter_mut().find(|case| case.initially_wrong && case.exact) {
+        case.actual = std::iter::once('?').chain(case.expected.chars().skip(1)).collect();
+        case.exact = false;
     }
 }
 
 /// A report of the sealed test as a passing one: the candidate typed every text right, and the baseline lost one it had
-/// restored, in every block and in the first plans of each profile.
+/// restored, in every block and in the first plans of each profile; every gate holds.
 fn accepted_report(sealed: &Sealed) -> Value {
-    let mut report = read(&sealed.report);
-    for (profile, early) in BLOCKS {
-        accept(block_of(&mut report, profile, early));
+    let mut report = parsed(&read(&sealed.report));
+    for (_, profile) in report.profiles.as_mut().expect("the profiles").each_mut() {
+        accept(&mut profile.cases.candidate, &mut profile.cases.baseline);
+        accept(&mut profile.early_off.cases.candidate, &mut profile.early_off.cases.baseline);
+        let first = profile.first.as_mut().expect("the first plans");
+        accept(&mut first.cases.candidate, &mut first.cases.baseline);
+        let held = Gates {
+            correct_text_preserved: true,
+            length_preserved: true,
+            net_restorations_at_least_baseline: true,
+            enough_documents_us: true,
+            enough_documents_ru: true,
+            execution_succeeded: true,
+            correction_layouts_match: true,
+        };
+        (profile.gates, profile.early_off.gates) = (held.clone(), held);
+        first.gates = FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true };
     }
-    for profile in PROFILES {
-        accept(&mut block_of(&mut report, profile, false)["first"]);
-    }
-    recount(&mut report);
-    report["promotion_passed"] = json!(true);
-    report
+    recounted(&mut report);
+    report.promotion_passed = true;
+    tree_of(&report)
 }
 
 /// A ledger that confirms this report.
@@ -725,12 +706,17 @@ fn a_receipt_is_exported_only_from_a_report_its_ledger_confirms() {
     let receipt = export_receipt(&asked, &report_path, &chat, &output).expect("a receipt");
     assert_eq!(receipt["quality_gates_passed"], json!(true));
     // A receipt of protocol 5: the first plans' counts, gates and earliness of the gated pairs and the installed one, no case.
-    assert_eq!(receipt["protocol"]["version"], json!(5));
-    let first = &receipt["test"]["profiles"]["portable"]["first"];
-    assert_eq!(first["earliness"].as_object().expect("pairs").keys().collect::<Vec<_>>(), ["baseline", "candidate", "installed"]);
-    assert!(first.get("cases").is_none() && first["gates"]["net_restorations_at_least_baseline"] == json!(true));
-    assert_eq!(receipt["test"]["installed_reference"], good["installed_reference"]);
-    assert_eq!(receipt["test"]["first_ineligible_rows"], json!(good["selection"]["first_ineligible"].as_array().expect("a list").len()));
+    assert_eq!(protocol_version(&receipt["protocol"]), Some(5));
+    let (public, private): (PublicTest, Report) = (typed(&receipt["test"]).expect("the test block of a receipt"), parsed(&good));
+    // Of each profile the receipt holds the counts, the earliness and the gates of the first plans: no case.
+    for (name, profile) in private.profiles.as_ref().expect("the profiles").each() {
+        let first = profile.first.as_ref().expect("the first plans");
+        let published = public.profiles.named(name).and_then(|published| published.first.as_ref()).expect("the first plans of a profile");
+        assert_eq!(*published, PublicFirst { counts: first.counts.public(), earliness: first.earliness.public(), gates: first.gates.clone() });
+        assert!(published.gates.net_restorations_at_least_baseline);
+    }
+    assert_eq!(public.installed_reference, private.installed_reference);
+    assert_eq!(public.first_ineligible_rows, Some(private.selection.as_ref().expect("the selection").first_ineligible.len().to::<i64>()));
     // The same again gives the same bytes, and a receipt that differs is not written over.
     export_receipt(&asked, &report_path, &chat, &output).expect("the same receipt");
     std::fs::write(&output, b"other").expect("a file");
@@ -1014,10 +1000,10 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let (held, said) = told(&mut promote(&run));
     assert!(!held && said.contains("short of the release receipt"), "{said}");
     // The default mode is held to its first plans.
-    let mut behind = accepted_report(&SEALED);
-    let restored = behind["profiles"]["reference_hunspell"]["first"]["counts"]["candidate"]["exactly_restored"].as_i64().expect("a count");
-    behind["profiles"]["reference_hunspell"]["first"]["counts"]["baseline"]["exactly_restored"] = json!(restored + 1);
-    let run = promotion("behind-first", &behind);
+    let mut behind = parsed(&accepted_report(&SEALED));
+    let first = behind.profiles.as_mut().expect("the profiles").reference_hunspell.first.as_mut().expect("the first plans");
+    first.counts.baseline.exactly_restored = first.counts.candidate.exactly_restored + 1;
+    let run = promotion("behind-first", &tree_of(&behind));
     let (held, said) = told(&mut promote(&run));
     assert!(!held && said.contains("short of the release receipt") && said.contains("reference_hunspell/default"), "{said}");
     // The chat test recorded for it holds nothing.

@@ -86,9 +86,9 @@ fn main() {
         };
         match ks_train::evaluate::evaluate(&request) {
             Ok(report) => {
-                println!("promotion_passed: {}", report["promotion_passed"]);
+                println!("promotion_passed: {}", report.promotion_passed);
                 let development = request.split == "development";
-                std::process::exit(i32::from(!(development || report["promotion_passed"].as_bool() == Some(true))));
+                std::process::exit(i32::from(!(development || report.promotion_passed)));
             }
             Err(error) => {
                 eprintln!("{error}");

@@ -110,12 +110,12 @@ fn heads_are_fitted_onto_a_base_that_lacks_them() {
     let run = prepared("heads");
     let carried = carried_without(&run, &["letter", "term"]);
     let mut options = recipe();
-    let labels = options["frozen_base"]["labels"].clone();
-    let alone = options["frozen_base"]["carried"].clone();
-    options["frozen_base"] = base_of(&carried);
-    options["frozen_base"]["labels"] = labels;
-    options["frozen_base"]["carried"] = alone;
-    options["frozen_base"]["heads"] = json!({"letter": {"maximum_features": 300}, "term": {"maximum_features": 300}});
+    let base = &mut options["frozen_base"];
+    let (labels, alone) = (base["labels"].clone(), base["carried"].clone());
+    *base = base_of(&carried);
+    base["labels"] = labels;
+    base["carried"] = alone;
+    base["heads"] = json!({"letter": {"maximum_features": 300}, "term": {"maximum_features": 300}});
     options["term_curriculum"]["item_modulus"] = json!(1);
     let answer = fitted(&run, "heads", &options);
     let text = said(&answer);
@@ -197,10 +197,11 @@ fn what_a_recipe_and_a_corpus_name_has_to_hold() {
     let manifest_path = run.corpus.join("manifest.json");
     let bytes = std::fs::read(&manifest_path).expect("a manifest");
     let mut manifest: Value = serde_json::from_slice(&bytes).expect("json");
-    manifest["metadata"] = json!({"refused_test_aliases": 5});
+    let aliases = |count: i64| json!({"refused_test_aliases": count});
+    manifest["metadata"] = aliases(5);
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
     refused(&fitted(&run, "frozen-against", &recipe()), "the test ledger");
-    manifest["metadata"] = json!({"refused_test_aliases": 1});
+    manifest["metadata"] = aliases(1);
     std::fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
     let _ = bytes;
     // A split with nothing in it.

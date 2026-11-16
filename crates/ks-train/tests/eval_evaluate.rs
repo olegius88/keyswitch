@@ -6,6 +6,7 @@ mod support;
 
 use ks_train::corpus::CorpusRow;
 use ks_train::evaluate::{first_plan, opening_letters, select_rows, sequence_plan, sequence_plans};
+use ks_train::sequence_report::{Documents, InstalledReference, Report, Unsupported};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Output;
@@ -193,43 +194,42 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     ];
     let answer = development_replay(&tree(), &folder, &rows);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
-    let report: Value = serde_json::from_slice(&std::fs::read(folder.join("report.json")).expect("a report")).expect("json");
-    let selection = &report["selection"];
-    assert_eq!(selection["unsupported"], json!([{"identifier": "development:4", "codepoints": ["U+00E9"]}]));
-    assert_eq!(selection["replayed_documents"], json!({"0": 3, "1": 2, "None": 1}));
-    assert_eq!(selection["trimmed_rows"], json!(1));
-    let gates = &report["profiles"]["portable"]["gates"];
-    assert_eq!((gates["enough_documents_us"].clone(), gates["enough_documents_ru"].clone()), (json!(false), json!(false)));
-    assert!(report["profiles"]["portable"]["ablation"]["candidate_context_baseline_prefix"]["cases"].is_array());
+    let report: Report = ks_text::json::loads(std::fs::read(folder.join("report.json")).expect("a report")).expect("a report of the shape the evaluation writes");
+    let (selection, profiles) = (report.selection.as_ref().expect("a selection"), report.profiles.as_ref().expect("profiles"));
+    assert_eq!(selection.unsupported, [Unsupported { identifier: "development:4".to_owned(), codepoints: vec!["U+00E9".to_owned()] }]);
+    assert_eq!(selection.replayed_documents, Documents { us: 3, ru: 2, none: 1 });
+    assert_eq!(selection.trimmed_rows, 1);
+    let gates = &profiles.portable.gates;
+    assert_eq!((gates.enough_documents_us, gates.enough_documents_ru), (false, false));
+    assert!(profiles.portable.ablation.as_ref().is_some_and(|pairs| pairs.contains_key("candidate_context_baseline_prefix")));
     assert!(!folder.join("ledger").exists(), "a development replay claims no test");
     // Protocol 5: the words that open with a letter of their layout typed first, by every pair of the default mode.
-    assert_eq!(report["protocol"]["version"], json!(5));
-    assert_eq!(selection["first_ineligible"], json!(["development:6"]));
-    for profile in ["portable", "reference_hunspell"] {
-        let first = &report["profiles"][profile]["first"];
+    assert_eq!(report.protocol_version(), Some(5));
+    assert_eq!(selection.first_ineligible, ["development:6"]);
+    for (name, profile) in profiles.each() {
+        let first = profile.first.as_ref().expect("the first plans are of the default mode");
         for pair in ["baseline", "candidate", "candidate_context_baseline_prefix", "installed"] {
-            assert_eq!((first["counts"][pair]["initially_wrong"].clone(), first["counts"][pair]["initially_correct"].clone()), (json!(4), json!(4)), "{profile} {pair}");
-            let early = &first["earliness"][pair];
-            let classes: Vec<i64> = ["inside_word", "last_letter", "boundary_key", "later", "never"].iter().map(|name| early[*name].as_i64().expect("a count")).collect();
-            assert_eq!(classes.iter().sum::<i64>(), 4, "{profile} {pair}: {early}");
+            let counts = first.counts.named(pair).expect("a pair");
+            assert_eq!((counts.initially_wrong, counts.initially_correct), (4, 4), "{name} {pair}");
+            let early = first.earliness.named(pair).expect("a pair");
+            assert_eq!(early.inside_word + early.last_letter + early.boundary_key + early.later + early.never, 4, "{name} {pair}: {early:?}");
         }
-        assert_eq!(first["gates"].as_object().expect("gates").len(), 3);
-        assert!(report["profiles"][profile]["early_off"].get("first").is_none(), "the first plans are of the default mode");
     }
     // The candidate here is the installed pair: the reference replays the same models, and the report names them.
-    let profile = &report["profiles"]["portable"];
-    assert_eq!(profile["first"]["counts"]["candidate"], profile["first"]["counts"]["installed"]);
-    assert_eq!(profile["first"]["earliness"]["candidate"], profile["first"]["earliness"]["installed"]);
-    assert_eq!(profile["installed"]["counts"], profile["counts"]["candidate"]);
+    let profile = &profiles.portable;
+    let first = profile.first.as_ref().expect("the first plans");
+    assert_eq!(first.counts.candidate, first.counts.installed);
+    assert_eq!(first.earliness.candidate, first.earliness.installed);
+    assert_eq!(profile.installed.as_ref().expect("the installed pair").counts, profile.counts.candidate);
     let models = tree().join("resources/models");
-    for (field, file) in [("context_sha256", "context_policy_v1.json"), ("prefix_sha256", "prefix_policy_v1.json")] {
-        assert_eq!(report["installed_reference"][field], json!(digest(&std::fs::read(models.join(file)).expect("a model"))));
-    }
+    let digest_of = |file: &str| digest(&std::fs::read(models.join(file)).expect("a model"));
+    assert_eq!(report.installed_reference, Some(InstalledReference { context_sha256: digest_of("context_policy_v1.json"), prefix_sha256: digest_of("prefix_policy_v1.json") }));
     // A wrong first plan: its first key is the wrong letter, and every correction names the kind of plan that made it.
-    let cases = profile["first"]["cases"]["candidate"].as_array().expect("cases");
-    let wrong = cases.iter().find(|case| case["identifier"] == json!("development:1") && case["initially_wrong"] == json!(true)).expect("a wrong first plan");
-    assert_eq!((wrong["intervention"]["event"].clone(), wrong["intervention"]["observed"].clone(), wrong["focus_letters"].clone()), (json!(1), json!("g"), json!(6)));
-    let kinds: Vec<&str> = cases.iter().chain(profile["cases"]["candidate"].as_array().expect("cases")).flat_map(|case| case["corrections"].as_array().expect("corrections")).map(|item| item["kind"].as_str().expect("a kind")).collect();
+    let wanted = "development:1";
+    let wrong = first.cases.candidate.iter().find(|case| case.identifier == wanted && case.initially_wrong).expect("a wrong first plan");
+    let intervention = wrong.intervention.as_ref().expect("an intervention");
+    assert_eq!((intervention.event, intervention.observed.as_str(), wrong.focus_letters), (1, "g", Some(6)));
+    let kinds: Vec<&str> = first.cases.candidate.iter().chain(&profile.cases.candidate).flat_map(|case| &case.corrections).map(|item| item.kind.as_deref().expect("a kind")).collect();
     assert!(!kinds.is_empty() && kinds.iter().all(|kind| !kind.is_empty()), "{kinds:?}");
 }
 

@@ -5,8 +5,10 @@
 mod support;
 
 use ks_train::corpus::read_json;
-use ks_train::evaluate::Earliness;
+use ks_train::artifact::{tree_of, typed};
+use ks_train::evaluate::{Earliness, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, protocol_set};
 use ks_train::receipt::{validate_evidence, validate_receipt};
+use ks_train::sequence_report::{ByPair, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -200,21 +202,62 @@ fn the_counts_of_a_calibration_must_add_up() {
     refuses("invalid count", |value| value["calibration"]["outside_lone_word"]["rows"] = json!(-1));
 }
 
+/// The test block of a receipt, as its type.
+fn test_of(receipt: &Value) -> PublicTest {
+    typed(&receipt["test"]).unwrap()
+}
+
+/// A receipt of the installed pair whose test block is changed as its type.
+fn refuses_test(words: &str, edit: impl FnOnce(&mut PublicTest)) {
+    refuses(words, |value| {
+        let mut test = test_of(value);
+        edit(&mut test);
+        value["test"] = tree_of(&test);
+    });
+}
+
+/// A profile of a test by its name.
+fn profile_in<'a>(test: &'a mut PublicTest, profile: &str) -> &'a mut PublicProfile {
+    match profile {
+        "portable" => &mut test.profiles.portable,
+        _ => &mut test.profiles.reference_hunspell,
+    }
+}
+
+/// The counts and the gates of a block of a profile of a test: the default mode's, or its control's.
+fn block_in<'a>(test: &'a mut PublicTest, profile: &str, early: bool) -> (&'a mut Gated<PairCounts>, &'a mut Gates) {
+    let profile = profile_in(test, profile);
+    if early { (&mut profile.early_off.counts, &mut profile.early_off.gates) } else { (&mut profile.counts, &mut profile.gates) }
+}
+
+/// The counts of a pair in a block of a profile of a test.
+fn counts_in<'a>(test: &'a mut PublicTest, profile: &str, early: bool, model: &str) -> &'a mut PairCounts {
+    let (counts, _) = block_in(test, profile, early);
+    match model {
+        "candidate" => &mut counts.candidate,
+        _ => &mut counts.baseline,
+    }
+}
+
+/// The same counts as a tree, for an edit that is no number.
+fn counts_tree<'a>(value: &'a mut Value, profile: &str, early: bool, model: &str) -> &'a mut Value {
+    let block = &mut value["test"]["profiles"][profile];
+    let block = if early { &mut block["early_off"] } else { block };
+    &mut block["counts"][model]
+}
+
 #[test]
 fn the_selection_of_a_test_must_add_up() {
     const SELECTION: &str = "inconsistent sequence selection";
     refuses("missing or extra fields", |value| value["test"]["extra"] = json!(1));
-    refuses("invalid count", |value| value["test"]["documents"]["0"] = json!(-1));
-    refuses(SELECTION, |value| value["test"]["documents"]["0"] = json!(513));
-    refuses(SELECTION, |value| value["test"]["selected_rows"] = json!(1537));
-    refuses(SELECTION, |value| plus(&mut value["test"]["selected_rows"], 1));
-    refuses("invalid count", |value| value["test"]["selected_rows"] = json!(-1));
-    refuses("invalid count", |value| value["test"]["unsupported_rows"] = json!(-1));
-    refuses("invalid count", |value| value["test"]["trimmed_rows"] = json!(-1));
-    refuses(SELECTION, |value| {
-        let selected = value["test"]["selected_rows"].clone();
-        value["test"]["trimmed_rows"] = json!(selected.as_i64().unwrap() + 1);
-    });
+    refuses_test("invalid count", |test| test.documents.us = -1);
+    refuses_test(SELECTION, |test| test.documents.us = 513);
+    refuses_test(SELECTION, |test| test.selected_rows = 1537);
+    refuses_test(SELECTION, |test| test.selected_rows += 1);
+    refuses_test("invalid count", |test| test.selected_rows = -1);
+    refuses_test("invalid count", |test| test.unsupported_rows = -1);
+    refuses_test("invalid count", |test| test.trimmed_rows = -1);
+    refuses_test(SELECTION, |test| test.trimmed_rows = test.selected_rows + 1);
     refuses("missing or extra fields", |value| value["test"]["profiles"] = json!({}));
 }
 
@@ -223,89 +266,66 @@ fn the_counts_of_a_replay_must_add_up() {
     const COUNTS: &str = "inconsistent sequence counts";
     for (profile, early) in [("portable", false), ("reference_hunspell", false), ("portable", true), ("reference_hunspell", true)] {
         for model in ["candidate", "baseline"] {
-            let with = |edit: &dyn Fn(&mut Value), words: &str| {
-                refuses(words, |value| {
-                    let block = &mut value["test"]["profiles"][profile];
-                    let block = if early { &mut block["early_off"] } else { block };
-                    edit(&mut block["counts"][model]);
-                });
-            };
-            with(&|counts| counts["extra"] = json!(1), "missing or extra fields");
-            with(&|counts| counts["rows"] = json!(-1), "invalid count");
-            with(&|counts| plus(&mut counts["rows"], 1), COUNTS);
-            with(&|counts| plus(&mut counts["initially_correct"], 1), COUNTS);
-            with(&|counts| plus(&mut counts["initially_wrong"], 1), COUNTS);
-            with(&|counts| counts["exactly_restored"] = json!(100_000), COUNTS);
-            with(&|counts| {
-                let injections = counts["injections"].as_i64().unwrap();
-                counts["exactly_restored"] = json!(injections + 1);
-            }, COUNTS);
-            with(&|counts| plus(&mut counts["preserved_correct"], 1), COUNTS);
-            for name in ["length_mismatches", "execution_errors", "final_layout_mismatches"] {
-                with(&|counts| counts[name] = json!(100_000), COUNTS);
-            }
-            with(&|counts| {
-                let injections = counts["injections"].as_i64().unwrap();
-                counts["correction_layout_mismatches"] = json!(injections + 1);
-            }, COUNTS);
+            let with = |edit: &dyn Fn(&mut PairCounts), words: &str| refuses_test(words, |test| edit(counts_in(test, profile, early, model)));
+            refuses("missing or extra fields", |value| counts_tree(value, profile, early, model)["extra"] = json!(1));
+            with(&|counts| counts.rows = -1, "invalid count");
+            with(&|counts| counts.rows += 1, COUNTS);
+            with(&|counts| counts.initially_correct += 1, COUNTS);
+            with(&|counts| counts.initially_wrong += 1, COUNTS);
+            with(&|counts| counts.exactly_restored = 100_000, COUNTS);
+            with(&|counts| counts.exactly_restored = counts.injections + 1, COUNTS);
+            with(&|counts| counts.preserved_correct += 1, COUNTS);
+            with(&|counts| counts.length_mismatches = 100_000, COUNTS);
+            with(&|counts| counts.execution_errors = 100_000, COUNTS);
+            with(&|counts| counts.final_layout_mismatches = 100_000, COUNTS);
+            with(&|counts| counts.correction_layout_mismatches = counts.injections + 1, COUNTS);
         }
         // Counts that hold together, and that no gate lets through.
-        let gated = |edit: &dyn Fn(&mut Value)| {
-            refuses("sequence gates failed", |value| {
-                let block = &mut value["test"]["profiles"][profile];
-                let block = if early { &mut block["early_off"] } else { block };
-                edit(block);
+        let gated = |edit: &dyn Fn(&mut Gated<PairCounts>, &mut Gates)| {
+            refuses_test("sequence gates failed", |test| {
+                let (counts, gates) = block_in(test, profile, early);
+                edit(counts, gates);
             });
         };
-        gated(&|block| {
-            let theirs = block["counts"]["baseline"]["correct_text_corruptions"].as_i64().unwrap();
-            let counts = &mut block["counts"]["candidate"];
-            let more = theirs + 1 - counts["correct_text_corruptions"].as_i64().unwrap();
-            plus(&mut counts["correct_text_corruptions"], more);
-            plus(&mut counts["preserved_correct"], -more);
+        gated(&|counts, _| {
+            let more = counts.baseline.correct_text_corruptions + 1 - counts.candidate.correct_text_corruptions;
+            counts.candidate.correct_text_corruptions += more;
+            counts.candidate.preserved_correct -= more;
         });
-        gated(&|block| block["counts"]["candidate"]["length_mismatches"] = json!(1));
-        gated(&|block| {
-            let (restored, spoiled) = (block["counts"]["baseline"]["exactly_restored"].as_i64().unwrap(), block["counts"]["baseline"]["correct_text_corruptions"].as_i64().unwrap());
-            let counts = &mut block["counts"]["candidate"];
-            let own = counts["correct_text_corruptions"].as_i64().unwrap();
-            counts["exactly_restored"] = json!(restored - spoiled + own - 1);
-        });
-        gated(&|block| block["counts"]["candidate"]["execution_errors"] = json!(1));
-        gated(&|block| block["counts"]["baseline"]["execution_errors"] = json!(1));
-        gated(&|block| block["counts"]["candidate"]["correction_layout_mismatches"] = json!(1));
-        gated(&|block| block["gates"]["length_preserved"] = json!(false));
+        gated(&|counts, _| counts.candidate.length_mismatches = 1);
+        gated(&|counts, _| counts.candidate.exactly_restored = counts.baseline.exactly_restored - counts.baseline.correct_text_corruptions + counts.candidate.correct_text_corruptions - 1);
+        gated(&|counts, _| counts.candidate.execution_errors = 1);
+        gated(&|counts, _| counts.baseline.execution_errors = 1);
+        gated(&|counts, _| counts.candidate.correction_layout_mismatches = 1);
+        gated(&|_, gates| gates.length_preserved = false);
     }
 }
 
 /// A gate about how much was read: fewer documents than a test needs, with everything else in step.
 #[test]
 fn a_test_of_too_few_documents_passes_no_gate() {
-    for group in ["0", "1"] {
-        refuses("sequence gates failed", |value| {
-            let test = &mut value["test"];
-            let held = test["documents"][group].as_i64().unwrap();
-            let gone = held - 31;
-            test["documents"][group] = json!(31);
-            plus(&mut test["selected_rows"], -gone);
-            for profile in ["portable", "reference_hunspell"] {
-                for early in [false, true] {
-                    let block = &mut test["profiles"][profile];
-                    let block = if early { &mut block["early_off"] } else { block };
-                    for model in ["candidate", "baseline"] {
-                        let counts = &mut block["counts"][model];
-                        plus(&mut counts["rows"], -2 * gone);
-                        plus(&mut counts["initially_correct"], -gone);
-                        plus(&mut counts["initially_wrong"], -gone);
-                        plus(&mut counts["preserved_correct"], -gone);
-                        counts["exactly_restored"] = json!(0);
-                        counts["final_layout_mismatches"] = json!(0);
+    for russian in [false, true] {
+        refuses_test("sequence gates failed", |test| {
+            let documents = if russian { &mut test.documents.ru } else { &mut test.documents.us };
+            let gone = *documents - 31;
+            *documents = 31;
+            test.selected_rows -= gone;
+            for (_, profile) in test.profiles.each_mut() {
+                for counts in [&mut profile.counts, &mut profile.early_off.counts] {
+                    for pair in [&mut counts.candidate, &mut counts.baseline] {
+                        pair.rows -= 2 * gone;
+                        pair.initially_correct -= gone;
+                        pair.initially_wrong -= gone;
+                        pair.preserved_correct -= gone;
+                        pair.exactly_restored = 0;
+                        pair.final_layout_mismatches = 0;
                     }
                 }
             }
         });
     }
 }
+
 
 #[test]
 fn a_chat_test_is_held_to_its_own_numbers() {
@@ -424,37 +444,52 @@ fn a_recipe_of_another_kind_than_the_receipt_knows_is_refused() {
 /// word without first plans, and first plans whose counts, earliness and gates hold together. `restored` gives the rows
 /// the baseline, candidate and installed pairs restore of their wrong first plans, each over ten.
 fn version_five() -> Value {
-    let protocols = read_json(&root().join("model/context_v3/protocols.json")).unwrap();
-    let set = &protocols["versions"]["5"];
+    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
+    let set = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION).unwrap();
     let mut five = receipt();
     five["protocol"] = set["receipt"].clone();
     five["scope"] = set["scope"].clone();
-    let test = &mut five["test"];
-    let words = test["documents"]["0"].as_i64().unwrap() + test["documents"]["1"].as_i64().unwrap() - 1;
-    test["first_ineligible_rows"] = json!(1);
-    test["installed_reference"] = json!({"context_sha256": "a".repeat(64), "prefix_sha256": "b".repeat(64)});
-    let counts = |restored: i64, spoiled: i64| {
-        json!({"rows": 2 * words, "initially_correct": words, "initially_wrong": words, "preserved_correct": words - spoiled, "exactly_restored": restored, "correct_text_corruptions": spoiled,
-            "length_mismatches": 0, "injections": words, "execution_errors": 0, "correction_layout_mismatches": 0, "final_layout_mismatches": 0})
+    let mut test = test_of(&five);
+    let words = test.documents.us + test.documents.ru - 1;
+    test.first_ineligible_rows = Some(1);
+    test.installed_reference = Some(InstalledReference { context_sha256: "a".repeat(64), prefix_sha256: "b".repeat(64) });
+    let counts = |restored: i64, spoiled: i64| PairCounts {
+        rows: 2 * words,
+        initially_correct: words,
+        initially_wrong: words,
+        preserved_correct: words - spoiled,
+        exactly_restored: restored,
+        correct_text_corruptions: spoiled,
+        injections: words,
+        ..PairCounts::default()
     };
     // Every restored row right at the end: ten at its last letter or the key after it, the rest at the fourth key.
     let early = |restored: i64| {
-        let mut early = Earliness { inside_word: restored - 10, last_letter: 5, boundary_key: 5, never: words - restored, first_word_correct: restored, switch_key_rows: restored, false_early_sequence: 1, ..Earliness::default() };
-        early.switch_key_sum = 4 * (restored - 10) + 6 * 5 + 7 * 5;
+        let mut early = Earliness {
+            inside_word: restored - 10,
+            last_letter: 5,
+            boundary_key: 5,
+            never: words - restored,
+            first_word_correct: restored,
+            switch_key_rows: restored,
+            false_early_sequence: 1,
+            switch_key_sum: 4 * (restored - 10) + 6 * 5 + 7 * 5,
+            ..Earliness::default()
+        };
         for (bin, rows) in [("4", restored - 10), ("6", 5), ("7", 5)] {
             early.switch_key_histogram.insert(bin.to_owned(), rows);
         }
         early.first_correction_kinds = [("early", restored - 10), ("pause", 5), ("boundary", 5)].into_iter().map(|(kind, rows)| (kind.to_owned(), rows)).collect();
-        json!(early)
+        early
     };
-    for profile in ["portable", "reference_hunspell"] {
-        let first = json!({
-            "counts": {"baseline": counts(690, 1), "candidate": counts(700, 0), "installed": counts(695, 1)},
-            "earliness": {"baseline": early(690), "candidate": early(700), "installed": early(695)},
-            "gates": {"net_restorations_at_least_baseline": true, "correct_text_preserved": true, "length_preserved": true},
+    for (_, profile) in test.profiles.each_mut() {
+        profile.first = Some(PublicFirst {
+            counts: ByPair { baseline: counts(690, 1), candidate: counts(700, 0), installed: counts(695, 1) },
+            earliness: ByPair { baseline: early(690), candidate: early(700), installed: early(695) },
+            gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
         });
-        five["test"]["profiles"][profile]["first"] = first;
     }
+    five["test"] = tree_of(&test);
     five
 }
 
@@ -463,6 +498,28 @@ fn refuses_five(words: &str, edit: impl FnOnce(&mut Value)) {
     edit(&mut changed);
     let said = check(&changed).expect_err(words);
     assert!(said.contains(words), "{words}: {said}");
+}
+
+/// The same, with the test block changed as its type.
+fn refuses_five_typed(words: &str, edit: impl FnOnce(&mut PublicTest)) {
+    refuses_five(words, |value| {
+        let mut test = test_of(value);
+        edit(&mut test);
+        value["test"] = tree_of(&test);
+    });
+}
+
+/// The first plans of the portable profile of a receipt's test, as a tree and as their type.
+fn first_tree(value: &mut Value) -> &mut Value {
+    &mut value["test"]["profiles"]["portable"]["first"]
+}
+
+fn early_tree(value: &mut Value) -> &mut Value {
+    &mut first_tree(value)["earliness"]["candidate"]
+}
+
+fn first_of(test: &mut PublicTest) -> &mut PublicFirst {
+    test.profiles.portable.first.as_mut().unwrap()
 }
 
 /// A receipt is checked by the protocol it names: the installed pair's of version 4 as before, one of version 5 with its
@@ -474,93 +531,96 @@ fn a_receipt_is_checked_by_the_version_of_its_protocol() {
     refuses("unsupported receipt identity", |value| value["protocol"]["version"] = json!(6));
     refuses_five("unsupported receipt identity", |value| value["scope"] = receipt()["scope"].clone());
     refuses_five("unsupported receipt identity", |value| value["protocol"]["first_gates"] = json!("other"));
-    refuses("missing or extra fields: test", |value| value["test"]["first_ineligible_rows"] = json!(0));
-    refuses_five("missing or extra fields: test", |value| {
-        value["test"].as_object_mut().unwrap().remove("installed_reference");
-    });
-    refuses_five("missing or extra fields: test profile", |value| {
-        value["test"]["profiles"]["portable"].as_object_mut().unwrap().remove("first");
-    });
-    refuses_five("missing or extra fields: test profile", |value| value["test"]["profiles"]["portable"]["cases"] = json!([]));
-    refuses_five("missing or extra fields: installed reference", |value| value["test"]["installed_reference"]["extra"] = json!(1));
-    refuses_five("invalid SHA256", |value| value["test"]["installed_reference"]["prefix_sha256"] = json!("0"));
-    refuses_five("invalid count", |value| value["test"]["first_ineligible_rows"] = json!(-1));
-    refuses_five("inconsistent sequence selection", |value| value["test"]["first_ineligible_rows"] = json!(100_000));
+    let mut with_rows = test_of(&receipt());
+    with_rows.first_ineligible_rows = Some(0);
+    refuses("missing or extra fields: test", |value| value["test"] = tree_of(&with_rows));
+    refuses_five_typed("missing or extra fields: test", |test| test.installed_reference = None);
+    refuses_five_typed("missing or extra fields: test profile", |test| test.profiles.portable.first = None);
+    refuses_five("unknown field `cases`", |value| value["test"]["profiles"]["portable"]["cases"] = json!([]));
+    refuses_five("unknown field `extra`", |value| value["test"]["installed_reference"]["extra"] = json!(1));
+    refuses_five_typed("invalid SHA256", |test| test.installed_reference.as_mut().unwrap().prefix_sha256 = "0".to_owned());
+    refuses_five_typed("invalid count", |test| test.first_ineligible_rows = Some(-1));
+    refuses_five_typed("inconsistent sequence selection", |test| test.first_ineligible_rows = Some(100_000));
     // One word fewer than the first plans count.
-    refuses_five("inconsistent sequence counts", |value| value["test"]["first_ineligible_rows"] = json!(2));
+    refuses_five_typed("inconsistent sequence counts", |test| test.first_ineligible_rows = Some(2));
 }
 
 #[test]
 fn the_first_plans_of_a_receipt_hold_together() {
-    refuses_five("missing or extra fields: first plans", |value| value["test"]["profiles"]["portable"]["first"]["cases"] = json!({}));
-    refuses_five("missing or extra fields: first-plan counts", |value| {
-        value["test"]["profiles"]["portable"]["first"]["counts"].as_object_mut().unwrap().remove("installed");
+    refuses_five("unknown field `cases`", |value| first_tree(value)["cases"] = json!({}));
+    refuses_five("missing field `installed`", |value| {
+        first_tree(value)["counts"].as_object_mut().unwrap().remove("installed");
     });
-    refuses_five("missing or extra fields: first-plan earliness", |value| value["test"]["profiles"]["portable"]["first"]["earliness"]["ablation"] = json!({}));
-    refuses_five("inconsistent sequence counts", |value| plus(&mut value["test"]["profiles"]["reference_hunspell"]["first"]["counts"]["installed"]["rows"], 1));
+    refuses_five("unknown field `ablation`", |value| first_tree(value)["earliness"]["ablation"] = json!({}));
+    refuses_five_typed("inconsistent sequence counts", |test| test.profiles.reference_hunspell.first.as_mut().unwrap().counts.installed.rows += 1);
     // Gates claimed that the counts do not give: more corruptions than the baseline, fewer restored, a length changed.
     const GATES: &str = "first-plan gates failed";
-    refuses_five(GATES, |value| {
-        let counts = &mut value["test"]["profiles"]["portable"]["first"]["counts"]["candidate"];
-        plus(&mut counts["correct_text_corruptions"], 2);
-        plus(&mut counts["preserved_correct"], -2);
+    refuses_five_typed(GATES, |test| {
+        let counts = &mut first_of(test).counts.candidate;
+        counts.correct_text_corruptions += 2;
+        counts.preserved_correct -= 2;
     });
-    refuses_five(GATES, |value| value["test"]["profiles"]["portable"]["first"]["counts"]["candidate"]["length_mismatches"] = json!(1));
-    refuses_five(GATES, |value| value["test"]["profiles"]["portable"]["first"]["gates"]["length_preserved"] = json!(false));
-    refuses_five(GATES, |value| {
+    refuses_five_typed(GATES, |test| first_of(test).counts.candidate.length_mismatches = 1);
+    refuses_five_typed(GATES, |test| first_of(test).gates.length_preserved = false);
+    refuses_five_typed(GATES, |test| {
         // The baseline restores more than the candidate: its earliness moves with it.
-        let first = &mut value["test"]["profiles"]["portable"]["first"];
-        first["counts"]["baseline"]["exactly_restored"] = json!(702);
-        let early = &mut first["earliness"]["baseline"];
-        for (field, by) in [("inside_word", 12), ("never", -12), ("first_word_correct", 12), ("switch_key_rows", 12), ("switch_key_sum", 48)] {
-            plus(&mut early[field], by);
-        }
-        plus(&mut early["switch_key_histogram"]["4"], 12);
-        plus(&mut early["first_correction_kinds"]["early"], 12);
+        let first = first_of(test);
+        first.counts.baseline.exactly_restored = 702;
+        let early = &mut first.earliness.baseline;
+        early.inside_word += 12;
+        early.never -= 12;
+        early.first_word_correct += 12;
+        early.switch_key_rows += 12;
+        early.switch_key_sum += 48;
+        *early.switch_key_histogram.get_mut("4").unwrap() += 12;
+        *early.first_correction_kinds.get_mut("early").unwrap() += 12;
     });
 }
 
 #[test]
 fn the_earliness_of_a_receipt_holds_together() {
     const EARLY: &str = "inconsistent first-plan earliness";
-    let with = |words: &str, edit: &dyn Fn(&mut Value)| refuses_five(words, |value| edit(&mut value["test"]["profiles"]["portable"]["first"]["earliness"]["candidate"]));
-    with("invalid first-plan earliness", &|early| early["extra"] = json!(1));
-    with("invalid first-plan earliness", &|early| {
-        early.as_object_mut().unwrap().remove("never");
+    let with = |words: &str, edit: &dyn Fn(&mut Earliness)| refuses_five_typed(words, |test| edit(&mut first_of(test).earliness.candidate));
+    refuses_five("unknown field `extra`", |value| early_tree(value)["extra"] = json!(1));
+    refuses_five("missing field `never`", |value| {
+        early_tree(value).as_object_mut().unwrap().remove("never");
     });
-    with("invalid first-plan earliness", &|early| early["never"] = json!("many"));
-    with(EARLY, &|early| plus(&mut early["never"], 1));
-    with(EARLY, &|early| early["false_early_first"] = json!(-1));
+    refuses_five("invalid type", |value| early_tree(value)["never"] = json!("many"));
+    with(EARLY, &|early| early.never += 1);
+    with(EARLY, &|early| early.false_early_first = -1);
     with(EARLY, &|early| {
-        early["switch_key_histogram"].as_object_mut().unwrap().remove("9+");
+        early.switch_key_histogram.remove("9+");
     });
-    with(EARLY, &|early| early["first_correction_kinds"][""] = json!(0));
-    with(EARLY, &|early| plus(&mut early["first_correction_kinds"]["early"], 1));
-    with(EARLY, &|early| plus(&mut early["first_word_correct"], 100_000));
+    with(EARLY, &|early| {
+        early.first_correction_kinds.insert(String::new(), 0);
+    });
+    with(EARLY, &|early| *early.first_correction_kinds.get_mut("early").unwrap() += 1);
+    with(EARLY, &|early| early.first_word_correct += 100_000);
     // The rows restored exactly have their first word right.
     with(EARLY, &|early| {
-        plus(&mut early["first_word_correct"], -1);
-        plus(&mut early["switch_key_rows"], -1);
-        plus(&mut early["switch_key_histogram"]["4"], -1);
-        plus(&mut early["switch_key_sum"], -4);
+        early.first_word_correct -= 1;
+        early.switch_key_rows -= 1;
+        *early.switch_key_histogram.get_mut("4").unwrap() -= 1;
+        early.switch_key_sum -= 4;
     });
-    with(EARLY, &|early| early["started_right_ended_wrong"] = json!(100_000));
-    with(EARLY, &|early| plus(&mut early["switch_key_histogram"]["5"], 1));
-    with(EARLY, &|early| plus(&mut early["switch_key_sum"], 1));
-    with(EARLY, &|early| plus(&mut early["switch_key_sum"], -1));
-    with(EARLY, &|early| early["false_early_first"] = json!(100_000));
-    with(EARLY, &|early| early["false_early_sequence"] = json!(100_000));
+    with(EARLY, &|early| early.started_right_ended_wrong = 100_000);
+    with(EARLY, &|early| *early.switch_key_histogram.get_mut("5").unwrap() += 1);
+    with(EARLY, &|early| early.switch_key_sum += 1);
+    with(EARLY, &|early| early.switch_key_sum -= 1);
+    with(EARLY, &|early| early.false_early_first = 100_000);
+    with(EARLY, &|early| early.false_early_sequence = 100_000);
     // Rows past the eighth key let the sum be larger than the bins alone give, never smaller.
-    refuses_five(EARLY, |value| {
-        let early = &mut value["test"]["profiles"]["portable"]["first"]["earliness"]["candidate"];
-        plus(&mut early["switch_key_histogram"]["7"], -1);
-        plus(&mut early["switch_key_histogram"]["9+"], 1);
-        plus(&mut early["switch_key_sum"], -10);
+    with(EARLY, &|early| {
+        *early.switch_key_histogram.get_mut("7").unwrap() -= 1;
+        *early.switch_key_histogram.get_mut("9+").unwrap() += 1;
+        early.switch_key_sum -= 10;
     });
     let mut later = version_five();
-    let early = &mut later["test"]["profiles"]["portable"]["first"]["earliness"]["candidate"];
-    plus(&mut early["switch_key_histogram"]["7"], -1);
-    plus(&mut early["switch_key_histogram"]["9+"], 1);
-    plus(&mut early["switch_key_sum"], 20);
+    let mut test = test_of(&later);
+    let early = &mut first_of(&mut test).earliness.candidate;
+    *early.switch_key_histogram.get_mut("7").unwrap() -= 1;
+    *early.switch_key_histogram.get_mut("9+").unwrap() += 1;
+    early.switch_key_sum += 20;
+    later["test"] = tree_of(&test);
     check(&later).unwrap();
 }

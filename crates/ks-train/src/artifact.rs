@@ -1,7 +1,9 @@
 //! The artifact's bytes: keys sorted, one feature with its weights to a line, so that a diff of two artifacts names the
 //! features that changed. The seal is of these very bytes.
 use ks_text::pyjson::json_string;
-use ks_text::{JsonOptions, json_dumps};
+use ks_text::{JsonOptions, json, json_dumps};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 fn compact(sort_keys: bool) -> JsonOptions {
@@ -12,6 +14,24 @@ fn compact(sort_keys: bool) -> JsonOptions {
 #[must_use]
 pub fn canonical(value: &Value) -> Vec<u8> {
     (json_dumps(value, &compact(true)) + "\n").into_bytes()
+}
+
+/// `canonical` of a typed value: the bytes of the tree that value makes.
+#[must_use]
+pub fn canonical_of<T: Serialize + ?Sized>(value: &T) -> Vec<u8> {
+    (json::dumps(value, &compact(true)) + "\n").into_bytes()
+}
+
+/// A value, whatever it is held as, read as the type it holds, or why it is not one: a tree as a record, a record as its
+/// tree. The text between them is the one `dumps` writes.
+pub fn typed<T: DeserializeOwned, S: Serialize + ?Sized>(value: &S) -> Result<T, String> {
+    json::loads(json::dumps(value, &JsonOptions::default())).map_err(|error| error.to_string())
+}
+
+/// The tree (or other type) of a typed value, as `dumps` writes it.
+#[must_use]
+pub fn tree_of<T: DeserializeOwned, S: Serialize + ?Sized>(value: &S) -> T {
+    typed(value).expect("the text a record is written as is JSON")
 }
 
 #[must_use]

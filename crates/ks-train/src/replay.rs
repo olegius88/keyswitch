@@ -2,6 +2,7 @@
 //! (`evaluate_context_action_sequences.replay`): how a candidate is measured and how span frames are captured.
 use ks_cast::To as _;
 use crate::physical::PhysicalKey;
+use crate::sequence_report::Intervention;
 use crate::tools::{Lexicons, Tools};
 use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
@@ -19,7 +20,7 @@ use ks_lang::early_switch::PrefixIndex;
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_replay::harness::{Backend, Correction, FakeClock, UnreadField};
 use ks_text::pystr;
-use serde_json::{Map, Value, json};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -85,37 +86,8 @@ pub struct Outcome {
     pub expected_final_group: i64,
     pub final_layout_matches: bool,
     pub corrections: Vec<Correction>,
-    pub intervention: Value,
+    pub intervention: Option<Intervention>,
     pub error: Option<String>,
-}
-
-impl Outcome {
-    /// The fields of a case's outcome, in the order a report lists them.
-    #[must_use]
-    pub fn fields(&self) -> Map<String, Value> {
-        let corrections: Vec<Value> = self
-            .corrections
-            .iter()
-            .map(|item| {
-                json!({"event": item.event, "before": item.before, "after": item.after, "source_group": item.source_group, "target_group": item.target_group,
-                    "actual_group": item.actual_group, "caret_before": item.caret_before, "caret_after": item.caret_after, "kind": item.kind})
-            })
-            .collect();
-        let mut fields = Map::new();
-        for (name, value) in [
-            ("mode", json!(self.mode.as_str())), ("actual", json!(self.actual)), ("exact", json!(self.exact)), ("length_mismatch", json!(self.length_mismatch)),
-            ("final_group", json!(self.final_group)), ("expected_final_group", json!(self.expected_final_group)), ("final_layout_matches", json!(self.final_layout_matches)),
-            ("corrections", json!(corrections)), ("intervention", self.intervention.clone()), ("error", json!(self.error)),
-        ] {
-            fields.insert(name.to_owned(), value);
-        }
-        fields
-    }
-
-    #[must_use]
-    pub fn value(&self) -> Value {
-        Value::Object(self.fields())
-    }
 }
 
 pub struct Capture {
@@ -254,7 +226,7 @@ impl Replayer {
         if mode == Mode::Default && plan.keys.len() != expected.len() {
             error = Some("ValueError: default settings replay requires one key per expected character".to_owned());
         }
-        let mut intervention = Value::Null;
+        let mut intervention = None;
         if error.is_none() {
             error = self.type_keys(&mut core, &backend, &clock, plan, &expected, &mut intervention).err();
         }
@@ -276,7 +248,7 @@ impl Replayer {
         }
     }
 
-    fn type_keys(&self, core: &mut EngineCore, backend: &Arc<Backend>, clock: &FakeClock, plan: &Plan, expected: &[char], intervention: &mut Value) -> Result<(), String> {
+    fn type_keys(&self, core: &mut EngineCore, backend: &Arc<Backend>, clock: &FakeClock, plan: &Plan, expected: &[char], intervention: &mut Option<Intervention>) -> Result<(), String> {
         let timers = |core: &mut EngineCore| -> Result<(), String> {
             // The engine's idle loop runs exactly these callbacks when no key arrives.
             core.expire_deferred_action().map_err(|error| format!("{error:?}"))?;
@@ -300,7 +272,7 @@ impl Replayer {
             if plan.intervention_event == Some(serial) {
                 let target = plan.group.expect("an intervention has a group");
                 let intended = key.characters[target.to::<usize>()];
-                *intervention = json!({"event": serial, "expected": intended.to_string(), "observed": observed.to_string(), "source_group": group, "target_group": target});
+                *intervention = Some(Intervention { event: serial.to::<i64>(), expected: intended.to_string(), observed: observed.to_string(), source_group: i64::from(group), target_group: target });
                 if observed == intended {
                     return Err("ValueError: wrong intervention did not change the focus letter".to_owned());
                 }

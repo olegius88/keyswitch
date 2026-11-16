@@ -51,7 +51,7 @@ fn a_replay_refuses_a_plan_it_cannot_type_as_asked() {
     plan.intervention_event = Some(1);
     let outcome = replayer.replay(&plan, Mode::EarlyOff);
     assert!(outcome.error.as_deref().is_some_and(|error| error.contains("did not change the focus letter")), "{outcome:?}");
-    assert_eq!(outcome.value()["mode"], "early_off");
+    assert_eq!(outcome.mode, Mode::EarlyOff);
     // A plan typed as asked.
     let outcome = replayer.replay(&Plan::typed("plain".to_owned(), "document".to_owned(), 0, "hello world".to_owned(), keys("hello world", 0), 0), Mode::Default);
     assert!(outcome.error.is_none() && outcome.exact, "{outcome:?}");

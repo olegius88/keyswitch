@@ -41,6 +41,7 @@ pub mod receipt;
 pub mod replay;
 pub mod retired;
 pub mod selection;
+pub mod sequence_report;
 pub mod small_tools;
 pub mod spans;
 pub mod tools;

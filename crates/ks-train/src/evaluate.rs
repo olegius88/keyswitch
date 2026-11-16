@@ -4,9 +4,9 @@
 //! read before.
 use ks_cast::To as _;
 use crate::corpus::{CorpusRow, DEVELOPMENT, checksum, load_rows, read_json};
-use crate::curricula::Counts;
 use crate::physical::{PhysicalKey, hex, hex_digest, key_of};
 use crate::replay::{Mode, Plan, Replayer, prefix_indexes};
+use crate::sequence_report::{AllPairs, Block, Case, EarlyOff, FirstBlock, FirstGates, Gated, Gates, Documents, InstalledReference, PairCounts, Profile, Profiles, Report, Selection, Unsupported};
 use crate::tools::{Lexicons, Tools, reference_models};
 use ks_context::VersionedPrefixModel;
 use ks_context::context_model::ContextModel;
@@ -44,8 +44,6 @@ pub const FIRST_PLANS_VERSION: i64 = 5;
 pub const INSTALLED: &str = "installed";
 pub const INSTALLED_CONTEXT: &str = "resources/models/context_policy_v1.json";
 pub const INSTALLED_PREFIX: &str = "resources/models/prefix_policy_v1.json";
-/// The pairs whose first plans a report's checks recount and a receipt publishes: the two gated and the installed one.
-pub const FIRST_PUBLIC_PAIRS: [&str; 3] = ["baseline", "candidate", INSTALLED];
 /// The kind of correction an early switch makes: the mode of the engine's plan.
 pub const EARLY_KIND: &str = "early";
 /// The bins of the earliness histogram: the keys from one to this many each, then one bin for every later key.
@@ -232,64 +230,22 @@ pub fn select_rows(rows: &[CorpusRow]) -> Vec<&CorpusRow> {
     selected
 }
 
-fn zeroed_counts() -> Counts {
-    let mut counts = Counts::default();
-    for key in ["rows", "initially_correct", "initially_wrong", "preserved_correct", "exactly_restored", "correct_text_corruptions", "length_mismatches", "injections", "execution_errors", "correction_layout_mismatches", "final_layout_mismatches"] {
-        counts.add_by(key, 0);
+/// `score_pair`: the cases of every plan a pair replayed, with the counts they give.
+fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (PairCounts, Vec<Case>) {
+    let results: Vec<Case> = plans.iter().filter(|plan| plan.unsupported.is_empty()).map(|plan| Case::new(plan, &replayer.replay(plan, mode))).collect();
+    (PairCounts::of_cases(&results), results)
+}
+
+fn profile_gates(candidate: &PairCounts, baseline: &PairCounts, documents: &Documents) -> Gates {
+    Gates {
+        correct_text_preserved: candidate.correct_text_corruptions <= baseline.correct_text_corruptions,
+        length_preserved: candidate.length_mismatches == 0,
+        net_restorations_at_least_baseline: candidate.exactly_restored - candidate.correct_text_corruptions >= baseline.exactly_restored - baseline.correct_text_corruptions,
+        enough_documents_us: documents.us >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+        enough_documents_ru: documents.ru >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP,
+        execution_succeeded: candidate.execution_errors == 0 && baseline.execution_errors == 0,
+        correction_layouts_match: candidate.correction_layout_mismatches == 0,
     }
-    counts
-}
-
-/// `score_pair`.
-fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (Counts, Vec<Value>) {
-    let mut counts = zeroed_counts();
-    let mut results = Vec::new();
-    for plan in plans {
-        if !plan.unsupported.is_empty() {
-            continue;
-        }
-        let outcome = replayer.replay(plan, mode);
-        counts.add("rows");
-        counts.add(if plan.initially_wrong { "initially_wrong" } else { "initially_correct" });
-        counts.add_by(if plan.initially_wrong { "exactly_restored" } else { "preserved_correct" }, i64::from(outcome.exact));
-        counts.add_by("correct_text_corruptions", i64::from(!plan.initially_wrong && !outcome.exact));
-        counts.add_by("length_mismatches", i64::from(outcome.length_mismatch));
-        counts.add_by("execution_errors", i64::from(outcome.error.is_some()));
-        counts.add_by("injections", outcome.corrections.len().to::<i64>());
-        counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count().to::<i64>());
-        counts.add_by("final_layout_mismatches", i64::from(!outcome.final_layout_matches));
-        let mut case = json!({"identifier": plan.identifier, "document": plan.document, "group": plan.group, "initially_wrong": plan.initially_wrong, "expected": plan.expected, "trimmed_left": plan.trimmed_left, "trimmed_right": plan.trimmed_right});
-        if let Some(letters) = plan.focus_letters {
-            case["focus_letters"] = json!(letters);
-        }
-        case.as_object_mut().expect("a case is an object").extend(outcome.fields());
-        results.push(case);
-    }
-    (counts, results)
-}
-
-fn profile_gates(candidate: &Counts, baseline: &Counts, documents: &BTreeMap<String, i64>) -> Value {
-    let enough = |group: &str| documents.get(group).copied().unwrap_or(0) >= MINIMUM_SEQUENCE_DOCUMENTS_PER_GROUP;
-    json!({
-        "correct_text_preserved": candidate.get("correct_text_corruptions") <= baseline.get("correct_text_corruptions"),
-        "length_preserved": candidate.get("length_mismatches") == 0,
-        "net_restorations_at_least_baseline": candidate.get("exactly_restored") - candidate.get("correct_text_corruptions") >= baseline.get("exactly_restored") - baseline.get("correct_text_corruptions"),
-        "enough_documents_us": enough("0"),
-        "enough_documents_ru": enough("1"),
-        "execution_succeeded": candidate.get("execution_errors") == 0 && baseline.get("execution_errors") == 0,
-        "correction_layouts_match": candidate.get("correction_layout_mismatches") == 0,
-    })
-}
-
-/// The gates of the first plans (protocol 5), from the counts of the candidate pair and of the baseline pair: restorations
-/// net of corruptions at least the baseline's, no more corruptions than the baseline's, no length changed.
-pub fn first_gates(candidate: impl Fn(&str) -> i64, baseline: impl Fn(&str) -> i64) -> Value {
-    let net = |count: &dyn Fn(&str) -> i64| count("exactly_restored") - count("correct_text_corruptions");
-    json!({
-        "net_restorations_at_least_baseline": net(&candidate) >= net(&baseline),
-        "correct_text_preserved": candidate("correct_text_corruptions") <= baseline("correct_text_corruptions"),
-        "length_preserved": candidate("length_mismatches") == 0,
-    })
 }
 
 /// One correction as the earliness reads it: the key it came at, the layout it typed, the kind of plan that made it.
@@ -410,36 +366,26 @@ impl Earliness {
 }
 
 /// The corrections of a case as the earliness reads them.
-fn switches(case: &Value) -> Result<Vec<Switch<'_>>, String> {
-    let mut read = Vec::new();
-    for item in case["corrections"].as_array().ok_or("invalid case corrections")? {
-        let event = item["event"].as_u64().ok_or("invalid case correction event")?.to::<usize>();
-        let target_group = item["target_group"].as_i64().ok_or("invalid case correction layout")?;
-        let kind = item["kind"].as_str().ok_or("a case correction without its kind")?;
-        read.push(Switch { event, target_group, kind });
-    }
-    Ok(read)
+fn switches(case: &Case) -> Result<Vec<Switch<'_>>, String> {
+    case.corrections.iter().map(|item| Ok(Switch { event: item.event, target_group: item.target_group, kind: item.kind.as_deref().ok_or("a case correction without its kind")? })).collect()
 }
 
 /// `earliness`: a pair's earliness from its cases: those of its first plans, and those of its protocol-4 plans in the
 /// default mode.
-pub fn earliness(first: &[Value], sequence: &[Value]) -> Result<Earliness, String> {
+pub fn earliness(first: &[Case], sequence: &[Case]) -> Result<Earliness, String> {
     let mut total = Earliness::default();
     for case in first {
         let corrections = switches(case)?;
-        if case["initially_wrong"].as_bool().ok_or("invalid case intervention mode")? {
-            let declared = case["group"].as_i64().ok_or("a wrong first case without its layout")?;
-            let letters = case["focus_letters"].as_u64().ok_or("a first case without the letters of its word")?.to::<usize>();
-            let text = |field: &str| case[field].as_str().ok_or("invalid case text or identity");
-            total.add_wrong(declared, letters, text("expected")?, text("actual")?, &corrections);
+        if case.initially_wrong {
+            let declared = case.group.ok_or("a wrong first case without its layout")?;
+            let letters = case.focus_letters.and_then(|letters| usize::try_from(letters).ok()).ok_or("a first case without the letters of its word")?;
+            total.add_wrong(declared, letters, &case.expected, &case.actual, &corrections);
         } else {
             total.add_correct_first(&corrections);
         }
     }
-    for case in sequence {
-        if !case["initially_wrong"].as_bool().ok_or("invalid case intervention mode")? {
-            total.add_correct_sequence(&switches(case)?);
-        }
+    for case in sequence.iter().filter(|case| !case.initially_wrong) {
+        total.add_correct_sequence(&switches(case)?);
     }
     Ok(total)
 }
@@ -509,17 +455,22 @@ struct Task<'a> {
 
 /// `score_sequences`: every pair replayed in both settings modes, and the first plans in the default mode; acceptance
 /// needs every gate in every mode and profile.
-pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Map<String, Value>, String> {
+pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Replayed, String> {
     let selected = select_rows(rows);
     let SequencePlans { sequence: plans, first: first_plans, first_ineligible } = sequence_plans(&selected);
-    let mut documents: BTreeMap<String, i64> = BTreeMap::new();
-    for (name, group) in [("0", Some(0)), ("1", Some(1)), ("None", None)] {
-        let distinct: BTreeSet<&str> = plans.iter().filter(|plan| plan.group == group && plan.unsupported.is_empty()).map(|plan| plan.document.as_str()).collect();
-        documents.insert(name.to_owned(), distinct.len().to::<i64>());
-    }
-    let unsupported: Vec<Value> = plans.iter().filter(|plan| !plan.unsupported.is_empty() && !plan.initially_wrong).map(|plan| json!({"identifier": plan.identifier, "codepoints": plan.unsupported})).collect();
-    let selection = json!({"source_ids": selected.iter().map(|row| row.identifier.as_str()).collect::<Vec<_>>(), "selected_rows": selected.len(), "replayed_documents": documents,
-        "trimmed_rows": plans.iter().filter(|plan| !plan.initially_wrong && (plan.trimmed_left != 0 || plan.trimmed_right != 0)).count(), "unsupported": unsupported, "first_ineligible": first_ineligible});
+    let distinct = |group: Option<i64>| -> i64 {
+        let documents: BTreeSet<&str> = plans.iter().filter(|plan| plan.group == group && plan.unsupported.is_empty()).map(|plan| plan.document.as_str()).collect();
+        documents.len().to::<i64>()
+    };
+    let documents = Documents { us: distinct(Some(0)), ru: distinct(Some(1)), none: distinct(None) };
+    let selection = Selection {
+        source_ids: selected.iter().map(|row| row.identifier.clone()).collect(),
+        selected_rows: selected.len().to::<i64>(),
+        replayed_documents: documents.clone(),
+        trimmed_rows: plans.iter().filter(|plan| !plan.initially_wrong && (plan.trimmed_left != 0 || plan.trimmed_right != 0)).count().to::<i64>(),
+        unsupported: plans.iter().filter(|plan| !plan.unsupported.is_empty() && !plan.initially_wrong).map(|plan| Unsupported { identifier: plan.identifier.clone(), codepoints: plan.unsupported.clone() }).collect(),
+        first_ineligible: first_ineligible.iter().map(|identifier| (*identifier).to_owned()).collect(),
+    };
     let first = &tools.portable;
     let known = EngineCore::known_of(first);
     let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), Some(resources.packaged_identifier()), known, Some(resources.clone())) {
@@ -552,7 +503,7 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let mut order: Vec<usize> = (0..tasks.len()).collect();
     order.sort_by_cached_key(|index| std::cmp::Reverse(keys_of(tasks[*index].part)));
     let next = AtomicUsize::new(0);
-    let done: Mutex<Vec<Option<(Counts, Vec<Value>)>>> = Mutex::new((0..tasks.len()).map(|_| None).collect());
+    let done: Mutex<Vec<Option<Scored>>> = Mutex::new((0..tasks.len()).map(|_| None).collect());
     let failure: Mutex<Option<String>> = Mutex::new(None);
     std::thread::scope(|scope| {
         for worker in 0..jobs.max(1).min(tasks.len()) {
@@ -593,66 +544,68 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     }
     let mut scored = done.into_inner().expect("the workers finished").into_iter();
     let mut next_scored = || scored.next().flatten().ok_or("a task was not scored");
-    let mut profiles = Map::new();
     let mut all_passed = true;
-    let passed = |gates: &Value| gates.as_object().is_some_and(|table| table.values().all(|value| value == &json!(true)));
-    for profile in PROFILES {
-        let mut blocks: BTreeMap<&str, Value> = BTreeMap::new();
+    let mut profiles = Vec::new();
+    for _ in PROFILES {
+        let (mut control, mut sequences, mut firsts): (Replays<'_>, Replays<'_>, Replays<'_>) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
         for (mode, listed) in PAIRS {
-            let mut totals: BTreeMap<&str, Counts> = BTreeMap::new();
-            let mut cases: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
-            let mut first_totals: BTreeMap<&str, Counts> = BTreeMap::new();
-            let mut first_cases: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
             for (name, _, _) in listed {
-                let (counts, results) = next_scored()?;
-                totals.insert(name, counts);
-                cases.insert(name, results);
+                let replayed = next_scored()?;
                 if mode == Mode::Default {
-                    let (counts, results) = next_scored()?;
-                    first_totals.insert(name, counts);
-                    first_cases.insert(name, results);
+                    sequences.insert(name, replayed);
+                    firsts.insert(name, next_scored()?);
+                } else {
+                    control.insert(name, replayed);
                 }
             }
-            let gates = profile_gates(&totals["candidate"], &totals["baseline"], &documents);
-            all_passed = all_passed && passed(&gates);
-            let mut block = json!({"counts": {"baseline": totals["baseline"].report(), "candidate": totals["candidate"].report()},
-                "cases": {"baseline": cases["baseline"], "candidate": cases["candidate"]}, "gates": gates});
-            let mut ablation = Map::new();
-            for (name, counts) in &totals {
-                if !["baseline", "candidate", INSTALLED].contains(name) {
-                    ablation.insert((*name).to_owned(), json!({"counts": counts.report(), "cases": cases[name]}));
-                }
-            }
-            if !ablation.is_empty() {
-                block["ablation"] = Value::Object(ablation);
-            }
-            if let Some(counts) = totals.get(INSTALLED) {
-                block[INSTALLED] = json!({"counts": counts.report(), "cases": cases[INSTALLED]});
-            }
-            if mode == Mode::Default {
-                let gates = first_gates(|name| first_totals["candidate"].get(name), |name| first_totals["baseline"].get(name));
-                all_passed = all_passed && passed(&gates);
-                let (mut counts, mut early, mut replayed) = (Map::new(), Map::new(), Map::new());
-                for (name, total) in &first_totals {
-                    let typed = first_cases.remove(name).unwrap_or_default();
-                    counts.insert((*name).to_owned(), total.report());
-                    early.insert((*name).to_owned(), json!(earliness(&typed, &cases[name])?));
-                    replayed.insert((*name).to_owned(), Value::Array(typed));
-                }
-                block["first"] = json!({"counts": counts, "earliness": early, "cases": replayed, "gates": gates});
-            }
-            blocks.insert(mode.as_str(), block);
         }
-        let mut block = blocks.remove("default").ok_or("the default mode")?;
-        block["early_off"] = blocks.remove("early_off").ok_or("the early-off mode")?;
-        profiles.insert(profile.to_owned(), block);
+        let early_off = {
+            let (baseline, candidate) = (pulled(&mut control, "baseline")?, pulled(&mut control, "candidate")?);
+            let gates = profile_gates(&candidate.0, &baseline.0, &documents);
+            all_passed = all_passed && gates.all_held();
+            EarlyOff { counts: Gated { baseline: baseline.0, candidate: candidate.0 }, cases: Gated { baseline: baseline.1, candidate: candidate.1 }, gates }
+        };
+        // The earliness of each pair reads its first plans and its protocol-4 plans of the default mode.
+        let early = AllPairs::build(|name| earliness(&firsts[name].1, &sequences[name].1))?;
+        let replayed = AllPairs::build(|name| pulled(&mut firsts, name))?;
+        let gates = FirstGates::of(&replayed.candidate.0, &replayed.baseline.0);
+        all_passed = all_passed && gates.all_held();
+        let first = FirstBlock { counts: replayed.map(|(counts, _)| counts.clone()), earliness: early, cases: replayed.map(|(_, cases)| cases.clone()), gates };
+        let (baseline, candidate, installed) = (pulled(&mut sequences, "baseline")?, pulled(&mut sequences, "candidate")?, pulled(&mut sequences, INSTALLED)?);
+        let gates = profile_gates(&candidate.0, &baseline.0, &documents);
+        all_passed = all_passed && gates.all_held();
+        let ablation: BTreeMap<String, Block> = sequences.into_iter().map(|(name, (counts, cases))| (name.to_owned(), Block { counts, cases })).collect();
+        profiles.push(Profile {
+            counts: Gated { baseline: baseline.0, candidate: candidate.0 },
+            cases: Gated { baseline: baseline.1, candidate: candidate.1 },
+            gates,
+            ablation: (!ablation.is_empty()).then_some(ablation),
+            installed: Some(Block { counts: installed.0, cases: installed.1 }),
+            first: Some(first),
+            early_off,
+        });
     }
     let _ = root;
-    let mut result = Map::new();
-    result.insert("selection".to_owned(), selection);
-    result.insert("profiles".to_owned(), Value::Object(profiles));
-    result.insert("promotion_passed".to_owned(), json!(all_passed));
-    Ok(result)
+    let [portable, reference_hunspell]: [Profile; 2] = profiles.try_into().map_err(|_| "a profile was not scored")?;
+    Ok(Replayed { selection, profiles: Profiles { portable, reference_hunspell }, promotion_passed: all_passed })
+}
+
+/// What `score_sequences` makes of an evaluation: what was selected, every profile's blocks, and whether every gate held.
+pub struct Replayed {
+    pub selection: Selection,
+    pub profiles: Profiles,
+    pub promotion_passed: bool,
+}
+
+/// The counts and the cases a pair's replay of some plans gave.
+type Scored = (PairCounts, Vec<Case>);
+
+/// The scores of the pairs of a block, by name.
+type Replays<'a> = BTreeMap<&'a str, Scored>;
+
+/// The scores of a pair, taken out of its block.
+fn pulled(block: &mut Replays<'_>, name: &str) -> Result<Scored, String> {
+    block.remove(name).ok_or_else(|| format!("{name} was not scored"))
 }
 
 fn hash_list(value: &Value, name: &str) -> Result<Vec<String>, String> {
@@ -725,8 +678,8 @@ pub fn protocol(root: &Path) -> Result<Value, String> {
 }
 
 /// `immutable_record`: create a record, or verify the exact existing bytes.
-fn immutable_record(path: &Path, value: &Value) -> Result<(), String> {
-    let encoded = crate::artifact::canonical(value);
+fn immutable_record<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<(), String> {
+    let encoded = crate::artifact::canonical_of(value);
     if path.exists() {
         if std::fs::read(path).map_err(|error| error.to_string())? != encoded {
             return Err(format!("immutable test record differs: {}", path.display()));
@@ -895,7 +848,7 @@ pub fn unchanged_since(request: &EvaluationRequest<'_>, identity: &Identity) -> 
 }
 
 /// `evaluate`: the report of a development diagnostic, or of the sealed test, read once.
-pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
+pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
     let split = request.split;
     if split != DEVELOPMENT && split != "test" {
         return Err("sequence evaluator accepts development or sealed test only".to_owned());
@@ -932,20 +885,35 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     };
     // The installed pair is a reference, not an input the seal or the test membership names: the report says which one
     // it was, and the pair must not change while it is replayed.
-    let installed_reference = || -> Result<Value, String> { Ok(json!({"context_sha256": checksum(&pairs.installed)?, "prefix_sha256": checksum(&pairs.prefix_installed)?})) };
+    let installed_reference = || -> Result<InstalledReference, String> { Ok(InstalledReference { context_sha256: checksum(&pairs.installed)?, prefix_sha256: checksum(&pairs.prefix_installed)? }) };
     let reference = installed_reference()?;
     let gate_policy = read_json(&root.join("model/context_v3/recipe.json"))?["gate_policy"].clone();
-    let mut report = json!({"schema_version": 1, "split": split, "identity": identity.value, "protocol": protocol(root)?, "gate_policy": gate_policy, "promotion_passed": false, "installed_reference": reference});
+    let mut report = Report {
+        schema_version: 1,
+        split: split.to_owned(),
+        identity: Report::carry(&identity.value)?,
+        protocol: Report::carry(&protocol(root)?)?,
+        gate_policy: Report::carry(&gate_policy)?,
+        promotion_passed: false,
+        installed_reference: Some(reference.clone()),
+        selection: None,
+        profiles: None,
+        execution_error: None,
+        scope: None,
+    };
     let scored = score_sequences(root, &resources, &tools, &spelling, &rows, &pairs, request.jobs);
-    let write_report = |report: &Value| -> Result<(), String> {
+    let write_report = |report: &Report| -> Result<(), String> {
         std::fs::create_dir_all(request.output.parent().ok_or("a report outside a folder")?).map_err(|error| error.to_string())?;
-        std::fs::write(request.output, crate::artifact::canonical(report)).map_err(|error| error.to_string())
+        std::fs::write(request.output, crate::artifact::canonical_of(report)).map_err(|error| error.to_string())
     };
     match scored {
-        Ok(table) => report.as_object_mut().expect("a report is an object").extend(table),
+        Ok(replayed) => {
+            report.selection = Some(replayed.selection);
+            report.profiles = Some(replayed.profiles);
+            report.promotion_passed = replayed.promotion_passed;
+        }
         Err(error) => {
-            report["execution_error"] = json!(error);
-            report["promotion_passed"] = json!(false);
+            report.execution_error = Some(error.clone());
             if split == "test" {
                 immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
             }
@@ -956,14 +924,14 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     if !request.unsealed {
         unchanged_since(request, &identity)?;
     }
-    if installed_reference()? != report["installed_reference"] {
+    if installed_reference()? != reference {
         return Err("the installed pair changed during sequence replay".to_owned());
     }
     if split == "test" {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
     } else {
-        report["promotion_passed"] = json!(false);
-        report["scope"] = json!("development diagnostic; cannot promote a model");
+        report.promotion_passed = false;
+        report.scope = Some("development diagnostic; cannot promote a model".to_owned());
     }
     write_report(&report)?;
     Ok(report)
@@ -973,16 +941,16 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::sequence_report::CorrectionRecord;
 
     #[test]
     fn a_replay_that_failed_to_run_fails_its_gate_whichever_pair_it_was() {
-        let documents = BTreeMap::from([("0".to_owned(), 40), ("1".to_owned(), 40)]);
-        let clean = zeroed_counts();
-        let mut failed = zeroed_counts();
-        failed.add_by("execution_errors", 1);
-        assert_eq!(profile_gates(&clean, &clean, &documents)["execution_succeeded"], json!(true));
+        let documents = Documents { us: 40, ru: 40, none: 0 };
+        let clean = PairCounts::default();
+        let failed = PairCounts { execution_errors: 1, ..PairCounts::default() };
+        assert!(profile_gates(&clean, &clean, &documents).execution_succeeded);
         for (candidate, baseline) in [(&failed, &clean), (&clean, &failed)] {
-            assert_eq!(profile_gates(candidate, baseline, &documents)["execution_succeeded"], json!(false));
+            assert!(!profile_gates(candidate, baseline, &documents).execution_succeeded);
         }
     }
 
@@ -1040,58 +1008,68 @@ mod tests {
         assert_eq!(Earliness::bin(SWITCH_KEY_HISTOGRAM_KEYS + 1), SWITCH_KEY_HISTOGRAM_LATER);
     }
 
-    fn case(wrong: bool, letters: Option<usize>, actual: &str, corrections: &Value) -> Value {
-        let mut case = json!({"initially_wrong": wrong, "group": 1, "expected": "привет мир", "actual": actual, "corrections": corrections});
-        if let Some(letters) = letters {
-            case["focus_letters"] = json!(letters);
+    fn case(wrong: bool, letters: Option<i64>, actual: &str, corrections: Vec<CorrectionRecord>) -> Case {
+        Case {
+            identifier: "a".to_owned(),
+            document: "d".to_owned(),
+            group: Some(1),
+            initially_wrong: wrong,
+            expected: "привет мир".to_owned(),
+            trimmed_left: 0,
+            trimmed_right: 0,
+            focus_letters: letters,
+            mode: "default".to_owned(),
+            actual: actual.to_owned(),
+            exact: actual == "привет мир",
+            length_mismatch: false,
+            final_group: 1,
+            expected_final_group: 1,
+            final_layout_matches: true,
+            corrections,
+            intervention: None,
+            error: None,
         }
-        case
+    }
+
+    fn correction(event: usize, target_group: i64, kind: Option<&str>) -> CorrectionRecord {
+        CorrectionRecord { event, before: String::new(), after: String::new(), source_group: 0, target_group, actual_group: target_group, caret_before: 0, caret_after: 0, kind: kind.map(str::to_owned) }
     }
 
     /// The earliness a report states is read from its cases: the same numbers as from the corrections themselves.
     #[test]
     fn the_earliness_of_a_pair_is_read_from_its_cases() {
-        let early = json!([{"event": 4, "target_group": 1, "kind": "early"}]);
-        let first = [case(true, Some(6), "привет мир", &early), case(false, Some(6), "привет мир", &json!([]))];
-        let sequence = [case(false, None, "привет мир", &early), case(true, None, "привет мир", &early)];
+        let early = || vec![correction(4, 1, Some("early"))];
+        let first = [case(true, Some(6), "привет мир", early()), case(false, Some(6), "привет мир", Vec::new())];
+        let sequence = [case(false, None, "привет мир", early()), case(true, None, "привет мир", early())];
         let read = earliness(&first, &sequence).expect("cases that hold");
         let mut expected = Earliness::default();
         expected.add_wrong(1, 6, "привет мир", "привет мир", &[switch(4, 1, "early")]);
         expected.add_correct_sequence(&[switch(4, 1, "early")]);
         assert_eq!(read, expected);
         // A case that does not say what the earliness needs.
-        let refused = |first: &[Value], sequence: &[Value], words: &str| {
+        let refused = |first: &[Case], sequence: &[Case], words: &str| {
             let said = earliness(first, sequence).expect_err(words);
             assert!(said.contains(words), "{words}: {said}");
         };
-        refused(&[case(true, None, "привет мир", &early)], &[], "letters of its word");
-        refused(&[case(true, Some(6), "привет мир", &json!([{"event": 4, "target_group": 1}]))], &[], "without its kind");
-        refused(&[case(true, Some(6), "привет мир", &json!([{"event": -1, "target_group": 1, "kind": "early"}]))], &[], "correction event");
-        refused(&[case(true, Some(6), "привет мир", &json!([{"event": 1, "target_group": "x", "kind": "early"}]))], &[], "correction layout");
-        refused(&[case(true, Some(6), "привет мир", &json!(1))], &[], "invalid case corrections");
-        refused(&[json!({"initially_wrong": "x", "corrections": []})], &[], "intervention mode");
-        refused(&[], &[json!({"initially_wrong": "x", "corrections": []})], "intervention mode");
-        refused(&[json!({"initially_wrong": true, "corrections": [], "focus_letters": 1})], &[], "without its layout");
-        refused(&[json!({"initially_wrong": true, "group": 1, "corrections": [], "focus_letters": 1})], &[], "invalid case text");
+        refused(&[case(true, None, "привет мир", early())], &[], "letters of its word");
+        refused(&[case(true, Some(-1), "привет мир", early())], &[], "letters of its word");
+        refused(&[case(true, Some(6), "привет мир", vec![correction(4, 1, None)])], &[], "without its kind");
+        refused(&[], &[case(false, None, "привет мир", vec![correction(4, 1, None)])], "without its kind");
+        let ungrouped = Case { group: None, ..case(true, Some(1), "привет мир", Vec::new()) };
+        refused(&[ungrouped], &[], "without its layout");
     }
 
     #[test]
     fn the_first_plans_are_gated_by_their_balance_their_corruptions_and_their_lengths() {
-        let counts = |restored: i64, spoiled: i64, lengths: i64| move |name: &str| match name {
-            "exactly_restored" => restored,
-            "correct_text_corruptions" => spoiled,
-            "length_mismatches" => lengths,
-            _ => 0,
-        };
-        let all = |gates: &Value| gates.as_object().expect("gates").values().all(|value| value == &json!(true));
-        assert!(all(&first_gates(counts(10, 1, 0), counts(9, 1, 0))));
-        assert!(all(&first_gates(counts(10, 1, 0), counts(10, 1, 0))));
-        let fewer = first_gates(counts(9, 1, 0), counts(10, 1, 0));
-        assert_eq!((fewer["net_restorations_at_least_baseline"].clone(), fewer["correct_text_preserved"].clone()), (json!(false), json!(true)));
+        let counts = |restored: i64, spoiled: i64, lengths: i64| PairCounts { exactly_restored: restored, correct_text_corruptions: spoiled, length_mismatches: lengths, ..PairCounts::default() };
+        assert!(FirstGates::of(&counts(10, 1, 0), &counts(9, 1, 0)).all_held());
+        assert!(FirstGates::of(&counts(10, 1, 0), &counts(10, 1, 0)).all_held());
+        let fewer = FirstGates::of(&counts(9, 1, 0), &counts(10, 1, 0));
+        assert_eq!((fewer.net_restorations_at_least_baseline, fewer.correct_text_preserved), (false, true));
         // More restored does not buy more corruption.
-        let spoiling = first_gates(counts(20, 2, 0), counts(10, 1, 0));
-        assert_eq!((spoiling["net_restorations_at_least_baseline"].clone(), spoiling["correct_text_preserved"].clone()), (json!(true), json!(false)));
-        assert_eq!(first_gates(counts(10, 1, 1), counts(9, 1, 0))["length_preserved"], json!(false));
+        let spoiling = FirstGates::of(&counts(20, 2, 0), &counts(10, 1, 0));
+        assert_eq!((spoiling.net_restorations_at_least_baseline, spoiling.correct_text_preserved), (true, false));
+        assert!(!FirstGates::of(&counts(10, 1, 1), &counts(9, 1, 0)).length_preserved);
     }
 
     /// Version 4 stands at the top of the file, version 5 under `versions`; each answers for its own hash.
