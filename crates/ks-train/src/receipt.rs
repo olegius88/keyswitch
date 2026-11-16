@@ -2,7 +2,10 @@
 //! recomputed from the private cases of the sealed test before it is published, every gate recomputed from the counts.
 use ks_cast::To as _;
 use crate::corpus::{checksum, read_json};
-use crate::evaluate::{EvaluationRequest, PROFILES, evaluation_identity, validate_candidate_seal, validate_prefix_seal};
+use crate::evaluate::{
+    Earliness, EvaluationRequest, FIRST_PLANS_VERSION, FIRST_PUBLIC_PAIRS, INSTALLED, PROFILES, PROTOCOLS, SWITCH_KEY_HISTOGRAM_KEYS, SWITCH_KEY_HISTOGRAM_LATER, earliness, evaluation_identity,
+    first_gates, protocol_set, validate_candidate_seal, validate_prefix_seal,
+};
 use crate::fit::readable;
 use crate::physical::hex_digest;
 use ks_context::VersionedPrefixModel;
@@ -29,6 +32,13 @@ const RECEIPT_FIELDS: [&str; 29] = [
     "prefix_model_version", "prefix_feature_version", "prefix_conversion_threshold", "prefix_artifact_sha256", "prefix_weights_sha256", "prefix_candidate_seal_sha256", "prefix_baseline_path",
     "prefix_baseline_sha256", "devchat_test",
 ];
+/// The fields of a receipt's test block, by the protocol version that wrote it: a test of version 5 also says how many
+/// rows had no first plans and which installed pair was the reference.
+const TEST_FIELDS: [&str; 5] = ["documents", "selected_rows", "trimmed_rows", "unsupported_rows", "profiles"];
+const TEST_FIELDS_WITH_FIRST_PLANS: [&str; 7] = ["documents", "selected_rows", "trimmed_rows", "unsupported_rows", "first_ineligible_rows", "installed_reference", "profiles"];
+const PROFILE_FIELDS_WITH_FIRST_PLANS: [&str; 4] = ["counts", "gates", "early_off", "first"];
+const FIRST_BLOCK_FIELDS: [&str; 3] = ["counts", "earliness", "gates"];
+const INSTALLED_REFERENCE_FIELDS: [&str; 2] = ["context_sha256", "prefix_sha256"];
 const DEVCHAT_SIGNIFICANCE: f64 = 0.05;
 const MODES: [&str; 4] = ["correct", "forget_ru", "forget_en", "start_wrong"];
 const RESTORING_MODES: [&str; 3] = ["forget_ru", "forget_en", "start_wrong"];
@@ -101,13 +111,17 @@ fn public_calibration_block(block: &Value) -> Value {
 }
 
 fn sequence_counts(value: &Value, documents: &BTreeMap<String, i64>) -> Result<BTreeMap<&'static str, i64>, String> {
+    let wrong = documents["0"] + documents["1"];
+    plan_counts(value, wrong, wrong + documents["None"])
+}
+
+/// The counts of a pair's replay of `wrong` wrong plans and `correct` correct ones, checked against each other.
+fn plan_counts(value: &Value, wrong: i64, correct: i64) -> Result<BTreeMap<&'static str, i64>, String> {
     fields_exact(value, "sequence counts", &COUNTS)?;
     let mut counts = BTreeMap::new();
     for name in COUNTS {
         counts.insert(name, count(&value[name], name)?);
     }
-    let wrong = documents["0"] + documents["1"];
-    let correct = wrong + documents["None"];
     if counts["rows"] != wrong + correct
         || counts["initially_correct"] != correct
         || counts["initially_wrong"] != wrong
@@ -140,25 +154,97 @@ fn validate_gated_block(block: &Value, documents: &BTreeMap<String, i64>) -> Res
     Ok(())
 }
 
-fn validate_test(test: &Value) -> Result<(), String> {
-    fields_exact(test, "test", &["documents", "selected_rows", "trimmed_rows", "unsupported_rows", "profiles"])?;
+fn validate_test(test: &Value, version: i64) -> Result<(), String> {
+    let first_plans = version >= FIRST_PLANS_VERSION;
+    fields_exact(test, "test", if first_plans { &TEST_FIELDS_WITH_FIRST_PLANS } else { &TEST_FIELDS })?;
     let mut documents = BTreeMap::new();
     for name in ["0", "1", "None"] {
         documents.insert(name.to_owned(), count(&test["documents"][name], "documents")?);
     }
     let selected = count(&test["selected_rows"], "selected_rows")?;
+    let ineligible = if first_plans { count(&test["first_ineligible_rows"], "first_ineligible_rows")? } else { 0 };
+    let typed_words = documents["0"] + documents["1"];
     if documents.values().any(|value| *value > SEQUENCE_DOCUMENT_CAP_PER_GROUP)
         || selected > SEQUENCE_MAXIMUM_SELECTED_ROWS
         || selected != documents.values().sum::<i64>() + count(&test["unsupported_rows"], "unsupported_rows")?
         || count(&test["trimmed_rows"], "trimmed_rows")? > selected
+        || ineligible > typed_words
     {
         return Err("inconsistent sequence selection".to_owned());
+    }
+    if first_plans {
+        let reference = &test["installed_reference"];
+        fields_exact(reference, "installed reference", &INSTALLED_REFERENCE_FIELDS)?;
+        for name in INSTALLED_REFERENCE_FIELDS {
+            sha(&reference[name])?;
+        }
     }
     fields_exact(&test["profiles"], "test profiles", &PROFILES)?;
     for name in PROFILES {
         let profile = &test["profiles"][name];
         validate_gated_block(profile, &documents)?;
         validate_gated_block(&profile["early_off"], &documents)?;
+        if first_plans {
+            fields_exact(profile, "test profile", &PROFILE_FIELDS_WITH_FIRST_PLANS)?;
+            validate_first_block(&profile["first"], typed_words - ineligible, documents.values().sum())?;
+        }
+    }
+    Ok(())
+}
+
+/// The first plans of a profile (protocol 5): a correct and a wrong plan of each of `words` words, the counts and the
+/// earliness of each pair published, and the gates recomputed from the counts. `correct_sequences` is the number of
+/// correct plans of protocol 4, the most that can carry a false early switch inside a text.
+fn validate_first_block(block: &Value, words: i64, correct_sequences: i64) -> Result<(), String> {
+    fields_exact(block, "first plans", &FIRST_BLOCK_FIELDS)?;
+    fields_exact(&block["counts"], "first-plan counts", &FIRST_PUBLIC_PAIRS)?;
+    fields_exact(&block["earliness"], "first-plan earliness", &FIRST_PUBLIC_PAIRS)?;
+    let mut counted = BTreeMap::new();
+    for pair in FIRST_PUBLIC_PAIRS {
+        let counts = plan_counts(&block["counts"][pair], words, words)?;
+        validate_earliness(&block["earliness"][pair], &counts, correct_sequences)?;
+        counted.insert(pair, counts);
+    }
+    let gates = first_gates(|name| counted["candidate"].get(name).copied().unwrap_or(0), |name| counted["baseline"].get(name).copied().unwrap_or(0));
+    if !gates.as_object().is_some_and(|table| table.values().all(|value| value == &json!(true))) || block["gates"] != gates {
+        return Err("first-plan gates failed or contradicted by counts".to_owned());
+    }
+    Ok(())
+}
+
+/// A pair's earliness, read as its type and held to its counts: every wrong first plan in one class, the bins and the
+/// kinds adding up to the rows they count, the sum of the keys within what the bins allow.
+fn validate_earliness(value: &Value, counts: &BTreeMap<&'static str, i64>, correct_sequences: i64) -> Result<(), String> {
+    const INCONSISTENT: &str = "inconsistent first-plan earliness";
+    let text = ks_text::json::dumps(value, &ks_text::JsonOptions::default());
+    let early: Earliness = ks_text::json::loads(text).map_err(|error| format!("invalid first-plan earliness: {error}"))?;
+    let (wrong, correct) = (counts["initially_wrong"], counts["initially_correct"]);
+    let scalars = [early.inside_word, early.last_letter, early.boundary_key, early.later, early.never, early.first_word_correct, early.started_right_ended_wrong, early.switch_key_sum, early.switch_key_rows, early.false_early_first, early.false_early_sequence];
+    let bins: BTreeSet<String> = (1..=SWITCH_KEY_HISTOGRAM_KEYS).map(|key| key.to_string()).chain(std::iter::once(SWITCH_KEY_HISTOGRAM_LATER.to_owned())).collect();
+    if scalars.iter().chain(early.switch_key_histogram.values()).chain(early.first_correction_kinds.values()).any(|number| *number < 0)
+        || early.switch_key_histogram.keys().cloned().collect::<BTreeSet<String>>() != bins
+        || early.first_correction_kinds.keys().any(String::is_empty)
+    {
+        return Err(INCONSISTENT.to_owned());
+    }
+    let switched = early.inside_word + early.last_letter + early.boundary_key + early.later;
+    // The least the keys can sum to: each bin at its own key, the last at the first key after the numbered ones.
+    let least: i64 = (1..=SWITCH_KEY_HISTOGRAM_KEYS).map(|key| key.to::<i64>() * early.switch_key_histogram[&key.to_string()]).sum::<i64>()
+        + (SWITCH_KEY_HISTOGRAM_KEYS + 1).to::<i64>() * early.switch_key_histogram[SWITCH_KEY_HISTOGRAM_LATER];
+    if switched + early.never != wrong
+        || early.first_correction_kinds.values().sum::<i64>() != switched
+        || early.first_word_correct > wrong
+        || counts["exactly_restored"] > early.first_word_correct
+        || early.started_right_ended_wrong > wrong - early.first_word_correct
+        || early.switch_key_rows > early.first_word_correct
+        || early.switch_key_rows > switched
+        || early.switch_key_histogram.values().sum::<i64>() != early.switch_key_rows
+        || early.switch_key_sum < least
+        || (early.switch_key_histogram[SWITCH_KEY_HISTOGRAM_LATER] == 0 && early.switch_key_sum != least)
+        || early.false_early_first > correct
+        || early.false_early_sequence > correct_sequences
+    {
+        return Err(INCONSISTENT.to_owned());
     }
     Ok(())
 }
@@ -236,14 +322,17 @@ pub fn validate_receipt(receipt: &Value, artifact: &Path, root: &Path, prefix_ar
 /// Everything a receipt claims except the bytes of the sources it names: the identity of the pair, every gate recomputed.
 pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_artifact: &Path, models_dir: &Path) -> Result<(), String> {
     fields_exact(receipt, "receipt", &RECEIPT_FIELDS)?;
-    let protocols = read_json(&root.join("model/context_v3/protocols.json"))?;
+    let protocols = read_json(&root.join(PROTOCOLS))?;
     let recipe = read_json(&root.join(RECIPE))?;
     let policy = &recipe["gate_policy"];
+    // The receipt is checked by the protocol it was made by: the version it names, as the protocols file states it.
+    let version = receipt["protocol"]["version"].as_i64().unwrap_or_default();
+    let Some(protocol) = protocol_set(&protocols, version) else { return Err("unsupported receipt identity or policy".to_owned()) };
     if receipt["schema_version"] != json!(1)
         || receipt["feature_version"] != json!(3)
         || receipt["quality_gates_passed"] != json!(true)
-        || receipt["scope"] != protocols["scope"]
-        || receipt["protocol"] != protocols["receipt"]
+        || receipt["scope"] != protocol["scope"]
+        || receipt["protocol"] != protocol["receipt"]
         || receipt["gate_policy"] != *policy
         || receipt["baseline_path"] != json!(BASELINE)
         || receipt["recipe_path"] != json!(RECIPE)
@@ -274,13 +363,14 @@ pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_a
     let calibration = &receipt["calibration"];
     validate_calibration_block(calibration, "calibration", policy)?;
     validate_calibration_block(&calibration[OUTSIDE_LONE_WORD], "calibration outside the lone-word class", policy)?;
-    validate_test(&receipt["test"])?;
+    validate_test(&receipt["test"], version)?;
     validate_devchat(&receipt[DEVCHAT], receipt)?;
     Ok(())
 }
 
-/// The inputs a case was typed from, and the counts it adds (`case_evidence`).
-fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'static str, i64>), String> {
+/// The inputs a case was typed from, and the counts it adds (`case_evidence`). From protocol 5 on (`kinds`) every
+/// correction names the kind of plan that made it.
+fn case_evidence(case: &Value, kinds: bool) -> Result<((String, bool), Value, BTreeMap<&'static str, i64>), String> {
     let text = |field: &str| case[field].as_str().ok_or("invalid case text or identity");
     let (identifier, document, expected, actual) = (text("identifier")?, text("document")?, text("expected")?, text("actual")?);
     let group = case["group"].as_i64();
@@ -330,6 +420,9 @@ fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'stat
         if event < 1 || event.to::<usize>() > characters.len() || ["source_group", "target_group", "actual_group"].iter().any(|key| !matches!(correction[*key].as_i64(), Some(0 | 1))) {
             return Err("invalid case correction layout or event".to_owned());
         }
+        if kinds && correction["kind"].as_str().is_none_or(str::is_empty) {
+            return Err("a case correction without its kind".to_owned());
+        }
         for (name, caret) in [("before", "caret_before"), ("after", "caret_after")] {
             let held = correction[name].as_str().ok_or("invalid case correction text or caret")?;
             if (count(&correction[caret], "case correction caret")?).to::<usize>() > held.chars().count() {
@@ -347,8 +440,104 @@ fn case_evidence(case: &Value) -> Result<((String, bool), Value, BTreeMap<&'stat
     Ok(((identifier.to_owned(), wrong), inputs, counts))
 }
 
+/// The inputs of every case of a pair's block and the counts recomputed from them, held to the counts the block claims.
+fn recounted(cases: &Value, claimed: &Value, selected: &HashSet<&str>, omitted: &HashSet<&str>, document_hashes: &HashSet<&str>, kinds: bool) -> Result<BTreeMap<(String, bool), Value>, String> {
+    let mut inputs = BTreeMap::new();
+    let mut counts: BTreeMap<&str, i64> = COUNTS.iter().map(|name| (*name, 0)).collect();
+    for case in cases.as_array().ok_or("missing case rows")? {
+        let (key, values, outcome) = case_evidence(case, kinds)?;
+        if inputs.contains_key(&key) || !selected.contains(key.0.as_str()) || omitted.contains(key.0.as_str()) {
+            return Err("duplicate, omitted or unselected case".to_owned());
+        }
+        if !document_hashes.contains(hex_digest(values[0].as_str().unwrap_or("")).as_str()) {
+            return Err("case document is outside immutable test membership".to_owned());
+        }
+        inputs.insert(key, values);
+        for (field, number) in outcome {
+            *counts.get_mut(field).expect("a known count") += number;
+        }
+    }
+    if COUNTS.iter().any(|field| claimed[*field].as_i64() != Some(counts[field])) {
+        return Err("claimed counts differ from actual cases".to_owned());
+    }
+    Ok(inputs)
+}
+
+/// The protocol-4 cases of a pair in the default mode of a profile: those the earliness of its first plans counts false
+/// early switches in.
+fn sequence_cases<'a>(profile: &'a Value, pair: &str) -> &'a Value {
+    if pair == INSTALLED { &profile[INSTALLED]["cases"] } else { &profile["cases"][pair] }
+}
+
+/// The first plans of a report (protocol 5) recomputed from their cases: each a word that protocol 4 typed as a US or RU
+/// row, opening with as many letters as the case says; the same inputs for every pair and profile; each word once
+/// correct and once wrong, and every word but the ones the selection says opened otherwise; the counts, the earliness and
+/// the gates as the cases give them. `sequence` holds the inputs of the protocol-4 cases.
+fn validate_first_cases(report: &Value, sequence: &BTreeMap<(String, bool), Value>) -> Result<(), String> {
+    const OTHER: &str = "first-plan case of a row without first plans, of another document or layout, or of a word it does not open with";
+    let listed = report["selection"]["first_ineligible"].as_array().ok_or("invalid first-plan selection")?;
+    let ineligible: HashSet<&str> = listed.iter().map(|item| item.as_str().ok_or("invalid first-plan selection")).collect::<Result<_, _>>()?;
+    let typed: BTreeMap<&str, &Value> = sequence.iter().filter(|(key, values)| !key.1 && matches!(values[1].as_i64(), Some(0 | 1))).map(|(key, values)| (key.0.as_str(), values)).collect();
+    if ineligible.len() != listed.len() || ineligible.iter().any(|name| !typed.contains_key(name)) {
+        return Err("invalid first-plan selection".to_owned());
+    }
+    let mut reference: Option<BTreeMap<(String, bool), Value>> = None;
+    for name in PROFILES {
+        let profile = &report["profiles"][name];
+        let block = &profile["first"];
+        let mut claimed = BTreeMap::new();
+        for pair in FIRST_PUBLIC_PAIRS {
+            let cases = block["cases"][pair].as_array().ok_or("missing first-plan case rows")?;
+            let mut inputs = BTreeMap::new();
+            let mut counts: BTreeMap<&str, i64> = COUNTS.iter().map(|name| (*name, 0)).collect();
+            for case in cases {
+                let (key, mut values, outcome) = case_evidence(case, true)?;
+                let letters = count(&case["focus_letters"], "first-plan letters")?.to::<usize>();
+                let row = typed.get(key.0.as_str()).filter(|_| !ineligible.contains(key.0.as_str())).ok_or(OTHER)?;
+                let expected: Vec<char> = case["expected"].as_str().unwrap_or_default().chars().collect();
+                let opening = expected.get(..letters).unwrap_or_default();
+                let first_key = !key.1 || case["intervention"]["event"].as_i64() == Some(1);
+                if values[0] != row[0] || values[1] != row[1] || !first_key || letters == 0 || opening.len() != letters || !opening.iter().all(|character| crate::rows::is_alpha(*character)) {
+                    return Err(OTHER.to_owned());
+                }
+                if inputs.contains_key(&key) {
+                    return Err("duplicate first-plan case".to_owned());
+                }
+                values.as_array_mut().ok_or("the inputs of a case")?.push(json!(letters));
+                inputs.insert(key, values);
+                for (field, number) in outcome {
+                    *counts.get_mut(field).expect("a known count") += number;
+                }
+            }
+            if COUNTS.iter().any(|field| block["counts"][pair][*field].as_i64() != Some(counts[field])) {
+                return Err("claimed first-plan counts differ from actual cases".to_owned());
+            }
+            let early = earliness(cases, sequence_cases(profile, pair).as_array().ok_or("missing case rows")?)?;
+            if block["earliness"][pair] != json!(early) {
+                return Err("claimed earliness differs from actual cases".to_owned());
+            }
+            if reference.as_ref().is_some_and(|known| known != &inputs) {
+                return Err("compared models or profiles have different first-plan inputs".to_owned());
+            }
+            reference = Some(inputs);
+            claimed.insert(pair, counts);
+        }
+        if block["gates"] != first_gates(|field| claimed["candidate"][field], |field| claimed["baseline"][field]) {
+            return Err("first-plan gates contradicted by counts".to_owned());
+        }
+    }
+    let reference = reference.ok_or("no first-plan case rows")?;
+    let correct: BTreeMap<&String, &Value> = reference.iter().filter(|(key, _)| !key.1).map(|(key, values)| (&key.0, values)).collect();
+    let wanted = typed.keys().filter(|name| !ineligible.contains(*name)).count();
+    if correct.len() != wanted || reference.iter().any(|(key, values)| key.1 && correct.get(&key.0) != Some(&values)) || reference.len() != 2 * wanted {
+        return Err("first-plan coverage or paired correct/wrong inputs differ".to_owned());
+    }
+    Ok(())
+}
+
 /// `validate_full_report`: aggregates recomputed from the private cases, without reading corpus text.
 pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), String> {
+    let first_plans = report["protocol"]["version"].as_i64().is_some_and(|version| version >= FIRST_PLANS_VERSION);
     let selection = &report["selection"];
     let identifiers: Vec<&str> = selection["source_ids"].as_array().ok_or("case selection IDs are missing")?.iter().filter_map(Value::as_str).collect();
     let selected: HashSet<&str> = identifiers.iter().copied().collect();
@@ -364,32 +553,22 @@ pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), Stri
     let mut reference: Option<BTreeMap<(String, bool), Value>> = None;
     for name in PROFILES {
         let profile = &report["profiles"][name];
+        let mut blocks: Vec<(&Value, &Value)> = Vec::new();
         for block in [profile, &profile["early_off"]] {
             for model in ["baseline", "candidate"] {
-                let mut inputs = BTreeMap::new();
-                let mut counts: BTreeMap<&str, i64> = COUNTS.iter().map(|name| (*name, 0)).collect();
-                for case in block["cases"][model].as_array().ok_or("missing case rows")? {
-                    let (key, values, outcome) = case_evidence(case)?;
-                    if inputs.contains_key(&key) || !selected.contains(key.0.as_str()) || omitted.contains(key.0.as_str()) {
-                        return Err("duplicate, omitted or unselected case".to_owned());
-                    }
-                    if !document_hashes.contains(hex_digest(values[0].as_str().unwrap_or("")).as_str()) {
-                        return Err("case document is outside immutable test membership".to_owned());
-                    }
-                    inputs.insert(key, values);
-                    for (field, number) in outcome {
-                        *counts.get_mut(field).expect("a known count") += number;
-                    }
-                }
-                let claimed = &block["counts"][model];
-                if COUNTS.iter().any(|field| claimed[*field].as_i64() != Some(counts[field])) {
-                    return Err("claimed counts differ from actual cases".to_owned());
-                }
-                if reference.as_ref().is_some_and(|known| known != &inputs) {
-                    return Err("compared models, modes or profiles have different case inputs".to_owned());
-                }
-                reference = Some(inputs);
+                blocks.push((&block["cases"][model], &block["counts"][model]));
             }
+        }
+        if first_plans {
+            // The installed pair's protocol-4 cases: its earliness counts the false early switches in them.
+            blocks.push((&profile[INSTALLED]["cases"], &profile[INSTALLED]["counts"]));
+        }
+        for (cases, claimed) in blocks {
+            let inputs = recounted(cases, claimed, &selected, &omitted, &document_hashes, first_plans)?;
+            if reference.as_ref().is_some_and(|known| known != &inputs) {
+                return Err("compared models, modes or profiles have different case inputs".to_owned());
+            }
+            reference = Some(inputs);
         }
     }
     let reference = reference.ok_or("no case rows")?;
@@ -406,6 +585,9 @@ pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), Stri
     let documents = |group: Option<i64>| correct.values().filter(|values| values[1].as_i64() == group).map(|values| values[0].as_str().unwrap_or("")).collect::<HashSet<_>>().len();
     if json!({"0": documents(Some(0)), "1": documents(Some(1)), "None": documents(None)}) != selection["replayed_documents"] {
         return Err("case document counts or one-focus-per-document policy differ".to_owned());
+    }
+    if first_plans {
+        validate_first_cases(report, &reference)?;
     }
     Ok(())
 }
@@ -443,10 +625,13 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     let identity = evaluation_identity(request)?;
     let report = read_json(report_path)?;
     let recipe = read_json(&root.join(RECIPE))?;
-    let protocols = read_json(&root.join("model/context_v3/protocols.json"))?;
-    if report["schema_version"] != json!(1) || report["split"] != json!("test") || report["identity"] != identity.value || report["protocol"] != protocols["sequence"] || report["gate_policy"] != recipe["gate_policy"] || report["promotion_passed"] != json!(true) || report.get("execution_error").is_some() {
+    let protocols = read_json(&root.join(PROTOCOLS))?;
+    let version = report["protocol"]["version"].as_i64().unwrap_or_default();
+    let protocol = protocol_set(&protocols, version).ok_or("report is not an accepted current sealed test")?;
+    if report["schema_version"] != json!(1) || report["split"] != json!("test") || report["identity"] != identity.value || report["protocol"] != protocol["sequence"] || report["gate_policy"] != recipe["gate_policy"] || report["promotion_passed"] != json!(true) || report.get("execution_error").is_some() {
         return Err("report is not an accepted current sealed test".to_owned());
     }
+    let first_plans = version >= FIRST_PLANS_VERSION;
     if std::fs::read(request.ledger.join(format!("{}.access.json", identity.key))).map_err(|error| error.to_string())? != crate::artifact::canonical(&identity.value)
         || std::fs::read(request.ledger.join(format!("{}.outcome.json", identity.key))).map_err(|error| error.to_string())? != std::fs::read(report_path).map_err(|error| error.to_string())?
     {
@@ -462,7 +647,23 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     let mut public_profiles = Map::new();
     for profile in PROFILES {
         let private = &report["profiles"][profile];
-        public_profiles.insert(profile.to_owned(), json!({"counts": private["counts"], "gates": private["gates"], "early_off": {"counts": private["early_off"]["counts"], "gates": private["early_off"]["gates"]}}));
+        let mut public = json!({"counts": private["counts"], "gates": private["gates"], "early_off": {"counts": private["early_off"]["counts"], "gates": private["early_off"]["gates"]}});
+        if first_plans {
+            // Of the first plans, the counts and the earliness of the gated pairs and of the installed reference; no case.
+            let first = &private["first"];
+            let (mut counts, mut early) = (Map::new(), Map::new());
+            for pair in FIRST_PUBLIC_PAIRS {
+                counts.insert(pair.to_owned(), first["counts"][pair].clone());
+                early.insert(pair.to_owned(), first["earliness"][pair].clone());
+            }
+            public["first"] = json!({"counts": counts, "earliness": early, "gates": first["gates"]});
+        }
+        public_profiles.insert(profile.to_owned(), public);
+    }
+    let mut test = json!({"documents": selection["replayed_documents"], "selected_rows": selection["selected_rows"], "trimmed_rows": selection["trimmed_rows"], "unsupported_rows": selection["unsupported"].as_array().map_or(0, Vec::len), "profiles": public_profiles});
+    if first_plans {
+        test["first_ineligible_rows"] = json!(selection["first_ineligible"].as_array().map_or(0, Vec::len));
+        test["installed_reference"] = report["installed_reference"].clone();
     }
     let payload = read_json(request.artifact)?;
     let prefix_payload = read_json(request.prefix)?;
@@ -473,8 +674,8 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
         "prefix_model_version": prefix.version(), "prefix_feature_version": prefix.feature_version, "prefix_conversion_threshold": prefix.model.conversion_threshold, "prefix_artifact_sha256": identity.value["prefix_candidate_sha256"],
         "prefix_weights_sha256": prefix_payload["weights_sha256"], "prefix_candidate_seal_sha256": identity.value["prefix_candidate_seal_sha256"], "prefix_baseline_path": PREFIX_BASELINE, "prefix_baseline_sha256": identity.value["prefix_baseline_sha256"],
         "candidate_seal_sha256": checksum(request.seal)?, "full_test_report_sha256": checksum(report_path)?, "corpus_manifest_sha256": identity.value["corpus_manifest_sha256"], "provenance": hashes,
-        "calibration": public_calibration, "test": {"documents": selection["replayed_documents"], "selected_rows": selection["selected_rows"], "trimmed_rows": selection["trimmed_rows"], "unsupported_rows": selection["unsupported"].as_array().map_or(0, Vec::len), "profiles": public_profiles},
-        "gate_policy": recipe["gate_policy"], "protocol": protocols["receipt"], "scope": protocols["scope"], "quality_gates_passed": true,
+        "calibration": public_calibration, "test": test,
+        "gate_policy": recipe["gate_policy"], "protocol": protocol["receipt"], "scope": protocol["scope"], "quality_gates_passed": true,
     });
     receipt[DEVCHAT] = devchat_block(&checksum(request.artifact)?, devchat_ledger)?;
     validate_receipt(&receipt, request.artifact, root, request.prefix, &models_dir)?;

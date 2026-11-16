@@ -60,13 +60,17 @@ pub struct Plan {
     pub trimmed_right: usize,
     pub expected_final_group: i64,
     pub intervention_event: Option<usize>,
+    /// The layout the editor is in before the first key: the first key of a plan that selects no layout is typed in it.
+    pub initial_group: i32,
+    /// The letters of the word a plan types first in its text, for a plan that types its focus first; None otherwise.
+    pub focus_letters: Option<usize>,
 }
 
 impl Plan {
     /// A plan of keys chosen by the caller, with nothing trimmed and no intervention.
     #[must_use]
     pub fn typed(identifier: String, document: String, group: i64, expected: String, keys: Vec<PhysicalKey>, expected_final_group: i64) -> Plan {
-        Plan { identifier, document, group: Some(group), initially_wrong: false, expected, keys, unsupported: Vec::new(), trimmed_left: 0, trimmed_right: 0, expected_final_group, intervention_event: None }
+        Plan { identifier, document, group: Some(group), initially_wrong: false, expected, keys, unsupported: Vec::new(), trimmed_left: 0, trimmed_right: 0, expected_final_group, intervention_event: None, initial_group: 0, focus_letters: None }
     }
 }
 
@@ -94,7 +98,7 @@ impl Outcome {
             .iter()
             .map(|item| {
                 json!({"event": item.event, "before": item.before, "after": item.after, "source_group": item.source_group, "target_group": item.target_group,
-                    "actual_group": item.actual_group, "caret_before": item.caret_before, "caret_after": item.caret_after})
+                    "actual_group": item.actual_group, "caret_before": item.caret_before, "caret_after": item.caret_after, "kind": item.kind})
             })
             .collect();
         let mut fields = Map::new();
@@ -216,7 +220,7 @@ impl Replayer {
         for (name, value) in changes {
             settings.set(name, value, false).expect("in memory");
         }
-        let backend = Arc::new(Backend::new("TestEditor", 0, Vec::new()));
+        let backend = Arc::new(Backend::new("TestEditor", plan.initial_group, Vec::new()));
         let clock = FakeClock::new();
         let mut context_policy = self.context_policy.take().expect("one engine at a time");
         context_policy.stream = InputContext::with_clock(clock.read());

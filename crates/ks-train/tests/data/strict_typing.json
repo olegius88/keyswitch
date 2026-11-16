@@ -507,9 +507,9 @@
      "value_tokens": 57
     },
     "src/evaluate.rs": {
-     "literal_compares": 13,
-     "string_key_index": 24,
-     "value_tokens": 65
+     "literal_compares": 9,
+     "string_key_index": 40,
+     "value_tokens": 86
     },
     "src/fit.rs": {
      "literal_compares": 6,
@@ -624,12 +624,12 @@
     },
     "src/promote.rs": {
      "literal_compares": 1,
-     "string_key_index": 13,
+     "string_key_index": 17,
      "value_tokens": 5
     },
     "src/receipt.rs": {
-     "string_key_index": 182,
-     "value_tokens": 55
+     "string_key_index": 231,
+     "value_tokens": 78
     },
     "src/replay.rs": {
      "value_tokens": 32
@@ -727,8 +727,8 @@
     },
     "tests/cycle.rs": {
      "expect_roots": 1,
-     "string_key_index": 263,
-     "value_tokens": 196
+     "string_key_index": 384,
+     "value_tokens": 235
     },
     "tests/eval_boundary.rs": {
      "expect_roots": 1,
@@ -746,8 +746,8 @@
     },
     "tests/eval_evaluate.rs": {
      "expect_roots": 1,
-     "string_key_index": 18,
-     "value_tokens": 16
+     "string_key_index": 64,
+     "value_tokens": 26
     },
     "tests/eval_gates.rs": {
      "expect_roots": 1,
@@ -832,8 +832,8 @@
     },
     "tests/receipt.rs": {
      "expect_roots": 1,
-     "string_key_index": 252,
-     "value_tokens": 100
+     "string_key_index": 403,
+     "value_tokens": 129
     },
     "tests/release_tools.rs": {
      "expect_roots": 1,
@@ -894,9 +894,9 @@
      "value_tokens": 32
     }
    },
-   "literal_compares": 258,
-   "string_key_index": 2939,
-   "value_tokens": 3811
+   "literal_compares": 254,
+   "string_key_index": 3326,
+   "value_tokens": 3933
   },
   "ks-ui": {
    "expect_roots": 1,

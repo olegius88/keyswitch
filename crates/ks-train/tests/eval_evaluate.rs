@@ -5,11 +5,11 @@ mod eval_support;
 mod support;
 
 use ks_train::corpus::CorpusRow;
-use ks_train::evaluate::{select_rows, sequence_plan};
+use ks_train::evaluate::{first_plan, opening_letters, select_rows, sequence_plan, sequence_plans};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::Output;
-use support::{row, scratch, trainer, tree, write_split};
+use support::{digest, row, scratch, trainer, tree, write_split};
 
 fn corpus_row(identifier: &str, original: &str, group: Option<i64>, before: &str, after: &str) -> CorpusRow {
     CorpusRow {
@@ -87,6 +87,49 @@ fn the_keys_of_a_sequence_follow_the_letters_and_the_declared_layout() {
     assert_eq!(plan.keys[0].explicit_group, Some(1));
 }
 
+/// Protocol 5: the focus typed first, in an editor that opens in the layout its first letter is typed in.
+#[test]
+fn a_focus_typed_first_opens_the_editor_in_the_layout_of_its_first_letter() {
+    let row = corpus_row("first", "Hello", Some(0), "we say ", ", мир");
+    let wrong = first_plan(&row, true).expect("a word that opens with a letter of its layout");
+    assert_eq!((wrong.expected.as_str(), wrong.initial_group, wrong.intervention_event, wrong.focus_letters, wrong.trimmed_left), ("Hello, мир", 1, Some(1), Some(5), 0));
+    // No key of the word selects a layout; the first Russian letter after it does.
+    assert!(wrong.keys[..7].iter().all(|key| key.explicit_group.is_none()), "{:?}", wrong.keys);
+    assert_eq!((wrong.keys[7].explicit_group, wrong.expected_final_group), (Some(1), 1));
+    let right = first_plan(&row, false).expect("the correct plan");
+    assert_eq!((right.initial_group, right.intervention_event, right.keys.len()), (0, None, wrong.keys.len()));
+    assert!(!right.initially_wrong && wrong.initially_wrong);
+    // A Russian word opens the editor in English for its wrong plan; the window after it is trimmed as protocol 4 trims it.
+    let russian = first_plan(&corpus_row("ru", "ёлка", Some(1), &full_before("xxx"), &full_after("zzz")), true).expect("a Russian word");
+    assert_eq!((russian.initial_group, russian.trimmed_left, russian.trimmed_right), (0, 0, 3));
+    assert!(russian.expected.starts_with("ёлка") && russian.expected.ends_with("zz "), "{}", russian.expected);
+    // A glyph no layout has is listed, as in protocol 4.
+    assert_eq!(first_plan(&corpus_row("euro", "hello", Some(0), "", " €"), false).expect("a plan").unsupported, ["U+20AC"]);
+    // No first plans: a focus that opens with a digit, a sign or a letter of the other layout, and a focus of no layout.
+    for (original, group) in [("2nd", Some(0)), ("@ghbdtn", Some(0)), ("Hello", Some(1)), ("gitовый", None)] {
+        assert!(first_plan(&corpus_row("none", original, group, "", ""), true).is_none(), "{original}");
+    }
+    assert_eq!((opening_letters("don't"), opening_letters("2nd"), opening_letters("слово")), (3, 0, 5));
+}
+
+#[test]
+fn every_row_protocol_4_types_has_first_plans_or_is_named_as_without_them() {
+    let rows = [
+        corpus_row("a", "hello", Some(0), "say ", ""),
+        corpus_row("b", "2nd", Some(0), "the ", ""),
+        corpus_row("c", "привет", Some(1), "", " €"),
+        corpus_row("d", "gitовый", None, "", ""),
+        corpus_row("e", "мир", Some(1), "", ""),
+    ];
+    let selected: Vec<&CorpusRow> = rows.iter().collect();
+    let plans = sequence_plans(&selected);
+    assert_eq!(plans.sequence.len(), 9);
+    // A row protocol 4 cannot type has no first plans and is not named: it is in the selection's unsupported list.
+    let first: Vec<(&str, bool)> = plans.first.iter().map(|plan| (plan.identifier.as_str(), plan.initially_wrong)).collect();
+    assert_eq!(first, [("a", false), ("a", true), ("e", false), ("e", true)]);
+    assert_eq!(plans.first_ineligible, ["b"]);
+}
+
 #[test]
 fn one_focus_is_selected_per_document_and_group() {
     let rows = [
@@ -146,18 +189,48 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
         development_row(3, "gitовый", None, "это ", " коммит"),
         development_row(4, "café", Some(0), "a ", ""),
         development_row(5, "world", Some(0), &full_before("xxx"), &full_after("zzz")),
+        development_row(6, "2nd", Some(0), "the ", " one"),
     ];
     let answer = development_replay(&tree(), &folder, &rows);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
     let report: Value = serde_json::from_slice(&std::fs::read(folder.join("report.json")).expect("a report")).expect("json");
     let selection = &report["selection"];
     assert_eq!(selection["unsupported"], json!([{"identifier": "development:4", "codepoints": ["U+00E9"]}]));
-    assert_eq!(selection["replayed_documents"], json!({"0": 2, "1": 2, "None": 1}));
+    assert_eq!(selection["replayed_documents"], json!({"0": 3, "1": 2, "None": 1}));
     assert_eq!(selection["trimmed_rows"], json!(1));
     let gates = &report["profiles"]["portable"]["gates"];
     assert_eq!((gates["enough_documents_us"].clone(), gates["enough_documents_ru"].clone()), (json!(false), json!(false)));
     assert!(report["profiles"]["portable"]["ablation"]["candidate_context_baseline_prefix"]["cases"].is_array());
     assert!(!folder.join("ledger").exists(), "a development replay claims no test");
+    // Protocol 5: the words that open with a letter of their layout typed first, by every pair of the default mode.
+    assert_eq!(report["protocol"]["version"], json!(5));
+    assert_eq!(selection["first_ineligible"], json!(["development:6"]));
+    for profile in ["portable", "reference_hunspell"] {
+        let first = &report["profiles"][profile]["first"];
+        for pair in ["baseline", "candidate", "candidate_context_baseline_prefix", "installed"] {
+            assert_eq!((first["counts"][pair]["initially_wrong"].clone(), first["counts"][pair]["initially_correct"].clone()), (json!(4), json!(4)), "{profile} {pair}");
+            let early = &first["earliness"][pair];
+            let classes: Vec<i64> = ["inside_word", "last_letter", "boundary_key", "later", "never"].iter().map(|name| early[*name].as_i64().expect("a count")).collect();
+            assert_eq!(classes.iter().sum::<i64>(), 4, "{profile} {pair}: {early}");
+        }
+        assert_eq!(first["gates"].as_object().expect("gates").len(), 3);
+        assert!(report["profiles"][profile]["early_off"].get("first").is_none(), "the first plans are of the default mode");
+    }
+    // The candidate here is the installed pair: the reference replays the same models, and the report names them.
+    let profile = &report["profiles"]["portable"];
+    assert_eq!(profile["first"]["counts"]["candidate"], profile["first"]["counts"]["installed"]);
+    assert_eq!(profile["first"]["earliness"]["candidate"], profile["first"]["earliness"]["installed"]);
+    assert_eq!(profile["installed"]["counts"], profile["counts"]["candidate"]);
+    let models = tree().join("resources/models");
+    for (field, file) in [("context_sha256", "context_policy_v1.json"), ("prefix_sha256", "prefix_policy_v1.json")] {
+        assert_eq!(report["installed_reference"][field], json!(digest(&std::fs::read(models.join(file)).expect("a model"))));
+    }
+    // A wrong first plan: its first key is the wrong letter, and every correction names the kind of plan that made it.
+    let cases = profile["first"]["cases"]["candidate"].as_array().expect("cases");
+    let wrong = cases.iter().find(|case| case["identifier"] == json!("development:1") && case["initially_wrong"] == json!(true)).expect("a wrong first plan");
+    assert_eq!((wrong["intervention"]["event"].clone(), wrong["intervention"]["observed"].clone(), wrong["focus_letters"].clone()), (json!(1), json!("g"), json!(6)));
+    let kinds: Vec<&str> = cases.iter().chain(profile["cases"]["candidate"].as_array().expect("cases")).flat_map(|case| case["corrections"].as_array().expect("corrections")).map(|item| item["kind"].as_str().expect("a kind")).collect();
+    assert!(!kinds.is_empty() && kinds.iter().all(|kind| !kind.is_empty()), "{kinds:?}");
 }
 
 #[test]

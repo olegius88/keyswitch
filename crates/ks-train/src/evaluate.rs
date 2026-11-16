@@ -14,6 +14,7 @@ use ks_engine::engine::EngineCore;
 use ks_lang::Resources;
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_text::pystr;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,10 +30,32 @@ pub const PROFILES: [&str; 2] = ["portable", "reference_hunspell"];
 pub const BASELINE: &str = "model/context_v3/baseline-context-v1.json";
 pub const PREFIX_BASELINE: &str = "model/prefix_v2/baseline-prefix-v1.json";
 const SEALED_BEFORE_TEST: &str = "sealed-before-test";
+/// The file of the audited sequence protocols, every version a receipt may name.
+pub const PROTOCOLS: &str = "model/context_v3/protocols.json";
+/// The version of the sequence protocol this tree evaluates by.
+pub const SEQUENCE_PROTOCOL_VERSION: i64 = 5;
+/// The version whose blocks stand at the top of the protocols file, where receipts of that version were checked; later
+/// versions stand under `versions`, by number.
+pub const TOP_LEVEL_PROTOCOL_VERSION: i64 = 4;
+/// The version from which the default mode also types each focus first in a text of its own (`first_plan`), and the
+/// default mode's restoration floor is taken from those plans.
+pub const FIRST_PLANS_VERSION: i64 = 5;
+/// The tree's installed pair, replayed in the default mode as a reference of how early the switch comes; never gated.
+pub const INSTALLED: &str = "installed";
+pub const INSTALLED_CONTEXT: &str = "resources/models/context_policy_v1.json";
+pub const INSTALLED_PREFIX: &str = "resources/models/prefix_policy_v1.json";
+/// The pairs whose first plans a report's checks recount and a receipt publishes: the two gated and the installed one.
+pub const FIRST_PUBLIC_PAIRS: [&str; 3] = ["baseline", "candidate", INSTALLED];
+/// The kind of correction an early switch makes: the mode of the engine's plan.
+pub const EARLY_KIND: &str = "early";
+/// The bins of the earliness histogram: the keys from one to this many each, then one bin for every later key.
+pub const SWITCH_KEY_HISTOGRAM_KEYS: usize = 8;
+/// The bin of every key after the last numbered one.
+pub const SWITCH_KEY_HISTOGRAM_LATER: &str = "9+";
 /// The names of a pair in each settings mode, with its context and prefix models.
 const PAIRS: [(Mode, &[(&str, &str, &str)]); 2] = [
     (Mode::EarlyOff, &[("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate")]),
-    (Mode::Default, &[("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate"), ("candidate_context_baseline_prefix", "candidate", "baseline")]),
+    (Mode::Default, &[("baseline", "baseline", "baseline"), ("candidate", "candidate", "candidate"), ("candidate_context_baseline_prefix", "candidate", "baseline"), (INSTALLED, INSTALLED, INSTALLED)]),
 ];
 const MEMBERSHIP_IDENTITY_FIELDS: [&str; 3] = ["row_ids_sha256", "family_ids_sha256", "document_ids_sha256"];
 
@@ -106,28 +129,86 @@ pub fn sequence_plan(row: &CorpusRow, initially_wrong: bool) -> Plan {
                     explicit = Some(if initially_wrong { 1 - declared } else { declared });
                 }
             }
-            let mut candidate = key_of(character, intended.to::<usize>());
-            if candidate.is_none() {
-                candidate = key_of(character, (1 - intended).to::<usize>());
-                if candidate.is_some() {
-                    intended = 1 - intended;
-                    explicit = Some(intended);
-                }
-            }
-            let Some(key) = candidate else {
+            let Some(chosen) = key_in_layout(character, &mut intended, &mut explicit) else {
                 unsupported.insert(format!("U+{:04X}", u32::from(character)));
                 continue;
             };
             if phase == "focus" && Some(index) == focus_letter && initially_wrong {
                 intervention_event = Some(keys.len() + 1);
             }
-            let mut chosen = key.clone();
-            chosen.explicit_group = explicit.map(ks_cast::To::to::<i32>);
             keys.push(chosen);
         }
     }
     let expected = format!("{before}{}{after}", row.original);
-    Plan { identifier: row.identifier.clone(), document: row.document.clone(), group: row.group, initially_wrong, expected, keys, unsupported: unsupported.into_iter().collect(), trimmed_left: left, trimmed_right: right, expected_final_group: intended, intervention_event }
+    Plan { identifier: row.identifier.clone(), document: row.document.clone(), group: row.group, initially_wrong, expected, keys, unsupported: unsupported.into_iter().collect(), trimmed_left: left, trimmed_right: right, expected_final_group: intended, intervention_event, initial_group: 0, focus_letters: None }
+}
+
+/// The key of `character` in the layout the text is typed in, selecting `explicit` if one is set; a glyph only the other
+/// layout has is typed there, and its key selects that layout. None for a glyph neither layout has.
+fn key_in_layout(character: char, intended: &mut i64, explicit: &mut Option<i64>) -> Option<PhysicalKey> {
+    let mut candidate = key_of(character, intended.to::<usize>());
+    if candidate.is_none() {
+        candidate = key_of(character, (1 - *intended).to::<usize>());
+        if candidate.is_some() {
+            *intended = 1 - *intended;
+            *explicit = Some(*intended);
+        }
+    }
+    let mut chosen = candidate?.clone();
+    chosen.explicit_group = explicit.map(ks_cast::To::to::<i32>);
+    Some(chosen)
+}
+
+/// The letters a word opens with: the run of letters from its start.
+#[must_use]
+pub fn opening_letters(text: &str) -> usize {
+    text.chars().take_while(|character| is_alpha(*character)).count()
+}
+
+/// `first_plan` (protocol 5): the focus typed first, in a text of its own: no window before it, the window after it
+/// trimmed as `sequence_plan` trims it. The editor opens in the layout the first key is typed in, the declared one for a
+/// correct plan and the other one for a wrong plan, and that key selects no layout: a wrong plan's first letter is wrong
+/// with no manual choice behind it. A later key selects a layout where the text changes script or has a glyph only the
+/// other layout has, as in `sequence_plan`. None for a row whose focus does not open with a letter of its declared layout.
+#[must_use]
+pub fn first_plan(row: &CorpusRow, initially_wrong: bool) -> Option<Plan> {
+    let declared = row.group.filter(|group| *group == 0 || *group == 1)?;
+    if row.original.chars().next().and_then(script_group) != Some(declared) {
+        return None;
+    }
+    let (_, after, _, right) = trimmed_window(row);
+    let mut intended = declared;
+    let mut keys: Vec<PhysicalKey> = Vec::new();
+    let mut unsupported: BTreeSet<String> = BTreeSet::new();
+    for character in row.original.chars().chain(after.chars()) {
+        let mut explicit: Option<i64> = None;
+        if let Some(group) = script_group(character).filter(|group| *group != intended) {
+            intended = group;
+            explicit = Some(group);
+        }
+        match key_in_layout(character, &mut intended, &mut explicit) {
+            Some(chosen) => keys.push(chosen),
+            None => {
+                unsupported.insert(format!("U+{:04X}", u32::from(character)));
+            }
+        }
+    }
+    let initial_group = if initially_wrong { 1 - declared } else { declared };
+    Some(Plan {
+        identifier: row.identifier.clone(),
+        document: row.document.clone(),
+        group: row.group,
+        initially_wrong,
+        expected: format!("{}{after}", row.original),
+        keys,
+        unsupported: unsupported.into_iter().collect(),
+        trimmed_left: 0,
+        trimmed_right: right,
+        expected_final_group: intended,
+        intervention_event: initially_wrong.then_some(1),
+        initial_group: initial_group.to::<i32>(),
+        focus_letters: Some(opening_letters(&row.original)),
+    })
 }
 
 /// `select_rows`: hash-ranked documents and one hash-ranked focus per document and group.
@@ -178,6 +259,9 @@ fn score_pair(plans: &[Plan], replayer: &mut Replayer, mode: Mode) -> (Counts, V
         counts.add_by("correction_layout_mismatches", outcome.corrections.iter().filter(|item| item.actual_group != item.target_group).count().to::<i64>());
         counts.add_by("final_layout_mismatches", i64::from(!outcome.final_layout_matches));
         let mut case = json!({"identifier": plan.identifier, "document": plan.document, "group": plan.group, "initially_wrong": plan.initially_wrong, "expected": plan.expected, "trimmed_left": plan.trimmed_left, "trimmed_right": plan.trimmed_right});
+        if let Some(letters) = plan.focus_letters {
+            case["focus_letters"] = json!(letters);
+        }
         case.as_object_mut().expect("a case is an object").extend(outcome.fields());
         results.push(case);
     }
@@ -197,24 +281,237 @@ fn profile_gates(candidate: &Counts, baseline: &Counts, documents: &BTreeMap<Str
     })
 }
 
+/// The gates of the first plans (protocol 5), from the counts of the candidate pair and of the baseline pair: restorations
+/// net of corruptions at least the baseline's, no more corruptions than the baseline's, no length changed.
+pub fn first_gates(candidate: impl Fn(&str) -> i64, baseline: impl Fn(&str) -> i64) -> Value {
+    let net = |count: &dyn Fn(&str) -> i64| count("exactly_restored") - count("correct_text_corruptions");
+    json!({
+        "net_restorations_at_least_baseline": net(&candidate) >= net(&baseline),
+        "correct_text_preserved": candidate("correct_text_corruptions") <= baseline("correct_text_corruptions"),
+        "length_preserved": candidate("length_mismatches") == 0,
+    })
+}
+
+/// One correction as the earliness reads it: the key it came at, the layout it typed, the kind of plan that made it.
+#[derive(Clone, Copy, Debug)]
+pub struct Switch<'a> {
+    pub event: usize,
+    pub target_group: i64,
+    pub kind: &'a str,
+}
+
+/// How early the switch came for a pair (protocol 5). A wrong first plan is counted by K, the key of its first correction
+/// into the declared layout (the first key is 1, so K is the number of keys typed when it came), against L, the letters
+/// of the word typed first; and by whether that word is right in the final text. Early switches in correctly typed text
+/// are counted at the start of a text (correct first plans) and inside one (correct plans of protocol 4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Earliness {
+    /// K < L: before the word's last letter.
+    pub inside_word: i64,
+    /// K = L: at its last letter.
+    pub last_letter: i64,
+    /// K = L + 1: at the key after it.
+    pub boundary_key: i64,
+    /// K > L + 1.
+    pub later: i64,
+    /// No correction typed the declared layout.
+    pub never: i64,
+    /// The final text up to its first space is the expected text up to its first space.
+    pub first_word_correct: i64,
+    /// An early switch into the declared layout came by the word's last letter, and the first word is wrong all the same.
+    pub started_right_ended_wrong: i64,
+    /// K summed over the rows whose first word is right, and their number: the mean key of a switch that ended right.
+    pub switch_key_sum: i64,
+    pub switch_key_rows: i64,
+    /// K of those rows, a bin for each key up to `SWITCH_KEY_HISTOGRAM_KEYS`, then one bin for the rest.
+    pub switch_key_histogram: BTreeMap<String, i64>,
+    /// The kind of the correction that gives K, over every row that has one.
+    pub first_correction_kinds: BTreeMap<String, i64>,
+    /// Correct first plans with an early switch: false early switches at the start of a text.
+    pub false_early_first: i64,
+    /// Correct protocol-4 plans of the default mode with an early switch: false early switches inside a text.
+    pub false_early_sequence: i64,
+}
+
+impl Default for Earliness {
+    fn default() -> Earliness {
+        let bins = (1..=SWITCH_KEY_HISTOGRAM_KEYS).map(|key| key.to_string()).chain(std::iter::once(SWITCH_KEY_HISTOGRAM_LATER.to_owned()));
+        Earliness {
+            inside_word: 0,
+            last_letter: 0,
+            boundary_key: 0,
+            later: 0,
+            never: 0,
+            first_word_correct: 0,
+            started_right_ended_wrong: 0,
+            switch_key_sum: 0,
+            switch_key_rows: 0,
+            switch_key_histogram: bins.map(|bin| (bin, 0)).collect(),
+            first_correction_kinds: BTreeMap::new(),
+            false_early_first: 0,
+            false_early_sequence: 0,
+        }
+    }
+}
+
+/// A text up to its first space.
+fn first_word(text: &str) -> &str {
+    text.split(|character: char| pystr::isspace(character.encode_utf8(&mut [0_u8; 4]))).next().unwrap_or_default()
+}
+
+fn early(corrections: &[Switch<'_>]) -> bool {
+    corrections.iter().any(|item| item.kind == EARLY_KIND)
+}
+
+impl Earliness {
+    /// The bin of key `key` in the histogram.
+    #[must_use]
+    pub fn bin(key: usize) -> String {
+        if key <= SWITCH_KEY_HISTOGRAM_KEYS { key.to_string() } else { SWITCH_KEY_HISTOGRAM_LATER.to_owned() }
+    }
+
+    /// A wrong first plan whose word of `letters` letters belongs to the layout `declared`.
+    pub fn add_wrong(&mut self, declared: i64, letters: usize, expected: &str, actual: &str, corrections: &[Switch<'_>]) {
+        let right = first_word(actual) == first_word(expected);
+        self.first_word_correct += i64::from(right);
+        if let Some(switch) = corrections.iter().find(|item| item.target_group == declared) {
+            let key = switch.event;
+            let class = match key.cmp(&letters) {
+                std::cmp::Ordering::Less => &mut self.inside_word,
+                std::cmp::Ordering::Equal => &mut self.last_letter,
+                std::cmp::Ordering::Greater if key == letters + 1 => &mut self.boundary_key,
+                std::cmp::Ordering::Greater => &mut self.later,
+            };
+            *class += 1;
+            *self.first_correction_kinds.entry(switch.kind.to_owned()).or_insert(0) += 1;
+            if right {
+                self.switch_key_sum += key.to::<i64>();
+                self.switch_key_rows += 1;
+                *self.switch_key_histogram.entry(Earliness::bin(key)).or_insert(0) += 1;
+            }
+        } else {
+            self.never += 1;
+        }
+        if !right && corrections.iter().any(|item| item.kind == EARLY_KIND && item.target_group == declared && item.event <= letters) {
+            self.started_right_ended_wrong += 1;
+        }
+    }
+
+    /// A correct first plan.
+    pub fn add_correct_first(&mut self, corrections: &[Switch<'_>]) {
+        self.false_early_first += i64::from(early(corrections));
+    }
+
+    /// A correct plan of protocol 4 in the default mode.
+    pub fn add_correct_sequence(&mut self, corrections: &[Switch<'_>]) {
+        self.false_early_sequence += i64::from(early(corrections));
+    }
+}
+
+/// The corrections of a case as the earliness reads them.
+fn switches(case: &Value) -> Result<Vec<Switch<'_>>, String> {
+    let mut read = Vec::new();
+    for item in case["corrections"].as_array().ok_or("invalid case corrections")? {
+        let event = item["event"].as_u64().ok_or("invalid case correction event")?.to::<usize>();
+        let target_group = item["target_group"].as_i64().ok_or("invalid case correction layout")?;
+        let kind = item["kind"].as_str().ok_or("a case correction without its kind")?;
+        read.push(Switch { event, target_group, kind });
+    }
+    Ok(read)
+}
+
+/// `earliness`: a pair's earliness from its cases: those of its first plans, and those of its protocol-4 plans in the
+/// default mode.
+pub fn earliness(first: &[Value], sequence: &[Value]) -> Result<Earliness, String> {
+    let mut total = Earliness::default();
+    for case in first {
+        let corrections = switches(case)?;
+        if case["initially_wrong"].as_bool().ok_or("invalid case intervention mode")? {
+            let declared = case["group"].as_i64().ok_or("a wrong first case without its layout")?;
+            let letters = case["focus_letters"].as_u64().ok_or("a first case without the letters of its word")?.to::<usize>();
+            let text = |field: &str| case[field].as_str().ok_or("invalid case text or identity");
+            total.add_wrong(declared, letters, text("expected")?, text("actual")?, &corrections);
+        } else {
+            total.add_correct_first(&corrections);
+        }
+    }
+    for case in sequence {
+        if !case["initially_wrong"].as_bool().ok_or("invalid case intervention mode")? {
+            total.add_correct_sequence(&switches(case)?);
+        }
+    }
+    Ok(total)
+}
+
 /// The models of an evaluation.
 pub struct Pairs {
     pub candidate: PathBuf,
     pub baseline: PathBuf,
     pub prefix_candidate: PathBuf,
     pub prefix_baseline: PathBuf,
+    /// The tree's installed pair: the default mode's reference.
+    pub installed: PathBuf,
+    pub prefix_installed: PathBuf,
 }
 
-/// `score_sequences`: every pair replayed in both settings modes; acceptance needs every gate in every mode and profile.
-pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Map<String, Value>, String> {
-    let selected = select_rows(rows);
-    let mut plans = Vec::new();
-    for row in &selected {
-        plans.push(sequence_plan(row, false));
+/// The plans of an evaluation: protocol 4's for every selected row, and the first plans of protocol 5.
+pub struct SequencePlans<'a> {
+    pub sequence: Vec<Plan>,
+    /// For each selected US or RU row that protocol 4 types and whose focus opens with a letter of its layout: the
+    /// correct plan, then the wrong one.
+    pub first: Vec<Plan>,
+    /// The US or RU rows protocol 4 types whose focus opens otherwise: they have no first plans.
+    pub first_ineligible: Vec<&'a str>,
+}
+
+/// `sequence_plans`.
+#[must_use]
+pub fn sequence_plans<'a>(selected: &[&'a CorpusRow]) -> SequencePlans<'a> {
+    let mut plans = SequencePlans { sequence: Vec::new(), first: Vec::new(), first_ineligible: Vec::new() };
+    for &row in selected {
+        let correct = sequence_plan(row, false);
+        let typed = correct.unsupported.is_empty();
+        plans.sequence.push(correct);
         if matches!(row.group, Some(0 | 1)) {
-            plans.push(sequence_plan(row, true));
+            plans.sequence.push(sequence_plan(row, true));
+            if typed {
+                if let (Some(right), Some(wrong)) = (first_plan(row, false), first_plan(row, true)) {
+                    // Every glyph of a first plan stands in its row's window, which protocol 4 types.
+                    assert!(right.unsupported.is_empty(), "a first plan types part of a window that is typed whole");
+                    plans.first.push(right);
+                    plans.first.push(wrong);
+                } else {
+                    plans.first_ineligible.push(row.identifier.as_str());
+                }
+            }
         }
     }
+    plans
+}
+
+/// Which plans a task replays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Part {
+    Sequence,
+    First,
+}
+
+/// One pair's replay of one part of the plans, in one profile and settings mode.
+#[derive(Clone, Copy)]
+struct Task<'a> {
+    profile: usize,
+    mode: Mode,
+    context: &'a str,
+    prefix: &'a str,
+    part: Part,
+}
+
+/// `score_sequences`: every pair replayed in both settings modes, and the first plans in the default mode; acceptance
+/// needs every gate in every mode and profile.
+pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Map<String, Value>, String> {
+    let selected = select_rows(rows);
+    let SequencePlans { sequence: plans, first: first_plans, first_ineligible } = sequence_plans(&selected);
     let mut documents: BTreeMap<String, i64> = BTreeMap::new();
     for (name, group) in [("0", Some(0)), ("1", Some(1)), ("None", None)] {
         let distinct: BTreeSet<&str> = plans.iter().filter(|plan| plan.group == group && plan.unsupported.is_empty()).map(|plan| plan.document.as_str()).collect();
@@ -222,7 +519,7 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     }
     let unsupported: Vec<Value> = plans.iter().filter(|plan| !plan.unsupported.is_empty() && !plan.initially_wrong).map(|plan| json!({"identifier": plan.identifier, "codepoints": plan.unsupported})).collect();
     let selection = json!({"source_ids": selected.iter().map(|row| row.identifier.as_str()).collect::<Vec<_>>(), "selected_rows": selected.len(), "replayed_documents": documents,
-        "trimmed_rows": plans.iter().filter(|plan| !plan.initially_wrong && (plan.trimmed_left != 0 || plan.trimmed_right != 0)).count(), "unsupported": unsupported});
+        "trimmed_rows": plans.iter().filter(|plan| !plan.initially_wrong && (plan.trimmed_left != 0 || plan.trimmed_right != 0)).count(), "unsupported": unsupported, "first_ineligible": first_ineligible});
     let first = &tools.portable;
     let known = EngineCore::known_of(first);
     let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), Some(resources.packaged_identifier()), known, Some(resources.clone())) {
@@ -235,28 +532,40 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let models_dir = resources.resource_dir().join("models");
     let load_context = |path: &Path| ContextModel::load_artifact(path, &models_dir).map_err(|error| format!("{}: {}", path.display(), error.name));
     let load_prefix = |path: &Path| VersionedPrefixModel::load(path).map(Arc::new).map_err(|error| format!("{}: {}", path.display(), error.name));
-    let (prefix_candidate, prefix_baseline) = (load_prefix(&pairs.prefix_candidate)?, load_prefix(&pairs.prefix_baseline)?);
+    let (prefix_candidate, prefix_baseline, prefix_installed) = (load_prefix(&pairs.prefix_candidate)?, load_prefix(&pairs.prefix_baseline)?, load_prefix(&pairs.prefix_installed)?);
     let indexes = [prefix_indexes(first), prefix_indexes(spelling)];
-    let mut tasks: Vec<(usize, Mode, &str, &str, &str)> = Vec::new();
+    // Tasks are listed in the order the report is put together, and run longest first, so that no worker is left with a
+    // long one at the end.
+    let mut tasks: Vec<Task<'_>> = Vec::new();
     for profile in 0..PROFILES.len() {
-        for mode in [Mode::EarlyOff, Mode::Default] {
-            let listed = PAIRS.iter().find(|entry| entry.0 == mode).expect("a mode").1;
-            for (name, context, prefix) in listed {
-                tasks.push((profile, mode, name, context, prefix));
+        for (mode, listed) in PAIRS {
+            for (_, context, prefix) in listed {
+                tasks.push(Task { profile, mode, context, prefix, part: Part::Sequence });
+                if mode == Mode::Default {
+                    tasks.push(Task { profile, mode, context, prefix, part: Part::First });
+                }
             }
         }
     }
+    let plans_of = |part: Part| if part == Part::First { &first_plans } else { &plans };
+    let keys_of = |part: Part| plans_of(part).iter().filter(|plan| plan.unsupported.is_empty()).map(|plan| plan.keys.len()).sum::<usize>();
+    let mut order: Vec<usize> = (0..tasks.len()).collect();
+    order.sort_by_cached_key(|index| std::cmp::Reverse(keys_of(tasks[*index].part)));
     let next = AtomicUsize::new(0);
     let done: Mutex<Vec<Option<(Counts, Vec<Value>)>>> = Mutex::new((0..tasks.len()).map(|_| None).collect());
     let failure: Mutex<Option<String>> = Mutex::new(None);
     std::thread::scope(|scope| {
         for worker in 0..jobs.max(1).min(tasks.len()) {
-            let (tasks, next, done, failure, plans, shared, indexes, prefix_candidate, prefix_baseline, load_context) = (&tasks, &next, &done, &failure, &plans, &shared, &indexes, &prefix_candidate, &prefix_baseline, &load_context);
+            let (tasks, order, next, done, failure, plans_of, shared, indexes, load_context) = (&tasks, &order, &next, &done, &failure, &plans_of, &shared, &indexes, &load_context);
+            let (prefix_candidate, prefix_baseline, prefix_installed) = (&prefix_candidate, &prefix_baseline, &prefix_installed);
             scope.spawn(move || {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    let Some((profile, mode, _name, context, prefix)) = tasks.get(index).copied() else { break };
-                    let path = if context == "candidate" { &pairs.candidate } else { &pairs.baseline };
+                while let Some(index) = order.get(next.fetch_add(1, Ordering::Relaxed)).copied() {
+                    let task = tasks[index];
+                    let path = match task.context {
+                        "candidate" => &pairs.candidate,
+                        INSTALLED => &pairs.installed,
+                        _ => &pairs.baseline,
+                    };
                     let model = match load_context(path) {
                         Ok(model) => model,
                         Err(error) => {
@@ -264,11 +573,15 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
                             break;
                         }
                     };
-                    let prefix_model = if prefix == "candidate" { prefix_candidate.clone() } else { prefix_baseline.clone() };
-                    let models = if profile == 0 { first } else { spelling };
+                    let prefix_model = match task.prefix {
+                        "candidate" => prefix_candidate.clone(),
+                        INSTALLED => prefix_installed.clone(),
+                        _ => prefix_baseline.clone(),
+                    };
+                    let models = if task.profile == 0 { first } else { spelling };
                     let folder = std::env::temp_dir().join(format!("ks-evaluate-{}-{worker}", std::process::id()));
-                    let mut replayer = Replayer::new(tools, models, shared.clone(), folder.clone(), model, Some(prefix_model), indexes[profile].clone());
-                    let scored = score_pair(plans, &mut replayer, mode);
+                    let mut replayer = Replayer::new(tools, models, shared.clone(), folder.clone(), model, Some(prefix_model), indexes[task.profile].clone());
+                    let scored = score_pair(plans_of(task.part), &mut replayer, task.mode);
                     let _ = std::fs::remove_dir_all(folder);
                     done.lock().expect("a worker finished")[index] = Some(scored);
                 }
@@ -279,30 +592,54 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
         return Err(error);
     }
     let mut scored = done.into_inner().expect("the workers finished").into_iter();
+    let mut next_scored = || scored.next().flatten().ok_or("a task was not scored");
     let mut profiles = Map::new();
     let mut all_passed = true;
+    let passed = |gates: &Value| gates.as_object().is_some_and(|table| table.values().all(|value| value == &json!(true)));
     for profile in PROFILES {
         let mut blocks: BTreeMap<&str, Value> = BTreeMap::new();
         for (mode, listed) in PAIRS {
             let mut totals: BTreeMap<&str, Counts> = BTreeMap::new();
             let mut cases: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
+            let mut first_totals: BTreeMap<&str, Counts> = BTreeMap::new();
+            let mut first_cases: BTreeMap<&str, Vec<Value>> = BTreeMap::new();
             for (name, _, _) in listed {
-                let (counts, results) = scored.next().flatten().ok_or("a task was not scored")?;
+                let (counts, results) = next_scored()?;
                 totals.insert(name, counts);
                 cases.insert(name, results);
+                if mode == Mode::Default {
+                    let (counts, results) = next_scored()?;
+                    first_totals.insert(name, counts);
+                    first_cases.insert(name, results);
+                }
             }
             let gates = profile_gates(&totals["candidate"], &totals["baseline"], &documents);
-            all_passed = all_passed && gates.as_object().is_some_and(|table| table.values().all(|value| value == &json!(true)));
+            all_passed = all_passed && passed(&gates);
             let mut block = json!({"counts": {"baseline": totals["baseline"].report(), "candidate": totals["candidate"].report()},
                 "cases": {"baseline": cases["baseline"], "candidate": cases["candidate"]}, "gates": gates});
             let mut ablation = Map::new();
             for (name, counts) in &totals {
-                if *name != "baseline" && *name != "candidate" {
+                if !["baseline", "candidate", INSTALLED].contains(name) {
                     ablation.insert((*name).to_owned(), json!({"counts": counts.report(), "cases": cases[name]}));
                 }
             }
             if !ablation.is_empty() {
                 block["ablation"] = Value::Object(ablation);
+            }
+            if let Some(counts) = totals.get(INSTALLED) {
+                block[INSTALLED] = json!({"counts": counts.report(), "cases": cases[INSTALLED]});
+            }
+            if mode == Mode::Default {
+                let gates = first_gates(|name| first_totals["candidate"].get(name), |name| first_totals["baseline"].get(name));
+                all_passed = all_passed && passed(&gates);
+                let (mut counts, mut early, mut replayed) = (Map::new(), Map::new(), Map::new());
+                for (name, total) in &first_totals {
+                    let typed = first_cases.remove(name).unwrap_or_default();
+                    counts.insert((*name).to_owned(), total.report());
+                    early.insert((*name).to_owned(), json!(earliness(&typed, &cases[name])?));
+                    replayed.insert((*name).to_owned(), Value::Array(typed));
+                }
+                block["first"] = json!({"counts": counts, "earliness": early, "cases": replayed, "gates": gates});
             }
             blocks.insert(mode.as_str(), block);
         }
@@ -363,14 +700,28 @@ pub fn evaluation_identity(request: &EvaluationRequest<'_>) -> Result<Identity, 
     Ok(Identity { value, key })
 }
 
-/// The protocol a report states, in the words of the audited protocol, whose bytes its hash pins.
-pub fn protocol(root: &Path) -> Result<Value, String> {
-    let protocols = read_json(&root.join("model/context_v3/protocols.json"))?;
-    let sequence = protocols["sequence"].clone();
-    if protocols["audited_sequence_protocol_sha256"].as_str() != Some(hex(&Sha256::digest(crate::artifact::canonical(&sequence))).as_str()) {
+/// The blocks of a version of the sequence protocol: `sequence`, `receipt`, `scope` and the audited hash of `sequence`.
+/// Version 4 stands at the top of the file, where the receipts of that version were checked; a later one under
+/// `versions`. None when the file has no such version, or the block there names another.
+#[must_use]
+pub fn protocol_set(protocols: &Value, version: i64) -> Option<&Value> {
+    let set = if version == TOP_LEVEL_PROTOCOL_VERSION { protocols } else { &protocols["versions"][version.to_string()] };
+    (set["sequence"]["version"].as_i64() == Some(version)).then_some(set)
+}
+
+/// The sequence block of a version, in the words of the audited protocol, whose bytes its hash pins.
+pub fn audited_sequence(protocols: &Value, version: i64) -> Result<Value, String> {
+    let set = protocol_set(protocols, version).ok_or_else(|| format!("no sequence protocol of version {version}"))?;
+    let sequence = set["sequence"].clone();
+    if set["audited_sequence_protocol_sha256"].as_str() != Some(hex(&Sha256::digest(crate::artifact::canonical(&sequence))).as_str()) {
         return Err("sequence protocol changed; public receipt protocol must be reviewed".to_owned());
     }
     Ok(sequence)
+}
+
+/// The protocol a report states: the current version's.
+pub fn protocol(root: &Path) -> Result<Value, String> {
+    audited_sequence(&read_json(&root.join(PROTOCOLS))?, SEQUENCE_PROTOCOL_VERSION)
 }
 
 /// `immutable_record`: create a record, or verify the exact existing bytes.
@@ -571,9 +922,20 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     let spelling = reference_models(root, &resources, true)?;
     let tools = Tools::new(root, resources.clone(), portable, BTreeSet::new())?;
     let rows = load_rows(request.corpus, split)?;
-    let pairs = Pairs { candidate: request.artifact.to_path_buf(), baseline: root.join(BASELINE), prefix_candidate: request.prefix.to_path_buf(), prefix_baseline: root.join(PREFIX_BASELINE) };
+    let pairs = Pairs {
+        candidate: request.artifact.to_path_buf(),
+        baseline: root.join(BASELINE),
+        prefix_candidate: request.prefix.to_path_buf(),
+        prefix_baseline: root.join(PREFIX_BASELINE),
+        installed: root.join(INSTALLED_CONTEXT),
+        prefix_installed: root.join(INSTALLED_PREFIX),
+    };
+    // The installed pair is a reference, not an input the seal or the test membership names: the report says which one
+    // it was, and the pair must not change while it is replayed.
+    let installed_reference = || -> Result<Value, String> { Ok(json!({"context_sha256": checksum(&pairs.installed)?, "prefix_sha256": checksum(&pairs.prefix_installed)?})) };
+    let reference = installed_reference()?;
     let gate_policy = read_json(&root.join("model/context_v3/recipe.json"))?["gate_policy"].clone();
-    let mut report = json!({"schema_version": 1, "split": split, "identity": identity.value, "protocol": protocol(root)?, "gate_policy": gate_policy, "promotion_passed": false});
+    let mut report = json!({"schema_version": 1, "split": split, "identity": identity.value, "protocol": protocol(root)?, "gate_policy": gate_policy, "promotion_passed": false, "installed_reference": reference});
     let scored = score_sequences(root, &resources, &tools, &spelling, &rows, &pairs, request.jobs);
     let write_report = |report: &Value| -> Result<(), String> {
         std::fs::create_dir_all(request.output.parent().ok_or("a report outside a folder")?).map_err(|error| error.to_string())?;
@@ -593,6 +955,9 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Value, String> {
     }
     if !request.unsealed {
         unchanged_since(request, &identity)?;
+    }
+    if installed_reference()? != report["installed_reference"] {
+        return Err("the installed pair changed during sequence replay".to_owned());
     }
     if split == "test" {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
@@ -619,5 +984,136 @@ mod tests {
         for (candidate, baseline) in [(&failed, &clean), (&clean, &failed)] {
             assert_eq!(profile_gates(candidate, baseline, &documents)["execution_succeeded"], json!(false));
         }
+    }
+
+    fn switch(event: usize, target_group: i64, kind: &str) -> Switch<'_> {
+        Switch { event, target_group, kind }
+    }
+
+    /// The class of each key a switch can come at, for a Russian word of six letters typed first in the English layout.
+    #[test]
+    fn a_wrong_first_word_is_counted_by_the_key_its_switch_came_at() {
+        let mut total = Earliness::default();
+        for (key, kind) in [(4, "early"), (6, "pause"), (7, "boundary"), (9, "context_word")] {
+            total.add_wrong(1, 6, "привет мир", "привет мир", &[switch(key, 1, kind)]);
+        }
+        total.add_wrong(1, 6, "привет мир", "ghbdtn мир", &[]);
+        // A correction into the other layout first: K is the first one into the declared layout.
+        total.add_wrong(1, 6, "привет мир", "привет мир", &[switch(2, 0, "undo"), switch(12, 1, "boundary")]);
+        assert_eq!((total.inside_word, total.last_letter, total.boundary_key, total.later, total.never), (1, 1, 1, 2, 1));
+        assert_eq!((total.first_word_correct, total.switch_key_rows, total.switch_key_sum), (5, 5, 4 + 6 + 7 + 9 + 12));
+        let histogram: Vec<i64> = total.switch_key_histogram.values().copied().collect();
+        assert_eq!(total.switch_key_histogram.len(), SWITCH_KEY_HISTOGRAM_KEYS + 1);
+        assert_eq!(histogram.iter().sum::<i64>(), 5);
+        assert_eq!((total.switch_key_histogram["4"], total.switch_key_histogram["6"], total.switch_key_histogram["7"], total.switch_key_histogram[SWITCH_KEY_HISTOGRAM_LATER]), (1, 1, 1, 2));
+        assert_eq!(total.first_correction_kinds, BTreeMap::from([("boundary".to_owned(), 2), ("context_word".to_owned(), 1), ("early".to_owned(), 1), ("pause".to_owned(), 1)]));
+        assert_eq!(total.started_right_ended_wrong, 0);
+    }
+
+    /// An early switch that began the word right and a word that ended wrong; the word is the text up to its first space.
+    #[test]
+    fn a_word_an_early_switch_began_and_its_end_spoiled_is_counted_apart() {
+        let mut total = Earliness::default();
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(4, 1, "early")]);
+        // Wrong after an early switch that came only after the word: not an earliness error of that kind.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(7, 1, "early")]);
+        // Wrong after a switch of another kind inside the word.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(4, 1, "pause")]);
+        // The first word right, the rest wrong: the first word counts as right.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарадж crfpfk", &[switch(4, 1, "early")]);
+        assert_eq!((total.started_right_ended_wrong, total.first_word_correct, total.switch_key_rows), (1, 1, 1));
+        assert_eq!((total.inside_word, total.boundary_key), (3, 1));
+        // A whole text of one word.
+        assert_eq!(first_word("слово"), "слово");
+        assert_eq!(first_word(""), "");
+    }
+
+    #[test]
+    fn an_early_switch_in_text_typed_right_is_a_false_one() {
+        let mut total = Earliness::default();
+        total.add_correct_first(&[switch(4, 0, "early")]);
+        total.add_correct_first(&[switch(7, 0, "boundary")]);
+        total.add_correct_first(&[]);
+        total.add_correct_sequence(&[switch(30, 1, "early"), switch(31, 1, "early")]);
+        assert_eq!((total.false_early_first, total.false_early_sequence), (1, 1));
+        assert_eq!(Earliness::bin(1), "1");
+        assert_eq!(Earliness::bin(SWITCH_KEY_HISTOGRAM_KEYS + 1), SWITCH_KEY_HISTOGRAM_LATER);
+    }
+
+    fn case(wrong: bool, letters: Option<usize>, actual: &str, corrections: &Value) -> Value {
+        let mut case = json!({"initially_wrong": wrong, "group": 1, "expected": "привет мир", "actual": actual, "corrections": corrections});
+        if let Some(letters) = letters {
+            case["focus_letters"] = json!(letters);
+        }
+        case
+    }
+
+    /// The earliness a report states is read from its cases: the same numbers as from the corrections themselves.
+    #[test]
+    fn the_earliness_of_a_pair_is_read_from_its_cases() {
+        let early = json!([{"event": 4, "target_group": 1, "kind": "early"}]);
+        let first = [case(true, Some(6), "привет мир", &early), case(false, Some(6), "привет мир", &json!([]))];
+        let sequence = [case(false, None, "привет мир", &early), case(true, None, "привет мир", &early)];
+        let read = earliness(&first, &sequence).expect("cases that hold");
+        let mut expected = Earliness::default();
+        expected.add_wrong(1, 6, "привет мир", "привет мир", &[switch(4, 1, "early")]);
+        expected.add_correct_sequence(&[switch(4, 1, "early")]);
+        assert_eq!(read, expected);
+        // A case that does not say what the earliness needs.
+        let refused = |first: &[Value], sequence: &[Value], words: &str| {
+            let said = earliness(first, sequence).expect_err(words);
+            assert!(said.contains(words), "{words}: {said}");
+        };
+        refused(&[case(true, None, "привет мир", &early)], &[], "letters of its word");
+        refused(&[case(true, Some(6), "привет мир", &json!([{"event": 4, "target_group": 1}]))], &[], "without its kind");
+        refused(&[case(true, Some(6), "привет мир", &json!([{"event": -1, "target_group": 1, "kind": "early"}]))], &[], "correction event");
+        refused(&[case(true, Some(6), "привет мир", &json!([{"event": 1, "target_group": "x", "kind": "early"}]))], &[], "correction layout");
+        refused(&[case(true, Some(6), "привет мир", &json!(1))], &[], "invalid case corrections");
+        refused(&[json!({"initially_wrong": "x", "corrections": []})], &[], "intervention mode");
+        refused(&[], &[json!({"initially_wrong": "x", "corrections": []})], "intervention mode");
+        refused(&[json!({"initially_wrong": true, "corrections": [], "focus_letters": 1})], &[], "without its layout");
+        refused(&[json!({"initially_wrong": true, "group": 1, "corrections": [], "focus_letters": 1})], &[], "invalid case text");
+    }
+
+    #[test]
+    fn the_first_plans_are_gated_by_their_balance_their_corruptions_and_their_lengths() {
+        let counts = |restored: i64, spoiled: i64, lengths: i64| move |name: &str| match name {
+            "exactly_restored" => restored,
+            "correct_text_corruptions" => spoiled,
+            "length_mismatches" => lengths,
+            _ => 0,
+        };
+        let all = |gates: &Value| gates.as_object().expect("gates").values().all(|value| value == &json!(true));
+        assert!(all(&first_gates(counts(10, 1, 0), counts(9, 1, 0))));
+        assert!(all(&first_gates(counts(10, 1, 0), counts(10, 1, 0))));
+        let fewer = first_gates(counts(9, 1, 0), counts(10, 1, 0));
+        assert_eq!((fewer["net_restorations_at_least_baseline"].clone(), fewer["correct_text_preserved"].clone()), (json!(false), json!(true)));
+        // More restored does not buy more corruption.
+        let spoiling = first_gates(counts(20, 2, 0), counts(10, 1, 0));
+        assert_eq!((spoiling["net_restorations_at_least_baseline"].clone(), spoiling["correct_text_preserved"].clone()), (json!(true), json!(false)));
+        assert_eq!(first_gates(counts(10, 1, 1), counts(9, 1, 0))["length_preserved"], json!(false));
+    }
+
+    /// Version 4 stands at the top of the file, version 5 under `versions`; each answers for its own hash.
+    #[test]
+    fn a_protocol_is_found_by_its_version() {
+        let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let protocols = read_json(&tree.join(PROTOCOLS)).expect("the protocols");
+        for version in [TOP_LEVEL_PROTOCOL_VERSION, SEQUENCE_PROTOCOL_VERSION] {
+            let set = protocol_set(&protocols, version).expect("a version the tree keeps");
+            assert_eq!(set["receipt"]["version"], json!(version));
+            assert_eq!(audited_sequence(&protocols, version).expect("audited")["version"], json!(version));
+        }
+        assert_eq!(protocol(&tree).expect("the current protocol")["version"], json!(SEQUENCE_PROTOCOL_VERSION));
+        assert!(protocol_set(&protocols, 3).is_none() && protocol_set(&protocols, 6).is_none());
+        assert!(audited_sequence(&protocols, 6).unwrap_err().contains("no sequence protocol of version 6"));
+        // A block that names another version than the one it stands under, and one whose words changed after their audit.
+        let mut moved = protocols.clone();
+        moved["versions"]["5"]["sequence"]["version"] = json!(4);
+        assert!(protocol_set(&moved, SEQUENCE_PROTOCOL_VERSION).is_none());
+        let mut changed = protocols;
+        changed["versions"]["5"]["sequence"]["window"] = json!("other");
+        assert!(audited_sequence(&changed, SEQUENCE_PROTOCOL_VERSION).unwrap_err().contains("protocol changed"));
+        assert!(audited_sequence(&changed, TOP_LEVEL_PROTOCOL_VERSION).is_ok());
     }
 }

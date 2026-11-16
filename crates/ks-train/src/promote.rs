@@ -3,7 +3,7 @@
 //! before that read: this refuses to touch the test until every check holds.
 use ks_cast::To as _;
 use crate::corpus::read_json;
-use crate::evaluate::{EvaluationRequest, evaluate, validate_candidate_seal, validate_prefix_seal};
+use crate::evaluate::{EvaluationRequest, FIRST_PLANS_VERSION, evaluate, validate_candidate_seal, validate_prefix_seal};
 use crate::mixed::{DevchatRequest, devchat};
 use crate::receipt::{export_receipt, validate_receipt};
 use ks_text::{Indent, JsonOptions};
@@ -179,11 +179,15 @@ fn installed_files(request: &PromoteRequest<'_>) -> [(PathBuf, &'static str); 4]
     ]
 }
 
-/// `restoration_shortfall`: where the sealed test leaves the candidate short of the release receipt's floors.
+/// `restoration_shortfall`: where the sealed test leaves the candidate short of the release receipt's floors. From
+/// protocol 5 on the default mode is held to its first plans, where every wrong word stands at the start of a text and so
+/// can be restored; its protocol-4 plans keep their gates.
 fn restoration_shortfall(report: &Value) -> Vec<String> {
     let mut failures = Vec::new();
+    let first_plans = report["protocol"]["version"].as_i64().is_some_and(|version| version >= FIRST_PLANS_VERSION);
     for (name, profile) in report["profiles"].as_object().into_iter().flatten() {
-        for (mode, counts) in [("default", &profile["counts"]), ("early_off", &profile["early_off"]["counts"])] {
+        let default = if first_plans { &profile["first"]["counts"] } else { &profile["counts"] };
+        for (mode, counts) in [("default", default), ("early_off", &profile["early_off"]["counts"])] {
             let (candidate, baseline) = (&counts["candidate"], &counts["baseline"]);
             let restored = candidate["exactly_restored"].as_i64().unwrap_or(0);
             let margin = RECEIPT_MIN_RESTORATION_MARGIN.iter().find(|entry| entry.0 == mode).map_or(0, |entry| entry.1);
@@ -268,5 +272,22 @@ mod tests {
         assert!(calibration_shortfall(&even).is_empty());
         let unnamed = comparison(r#"{"calibration": {"portable": {"installed": {"by_class": {"all": {"net": 0}}}}}}"#);
         assert_eq!(calibration_shortfall(&unnamed), ["portable"]);
+    }
+
+    /// Protocol 4 holds the default mode to its sequences, protocol 5 to its first plans; early_off is held as before.
+    #[test]
+    fn the_default_floor_is_read_where_the_protocol_of_the_report_puts_it() {
+        let counts = |candidate: i64, baseline: i64| serde_json::json!({"candidate": {"exactly_restored": candidate, "initially_wrong": candidate}, "baseline": {"exactly_restored": baseline}});
+        let report = |version: i64, sequences: Value, first: Value| {
+            serde_json::json!({"protocol": {"version": version}, "profiles": {"portable": {"counts": sequences, "first": {"counts": first}, "early_off": {"counts": counts(10, 9)}}}})
+        };
+        let short = vec!["portable/default: the margin over the baseline pair".to_owned()];
+        assert_eq!(restoration_shortfall(&report(4, counts(5, 6), counts(9, 9))), short);
+        assert!(restoration_shortfall(&report(4, counts(6, 6), counts(5, 9))).is_empty());
+        assert_eq!(restoration_shortfall(&report(5, counts(9, 9), counts(5, 6))), short);
+        assert!(restoration_shortfall(&report(5, counts(5, 6), counts(6, 6))).is_empty());
+        // early_off keeps its margin of one row and its share.
+        let behind = serde_json::json!({"protocol": {"version": 5}, "profiles": {"portable": {"first": {"counts": counts(6, 6)}, "early_off": {"counts": counts(9, 9)}}}});
+        assert_eq!(restoration_shortfall(&behind), ["portable/early_off: the margin over the baseline pair"]);
     }
 }
