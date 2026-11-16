@@ -6,7 +6,10 @@ use crate::corpus::read_json;
 use crate::evaluate::{EvaluationRequest, evaluate, validate_candidate_seal, validate_prefix_seal};
 use crate::mixed::{DevchatRequest, devchat};
 use crate::receipt::{export_receipt, validate_receipt};
+use ks_text::{Indent, JsonOptions};
+use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -19,7 +22,16 @@ const INSTALLED_CONTEXT_SEAL: &str = "model/context_v3/candidate-seal.json";
 const INSTALLED_PREFIX: &str = "resources/models/prefix_policy_v1.json";
 const INSTALLED_PREFIX_SEAL: &str = "model/prefix_v2/candidate-seal.json";
 const RECEIPT: &str = "model/context_v3/release-receipt.json";
-const TESTED_CRATES: [&str; 7] = ["ks-text", "ks-lang", "ks-context", "ks-engine", "ks-config", "ks-replay", "ks-train"];
+const RECIPE: &str = "model/context_v3/recipe.json";
+/// The crates of the program, whose tests run in the tree and again in a scratch tree with the candidate pair installed.
+const PROGRAM_CRATES: [&str; 6] = ["ks-text", "ks-lang", "ks-context", "ks-engine", "ks-config", "ks-replay"];
+/// The trainer's tests run in the tree only: they hold the kept records (the release receipt, the engine replays of the
+/// boundary and prefix models) to the installed pair, and a candidate has no receipt before its sealed test is read.
+const TRAINER_CRATE: &str = "ks-train";
+/// The names the comparison of the calibration gives the two artifacts, and the file it is written to, beside the report.
+const INSTALLED_NAME: &str = "installed";
+const CANDIDATE_NAME: &str = "candidate";
+const CALIBRATION_COMPARISON: &str = "calibration-comparison.json";
 /// The floors the release receipt holds the sealed test to: more rows restored than the frozen baseline pair, by a mode.
 const RECEIPT_MIN_RESTORATION_MARGIN: [(&str, i64); 2] = [("default", 0), ("early_off", 1)];
 const RECEIPT_MIN_RESTORED_SHARE: f64 = 0.97;
@@ -45,14 +57,61 @@ fn run(command: &mut Command, label: &str) -> bool {
     command.status().is_ok_and(|status| status.success())
 }
 
+/// The tests of the program's crates in a tree, every test binary run whatever an earlier one says, so that a failure
+/// names all the others.
 fn tests_of(tree: &Path) -> Command {
     let mut command = Command::new("cargo");
     // A tree's tests read files beside their sources, whose paths are compiled in: a target folder of its own.
-    command.current_dir(tree).env("CARGO_TARGET_DIR", tree.join("target")).args(["test", "--profile", "parity"]);
-    for name in TESTED_CRATES {
+    command.current_dir(tree).env("CARGO_TARGET_DIR", tree.join("target")).args(["test", "--profile", "parity", "--no-fail-fast"]);
+    for name in PROGRAM_CRATES {
         command.args(["-p", name]);
     }
     command
+}
+
+/// What the check of the calibration reads of a comparison (`compare`): each artifact's net on the calibration frames,
+/// by profile.
+#[derive(Deserialize)]
+struct Comparison {
+    calibration: BTreeMap<String, BTreeMap<String, Scored>>,
+}
+
+#[derive(Deserialize)]
+struct Scored {
+    by_class: Classes,
+}
+
+#[derive(Deserialize)]
+struct Classes {
+    all: Net,
+}
+
+#[derive(Deserialize)]
+struct Net {
+    net: i64,
+}
+
+/// `calibration_shortfall`: the profiles in which the candidate nets less on the calibration frames than the installed
+/// pair. The quality ratchet holds the receipt to the installed pair's number there, so such a candidate could not be
+/// installed whatever its sealed test said.
+fn calibration_shortfall(comparison: &Comparison) -> Vec<String> {
+    let net = |pairs: &BTreeMap<String, Scored>, name: &str| pairs.get(name).map(|scored| scored.by_class.all.net);
+    comparison.calibration.iter().filter(|(_, pairs)| net(pairs, CANDIDATE_NAME) < net(pairs, INSTALLED_NAME)).map(|(profile, _)| profile.clone()).collect()
+}
+
+/// The candidate and the installed pair compared on the corpus's calibration frames, the comparison written beside the
+/// report; the profiles the candidate falls short in.
+fn calibration(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
+    let root = request.root;
+    let inputs = crate::fit::load_inputs(root, &root.join("resources"), request.corpus, read_json(&root.join(RECIPE))?, request.ledger)?;
+    let artifacts = [(INSTALLED_NAME.to_owned(), root.join(INSTALLED_CONTEXT)), (CANDIDATE_NAME.to_owned(), request.candidate.join(CONTEXT_ARTIFACT))];
+    let report = crate::compare::compare(&inputs, &artifacts, request.jobs)?;
+    let path = request.report.with_file_name(CALIBRATION_COMPARISON);
+    let format = JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(Indent::Spaces(1)), ..JsonOptions::default() };
+    let text = ks_text::json_dumps(&report, &format) + "\n";
+    std::fs::write(&path, &text).map_err(|error| format!("{}: {error}", path.display()))?;
+    let comparison: Comparison = ks_text::json::loads(text).map_err(|error| error.to_string())?;
+    Ok(calibration_shortfall(&comparison))
 }
 
 /// `preflight`: every check of the pinned files, before any test byte is read; the failures, empty if none.
@@ -71,12 +130,18 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
     if let Err(error) = validate_prefix_seal(root, &request.prefix_candidate.join(PREFIX_ARTIFACT), &request.prefix_candidate.join(PREFIX_SEAL), true) {
         failures.push(format!("prefix seal: {error}"));
     }
-    if !run(&mut tests_of(root), "the tests of the engine and the trainer") {
+    match calibration(request) {
+        Ok(short) => failures.extend(short.iter().map(|profile| format!("the calibration nets less than the installed pair's in the {profile} profile: the quality ratchet would refuse the install"))),
+        Err(error) => failures.push(format!("the calibration could not be compared with the installed pair's: {error}")),
+    }
+    if !run(tests_of(root).args(["-p", TRAINER_CRATE]), "the tests of the engine and the trainer") {
         failures.push("the tests of the engine and the trainer".to_owned());
     }
     if failures.is_empty() {
-        // The same tests with the candidate pair installed, in a scratch worktree of the commit; then the owner's typing
-        // in that tree against the last release.
+        // The program's tests with the candidate pair installed, in a scratch worktree of the commit; then the owner's
+        // typing in that tree against the last release. The gate runs in the scratch tree: what it reads is named from
+        // anywhere, and the owner's typing stays in the tree it lives in.
+        let (field_root, released) = (std::path::absolute(request.field_root).map_err(|error| error.to_string())?, std::path::absolute(request.released_rows).map_err(|error| error.to_string())?);
         let scratch = std::env::temp_dir().join(format!("keyswitch-candidate-{}", std::process::id()));
         if !run(Command::new("git").current_dir(root).args(["worktree", "add", "--detach"]).arg(&scratch).arg("HEAD"), "a worktree of the commit") {
             return Err("no worktree of the commit".to_owned());
@@ -84,14 +149,14 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
         for (source, target) in installed_files(request) {
             std::fs::copy(&source, scratch.join(target)).map_err(|error| error.to_string())?;
         }
-        if !run(&mut tests_of(&scratch), "the tests with the candidate pair installed") {
+        if !run(&mut tests_of(&scratch), "the program's tests with the candidate pair installed") {
             failures.push("the tests, with the candidate pair installed".to_owned());
         }
         let mut build = Command::new("cargo");
         build.current_dir(&scratch).env("CARGO_TARGET_DIR", scratch.join("target")).args(["build", "--profile", "parity", "-p", "ks-replay", "--bins"]);
         let built = run(&mut build, "the replay of the candidate tree");
         let mut field = Command::new(scratch.join("target/parity/field-gate"));
-        field.current_dir(&scratch).arg("--root").arg(request.field_root).arg("--released").arg(request.released_rows).arg("--replay").arg(scratch.join("target/parity/ks-replay"));
+        field.current_dir(&scratch).arg("--root").arg(&field_root).arg("--released").arg(&released).arg("--replay").arg(scratch.join("target/parity/ks-replay"));
         if !built || !run(&mut field, "the owner's typing against the last release") {
             failures.push("the owner's typing: a word the last release got right comes out wrong, or the field regression gate could not run".to_owned());
         }
@@ -182,4 +247,26 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     validate_receipt(&receipt, &released, root, &installed_prefix, &resource_dir.join("models"))?;
     println!("installed {}", receipt["model_version"].as_str().unwrap_or(""));
     Ok(0)
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    fn comparison(text: &str) -> Comparison {
+        ks_text::json::loads(text).expect("a comparison")
+    }
+
+    #[test]
+    fn a_candidate_that_nets_less_on_the_calibration_than_the_installed_pair_falls_short_in_that_profile() {
+        let scored = |installed: i64, candidate: i64| format!(r#"{{"installed": {{"by_class": {{"all": {{"net": {installed}}}}}}}, "candidate": {{"by_class": {{"all": {{"net": {candidate}}}}}}}}}"#);
+        let both = comparison(&format!(r#"{{"calibration": {{"portable": {}, "reference_hunspell": {}}}, "development": {{}}}}"#, scored(13816, 13824), scored(13862, 13861)));
+        assert_eq!(calibration_shortfall(&both), ["reference_hunspell"]);
+        // Breaking even holds; a candidate the comparison does not name nets nothing.
+        let even = comparison(&format!(r#"{{"calibration": {{"portable": {}}}}}"#, scored(5, 5)));
+        assert!(calibration_shortfall(&even).is_empty());
+        let unnamed = comparison(r#"{"calibration": {"portable": {"installed": {"by_class": {"all": {"net": 0}}}}}}"#);
+        assert_eq!(calibration_shortfall(&unnamed), ["portable"]);
+    }
 }

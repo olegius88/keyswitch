@@ -699,7 +699,37 @@ fn stubs(folder: &Path) -> std::ffi::OsString {
         std::fs::write(&path, body).expect("a stub");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("a mode");
     };
-    write("cargo", "#!/bin/sh\ncase \"$1\" in\n  test)\n    case \"$CARGO_TARGET_DIR\" in\n      *keyswitch-candidate*) [ -z \"$KS_STUB_SCRATCH_TESTS_FAIL\" ] ;;\n      *) [ -z \"$KS_STUB_TESTS_FAIL\" ] ;;\n    esac\n    exit $?\n    ;;\n  build)\n    mkdir -p \"$CARGO_TARGET_DIR/parity\"\n    printf '#!/bin/sh\\nexit %s\\n' \"${KS_STUB_FIELD:-0}\" > \"$CARGO_TARGET_DIR/parity/field-gate\"\n    chmod +x \"$CARGO_TARGET_DIR/parity/field-gate\"\n    exit \"${KS_STUB_BUILD:-0}\"\n    ;;\nesac\n");
+    write(
+        "cargo",
+        r#"#!/bin/sh
+case "$1" in
+  test)
+    [ -z "$KS_STUB_LOG" ] || echo "$CARGO_TARGET_DIR $*" >> "$KS_STUB_LOG"
+    case "$CARGO_TARGET_DIR" in
+      *keyswitch-candidate*) [ -z "$KS_STUB_SCRATCH_TESTS_FAIL" ] ;;
+      *) [ -z "$KS_STUB_TESTS_FAIL" ] ;;
+    esac
+    exit $?
+    ;;
+  build)
+    mkdir -p "$CARGO_TARGET_DIR/parity"
+    cp "$(dirname "$0")/field-gate" "$CARGO_TARGET_DIR/parity/field-gate"
+    exit "${KS_STUB_BUILD:-0}"
+    ;;
+esac
+"#,
+    );
+    // The gate runs in the scratch tree: a tree or a record named relative to another folder is not there.
+    write(
+        "field-gate",
+        r#"#!/bin/sh
+while [ $# -gt 1 ]; do
+  case "$1" in --root|--released) case "$2" in /*) ;; *) echo "the gate is given a relative $1: $2"; exit 2 ;; esac ;; esac
+  shift
+done
+exit "${KS_STUB_FIELD:-0}"
+"#,
+    );
     write("git", "#!/bin/sh\ncase \"$1\" in\n  diff) [ -z \"$KS_STUB_PENDING\" ] || echo a-changed-file; exit 0 ;;\n  worktree)\n    if [ \"$2\" = add ]; then\n      [ -z \"$KS_STUB_NO_WORKTREE\" ] || exit 1\n      mkdir -p \"$4/resources/models\" \"$4/model/context_v3\" \"$4/model/prefix_v2\"\n    fi\n    exit 0 ;;\nesac\n");
     let mut path = bin.into_os_string();
     path.push(":");
@@ -749,7 +779,7 @@ fn promote(run: &Promotion) -> Command {
         .arg("--report")
         .arg(&run.report)
         .arg("--released")
-        .arg(run.folder.join("released"))
+        .arg("released")
         .arg("--devchat")
         .arg(run.folder.join("devchat"))
         .arg("--ledger")
@@ -757,7 +787,9 @@ fn promote(run: &Promotion) -> Command {
         .arg("--devchat-ledger")
         .arg(&run.chat)
         .args(["--jobs", "1"])
-        .env("PATH", &run.path);
+        .env("PATH", &run.path)
+        // The last release's rows named from the folder the promotion is run in, as a person types them.
+        .current_dir(&run.folder);
     command
 }
 
@@ -769,9 +801,17 @@ fn told(command: &mut Command) -> (bool, String) {
 #[test]
 fn a_candidate_is_installed_after_every_check_and_only_then() {
     let run = promotion("promote", &accepted_report(&SEALED));
-    // Checks only: nothing is read or changed.
-    let (held, said) = told(promote(&run).arg("--check-only"));
+    // Checks only: nothing is read or changed. The program's tests run in the tree and with the candidate pair installed,
+    // the trainer's in the tree only, every test binary whatever an earlier one says; the calibration is compared.
+    let log = run.folder.join("cargo.log");
+    let (held, said) = told(promote(&run).arg("--check-only").env("KS_STUB_LOG", &log));
     assert!(held && said.contains("every check holds"), "{said}");
+    let runs = std::fs::read_to_string(&log).expect("the runs");
+    let (scratch, tree): (Vec<&str>, Vec<&str>) = runs.lines().partition(|line| line.contains("keyswitch-candidate"));
+    assert!(scratch.len() == 1 && tree.len() == 1, "{runs}");
+    assert!(scratch.iter().chain(&tree).all(|line| line.contains("--no-fail-fast") && line.contains("-p ks-replay")), "{runs}");
+    assert!(tree.iter().all(|line| line.contains("-p ks-train")) && !scratch.iter().any(|line| line.contains("-p ks-train")), "{runs}");
+    assert!(run.folder.join("calibration-comparison.json").is_file());
     // The installed pair goes in, with its receipt.
     let (held, said) = told(&mut promote(&run));
     assert!(held && said.contains("installed"), "{said}");
@@ -793,6 +833,13 @@ fn a_check_that_fails_keeps_the_test_unread() {
     fails("KS_STUB_BUILD", "1", "the owner's typing");
     let (held, said) = told(promote(&run).arg("--check-only").env("KS_STUB_NO_WORKTREE", "1"));
     assert!(!held && said.contains("no worktree"), "{said}");
+    // The installed pair the candidate is compared with on the calibration frames cannot be read.
+    let installed = run.tree.join("resources/models/context_policy_v1.json");
+    let pair = std::fs::read(&installed).expect("the installed pair");
+    std::fs::write(&installed, "{}").expect("a model");
+    let (held, said) = told(promote(&run).arg("--check-only"));
+    assert!(!held && said.contains("the calibration could not be compared") && said.contains("no test byte was read"), "{said}");
+    std::fs::write(&installed, pair).expect("the installed pair");
     // No development result of the chat test, or one that holds nothing.
     let development = run.chat.join(format!("{}.dev.json", checksum(&FITTED.model).expect("a checksum")));
     let bytes = std::fs::read(&development).expect("a record");
