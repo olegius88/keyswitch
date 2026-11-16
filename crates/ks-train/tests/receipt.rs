@@ -6,7 +6,7 @@ mod support;
 
 use ks_train::corpus::read_json;
 use ks_train::artifact::{tree_of, typed};
-use ks_train::evaluate::{Earliness, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, protocol_set};
+use ks_train::evaluate::{Earliness, FirstFalseEarly, PROTOCOLS, SequenceFalseEarly, SEQUENCE_PROTOCOL_VERSION, protocol_set};
 use ks_train::receipt::{validate_evidence, validate_receipt};
 use ks_train::sequence_report::{ByPair, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
 use serde_json::{Value, json};
@@ -472,7 +472,8 @@ fn version_five() -> Value {
             never: words - restored,
             first_word_correct: restored,
             switch_key_rows: restored,
-            false_early_sequence: 1,
+            correct_first_plans: FirstFalseEarly { false_early: 2, false_early_on_focus: 1, false_early_flicker: 2, false_early_corrupted: 0, early_returns: 3 },
+            correct_sequence_plans: SequenceFalseEarly { false_early: 1, false_early_flicker: 1, false_early_corrupted: 0, early_returns: 1 },
             switch_key_sum: 4 * (restored - 10) + 6 * 5 + 7 * 5,
             ..Earliness::default()
         };
@@ -587,7 +588,7 @@ fn the_earliness_of_a_receipt_holds_together() {
     });
     refuses_five("invalid type", |value| early_tree(value)["never"] = json!("many"));
     with(EARLY, &|early| early.never += 1);
-    with(EARLY, &|early| early.false_early_first = -1);
+    with(EARLY, &|early| early.correct_first_plans.false_early_on_focus = -1);
     with(EARLY, &|early| {
         early.switch_key_histogram.remove("9+");
     });
@@ -607,8 +608,33 @@ fn the_earliness_of_a_receipt_holds_together() {
     with(EARLY, &|early| *early.switch_key_histogram.get_mut("5").unwrap() += 1);
     with(EARLY, &|early| early.switch_key_sum += 1);
     with(EARLY, &|early| early.switch_key_sum -= 1);
-    with(EARLY, &|early| early.false_early_first = 100_000);
-    with(EARLY, &|early| early.false_early_sequence = 100_000);
+    // The rows of a false early switch are the flickers and the spoiled ones; the focus ones are some of them.
+    with(EARLY, &|early| early.correct_first_plans.false_early += 1);
+    with(EARLY, &|early| early.correct_first_plans.false_early_on_focus = 3);
+    with(EARLY, &|early| {
+        early.correct_first_plans.false_early_flicker = 100_000;
+        early.correct_first_plans.false_early = 100_001;
+    });
+    with(EARLY, &|early| {
+        early.correct_first_plans.false_early_corrupted = 100_000;
+        early.correct_first_plans.false_early = 100_001;
+    });
+    // The candidate corrupts no correct row: a corrupted false switch is more than its counts have.
+    with(EARLY, &|early| {
+        early.correct_first_plans.false_early_corrupted = 1;
+        early.correct_first_plans.false_early += 1;
+    });
+    with(EARLY, &|early| early.correct_first_plans.early_returns = 100_000);
+    with(EARLY, &|early| early.correct_sequence_plans.false_early += 1);
+    with(EARLY, &|early| {
+        early.correct_sequence_plans.false_early_flicker = 100_000;
+        early.correct_sequence_plans.false_early = 100_000;
+    });
+    with(EARLY, &|early| early.correct_sequence_plans.early_returns = 100_000);
+    // A right early start undone needs a switch and a wrong first word to stand on.
+    with(EARLY, &|early| {
+        early.started_right_ended_wrong = early.inside_word + early.last_letter + early.boundary_key + early.later - early.switch_key_rows + 1;
+    });
     // Rows past the eighth key let the sum be larger than the bins alone give, never smaller.
     with(EARLY, &|early| {
         *early.switch_key_histogram.get_mut("7").unwrap() -= 1;

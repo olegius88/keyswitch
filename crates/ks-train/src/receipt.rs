@@ -245,9 +245,9 @@ fn validate_test(test: &Value, version: i64) -> Result<(), String> {
 /// earliness of each pair published, and the gates recomputed from the counts. `correct_sequences` is the number of
 /// correct plans of protocol 4, the most that can carry a false early switch inside a text.
 fn validate_first_block(block: &PublicFirst, words: i64, correct_sequences: i64) -> Result<(), String> {
-    for ((_, counts), (_, early)) in block.counts.each().into_iter().zip(block.earliness.each()) {
-        let counts = typed_plan_counts(counts, words, words)?;
-        validate_earliness(early, &counts, correct_sequences)?;
+    for ((_, published), (_, early)) in block.counts.each().into_iter().zip(block.earliness.each()) {
+        let counts = typed_plan_counts(published, words, words)?;
+        validate_earliness(early, &counts, (published.preserved_correct, published.correct_text_corruptions), correct_sequences)?;
     }
     let gates = FirstGates::of(&block.counts.candidate, &block.counts.baseline);
     if !gates.all_held() || block.gates != gates {
@@ -257,11 +257,32 @@ fn validate_first_block(block: &PublicFirst, words: i64, correct_sequences: i64)
 }
 
 /// A pair's earliness, held to its counts: every wrong first plan in one class, the bins and the kinds adding up to the
-/// rows they count, the sum of the keys within what the bins allow.
-fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, correct_sequences: i64) -> Result<(), String> {
+/// rows they count, the sum of the keys within what the bins allow, the false early switches within the correct plans
+/// that kept their text (`preserved`) and those that spoiled it (`corrupted`).
+fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, (preserved, corrupted): (i64, i64), correct_sequences: i64) -> Result<(), String> {
     const INCONSISTENT: &str = "inconsistent first-plan earliness";
     let (wrong, correct) = (counts["initially_wrong"], counts["initially_correct"]);
-    let scalars = [early.inside_word, early.last_letter, early.boundary_key, early.later, early.never, early.first_word_correct, early.started_right_ended_wrong, early.switch_key_sum, early.switch_key_rows, early.false_early_first, early.false_early_sequence];
+    let (first, sequence) = (&early.correct_first_plans, &early.correct_sequence_plans);
+    let scalars = [
+        early.inside_word,
+        early.last_letter,
+        early.boundary_key,
+        early.later,
+        early.never,
+        early.first_word_correct,
+        early.started_right_ended_wrong,
+        early.switch_key_sum,
+        early.switch_key_rows,
+        first.false_early,
+        first.false_early_on_focus,
+        first.false_early_flicker,
+        first.false_early_corrupted,
+        first.early_returns,
+        sequence.false_early,
+        sequence.false_early_flicker,
+        sequence.false_early_corrupted,
+        sequence.early_returns,
+    ];
     let bins: BTreeSet<String> = (1..=SWITCH_KEY_HISTOGRAM_KEYS).map(|key| key.to_string()).chain(std::iter::once(SWITCH_KEY_HISTOGRAM_LATER.to_owned())).collect();
     if scalars.iter().chain(early.switch_key_histogram.values()).chain(early.first_correction_kinds.values()).any(|number| *number < 0)
         || early.switch_key_histogram.keys().cloned().collect::<BTreeSet<String>>() != bins
@@ -278,13 +299,21 @@ fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, c
         || early.first_word_correct > wrong
         || counts["exactly_restored"] > early.first_word_correct
         || early.started_right_ended_wrong > wrong - early.first_word_correct
+        || early.started_right_ended_wrong > switched - early.switch_key_rows
         || early.switch_key_rows > early.first_word_correct
         || early.switch_key_rows > switched
         || early.switch_key_histogram.values().sum::<i64>() != early.switch_key_rows
         || early.switch_key_sum < least
         || (early.switch_key_histogram[SWITCH_KEY_HISTOGRAM_LATER] == 0 && early.switch_key_sum != least)
-        || early.false_early_first > correct
-        || early.false_early_sequence > correct_sequences
+        || first.false_early != first.false_early_flicker + first.false_early_corrupted
+        || first.false_early_on_focus > first.false_early
+        || first.false_early_flicker > preserved
+        || first.false_early_corrupted > corrupted
+        || first.false_early > correct
+        || first.early_returns > correct
+        || sequence.false_early != sequence.false_early_flicker + sequence.false_early_corrupted
+        || sequence.false_early > correct_sequences
+        || sequence.early_returns > correct_sequences
     {
         return Err(INCONSISTENT.to_owned());
     }

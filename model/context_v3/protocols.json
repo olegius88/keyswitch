@@ -97,7 +97,7 @@
      ]
     },
     "correction_kind": "every correction records the mode of the engine plan that made it (early, early_undo, boundary, pause, context_word, context_phrase, case, sign, symbols, undo, late_stroke, mention_shown, mention_hidden, ...); the replay idles 1.7 s after every word and the pause correction fires after 1.5 s, so a pause correction comes at a word's last letter like an early switch at its last letter: the kind, not the key, tells them apart",
-    "earliness": "per pair in the default mode, over the wrong first plans: K is the key serial of the first correction whose target is the declared layout (the first key is serial 1, so K is the number of keys typed when it came) and L the letters of the focus word, its alphabetic run from the start; classes inside_word (K < L), last_letter (K = L), boundary_key (K = L + 1), later (K > L + 1) and never (no such correction). first_word_correct: the final text up to its first whitespace equals the expected text up to its first whitespace. started_right_ended_wrong: a correction of kind early into the declared layout came at a key <= L and the first word is not correct. switch_key_sum and switch_key_rows: the sum and the count of K over the rows whose first word is correct (their mean K), switch_key_histogram their K in bins 1 to 8 and 9+; first_correction_kinds: the kind of the correction that gives K. False early switches: false_early_first counts correct first plans, false_early_sequence correct protocol-4 plans of the default mode, with a correction of kind early",
+    "earliness": "per pair in the default mode, over the wrong first plans: K is the key serial of the first correction whose target is the declared layout (the first key is serial 1, so K is the number of keys typed when it came) and L the letters of the focus word, its alphabetic run from the start; classes inside_word (K < L), last_letter (K = L), boundary_key (K = L + 1), later (K > L + 1) and never (no such correction). first_word_correct: the final text up to its first whitespace equals the expected text up to its first whitespace. started_right_ended_wrong: the first correction into the declared layout is of kind early and came at a key <= L (K < L + 1), and the first word is not correct (a right early switch undone later, for instance by the context model at the boundary). switch_key_sum and switch_key_rows: the sum and the count of K over the rows whose first word is correct (their mean K), switch_key_histogram their K in bins 1 to 8 and 9+; first_correction_kinds: the kind of the correction that gives K. False early switches, over the correct plans, each read against the layout of its row (its declared group): a false early switch is a correction of kind early whose target layout is not the row's layout; an early correction whose target is the row's layout brings the text back after another layer switched it away, and is a return, counted apart and never a false switch; a protocol-4 row with no declared layout has none to return to, so every early correction of it goes away. correct_first_plans (the correct first plans): false_early, the rows with at least one false early switch; false_early_on_focus, of those the rows whose first false early switch came at a key <= L; false_early_flicker, of those the rows whose final text is exact (the switch was undone); false_early_corrupted, of those the rows whose final text is not exact; early_returns, the rows with an early correction into the row's layout. correct_sequence_plans (the correct protocol-4 plans of the default mode): the same counts but false_early_on_focus, which a protocol-4 plan cannot say since it does not know the letters of its focus word. These counters are reported and never gated",
     "acceptance": "every gate must hold for the candidate pair against the baseline pair in both settings modes and both lexical profiles, on the protocol-4 plans and on the first plans of the default mode",
     "identifier_lexicon": "resources/identifiers.json is lexical evidence for both readings of a token in the engine, the trainer and this replay alike; technical holdout rows therefore measure commands present in the shipped index, and behaviour on identifiers outside it is reported by a separate lexicon-blind development diagnostic",
     "restoration_gate": "net outcome: candidate exactly_restored minus correct_text_corruptions must reach the baseline pair's exactly_restored minus correct_text_corruptions, and the candidate must not corrupt more correct rows than that pair; the model decides what to convert, and it is judged by the balance rather than by a ban on ever being wrong",
@@ -119,7 +119,7 @@
     "native_execution_verified": false,
     "test_access": "sealed-before-test",
     "fresh_fit_reproducibility_verified": false,
-    "source_protocol_sha256": "b51345584653a70acd1b83d21a67a3d81cd8fff1df10974bec7d16173759af34",
+    "source_protocol_sha256": "3f1e5122ab383e79c5b6895cd0bbb9dd230a64d0145382790339c459091c7cfe",
     "wrong_intervention": "first_declared_group_letter_after_literal_focus_prefix",
     "settings_modes": [
      "early_off",
@@ -138,10 +138,11 @@
     "earliness": "first_correction_into_declared_layout_key_serial_against_focus_letters",
     "correction_kind": "engine_plan_mode",
     "early_switch_min_letters": 4,
-    "receipt_floor_default": "first_plans_exactly_restored_at_least_baseline"
+    "receipt_floor_default": "first_plans_exactly_restored_at_least_baseline",
+    "false_early": "early_correction_away_from_row_layout_a_return_into_it_counted_apart"
    },
    "scope": "Sealed private-corpus test aggregates, with how early the switch comes on the word typed first, the sealed developer-chat test's counts and current artifact/provenance verification; fresh-fit reproducibility, reviewed human-intent labels and native OS execution are not asserted.",
-   "audited_sequence_protocol_sha256": "b51345584653a70acd1b83d21a67a3d81cd8fff1df10974bec7d16173759af34"
+   "audited_sequence_protocol_sha256": "3f1e5122ab383e79c5b6895cd0bbb9dd230a64d0145382790339c459091c7cfe"
   }
  }
 }

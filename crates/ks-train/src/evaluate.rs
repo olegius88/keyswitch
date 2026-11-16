@@ -275,7 +275,8 @@ pub struct Earliness {
     pub never: i64,
     /// The final text up to its first space is the expected text up to its first space.
     pub first_word_correct: i64,
-    /// An early switch into the declared layout came by the word's last letter, and the first word is wrong all the same.
+    /// The first correction into the declared layout is of kind early and came by the word's last letter (K <= L), and the
+    /// first word is wrong all the same: a right early switch undone later.
     pub started_right_ended_wrong: i64,
     /// K summed over the rows whose first word is right, and their number: the mean key of a switch that ended right.
     pub switch_key_sum: i64,
@@ -284,10 +285,43 @@ pub struct Earliness {
     pub switch_key_histogram: BTreeMap<String, i64>,
     /// The kind of the correction that gives K, over every row that has one.
     pub first_correction_kinds: BTreeMap<String, i64>,
-    /// Correct first plans with an early switch: false early switches at the start of a text.
-    pub false_early_first: i64,
-    /// Correct protocol-4 plans of the default mode with an early switch: false early switches inside a text.
-    pub false_early_sequence: i64,
+    /// The early corrections of the correct first plans: false early switches at the start of a text.
+    pub correct_first_plans: FirstFalseEarly,
+    /// The early corrections of the correct protocol-4 plans of the default mode: false early switches inside a text.
+    pub correct_sequence_plans: SequenceFalseEarly,
+}
+
+/// The early corrections of the texts typed as meant, at the start of a text. A false early switch is a correction of kind
+/// early whose target is not the row's layout; one whose target is the row's layout brings the text back after another
+/// layer switched it away, and is a return, not a false switch.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FirstFalseEarly {
+    /// Rows with a false early switch.
+    pub false_early: i64,
+    /// Of those, the rows whose first false early switch came by the last letter of the word typed first.
+    pub false_early_on_focus: i64,
+    /// Of those, the rows whose final text is exact: the switch was undone.
+    pub false_early_flicker: i64,
+    /// Of those, the rows whose final text is not exact.
+    pub false_early_corrupted: i64,
+    /// Rows with an early correction into the row's layout: a return after another layer's switch, not a false switch.
+    pub early_returns: i64,
+}
+
+/// The same inside a text (the correct plans of protocol 4): the plan does not say how many letters the word in focus has,
+/// so there is no count on it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SequenceFalseEarly {
+    /// Rows with a false early switch.
+    pub false_early: i64,
+    /// Of those, the rows whose final text is exact.
+    pub false_early_flicker: i64,
+    /// Of those, the rows whose final text is not exact.
+    pub false_early_corrupted: i64,
+    /// Rows with an early correction into the row's layout.
+    pub early_returns: i64,
 }
 
 impl Default for Earliness {
@@ -305,8 +339,8 @@ impl Default for Earliness {
             switch_key_rows: 0,
             switch_key_histogram: bins.map(|bin| (bin, 0)).collect(),
             first_correction_kinds: BTreeMap::new(),
-            false_early_first: 0,
-            false_early_sequence: 0,
+            correct_first_plans: FirstFalseEarly::default(),
+            correct_sequence_plans: SequenceFalseEarly::default(),
         }
     }
 }
@@ -316,8 +350,12 @@ fn first_word(text: &str) -> &str {
     text.split(|character: char| pystr::isspace(character.encode_utf8(&mut [0_u8; 4]))).next().unwrap_or_default()
 }
 
-fn early(corrections: &[Switch<'_>]) -> bool {
-    corrections.iter().any(|item| item.kind == EARLY_KIND)
+/// What the early corrections of a text typed as meant, in the layout `group`, say: the key of the first one that went away
+/// from that layout (a false switch), and whether one came back into it (a return). A row of no layout (`None`) has none to
+/// come back into: every early correction of it goes away.
+fn early_corrections(group: Option<i64>, corrections: &[Switch<'_>]) -> (Option<usize>, bool) {
+    let early = || corrections.iter().filter(|item| item.kind == EARLY_KIND);
+    (early().find(|item| Some(item.target_group) != group).map(|item| item.event), early().any(|item| Some(item.target_group) == group))
 }
 
 impl Earliness {
@@ -349,19 +387,36 @@ impl Earliness {
         } else {
             self.never += 1;
         }
-        if !right && corrections.iter().any(|item| item.kind == EARLY_KIND && item.target_group == declared && item.event <= letters) {
+        let first_into_declared = corrections.iter().find(|item| item.target_group == declared);
+        if !right && first_into_declared.is_some_and(|item| item.kind == EARLY_KIND && item.event <= letters) {
             self.started_right_ended_wrong += 1;
         }
     }
 
-    /// A correct first plan.
-    pub fn add_correct_first(&mut self, corrections: &[Switch<'_>]) {
-        self.false_early_first += i64::from(early(corrections));
+    /// A correct first plan of a row of the layout `group`, whose word typed first has `letters` letters; `exact` is whether
+    /// its final text is the expected one.
+    pub fn add_correct_first(&mut self, group: i64, letters: usize, exact: bool, corrections: &[Switch<'_>]) {
+        let (away, returned) = early_corrections(Some(group), corrections);
+        let block = &mut self.correct_first_plans;
+        block.early_returns += i64::from(returned);
+        if let Some(event) = away {
+            block.false_early += 1;
+            block.false_early_on_focus += i64::from(event <= letters);
+            block.false_early_flicker += i64::from(exact);
+            block.false_early_corrupted += i64::from(!exact);
+        }
     }
 
-    /// A correct plan of protocol 4 in the default mode.
-    pub fn add_correct_sequence(&mut self, corrections: &[Switch<'_>]) {
-        self.false_early_sequence += i64::from(early(corrections));
+    /// A correct plan of protocol 4 in the default mode, of a row of the layout `group` (a row may have none).
+    pub fn add_correct_sequence(&mut self, group: Option<i64>, exact: bool, corrections: &[Switch<'_>]) {
+        let (away, returned) = early_corrections(group, corrections);
+        let block = &mut self.correct_sequence_plans;
+        block.early_returns += i64::from(returned);
+        if away.is_some() {
+            block.false_early += 1;
+            block.false_early_flicker += i64::from(exact);
+            block.false_early_corrupted += i64::from(!exact);
+        }
     }
 }
 
@@ -381,11 +436,13 @@ pub fn earliness(first: &[Case], sequence: &[Case]) -> Result<Earliness, String>
             let letters = case.focus_letters.and_then(|letters| usize::try_from(letters).ok()).ok_or("a first case without the letters of its word")?;
             total.add_wrong(declared, letters, &case.expected, &case.actual, &corrections);
         } else {
-            total.add_correct_first(&corrections);
+            let group = case.group.ok_or("a correct first case without its layout")?;
+            let letters = case.focus_letters.and_then(|letters| usize::try_from(letters).ok()).ok_or("a first case without the letters of its word")?;
+            total.add_correct_first(group, letters, case.exact, &corrections);
         }
     }
     for case in sequence.iter().filter(|case| !case.initially_wrong) {
-        total.add_correct_sequence(&switches(case)?);
+        total.add_correct_sequence(case.group, case.exact, &switches(case)?);
     }
     Ok(total)
 }
@@ -996,16 +1053,62 @@ mod tests {
         assert_eq!(first_word(""), "");
     }
 
+    /// A Russian word of six letters typed first, in the English layout the editor opens in: the row's layout is 1, the
+    /// other is 0.
     #[test]
-    fn an_early_switch_in_text_typed_right_is_a_false_one() {
+    fn an_early_switch_away_from_the_layout_of_text_typed_right_is_a_false_one() {
         let mut total = Earliness::default();
-        total.add_correct_first(&[switch(4, 0, "early")]);
-        total.add_correct_first(&[switch(7, 0, "boundary")]);
-        total.add_correct_first(&[]);
-        total.add_correct_sequence(&[switch(30, 1, "early"), switch(31, 1, "early")]);
-        assert_eq!((total.false_early_first, total.false_early_sequence), (1, 1));
+        // Away and undone by the end: a flicker, on the word in focus (key 4 of six letters).
+        total.add_correct_first(1, 6, true, &[switch(4, 0, "early"), switch(6, 1, "pause")]);
+        // Away and left, after the word: spoiled, not on the word in focus.
+        total.add_correct_first(1, 6, false, &[switch(8, 0, "early")]);
+        // Away at the word's last letter: on it. Only the first false switch of a row counts, once.
+        total.add_correct_first(1, 6, false, &[switch(6, 0, "early"), switch(9, 0, "early")]);
+        // Not an early correction, or none: nothing.
+        total.add_correct_first(1, 6, true, &[switch(7, 0, "boundary")]);
+        total.add_correct_first(1, 6, true, &[]);
+        assert_eq!(total.correct_first_plans, FirstFalseEarly { false_early: 3, false_early_on_focus: 2, false_early_flicker: 1, false_early_corrupted: 2, early_returns: 0 });
+        assert_eq!(total.correct_sequence_plans, SequenceFalseEarly::default());
         assert_eq!(Earliness::bin(1), "1");
         assert_eq!(Earliness::bin(SWITCH_KEY_HISTOGRAM_KEYS + 1), SWITCH_KEY_HISTOGRAM_LATER);
+    }
+
+    /// Another layer turned the text away (a context switch on a pause), and an early correction put it back: a return.
+    #[test]
+    fn an_early_correction_back_into_the_layout_of_the_row_is_a_return_and_no_false_switch() {
+        let mut total = Earliness::default();
+        total.add_correct_first(1, 6, true, &[switch(6, 0, "pause"), switch(9, 1, "early")]);
+        // A return and a false switch in one row count in both.
+        total.add_correct_first(1, 6, false, &[switch(4, 0, "early"), switch(9, 1, "early")]);
+        assert_eq!(total.correct_first_plans, FirstFalseEarly { false_early: 1, false_early_on_focus: 1, false_early_flicker: 0, false_early_corrupted: 1, early_returns: 2 });
+        total.add_correct_sequence(Some(1), true, &[switch(30, 0, "context_word"), switch(31, 1, "early")]);
+        total.add_correct_sequence(Some(1), true, &[switch(30, 1, "early"), switch(31, 1, "early")]);
+        assert_eq!(total.correct_sequence_plans, SequenceFalseEarly { false_early: 0, false_early_flicker: 0, false_early_corrupted: 0, early_returns: 2 });
+    }
+
+    /// Inside a text: false switches by their final text, no count on a word in focus.
+    #[test]
+    fn a_false_early_switch_inside_a_text_is_split_by_its_final_text() {
+        let mut total = Earliness::default();
+        total.add_correct_sequence(Some(0), true, &[switch(30, 1, "early"), switch(31, 0, "early")]);
+        total.add_correct_sequence(Some(0), false, &[switch(30, 1, "early")]);
+        total.add_correct_sequence(Some(0), false, &[switch(30, 1, "pause")]);
+        assert_eq!(total.correct_sequence_plans, SequenceFalseEarly { false_early: 2, false_early_flicker: 1, false_early_corrupted: 1, early_returns: 1 });
+        assert_eq!(total.correct_first_plans, FirstFalseEarly::default());
+    }
+
+    /// A right early switch that the end of the word undid is the only one of its kind: the first correction into the
+    /// declared layout must be an early one, by the word's last letter.
+    #[test]
+    fn a_right_early_switch_undone_at_the_boundary_is_counted_apart() {
+        let mut total = Earliness::default();
+        // Early at the fourth key, the first word spoiled at the boundary.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(4, 1, "early"), switch(7, 0, "context_word"), switch(8, 1, "boundary")]);
+        // The first correction into the declared layout is a pause one; a later early one does not make it a right start.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(6, 1, "pause"), switch(6, 1, "early")]);
+        // The early switch away from the declared layout does not start right.
+        total.add_wrong(1, 6, "Фарадж сказал", "Фарад; сказал", &[switch(3, 0, "early"), switch(8, 1, "boundary")]);
+        assert_eq!(total.started_right_ended_wrong, 1);
     }
 
     fn case(wrong: bool, letters: Option<i64>, actual: &str, corrections: Vec<CorrectionRecord>) -> Case {
@@ -1039,13 +1142,18 @@ mod tests {
     #[test]
     fn the_earliness_of_a_pair_is_read_from_its_cases() {
         let early = || vec![correction(4, 1, Some("early"))];
-        let first = [case(true, Some(6), "привет мир", early()), case(false, Some(6), "привет мир", Vec::new())];
-        let sequence = [case(false, None, "привет мир", early()), case(true, None, "привет мир", early())];
+        let away = || vec![correction(4, 0, Some("early"))];
+        let first = [case(true, Some(6), "привет мир", early()), case(false, Some(6), "привет мир", away()), case(false, Some(6), "ghbdtn", away())];
+        let sequence = [case(false, None, "привет мир", away()), case(false, None, "привет мир", early()), case(true, None, "привет мир", early())];
         let read = earliness(&first, &sequence).expect("cases that hold");
         let mut expected = Earliness::default();
         expected.add_wrong(1, 6, "привет мир", "привет мир", &[switch(4, 1, "early")]);
-        expected.add_correct_sequence(&[switch(4, 1, "early")]);
+        expected.add_correct_first(1, 6, true, &[switch(4, 0, "early")]);
+        expected.add_correct_first(1, 6, false, &[switch(4, 0, "early")]);
+        expected.add_correct_sequence(Some(1), true, &[switch(4, 0, "early")]);
+        expected.add_correct_sequence(Some(1), true, &[switch(4, 1, "early")]);
         assert_eq!(read, expected);
+        assert_eq!((read.correct_first_plans.false_early, read.correct_sequence_plans.false_early, read.correct_sequence_plans.early_returns), (2, 1, 1));
         // A case that does not say what the earliness needs.
         let refused = |first: &[Case], sequence: &[Case], words: &str| {
             let said = earliness(first, sequence).expect_err(words);
@@ -1057,6 +1165,12 @@ mod tests {
         refused(&[], &[case(false, None, "привет мир", vec![correction(4, 1, None)])], "without its kind");
         let ungrouped = Case { group: None, ..case(true, Some(1), "привет мир", Vec::new()) };
         refused(&[ungrouped], &[], "without its layout");
+        refused(&[Case { group: None, ..case(false, Some(1), "привет мир", Vec::new()) }], &[], "correct first case without its layout");
+        refused(&[case(false, None, "привет мир", away())], &[], "letters of its word");
+        // A row of no layout has no layout to be returned to: its early corrections all go away.
+        let none = Case { group: None, ..case(false, None, "привет мир", vec![correction(4, 1, Some("early"))]) };
+        let read = earliness(&[], &[none]).expect("a case of no layout");
+        assert_eq!(read.correct_sequence_plans, SequenceFalseEarly { false_early: 1, false_early_flicker: 1, false_early_corrupted: 0, early_returns: 0 });
     }
 
     #[test]
