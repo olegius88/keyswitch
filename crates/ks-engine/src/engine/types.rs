@@ -251,7 +251,9 @@ pub struct WaitingContextWord {
     pub baseline: Option<DetectionDecision>,
     // The word was converted at its boundary and waits only in case the next word decides it again (start_context_wait's
     // fallback): nothing is left to convert when no next word comes.
-    pub converted: bool,
+    pub converted: bool,    // A pause has asked about the word and left it waiting for its next word (hold_context_wait_past_pause): later pauses
+    // ask nothing more.
+    pub asked_at_pause: bool,
 }
 
 // The baseline reason of the question a converted word is asked again (revert_with_next_word).

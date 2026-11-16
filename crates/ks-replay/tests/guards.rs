@@ -537,3 +537,32 @@ fn a_word_kept_for_a_layout_picked_by_hand_is_told_when_the_model_would_convert_
     }
     bundle.clean();
 }
+
+/// A stop after a word that waits for its next word leaves it waiting, and the next word settles it as it does with no
+/// stop: `redis` typed in the Russian layout becomes Latin and the layout English, `b` waits for its neighbour, and
+/// `nats` makes it `и` whether it comes at once or after a thought. The wait used to end at the stop, and `b` stood:
+/// `compose`, `b`, a second and a half, `runbook` (the laptop, 15.11.2026, `и` meant). A second stop asks nothing more.
+#[test]
+fn a_stop_after_a_word_that_waits_for_its_neighbour_leaves_it_to_the_neighbour() {
+    let mut bundle = Bundle::load(None);
+    for stop in [0.2, 1.5, 3.0] {
+        let mut session = bundle.session("app", 1, Vec::new());
+        log_technically(&mut session);
+        for (text, shown) in [("кувшы ", "redis "), ("b ", "redis b ")] {
+            for character in text.chars() {
+                press_as_laid_out(&mut session, character);
+                session.idle(0.12);
+            }
+            assert_eq!(session.backend.text().iter().collect::<String>(), shown, "a stop of {stop} s");
+        }
+        session.idle(stop);
+        for character in "nats ".chars() {
+            press_as_laid_out(&mut session, character);
+            session.idle(0.12);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), "redis и nats ", "a stop of {stop} s");
+        bundle.give_back(session);
+    }
+    bundle.clean();
+}

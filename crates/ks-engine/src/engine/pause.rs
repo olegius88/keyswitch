@@ -38,6 +38,7 @@ impl EngineCore {
             || !self.strokes.is_empty()
             || now < last + settle_after
             || self.last_committed_stale
+            || waiting.asked_at_pause
             || waiting.window != self.focus_or_zero()
             || !self.context_assists()
             || !self.flag("enabled", true)
@@ -56,8 +57,7 @@ impl EngineCore {
             return Ok(());
         }
         if !waiting.settles_on_pause {
-            self.log_context_wait("context_wait_cancelled", Some(&waiting), "suggestion_not_settled", &[]);
-            self.context_waiting = None;
+            self.hold_context_wait_past_pause("suggestion_not_settled");
             return Ok(());
         }
         let application = self.backend.active_application();
@@ -71,16 +71,29 @@ impl EngineCore {
             field_override: Some(waiting.field.clone()),
             ..PolicyOptions::default()
         })?;
-        self.context_waiting = None;
         if !result.decision.should_convert {
-            self.log_context_wait("context_wait_cancelled", Some(&waiting), "pause_kept_the_word", &[]);
+            self.hold_context_wait_past_pause("pause_kept_the_word");
             return Ok(());
         }
+        self.context_waiting = None;
         self.log_context_wait("context_wait_settled", Some(&waiting), "pause", &[]);
         self.learning_prompt_after = None;
         let confidence = result.decision.confidence;
         self.execute_correction(waiting.plan.replaced_with(|plan| plan.confidence = confidence), None);
         Ok(())
+    }
+
+    /// A pause that did not convert a waiting word leaves it waiting for its next word, asked no more at later pauses.
+    ///
+    /// The pause is the word's last chance when no next word comes, not the end of the wait: a thought between two
+    /// words is a pause too. Ended there, a word the model wanted its neighbour to settle stood as typed when the
+    /// neighbour came, and the neighbour was never asked about it: `compose`, `b`, a second and a half, `runbook`
+    /// (the laptop, 15.11.2026, `и` meant), and `redis b nats` gave `и` typed without the stop and `b` with it. The
+    /// wait still ends as before on the next word, another window, a caret move, Backspace, a changed field or its
+    /// deadline.
+    fn hold_context_wait_past_pause(&mut self, reason: &str) {
+        self.context_waiting.as_mut().expect("a pause holds only a word that waits").asked_at_pause = true;
+        self.log_context_wait("context_wait_held", self.context_waiting.as_ref(), reason, &[]);
     }
 
     /// Enter or Tab arrived while a word waits for its next word: no next word is coming.

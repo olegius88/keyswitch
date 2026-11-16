@@ -73,6 +73,7 @@ impl EngineCore {
                 settles_on_pause: settles,
                 baseline: self.last_baseline.clone(),
                 converted: fallback,
+                asked_at_pause: false,
             });
             // The pause that settles this wait (settle_context_wait_after_pause) is
             // counted from its boundary. The commit has just cleared the word timer,
