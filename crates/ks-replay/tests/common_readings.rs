@@ -1,20 +1,22 @@
 //! Tokens of two or three Russian letters whose Latin reading is a common word, typed through the engine: the class of
 //! the common-reading head (context_action_features.common_question). A Russian token after a Russian word stays (`сайт
 //! майл ру`, `у нас ща`); an English word typed in the Russian layout after English text, or first on a line under a
-//! Russian line (`He said`), is converted. The words of the release barrier's recorded typing are counted apart, a token outside the
-//! class (`гы`, too rare in Russian text) and words of the lexicon (`шт`) only measured. Half of each family is held out of
-//! the head's training frames by hash of the token's Cyrillic letters (the recipe's common_curriculum.held_out) and
-//! counted apart from the other half. The numbers are printed by group; the floors hold for a pair that carries the head,
-//! and a pair without it is only measured.
+//! Russian line (`He said`), is converted, and a Russian line that starts with a token of the class under a Russian line
+//! (`Ща приду`) stays. The words of the release barrier's recorded typing are counted apart, a token outside the class
+//! (`гы`, too rare in Russian text) and words of the lexicon (`шт`) only measured. Half of each family is drawn by hash of
+//! the token's Cyrillic letters; the recipe holds that half out of the head's training frames (common_curriculum.held_out)
+//! but for the tokens it trains by name (`TRAINED_BY_NAME`), and the three groups are counted apart. The numbers are
+//! printed by group; the floors hold for a pair that carries the head, and a pair without it is only measured.
 #![cfg(any(not(debug_assertions), coverage))]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
 use ks_config::constants::{DETECTION_CONTEXT_READ_FIELD, DETECTION_EARLY_SWITCH, DETECTION_RESPECT_MANUAL_LAYOUT};
 use ks_context::constants::COMMON_FEATURE_PREFIX;
 use ks_replay::harness::{Bundle, KEYS, PhysicalKey, Session};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 /// One step of a case: the keys that print a text in a layout, typed in whatever layout is on; or the layout changed
@@ -164,6 +166,24 @@ const OPENINGS: &[(&str, &str)] = &[
 /// The Russian line above an opening.
 const LINE_ABOVE: &str = "Вот что он написал вчера.\n";
 
+/// Russian lines typed as meant under a Russian line, starting with a token of the class: the token and the words after it.
+const LINE_STARTS: &[(&str, &str)] = &[
+    ("Ща", "приду"),
+    ("Ру", "домен нужен"),
+    ("Вк", "лежит"),
+    ("Ип", "закрыл вчера"),
+    ("Ср", "подходит"),
+    ("Ид", "не нашёл"),
+    ("Тс", "ответил"),
+    ("Ес", "ввёл пошлины"),
+    ("Тз", "готово"),
+    ("Зп", "пришла"),
+    ("Ии", "пишет код"),
+    ("Тп", "не отвечает"),
+    ("Ой", "всё"),
+    ("Вс", "занят"),
+];
+
 /// Tokens of the shape the recorded typing of the release barrier converts after Russian words, at a pause or a space: they
 /// stay converted.
 const GATE: &[(&str, &str)] = &[("ин", "проверь сортировку"), ("сс", "запусти")];
@@ -175,9 +195,49 @@ const LEXICON: &[(&str, &str, &str)] = &[("шт", "купил пять", "ябл
 /// A Russian token too rare in Russian text for the class.
 const OUTSIDE: &[(&str, &str, &str)] = &[("гы", "он такой", "смешной")];
 
-/// Whether the head's training frames hold a token out: half of each family, by hash of its Cyrillic letters.
-fn held_out(cyrillic: &str) -> bool {
+/// Tokens of the held-out half the recipe trains all the same, and why. `ру` and `ща` are the two tokens the battery asks
+/// both ways, kept after a Russian word and converted as `he` and `of` in English text: held out, the head saw neither
+/// answer for the tokens that have both, which is what it is for.
+const TRAINED_BY_NAME: &[(&str, &str)] = &[
+    ("ру", "kept in `сайт майл ру`, converted as `he` in English text"),
+    ("ща", "kept in `у нас ща`, converted as `of` in English text"),
+];
+
+#[derive(Deserialize)]
+struct Recipe {
+    common_curriculum: CommonCurriculum,
+}
+
+#[derive(Deserialize)]
+struct CommonCurriculum {
+    held_out: Vec<String>,
+}
+
+/// The tokens the recipe holds out of the head's training frames, casefolded as the trainer reads them.
+fn recipe_held_out() -> BTreeSet<String> {
+    let text = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../model/context_v3/recipe.json")).expect("the recipe");
+    let recipe: Recipe = ks_text::json::loads(text).expect("the recipe is JSON");
+    recipe.common_curriculum.held_out.iter().map(|token| token.to_lowercase()).collect()
+}
+
+/// Whether a token is in the held-out half of its family: by hash of its Cyrillic letters.
+fn hashed_out(cyrillic: &str) -> bool {
     Sha256::digest(format!("common-held-out:{cyrillic}").as_bytes())[0] % 2 == 0
+}
+
+/// The group a token is counted in: held out by the recipe, trained by name, or seen. A token of the held-out half is in
+/// the recipe's list or trained by name, and the recipe holds out no other.
+fn group(cyrillic: &str, recipe: &BTreeSet<String>) -> &'static str {
+    let (hashed, listed) = (hashed_out(cyrillic), recipe.contains(cyrillic));
+    let named = TRAINED_BY_NAME.iter().any(|entry| entry.0 == cyrillic);
+    assert!(hashed == (listed || named) && !(listed && named), "{cyrillic}: in the held-out half {hashed}, held out by the recipe {listed}, trained by name {named}");
+    if listed {
+        "held-out"
+    } else if named {
+        "trained-by-name"
+    } else {
+        "seen"
+    }
 }
 
 /// A Russian token typed as meant after a Russian word: at its space, before a Russian word, at a pause.
@@ -219,6 +279,17 @@ fn opening_cases(token: &str, next: &str, cases: &mut Vec<Case>) {
     add("line-start-pause", token.to_owned());
 }
 
+/// A Russian line typed as meant under a Russian line, starting with a token of the class: capitalised, and in lower case
+/// as chat is often typed.
+fn line_start_cases(token: &str, rest: &str, cases: &mut Vec<Case>) {
+    for (frame, opening) in [("line-start", token.to_owned()), ("line-start-lower", token.to_lowercase())] {
+        let typed = format!("{opening} {rest} ");
+        let kept = format!("{LINE_ABOVE}{typed}");
+        let converted = format!("{LINE_ABOVE}{} {rest} ", keys_of(&opening, 1));
+        cases.push(Case { family: "russian-line-start", frame, cyrillic: token.to_lowercase(), field: LINE_ABOVE.to_owned(), start: 1, steps: vec![keys(&typed, 1)], converted, kept, want: Want::Keep });
+    }
+}
+
 /// A gate word typed in the Russian layout after Russian words, meant as its Latin reading: at a pause and at its space.
 fn gate_cases(token: &str, before: &str, cases: &mut Vec<Case>) {
     let latin = keys_of(token, 1);
@@ -240,6 +311,9 @@ fn all_cases() -> Vec<Case> {
     for (token, next) in OPENINGS {
         opening_cases(token, next, &mut cases);
     }
+    for (token, rest) in LINE_STARTS {
+        line_start_cases(token, rest, &mut cases);
+    }
     for (token, before) in GATE {
         gate_cases(token, before, &mut cases);
     }
@@ -252,20 +326,27 @@ fn all_cases() -> Vec<Case> {
     cases
 }
 
-/// The least right answers of each family and half (every frame and both field settings pooled) a pair carrying the head
-/// gives: the numbers of the development candidate context-v3-8b77864d52b9 on corpus v86 (15.11.2026). The pair of 0.71.2
-/// gave, in the same order: 21, 26, 44, 44, 2, 4, 14, 0, 38, 22.
+/// The least right answers of each family and group (every frame and both field settings pooled) a pair carrying the
+/// head gives: the numbers of the development candidate context-v3-044361580f62 on corpus v86 (c6, 15.11.2026), and for
+/// the Russian lines that open with a token of the class those of the pair of 0.71.2, which the head may not fall below.
+/// The pair of 0.71.2 gave, in the same order: 15, 26, 6, 36, 44, 8, 2, 4, 14, 0, 36, 22, 2, 23, 20, 4.
 const FLOORS: &[(&str, usize)] = &[
-    ("english-line-start | held-out", 21),
+    ("english-line-start | held-out", 15),
     ("english-line-start | seen", 26),
-    ("english-midline | held-out", 44),
+    ("english-line-start | trained-by-name", 6),
+    ("english-midline | held-out", 36),
     ("english-midline | seen", 44),
+    ("english-midline | trained-by-name", 8),
     ("gate | held-out", 2),
     ("gate | seen", 4),
     ("lexicon-word | seen", 14),
     ("outside-class | seen", 0),
-    ("russian-after-word | held-out", 40),
+    ("russian-after-word | held-out", 36),
     ("russian-after-word | seen", 24),
+    ("russian-after-word | trained-by-name", 10),
+    ("russian-line-start | held-out", 23),
+    ("russian-line-start | seen", 20),
+    ("russian-line-start | trained-by-name", 4),
 ];
 
 #[derive(Default)]
@@ -286,8 +367,9 @@ fn short_tokens_with_common_latin_readings() {
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
     let mut families: BTreeMap<String, Tally> = BTreeMap::new();
     let mut misses: Vec<String> = Vec::new();
+    let recipe = recipe_held_out();
     for case in all_cases() {
-        let half = if held_out(&case.cyrillic) { "held-out" } else { "seen" };
+        let half = group(&case.cyrillic, &recipe);
         for field in [false, true] {
             let shown = typed(&mut bundle, &case, field);
             let converted = shown == case.converted;
@@ -309,6 +391,9 @@ fn short_tokens_with_common_latin_readings() {
     }
     bundle.clean();
     println!("pair {version}, common-reading head: {answers}");
+    for (token, why) in TRAINED_BY_NAME {
+        println!("TRAINED-BY-NAME {token}: {why}");
+    }
     for miss in &misses {
         println!("{miss}");
     }

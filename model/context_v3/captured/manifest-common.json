@@ -51,6 +51,30 @@
    "unique": 10699
   },
   {
+   "file": "so-common-opening-train.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "so-common-opening-train.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 13000,
+    "russian_share": 1.0,
+    "seed": "capture-common-opening-so-train",
+    "prefix_rate": 1.0,
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "selection": "ks-train select --class common-opening (the message opens with a token of the class, its Cyrillic reading no word of the Russian lexicon) over so-train.jsonl.gz (--development-share 0.0 --prefix so), every developer-chat question left out (--members of devchat-dev and devchat-test to devchat-test-5): 1 233 messages",
+   "typing": "every message of the selection, four typing modes, each first on a line under another message of the selection (prefix_rate 1): a Russian line that opens with a token of the class under a Russian line; the common-reading head's questions alone",
+   "sha256": "627d76a3093313e265c42a276257159c7aa1b787b42dfc351e7a9b6675fc9fc6",
+   "rows": 2220,
+   "unique": 1734
+  },
+  {
    "file": "so-common-dev.jsonl.xz",
    "weight": 1.0,
    "recipe": {
@@ -132,6 +156,30 @@
    "sha256": "8311e095b384aadcd846d7c6b727b37d5182c5089939d562476faf6faf2f9731",
    "rows": 179,
    "unique": 96
+  },
+  {
+   "file": "so-common-opening-dev.jsonl.xz",
+   "weight": 1.0,
+   "recipe": {
+    "messages": "sodev-common-opening-dev.jsonl.gz",
+    "kinds": [
+     "comment",
+     "title",
+     "prose"
+    ],
+    "count": 13000,
+    "russian_share": 1.0,
+    "seed": "capture-common-opening-so-dev",
+    "prefix_rate": 1.0,
+    "questions": "common"
+   },
+   "license": "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)",
+   "origin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5",
+   "selection": "ks-train select --class common-opening (the message opens with a token of the class, its Cyrillic reading no word of the Russian lexicon) over so-dev.jsonl.gz (--development-share 1.0 --prefix sodev), every developer-chat question left out (--members of devchat-dev and devchat-test to devchat-test-5): 173 messages",
+   "typing": "every message of the selection, four typing modes, each first on a line under another message of the selection (prefix_rate 1); the common-reading head's questions alone",
+   "sha256": "c35850d680848130d2aa20a55444f6497741276a4f8f123361b730d2db7391e8",
+   "rows": 328,
+   "unique": 250
   }
  ]
 }

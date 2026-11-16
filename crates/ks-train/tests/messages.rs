@@ -325,6 +325,12 @@ fn a_class_selects_its_messages() {
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let said: SelectSummary = serde_json::from_slice(&output.stdout).expect("json");
     assert_eq!((said.messages.train, said.messages.dev), (2, 0));
+    // The class of the messages that open with such a token, which a capture types under a line of text: `ру в начале`
+    // alone.
+    let output = tool("select", &["--messages".as_ref(), common.as_os_str(), "--class".as_ref(), "common-opening".as_ref(), "--development-share".as_ref(), "0.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "opening".as_ref()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let said: SelectSummary = ks_text::json::loads(&output.stdout).expect("json");
+    assert_eq!((said.messages.train, said.messages.dev), (1, 0));
     let no_tables = trainer().arg("select").arg("--tree").arg(sources.folder.join("no-tree")).args(["--class", "common", "--development-share", "0.0"]).arg("--messages").arg(&common).arg("--out").arg(&out).output().expect("the trainer starts");
     assert!(!no_tables.status.success());
     // With a list of the questions allowed, and with some of them left out.
@@ -509,6 +515,13 @@ fn the_table_of_capitals_counts_each_source_apart() {
     assert_eq!(table.sources.iso4217.published, "2026-01-01");
     assert_eq!((table.sources.technical.questions_left_out, table.sources.web.word_lists_sha256.len()), (1, 2));
     assert!(table.scope.contains("under 2 is cut"));
+    // The command writes the table as it writes the others, and says how many tokens each section holds.
+    let written = sources.folder.join("capitals-written.json");
+    let counts = ks_train::messages::write_capitals(&request, &written).expect("a table written");
+    let expected = ks_train::messages::CapitalsWritten { web_cyrillic: 2, web_latin: 1, technical_cyrillic: 0, technical_latin: 1, iso4217: 2, lexicon_capitals: 2 };
+    assert_eq!(counts, expected);
+    let text = std::fs::read_to_string(&written).expect("the table");
+    assert!(text.ends_with("}\n") && text.contains("\n  \"iso4217\": [\n    \"KZT\",") && text.contains("США"), "{text}");
     // The list is the pinned one, the counts are counts, and the list says when it was published.
     assert!(build_capitals(&CapitalsRequest { iso4217_sha256: "0", ..request }).unwrap_err().contains("differs"));
     let undated = sources.folder.join("capitals-undated.xml");
@@ -544,7 +557,7 @@ fn the_sentences_of_the_leipzig_corpora_are_selected_as_messages() {
         "capitals-sentences",
         ["", ""],
         [
-            "1\tКурс USD вырос сегодня утром\n2\tбез заглавных тут вообще\nnot a number\tтекст тут такой\nbad\n3\tIn English USD here\n4\tВ США ввели санкции вчера\n",
+            "1\tКурс USD вырос сегодня утром\n2\tбез заглавных тут вообще\nnot a number\tтекст тут такой\nbad\n3\tIn English USD here\n4\tВ США ввели санкции вчера\n5\tКурс 100€ USD вырос утром\n6\tСегодня утром ФСБ задержала его\n7\tцена price USD выросла утром\n",
             "1\tГЫВ опять растёт тут\n2\tкороткая\n3\tтут ФСБ и всё\n",
         ],
     );

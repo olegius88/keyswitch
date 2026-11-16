@@ -80,7 +80,7 @@ fn russian_letter(character: char) -> bool {
 /// mode slips.
 fn capital_slip(token: &str) -> bool {
     let core = pystr::strip_chars(token, SLIP_EDGE_SIGNS);
-    (UPPER_HEAD_MIN_LETTERS..=UPPER_HEAD_MAX_LETTERS).contains(&core.chars().count()) && pystr::isalpha(core) && pystr::isupper(core) && core.chars().all(russian_letter)
+    (UPPER_HEAD_MIN_LETTERS..=UPPER_HEAD_MAX_LETTERS).contains(&core.chars().count()) && pystr::isupper(core) && core.chars().all(russian_letter)
 }
 
 /// `script`: the layout a token's letters belong to.
@@ -676,8 +676,7 @@ impl Typist {
             state.rows.clear();
             state.edit = job.mode == EDIT_MODE;
         }
-        let typed = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }
-            .unwrap_or_else(|error| panic!("the engine failed ({error}) on message {} typed {}: {:?}", job.index, job.mode, job.text));
+        let typed = if job.mode == EDIT_MODE { self.edit_message(job) } else { self.type_message(job) }.expect("an engine to type the message with");
         let mut state = self.spy.lock().unwrap_or_else(PoisonError::into_inner);
         if job.mode != EDIT_MODE && typed.is_none() {
             state.rows.clear();

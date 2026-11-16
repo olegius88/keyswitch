@@ -2344,7 +2344,9 @@ fn russian_lean(word: &str, tables: &TermTables) -> i64 {
 /// in Russian technical text (`SHORT_AFTER_CYRILLIC`: `ру` 276 times, `he` 15; `ин` 23, `by` 154) and by how many orders
 /// one outnumbers the other; how Russian the word before it reads (`russian_lean`): after a word of the Russian layout that
 /// is the keys of an English word (`шы ру` for `is he`) the token is English too; whether the English lexicon knows the
-/// Latin reading and the identifier index holds it; the letters, the boundary and how the text after it was given; and the
+/// Latin reading and the identifier index holds it; the letters, the boundary, how the text after it was given and the
+/// script of its first word (`Ща` asked again beside a converted `попробую` stays, beside a converted `course` it opens
+/// `Of course`: without the script both read alike, and the frames of the first taught the second, cycle v87); and the
 /// pairs of these that decide together. First on its line under a Russian line the token opens an English sentence typed
 /// in the Russian layout (`He …`), which the frozen model converts, and after a Russian word it is a Russian token
 /// (`сайт майл ру`, `у нас ща`), which it converted as well: the place tells the two apart. No letter of its own and no copy of
@@ -2370,7 +2372,7 @@ fn common_evidence(item: &ContextEvidence, tables: &TermTables) -> Pairs {
     let previous = format!("previous:{}", reading.map_or_else(|| "na".to_owned(), |value| value.to_string()));
     let leaning = format!("follows:{}:previous:{}", lean(following), reading.map_or("na", lean));
     let known = format!("known:{}:identifier:{}", flag(item.target_known), flag(item.target_identifier));
-    let after_origin = format!("after:{}", item.after_origin.as_str());
+    let after_origin = format!("after:{}:{}", item.after_origin.as_str(), script(&pystr::casefold(first_word(&item.field.after))));
     let names = [
         ratio.clone(),
         follows.clone(),

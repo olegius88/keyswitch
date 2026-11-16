@@ -176,10 +176,8 @@ fn score_split(models: &[(String, ContextModel)], part: &Columns, names: &[Strin
         for (index, (_, label)) in rows.iter().enumerate() {
             let (conversion, probability) = decisions[position][index];
             let possible = usize::from(*label) == CONVERT;
-            if conversion && !possible
-                && let Some(text) = texts.get(index)
-            {
-                falsely.push(FalseFrame::new(text, classes[index], *label, probability));
+            if conversion && !possible {
+                falsely.push(FalseFrame::new(&texts[index], classes[index], *label, probability));
             }
             for key in [ALL_FRAMES, classes[index]] {
                 let counts = tallies.entry(key.to_owned()).or_default();
@@ -189,10 +187,8 @@ fn score_split(models: &[(String, ContextModel)], part: &Columns, names: &[Strin
                 counts.wrong += i64::from(conversion && !possible);
                 if position > 0 && decisions[0][index].0 != conversion {
                     let kind = format!("{}{}", if conversion { "gained" } else { "lost" }, if possible { "_right" } else { "_false" });
-                    if key == ALL_FRAMES
-                        && let Some(text) = texts.get(index)
-                    {
-                        changed.push(ChangedFrame { frame: FalseFrame::new(text, classes[index], *label, probability), kind: kind.clone(), p_first: decisions[0][index].1 });
+                    if key == ALL_FRAMES {
+                        changed.push(ChangedFrame { frame: FalseFrame::new(&texts[index], classes[index], *label, probability), kind: kind.clone(), p_first: decisions[0][index].1 });
                     }
                     *differences.entry(key.to_owned()).or_default().entry(kind).or_insert(0) += 1;
                 }
@@ -216,7 +212,8 @@ pub fn compare(inputs: &FitInputs, artifacts: &[(String, std::path::PathBuf)], j
     for split in [CALIBRATION, DEVELOPMENT] {
         let mut by_profile = Map::new();
         for profile in &inputs.profiles {
-            let frames = texts.0.get(&(profile.clone(), split.to_owned())).map_or(&[][..], Vec::as_slice);
+            // The build hands on the frames of every profile and split it scores, one for each row of its features.
+            let frames = &texts.0[&(profile.clone(), split.to_owned())];
             by_profile.insert(profile.clone(), score_split(&models, features.part_of(profile, split), features.feature_names(), frames));
         }
         report.insert(split.to_owned(), Value::Object(by_profile));

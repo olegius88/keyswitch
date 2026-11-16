@@ -1052,6 +1052,7 @@ dependencies = [
  "ks-hunspell",
  "ks-lang",
  "ks-text",
+ "serde",
  "serde_json",
  "sha2",
 ]

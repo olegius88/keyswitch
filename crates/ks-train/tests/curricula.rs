@@ -557,3 +557,62 @@ fn settings_that_leave_a_curriculum_only_part_of_its_work() {
         let _ = reported(&c::term_curriculum(tools, split, &naming, &with(options("term_curriculum"), &[("item_modulus", json!(1))])));
     }
 }
+
+/// The upper-case head's currency codes: none without the recipe's settings, outside the splits it teaches or with no
+/// Russian prose to stand after; none of a code held out by itself or by its keys; and the keys of a code taught to
+/// convert unless that reading is spelled in capitals on the web or in technical text.
+#[test]
+fn the_currency_codes_are_taught_as_written_and_by_their_keys() {
+    use std::collections::HashSet;
+    let settings = c::CurrencyOptions { contexts_per_code: 2, sample_weight: 1.0 };
+    let nothing: HashSet<String> = HashSet::new();
+    let run = |tools: &Tools, split: &str, rows: &[CorpusRow], held: &HashSet<String>| c::currency_curriculum(tools, split, rows, Some(&settings), held, c::Curriculum::default());
+    let of_group = |frames: &[ActionRow], group: i64| -> BTreeSet<String> { frames.iter().filter(|row| row.group == group).map(|row| row.original.clone()).collect() };
+    assert!(c::currency_curriculum(&TOOLS, "train", &ROWS, None, &nothing, c::Curriculum::default()).0.is_empty());
+    assert!(run(&TOOLS, "calibration", &ROWS, &nothing).0.is_empty());
+    let english: Vec<CorpusRow> = ROWS.iter().filter(|row| row.group == Some(0)).cloned().collect();
+    assert!(run(&TOOLS, "train", &english, &nothing).0.is_empty());
+    for split in ["train", "development"] {
+        let (frames, _) = run(&TOOLS, split, &ROWS, &nothing);
+        let codes = of_group(&frames, 0);
+        let keys = of_group(&frames, 1);
+        let taught: Vec<&String> = codes.iter().filter(|code| keys.contains(&ks_train::physical::reading(code, 0))).collect();
+        let [first, second, third, ..] = taught.as_slice() else { panic!("{split}: codes whose keys are taught: {taught:?}") };
+        // A code held out by itself, or by its keys, is not taught at all.
+        let held: HashSet<String> = [first.to_lowercase(), ks_train::physical::reading(second, 0).to_lowercase()].into_iter().collect();
+        let left = of_group(&run(&TOOLS, split, &ROWS, &held).0, 0);
+        assert!(!left.contains(*first) && !left.contains(*second) && left.contains(*third), "{split}");
+        // Keys spelled in capitals on the web or in technical text are a reading of their own: the code stays, its keys
+        // are not taught to convert.
+        let (web, technical) = (ks_train::physical::reading(first, 0), ks_train::physical::reading(second, 0));
+        let capitals = TOOLS.tables.capitals().expect("the capitals table");
+        assert_eq!((capitals.web(&web), capitals.technical(&technical)), (0, 0), "{split}");
+        let folder = scratch(&format!("currency-tables-{split}"));
+        let real = tree().join("resources/models");
+        for entry in std::fs::read_dir(&real).expect("the models") {
+            let path = entry.expect("an entry").path();
+            std::os::unix::fs::symlink(&path, folder.join(path.file_name().expect("a name"))).expect("a link");
+        }
+        let table = folder.join("context-capitals-frequency.json");
+        let text = std::fs::read_to_string(&table).expect("the table");
+        std::fs::remove_file(&table).expect("the link");
+        let text = text.replacen("\"web_cyrillic\": {", &format!("\"web_cyrillic\": {{\"{web}\": 9, "), 1).replacen("\"technical_cyrillic\": {", &format!("\"technical_cyrillic\": {{\"{technical}\": 9, "), 1);
+        std::fs::write(&table, &text).expect("a table");
+        let mut tools = Tools::new(&tree(), TOOLS.resources.clone(), TOOLS.portable.clone(), BTreeSet::new()).expect("the tools");
+        tools.tables = Arc::new(ks_context::context_model::TermTables::load(&folder).expect("the tables"));
+        let (frames, _) = run(&tools, split, &ROWS, &nothing);
+        let (codes, keys) = (of_group(&frames, 0), of_group(&frames, 1));
+        assert!(codes.contains(*first) && codes.contains(*second), "{split}");
+        let lexicon = ks_train::physical::reading(third, 0);
+        assert!(!keys.contains(&web) && !keys.contains(&technical) && keys.contains(&lexicon), "{split}");
+        // Keys the onboard lexicon writes in capitals are a reading of their own as well; a code the trainer refuses is not
+        // taught at all.
+        std::fs::write(&table, text.replacen("\"lexicon_capitals\": [", &format!("\"lexicon_capitals\": [\"{lexicon}\", "), 1)).expect("a table");
+        let mut tools = Tools::new(&tree(), TOOLS.resources.clone(), TOOLS.portable.clone(), ks_train::physical::expanded_aliases(second)).expect("the tools");
+        tools.tables = Arc::new(ks_context::context_model::TermTables::load(&folder).expect("the tables"));
+        let (frames, _) = run(&tools, split, &ROWS, &nothing);
+        let (codes, keys) = (of_group(&frames, 0), of_group(&frames, 1));
+        assert!(codes.contains(*third) && !keys.contains(&lexicon), "{split}: the lexicon's keys");
+        assert!(!codes.contains(*second), "{split}: the refused code");
+    }
+}

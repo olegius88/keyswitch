@@ -104,7 +104,7 @@ fn the_head_reads_where_the_token_stands_and_what_follows_a_russian_word() {
     // After a Russian word: `ру` follows one 276 times and `he` 15 (binary orders 9 and 4), `майл` reads Russian (33 times
     // in Russian prose, its keys never in English: order 6).
     let russian = head(&evidence("ру", "he", "сайт майл "), &tables);
-    for name in ["place:cyrillic", "follows:5:place:cyrillic", "follows:cyrillic:9:place:cyrillic", "follows:latin:4:place:cyrillic", "previous:6:place:cyrillic", "follows:ru:previous:ru:place:cyrillic", "ratio:-4:place:cyrillic", "known:1:identifier:0:place:cyrillic", "boundary:space:place:cyrillic", "after:none:place:cyrillic", "letters:2:place:cyrillic"] {
+    for name in ["place:cyrillic", "follows:5:place:cyrillic", "follows:cyrillic:9:place:cyrillic", "follows:latin:4:place:cyrillic", "previous:6:place:cyrillic", "follows:ru:previous:ru:place:cyrillic", "ratio:-4:place:cyrillic", "known:1:identifier:0:place:cyrillic", "boundary:space:place:cyrillic", "after:none:none:place:cyrillic", "letters:2:place:cyrillic"] {
         assert!(russian.contains(name), "{name}: {russian:?}");
     }
     assert!(!russian.contains("bias"), "no weight is shared by every place: {russian:?}");
@@ -120,7 +120,8 @@ fn the_head_reads_where_the_token_stands_and_what_follows_a_russian_word() {
     assert!(opening.contains("previous:na:place:line") && opening.contains("follows:ru:previous:na:place:line"), "{opening:?}");
     let mixed = head(&evidence("ру", "he", "testтест "), &tables);
     assert!(mixed.contains("previous:na:place:mixed"), "{mixed:?}");
-    // At a sign, not at a pause, and asked again with the next word planned for conversion.
+    // At a sign, not at a pause, and asked again with the next word planned for conversion: in which script the next word
+    // came tells `Ща попробую` from `Of course`.
     let mut paused = evidence("ру", "he", "сайт майл ");
     "punctuation".clone_into(&mut paused.trigger);
     assert!(head(&paused, &tables).contains("boundary:end:place:cyrillic"));
@@ -129,8 +130,11 @@ fn the_head_reads_where_the_token_stands_and_what_follows_a_russian_word() {
     let mut planned = evidence("ру", "he", "сайт майл ");
     planned.after_origin = AfterOrigin::PlannedNextConversion;
     "is".clone_into(&mut planned.field.after);
-    let planned = head(&planned, &tables);
-    assert!(planned.contains("follows:ru:previous:ru:after:planned_next_conversion:place:cyrillic"), "{planned:?}");
+    let latin = head(&planned, &tables);
+    assert!(latin.contains("follows:ru:previous:ru:after:planned_next_conversion:en:place:cyrillic"), "{latin:?}");
+    "попробую".clone_into(&mut planned.field.after);
+    let russian = head(&planned, &tables);
+    assert!(russian.contains("follows:ru:previous:ru:after:planned_next_conversion:ru:place:cyrillic"), "{russian:?}");
 }
 
 #[test]

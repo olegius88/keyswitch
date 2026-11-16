@@ -40,6 +40,9 @@ const LEIPZIG_WORDS_COLUMNS: usize = 3;
 const SHORT_HEAD_LETTERS: [usize; 2] = [2, 3];
 const TERM_FREQUENCY_LEAST: i64 = 5;
 const TERM_EDGE_SIGNS: &str = ".,!?:;\"'()[]{}<>«»-";
+/// The line a capture types above a message of the class `common-opening` (`opens_with_common`), as the class sees it: a
+/// letter before the token, which any line of text gives.
+const OPENING_LINE_ABOVE: &str = "текст\n";
 const TRAILING_SIGNS: &str = ".,;:!?)";
 const ALNUM_EDGE_SIGNS: &str = ".,;:!?()\"'«»";
 const LAYOUT_ALIKE_SIGNS: &str = "-=!%*()_+";
@@ -875,6 +878,36 @@ pub fn build_capitals(request: &CapitalsRequest<'_>) -> Result<CapitalsTable, St
     })
 }
 
+/// How the tables of the command are written: sorted, indented, letters as they are.
+fn indented_json() -> JsonOptions {
+    JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(Indent::Spaces(2)), ..JsonOptions::default() }
+}
+
+/// How many tokens each section of a table `write_capitals` wrote holds.
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+pub struct CapitalsWritten {
+    pub web_cyrillic: usize,
+    pub web_latin: usize,
+    pub technical_cyrillic: usize,
+    pub technical_latin: usize,
+    pub iso4217: usize,
+    pub lexicon_capitals: usize,
+}
+
+/// `capitals` of the command: the table `build_capitals` makes, written to `out` as the other tables of the command are.
+pub fn write_capitals(request: &CapitalsRequest<'_>, out: &Path) -> Result<CapitalsWritten, String> {
+    let table = build_capitals(request)?;
+    std::fs::write(out, ks_text::json::dumps(&table, &indented_json()) + "\n").map_err(|error| error.to_string())?;
+    Ok(CapitalsWritten {
+        web_cyrillic: table.web_cyrillic.len(),
+        web_latin: table.web_latin.len(),
+        technical_cyrillic: table.technical_cyrillic.len(),
+        technical_latin: table.technical_latin.len(),
+        iso4217: table.iso4217.len(),
+        lexicon_capitals: table.lexicon_capitals.len(),
+    })
+}
+
 /// The sentences of the Leipzig corpora unpacked under the directory, as messages: a typeable sentence of `MIN_TOKENS` to
 /// `MAX_TOKENS` tokens with Cyrillic, its question the corpus's place in their sorted list times `LEIPZIG_QUESTION_STRIDE`
 /// plus its number, each handed to `each` as it is read, as a line of JSON like a line of the messages' files.
@@ -1155,27 +1188,42 @@ fn token_class(name: &str) -> Option<TokenClass> {
     })
 }
 
+/// A class of the common-reading head's messages: `holds_common` or `opens_with_common`.
+type CommonClass = fn(&str, &CommonReadings<'_>) -> bool;
+
 fn holds(text: &str, class: TokenClass) -> bool {
     let tokens = pystr::split(text);
     tokens.iter().enumerate().any(|(index, token)| class(if index == 0 { "" } else { tokens[index - 1] }, token))
 }
 
-/// What the class `common` of `select` reads: the packaged count tables and whether the Russian lexicon knows a word.
+/// What the classes `common` and `common-opening` of `select` read: the packaged count tables and whether the Russian
+/// lexicon knows a word.
 pub struct CommonReadings<'a> {
     pub tables: &'a TermTables,
     pub known: &'a dyn Fn(&str) -> bool,
 }
 
-/// A token whose Cyrillic reading (the token itself, or the keys of a Latin one in the Russian layout) is of the
-/// common-reading head's shape after the token before it (`common_shape`) and no word the Russian lexicon knows, which
-/// the head leaves to the frozen model: `ру` in `майл ру`, `he` in `and he`, not `вы` in `а вы`.
+/// Whether a token's Cyrillic reading (the token itself, or the keys of a Latin one in the Russian layout) is of the
+/// common-reading head's shape after the text before it (`common_shape`) and no word the Russian lexicon knows, which the
+/// head leaves to the frozen model.
+fn common_token(token: &str, before: &str, readings: &CommonReadings<'_>) -> bool {
+    let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
+    let cyrillic = if pystr::isascii(core) { crate::physical::translated(core, 0).unwrap_or_default() } else { core.to_owned() };
+    !(readings.known)(&pystr::casefold(&cyrillic)) && common_shape(&cyrillic, before, "space", readings.tables).unwrap_or(false)
+}
+
+/// A token of the class after another word of the message (`common_token`): `ру` in `майл ру`, `he` in `and he`, not
+/// `вы` in `а вы`.
 fn holds_common(text: &str, readings: &CommonReadings<'_>) -> bool {
     let tokens = pystr::split(text);
-    tokens.iter().enumerate().skip(1).any(|(index, token)| {
-        let core = pystr::strip_chars(token, TERM_EDGE_SIGNS);
-        let cyrillic = if pystr::isascii(core) { crate::physical::translated(core, 0).unwrap_or_default() } else { core.to_owned() };
-        !(readings.known)(&pystr::casefold(&cyrillic)) && common_shape(&cyrillic, tokens[index - 1], "space", readings.tables).unwrap_or(false)
-    })
+    tokens.iter().enumerate().skip(1).any(|(index, token)| common_token(token, tokens[index - 1], readings))
+}
+
+/// The class `common-opening`: a message that opens with a token of the class (`common_token`), `Ой, всё` or `Тс прав`,
+/// which a capture types first on a line under a line of text (prefix_rate 1): the shape asks only for a letter before
+/// the token, and `OPENING_LINE_ABOVE` stands for that line.
+fn opens_with_common(text: &str, readings: &CommonReadings<'_>) -> bool {
+    pystr::split(text).first().is_some_and(|token| common_token(token, OPENING_LINE_ABOVE, readings))
 }
 
 fn capture_split(question: i64, development_share: f64) -> &'static str {
@@ -1200,14 +1248,19 @@ pub struct SelectRequest<'a> {
     pub out: &'a Path,
     pub prefix: &'a str,
     pub only: Option<&'a Path>,
-    /// What the class `common` reads (`holds_common`).
+    /// What the classes `common` and `common-opening` read (`holds_common`, `opens_with_common`).
     pub common: Option<&'a CommonReadings<'a>>,
 }
 
 /// `select`: the messages of a class, in two files by question.
 pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let (message, token) = (message_class(request.name), token_class(request.name));
-    let common = request.common.filter(|_| matches!(request.name, "common"));
+    let class: Option<CommonClass> = match request.name {
+        "common" => Some(holds_common),
+        "common-opening" => Some(opens_with_common),
+        _ => None,
+    };
+    let common = request.common.zip(class);
     if message.is_none() && token.is_none() && common.is_none() {
         return Err(format!("unknown class: {}", request.name));
     }
@@ -1225,7 +1278,7 @@ pub fn select(request: &SelectRequest<'_>) -> Result<Value, String> {
     let mut take = |line: &str| -> Result<(), String> {
         let row: Value = serde_json::from_str(line).map_err(|error| error.to_string())?;
         let text = row["text"].as_str().ok_or("a text")?;
-        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) || common.is_some_and(|readings| !holds_common(text, readings)) {
+        if message.is_some_and(|class| !class(text)) || token.is_some_and(|class| !holds(text, class)) || other.is_some_and(|class| holds(text, class)) || common.is_some_and(|(readings, class)| !class(text, readings)) {
             return Ok(());
         }
         let question = row["qid"].as_i64().ok_or("a question")?;
@@ -1401,7 +1454,7 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
     let option = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|place| arguments.get(place + 1)).map(PathBuf::from);
     let required = |name: &str| option(name).ok_or_else(|| format!("{name} is required"));
     let repeated = |name: &str| -> Vec<PathBuf> { arguments.iter().enumerate().filter(|(_, argument)| *argument == name).filter_map(|(place, _)| arguments.get(place + 1)).map(PathBuf::from).collect() };
-    let indented = JsonOptions { ensure_ascii: false, sort_keys: true, indent: Some(Indent::Spaces(2)), ..JsonOptions::default() };
+    let indented = indented_json();
     let write_table = |table: &Value, path: &Path| -> Result<Value, String> {
         std::fs::write(path, json_dumps(table, &indented) + "\n").map_err(|error| error.to_string())?;
         Ok(Value::Object(table.as_object().ok_or("a table")?.iter().map(|(name, words)| (name.clone(), json!(words.as_object().map_or(0, Map::len)))).collect()))
@@ -1438,10 +1491,7 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
         Some("capitals") => {
             let minimum: i64 = required("--minimum-count")?.to_string_lossy().parse().map_err(|_| "--minimum-count is a number")?;
             let request = CapitalsRequest { root, leipzig: &required("--leipzig")?, messages: &required("--messages")?, members: &repeated("--members"), iso4217: &required("--iso4217")?, iso4217_sha256: ISO_4217_LIST_SHA256, minimum };
-            let table = build_capitals(&request)?;
-            std::fs::write(required("--out")?, ks_text::json::dumps(&table, &indented) + "\n").map_err(|error| error.to_string())?;
-            Ok(json!({"web_cyrillic": table.web_cyrillic.len(), "web_latin": table.web_latin.len(), "technical_cyrillic": table.technical_cyrillic.len(),
-                "technical_latin": table.technical_latin.len(), "iso4217": table.iso4217.len(), "lexicon_capitals": table.lexicon_capitals.len()}))
+            Ok(json!(write_capitals(&request, &required("--out")?)?))
         }
         Some("sources") => build_sources(&required("--manifest")?, &required("--messages")?, &required("--tatoeba")?),
         Some("select") => {
@@ -1451,9 +1501,9 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
             let only = option("--only-ids");
             let leipzig = option("--leipzig");
             let messages = if leipzig.is_some() { PathBuf::new() } else { required("--messages")? };
-            // The class of the common-reading head reads the packaged count tables and the Russian lexicon of the tree.
+            // The classes of the common-reading head read the packaged count tables and the Russian lexicon of the tree.
             let (tables, russian) = match name.as_str() {
-                "common" => (Some(TermTables::load(&root.join("resources/models")).map_err(|error| error.message)?), Some(resources.engine_language_model("ru_RU").map_err(|error| error.message)?)),
+                "common" | "common-opening" => (Some(TermTables::load(&root.join("resources/models")).map_err(|error| error.message)?), Some(resources.engine_language_model("ru_RU").map_err(|error| error.message)?)),
                 _ => (None, None),
             };
             let known = |word: &str| russian.as_ref().is_some_and(|model| model.score(word).known);
