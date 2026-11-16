@@ -772,7 +772,7 @@ impl Shared {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, X11Error> {
         let Some(api) = self.api() else { return Err(failed("X11 backend не запущен")) };
-        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = injection;
+        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased, .. } = injection;
         if kept_tail != 0 && (kept_tail >= strokes.len() || source_group.is_none()) {
             return Err(failed("Некорректная граница сохраняемого слова; замена отменена"));
         }

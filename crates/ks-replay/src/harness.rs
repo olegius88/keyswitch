@@ -103,6 +103,8 @@ pub struct Correction {
     pub actual_group: i32,
     pub caret_before: usize,
     pub caret_after: usize,
+    /// What decided it, as the engine's plan names it (`early`, `pause`, `boundary`, …).
+    pub kind: &'static str,
 }
 
 /// Whether the next editors keep the program's own hotkeys from the window, as a Mac does.
@@ -428,6 +430,7 @@ impl InputBackend for Backend {
             actual_group,
             caret_before: initial_caret,
             caret_after,
+            kind: injection.mode,
         });
         Ok(0)
     }

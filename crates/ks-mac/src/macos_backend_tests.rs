@@ -241,7 +241,7 @@ fn stroke(keycode: u32, group: i32, state: u32) -> KeyEvent {
 }
 
 fn injection(strokes: &[KeyEvent], target_group: i32) -> Injection<'_> {
-    Injection { strokes, target_group, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None }
+    Injection { strokes, target_group, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" }
 }
 
 #[test]
@@ -917,6 +917,7 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
                         trailing: &trailing,
                         kept_tail: *dice.of(&[0, 0, 1, 9]),
                         erased: *dice.of(&[None, None, Some(1)]),
+                        mode: "boundary",
                     });
                 }
                 23 => match dice.below(4) {

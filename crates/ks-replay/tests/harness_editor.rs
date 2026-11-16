@@ -19,12 +19,13 @@ fn a_correction_is_recorded_with_the_key_it_came_at() {
     let backend = Backend::new("app", 0, "ghb".chars().collect());
     let strokes = [key(["g", "п"], 0), key(["h", "р"], 0), key(["b", "и"], 0)];
     backend.set_serial(7);
-    let injection = Injection { strokes: &strokes, target_group: 1, boundary: None, source_group: Some(0), late: &[], trailing: &[], kept_tail: 0, erased: None };
+    let injection = Injection { strokes: &strokes, target_group: 1, boundary: None, source_group: Some(0), late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "early" };
     assert_eq!(backend.inject_correction(injection).ok(), Some(0));
     let corrections: Vec<Correction> = backend.corrections();
     assert_eq!(corrections.len(), 1);
     assert_eq!((corrections[0].event, corrections[0].before.as_str(), corrections[0].after.as_str()), (7, "ghb", "при"));
     assert_eq!((corrections[0].source_group, corrections[0].target_group, corrections[0].actual_group), (0, 1, 1));
+    assert_eq!(corrections[0].kind, "early", "the kind the engine's plan gave the injection");
 }
 
 #[test]
@@ -32,7 +33,7 @@ fn a_window_that_closed_refuses_what_it_is_asked() {
     let backend = Backend::new("app", 0, "ghb".chars().collect());
     backend.set_failing(true);
     let strokes = [key(["g", "п"], 0)];
-    let injection = Injection { strokes: &strokes, target_group: 1, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None };
+    let injection = Injection { strokes: &strokes, target_group: 1, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" };
     assert!(matches!(backend.inject_correction(injection), Err(BackendError::Failed(_))));
     let selected = SelectedText { text: "ghb".to_owned(), source: "clipboard".to_owned() };
     assert!(matches!(backend.replace_selection(&selected, "при", Some(1)), Err(SelectionError::Failed(_))));

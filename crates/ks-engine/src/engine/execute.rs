@@ -842,6 +842,7 @@ impl EngineCore {
                 trailing: &literal,
                 kept_tail: 0,
                 erased: None,
+                mode: plan.mode,
             });
         }
         let strokes = owned(&plan.strokes);
@@ -856,6 +857,7 @@ impl EngineCore {
             trailing: &trailing,
             kept_tail: 0,
             erased: None,
+            mode: plan.mode,
         };
         if !plan.replaced_strokes.is_empty() && plan.replaced_strokes.len() != plan.strokes.len() {
             // A typo correction (or its undo) types more or fewer keys than the word on screen has.

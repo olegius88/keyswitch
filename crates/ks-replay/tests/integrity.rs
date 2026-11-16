@@ -634,7 +634,7 @@ impl InputBackend for Desk {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError> {
         let mut state = self.lock();
-        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = injection;
+        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased, .. } = injection;
         assert!(!state.panicking_correction, "the backend failed in the middle of a correction");
         if state.failing {
             state.failing = false;

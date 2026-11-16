@@ -147,7 +147,7 @@ mod tests {
         }
         assert_eq!(backend.active_application(), "");
         assert_eq!(backend.focused_window(), None);
-        let injection = Injection { strokes: &[], target_group: 0, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None };
+        let injection = Injection { strokes: &[], target_group: 0, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" };
         assert!(backend.inject_correction(injection).is_err());
     }
 }

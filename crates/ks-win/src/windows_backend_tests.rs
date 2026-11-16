@@ -620,6 +620,7 @@ fn injection(strokes: &[KeyEvent], target_group: i32) -> Injection<'_> {
         trailing: &[],
         kept_tail: 0,
         erased: None,
+        mode: "boundary",
     }
 }
 
@@ -2803,6 +2804,7 @@ mod golden {
             trailing: &trailing,
             kept_tail: number(&op["kept_tail"]).to::<usize>(),
             erased: op["erased"].as_u64().map(ks_cast::To::to::<usize>),
+            mode: "boundary",
         });
         outcome.map_or_else(|error| json!(error_text(&error)), |count| json!(count))
     }
@@ -3155,6 +3157,7 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
                         trailing: &trailing,
                         kept_tail: *dice.of(&[0, 0, 1, 9]),
                         erased: *dice.of(&[None, None, Some(1)]),
+                        mode: "boundary",
                     });
                 }
                 23 => match dice.below(4) {

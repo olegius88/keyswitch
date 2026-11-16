@@ -155,6 +155,9 @@ pub struct Injection<'a> {
     /// How many characters the word occupies on screen when that differs from the keys it types
     /// (a typo correction); None when the backend erases one character per stroke.
     pub erased: Option<usize>,
+    /// What decided the correction, as the engine's plan names it (`early`, `pause`, `boundary`, `context_word`, …).
+    /// A backend types every kind alike; the name is there for whoever records what was typed.
+    pub mode: &'static str,
 }
 
 /// Operations required by the correction engine and diagnostics UI.

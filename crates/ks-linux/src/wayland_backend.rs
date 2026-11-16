@@ -891,7 +891,7 @@ impl Inner {
     }
 
     fn inject_correction_inner(&self, injection: &Injection<'_>) -> Result<i32, BackendError> {
-        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = *injection;
+        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased, .. } = *injection;
         let group_count = self.group_count().low::<i32>();
         if !(0 <= target_group && target_group < group_count) {
             return Err(failed(format!("Неизвестная группа раскладки {target_group}")));

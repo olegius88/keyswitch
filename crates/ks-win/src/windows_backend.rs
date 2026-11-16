@@ -1662,7 +1662,7 @@ impl Inner {
     }
 
     fn inject_correction_inner(&self, injection: &Injection<'_>) -> Result<i32, WindowsBackendError> {
-        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased } = *injection;
+        let Injection { strokes, target_group, boundary, source_group, late, trailing, kept_tail, erased, .. } = *injection;
         self.layouts()?;
         if !valid_group(target_group) {
             return Err(failed(format!("Неизвестная группа раскладки {target_group}")));
