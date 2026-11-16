@@ -417,6 +417,8 @@ pub struct SplitFrames {
     pub pairs: usize,
     /// `<category>:<group>` of the parents, by the frames' `class`.
     pub classes: Vec<String>,
+    /// The whole text each sequence types, by its number.
+    pub typed: Vec<String>,
 }
 
 struct ParentFrames {
@@ -424,6 +426,7 @@ struct ParentFrames {
     names: Vec<String>,
     pairs: Vec<String>,
     sequences: Vec<String>,
+    typed: Vec<String>,
 }
 
 /// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller.
@@ -434,7 +437,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
     let length_count = parent_length.min(maximum_prefix_length);
     let weight = 1.0 / (family_count.to::<f64>() * variants.len().to::<f64>() * PROFILES.len().to::<f64>() * states.len().to::<f64>() * length_count.to::<f64>());
     let mut names: HashMap<String, u32> = HashMap::new();
-    let mut out = ParentFrames { frames: Vec::new(), names: Vec::new(), pairs: Vec::new(), sequences: Vec::new() };
+    let mut out = ParentFrames { frames: Vec::new(), names: Vec::new(), pairs: Vec::new(), sequences: Vec::new(), typed: Vec::new() };
     let (from, to) = if parent.group != 0 { ("ru", "us") } else { ("us", "ru") };
     for context in &variants {
         let context_key = json!([context.before, context.application, context.role.as_str()]);
@@ -452,6 +455,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
                 let sequence_id = format!("prefix-v2-sequence:{}", digest(&json!([pair_id, desired])));
                 let sequence_number = out.sequences.len().to::<u32>();
                 out.sequences.push(sequence_id);
+                out.typed.push(full.clone());
                 for length in 1..=length_count {
                     let original = pystr::slice(&full, None, Some(length.to::<i64>())).to_owned();
                     let (source_layout, target_layout) = if source != 0 { ("ru", "us") } else { ("us", "ru") };
@@ -532,7 +536,9 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
     let mut numbers: HashMap<String, u32> = HashMap::new();
     let mut frames = Vec::new();
     let (mut sequences, mut pairs) = (0_u32, 0_u32);
+    let mut typed = Vec::new();
     for part in done.into_inner().expect("the workers finished").into_iter().flatten() {
+        typed.extend(part.typed);
         let mapping: Vec<u32> = part
             .names
             .iter()
@@ -554,7 +560,7 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
         sequences += part.sequences.len().to::<u32>();
         pairs += part.pairs.len().to::<u32>();
     }
-    SplitFrames { frames, names, families, pairs: pairs.to::<usize>(), classes }
+    SplitFrames { frames, names, families, pairs: pairs.to::<usize>(), classes, typed }
 }
 
 /// `feature_vocabulary`: Kahan feature mass; family weight precedes class multipliers.
@@ -718,6 +724,19 @@ struct ClassReport<'a> {
     development: BTreeMap<String, ClassMetrics>,
     calibration: BTreeMap<String, ClassMetrics>,
     calibration_by_threshold: BTreeMap<String, BTreeMap<String, ClassMetrics>>,
+    /// The texts typed as meant that each threshold would convert on calibration, with their class.
+    calibration_false: BTreeMap<String, Vec<String>>,
+}
+
+/// The distinct texts of the kept sequences a threshold converts, each after its class: what holds a threshold up.
+fn false_texts(scores: &[Sequence], threshold: f64, frames: &SplitFrames) -> Vec<String> {
+    let found: BTreeSet<String> = scores
+        .iter()
+        .zip(&frames.typed)
+        .filter(|(value, _)| !value.desired && value.candidates.iter().any(|candidate| candidate.1 >= threshold))
+        .map(|(value, text)| format!("{}: {text}", frames.classes[usize::from(value.class)]))
+        .collect();
+    found.into_iter().collect()
 }
 
 /// The metrics of each class of parents, both profiles together, and the length of the first conversion of each
@@ -1050,6 +1069,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             calibration: class_metrics(&scores, threshold, &calibration_frames.classes),
             // What each threshold of the grid would do on calibration, class by class: which kept words a lower one converts.
             calibration_by_threshold: thresholds.iter().map(|candidate| (candidate.to_string(), class_metrics(&scores, *candidate, &calibration_frames.classes))).collect(),
+            calibration_false: thresholds.iter().map(|candidate| (candidate.to_string(), false_texts(&scores, *candidate, &calibration_frames))).collect(),
         };
         let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
         write("classes.json", (ks_text::json::dumps(&report, &options) + "\n").as_bytes())?;
@@ -1120,6 +1140,9 @@ mod tests {
         let rare = &value["rare:1"];
         assert_eq!((rare.desired, rare.converted_before_end, rare.first_conversion_length.clone()), (2, 1, [(0, 1), (4, 1)].into_iter().collect()));
         assert_eq!(value["name:0"].false_conversions, 1);
+        let frames = SplitFrames { frames: Vec::new(), names: Vec::new(), families: Vec::new(), pairs: 0, classes: classes.clone(), typed: vec!["ghbdtn".to_owned(), "kaplan".to_owned(), "ghbd".to_owned()] };
+        assert_eq!(false_texts(&scores, 0.99, &frames), ["name:0: kaplan"]);
+        assert!(false_texts(&scores, 0.9999, &frames).is_empty());
         assert_eq!(ks_text::json::dumps(&value["name:0"], &JsonOptions::default()), r#"{"sequences": 1, "desired": 0, "converted": 0, "converted_before_end": 0, "false": 1, "first_conversion_length": {}}"#);
     }
 

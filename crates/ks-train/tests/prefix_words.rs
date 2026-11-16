@@ -163,6 +163,7 @@ fn a_fit_reads_a_word_corpus_each_row_in_its_own_situation_and_reports_each_clas
     assert_eq!(classes["calibration"]["sign_led:0"]["sequences"], json!(4));
     assert_eq!(classes["calibration"]["rare:1"]["desired"], json!(12));
     assert_eq!(classes["calibration_by_threshold"]["0.985"]["rare:1"]["desired"], json!(12));
+    assert_eq!(classes["calibration_false"]["0.985"], json!([]));
     // A recipe that names a folder without a word corpus.
     options["corpus"] = json!("model/prefix_v1");
     std::fs::write(&recipe_path, options.to_string()).expect("a recipe");
