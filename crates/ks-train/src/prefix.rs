@@ -11,7 +11,8 @@ use crate::{ACTIONS, DETERMINISTIC_ROUNDING_DECIMALS, FEATURE_MASS_TOLERANCE, LO
 use flate2::read::MultiGzDecoder;
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::prefix_model::{PrefixInput, PrefixModel, PrefixSide};
-use ks_context::prefix_schema::features_for_version;
+use ks_context::prefix_schema::features_with_ortho;
+use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_context::flat_table::WeightTable;
 use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
 use ks_lang::{Resources, LanguageModel};
@@ -250,7 +251,7 @@ struct ParentFrames {
 }
 
 /// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller.
-fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64) -> ParentFrames {
+fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>) -> ParentFrames {
     let variants = contexts_of(parent);
     let categories_correct = parent.category == "correct";
     let states: &[bool] = if categories_correct { &[false, true] } else { &[false] };
@@ -294,7 +295,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                     field.before.clone_from(&context.before);
                     field.role = context.role;
                     let item = PrefixInput { original: original.clone(), alternative: alternate.clone(), source_group: source, field };
-                    let values = features_for_version(&item, [&sides[0], &sides[1]], feature_version).expect("the schema of the recipe");
+                    let values = features_with_ortho(&item, [&sides[0], &sides[1]], feature_version, ortho).expect("the schema of the recipe");
                     let features = values
                         .into_iter()
                         .map(|(name, value)| {
@@ -332,7 +333,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
 }
 
 /// `generate_frames`: paired snapshots with unit total sampling mass per physical family, by `jobs` threads.
-fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, jobs: usize) -> SplitFrames {
+fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, jobs: usize) -> SplitFrames {
     let mut family_counts: BTreeMap<&str, u64> = BTreeMap::new();
     for parent in parents {
         *family_counts.entry(&parent.family).or_insert(0) += 1;
@@ -347,7 +348,7 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(parent) = parents.get(index) else { break };
-                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], models, indexes, maximum_prefix_length, feature_version);
+                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], models, indexes, maximum_prefix_length, feature_version, ortho);
                     done.lock().expect("a worker finished")[index] = Some(built);
                 }
             });
@@ -432,6 +433,15 @@ fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value) -> Packed {
             1.0
         };
         packed.importance.push(frame.sample_weight * factor);
+    }
+    // A family's weight is a share of one unit, about a thousandth of a row: AdaGrad's accumulators start at 1 and such
+    // gradients never move them, so the optimiser is plain descent with a tiny step. A recipe may scale the split's
+    // importance to a mean of one; without the key the importance is the family share, as every sealed recipe has it.
+    if cfg.get("importance_normalization").and_then(Value::as_str) == Some("mean_one") && !packed.importance.is_empty() {
+        let mean = fsum(&packed.importance).expect("finite importance") / packed.importance.len().to::<f64>();
+        for value in &mut packed.importance {
+            *value /= mean;
+        }
     }
     packed
 }
@@ -657,7 +667,13 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let spelling = reference_models(request.root, &resources, true)?;
     let indexes = indexes_of(&portable, &spelling);
     let maximum_prefix_length = cfg.int("maximum_prefix_length").to::<usize>();
-    let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, request.jobs);
+    // Schema three reads the keys with the packaged orthotactic models, as the engine does.
+    let ortho = if feature_version == ks_context::constants::ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() {
+        Some(OrthoModel::load(&artifact_path(request.resource_dir), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?)
+    } else {
+        None
+    };
+    let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, ortho.as_ref(), request.jobs);
     let train_frames = frames_of(TRAIN);
     println!("train: {} frames", train_frames.frames.len());
     let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());

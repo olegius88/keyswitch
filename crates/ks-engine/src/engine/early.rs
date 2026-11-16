@@ -208,8 +208,10 @@ impl EngineCore {
             && self.in_models(0)
             && self.in_models(1)
             && self.prefix_indexes.len() > 1;
-        let (Some(model), Some(field), true) = (self.prefix_model.as_ref(), field, supported) else {
-            let reason = if self.prefix_model.is_none() { "prefix_model_unavailable" } else { "prefix_input_unsupported" };
+        // A schema that reads the keys with the orthotactic models answers only beside them.
+        let usable = self.prefix_model.as_ref().filter(|model| !model.needs_ortho() || self.context_policy.ortho.is_some());
+        let (Some(model), Some(field), true) = (usable, field, supported) else {
+            let reason = if usable.is_none() { "prefix_model_unavailable" } else { "prefix_input_unsupported" };
             let result = if mode == "assist" { EarlySwitchDecision { should_switch: false, reason: reason.to_owned(), ..baseline } } else { baseline };
             return Ok((result, EARLY_SWITCH_CONFIDENCE));
         };
@@ -223,7 +225,7 @@ impl EngineCore {
             source_group: baseline.source_group,
             field: field.clone(),
         };
-        let prediction = model.predict(&item, [&sides[0], &sides[1]])?;
+        let prediction = model.predict_with(&item, [&sides[0], &sides[1]], self.context_policy.ortho.as_deref())?;
         let action = prediction.action.as_str();
         technical_event!(
             self.shared, "prefix_decision", "action": action, "score": logged(prediction.probability),

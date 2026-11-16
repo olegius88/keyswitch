@@ -591,6 +591,22 @@ pub const MAX_PREFIX_CHARACTER_NGRAM_ORDER: usize = 4;
 
 pub const PREFIX_CHARACTER_FEATURE_WEIGHT_CAP: f64 = 2.0;
 
+// Schema three: the orthotactic models read the keys of the prefix (crates/ks-context/src/prefix_schema.rs).
+pub const ORTHO_PREFIX_FEATURE_VERSION: usize = 3;
+
+// A prefix's orthotactic evidence (other layout's language against the typed one's, in nats) scaled into [-1, 1]:
+// the sum over its keys, the mean per key and the worst key of each reading.
+pub const PREFIX_ORTHO_SUM_BOUND_NATS: f64 = 60.0;
+pub const PREFIX_ORTHO_MEAN_BOUND_NATS: f64 = 15.0;
+pub const PREFIX_ORTHO_WORST_BOUND_NATS: f64 = 30.0;
+
+// The sum also goes in as a step of this many nats, at most this many steps either way, per length bucket.
+pub const PREFIX_ORTHO_STEP_NATS: f64 = 5.0;
+pub const PREFIX_ORTHO_MAX_STEPS: i64 = 8;
+
+// Length buckets of the orthotactic evidence: a key count at or above the last one shares its bucket.
+pub const PREFIX_ORTHO_LENGTH_BUCKETS: [usize; 4] = [3, 4, 5, 6];
+
 // Lowest conversion threshold a prefix model artifact may carry.
 pub const MIN_PREFIX_CONVERSION_THRESHOLD: f64 = 0.985;
 
