@@ -79,7 +79,7 @@ pub fn write_text(path: &Path, text: &str) -> io::Result<()> {
 /// name or ends it) is replaced, or the new one is appended.
 #[must_use]
 pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path.file_name().map_or_default(|n| n.to_string_lossy().into_owned());
     let existing = match name.rfind('.') {
         Some(i) if i > 0 && i < name.len() - 1 => name.len() - i,
         _ => 0,
@@ -90,7 +90,7 @@ pub fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 /// `path.with_name(name + suffix)`.
 #[must_use]
 pub fn with_name_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path.file_name().map_or_default(|n| n.to_string_lossy().into_owned());
     path.with_file_name(format!("{name}{suffix}"))
 }
 

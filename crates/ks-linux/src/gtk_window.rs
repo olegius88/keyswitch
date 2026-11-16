@@ -100,11 +100,11 @@ impl ApplicationChoice {
 #[must_use]
 pub fn installed_application_choices() -> Vec<ApplicationChoice> {
     let shown = gio::AppInfo::all().into_iter().filter(AppInfoExt::should_show).map(|application| {
-        let desktop_id = application.id().map(|id| id.to_string()).unwrap_or_default();
+        let desktop_id = application.id().map_or_default(|id| id.to_string());
         RawChoice {
             desktop_id: desktop_id.strip_suffix(".desktop").unwrap_or(&desktop_id).to_owned(),
-            startup_class: application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map(|class| class.to_string()).unwrap_or_default(),
-            executable: application.executable().file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(),
+            startup_class: application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map_or_default(|class| class.to_string()),
+            executable: application.executable().file_name().map_or_default(|name| name.to_string_lossy().into_owned()),
             display_name: application.display_name().to_string(),
             name: application.name().to_string(),
             icon: application.icon(),
@@ -605,7 +605,7 @@ impl MainWindow {
     /// The name of the page shown now.
     #[must_use]
     pub fn current_page(&self) -> String {
-        self.stack.visible_child_name().map(|name| name.to_string()).unwrap_or_default()
+        self.stack.visible_child_name().map_or_default(|name| name.to_string())
     }
 
     pub fn show_page(&self, page: &str) -> bool {
@@ -924,7 +924,7 @@ impl MainWindow {
         let searched = catalog.clone();
         let weak_search = search.downgrade();
         applications.set_filter_func(move |row| {
-            let wanted = weak_search.upgrade().map(|search| search.text().trim().to_lowercase()).unwrap_or_default();
+            let wanted = weak_search.upgrade().map_or_default(|search| search.text().trim().to_lowercase());
             searched[row.index().to::<usize>()].search_text().contains(&wanted)
         });
         let weak_list = applications.downgrade();

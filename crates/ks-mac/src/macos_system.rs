@@ -84,7 +84,7 @@ impl MacAutostartManager {
 
     #[must_use]
     pub fn status(&self) -> AutostartStatus {
-        let arguments = std::fs::read_to_string(&self.path).map(|document| registered_arguments(&document)).unwrap_or_default();
+        let arguments = std::fs::read_to_string(&self.path).map_or_default(|document| registered_arguments(&document));
         match arguments.first() {
             None => AutostartStatus { command: None, blocked_by_windows: false, target_missing: false },
             Some(program) => AutostartStatus {

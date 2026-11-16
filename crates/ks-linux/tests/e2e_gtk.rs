@@ -717,14 +717,14 @@ fn single_keys() -> Result<(), String> {
     layout.set_selected(place("Shift_L"));
     convert.set_selected(place("Shift_L"));
     pump(50);
-    let said = convert.subtitle().map(|text| text.to_string()).unwrap_or_default();
+    let said = convert.subtitle().map_or_default(|text| text.to_string());
     if stored() != ("Shift_L".to_owned(), String::new()) || convert.selected() != place("") || !said.starts_with("Левый Shift уже выбран") {
         return Err(format!("the conversion key took the layout switch key: stored {:?}, shown {}, said {said:?}", stored(), convert.selected()));
     }
     convert.set_selected(place("Control_L"));
     layout.set_selected(place("Control_L"));
     pump(50);
-    let said = layout.subtitle().map(|text| text.to_string()).unwrap_or_default();
+    let said = layout.subtitle().map_or_default(|text| text.to_string());
     if stored() != ("Shift_L".to_owned(), "Control_L".to_owned()) || convert.subtitle().map(|text| text.to_string()) != own_words || !said.starts_with("Левый Ctrl уже выбран") {
         return Err(format!("the conversion key was not stored, or the layout switch key took it: stored {:?}, said {said:?}", stored()));
     }

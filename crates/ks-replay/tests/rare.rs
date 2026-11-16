@@ -224,7 +224,7 @@ fn a_correction_waits_only_for_a_field_that_is_behind() {
 
 #[test]
 fn a_word_is_found_in_the_field_with_its_first_letter_in_any_case() {
-    let around = |before: &str, after: &str, typed: &str, ahead: &str| EngineCore::_typed_in_field(&field(before, after), typed, ahead);
+    let around = |before: &str, after: &str, typed: &str, ahead: &str| EngineCore::typed_in_field(&field(before, after), typed, ahead);
     assert_eq!(around("x ghbdtn", "", "ghbdtn", "").map(|found| found.0), Some("x ".to_owned()));
     // The editor made the first letter a capital: the keys typed are not what stands there.
     assert!(around("Ghbdtn", "", "ghbdtn", "").is_none());
@@ -512,18 +512,18 @@ fn settings_edited_by_hand_read_as_their_defaults() {
 #[test]
 fn the_shape_of_a_key_says_what_it_can_be() {
     let empty = KeyEvent { character: String::new(), ..(*key('a')).clone() };
-    assert!(!EngineCore::_layout_dependent(&empty));
+    assert!(!EngineCore::layout_dependent(&empty));
     let one_empty = KeyEvent { characters: vec![String::new(), "a".to_owned()], ..(*key('a')).clone() };
-    assert!(!EngineCore::_layout_dependent(&one_empty));
-    assert!(EngineCore::_layout_dependent(&key('a')));
+    assert!(!EngineCore::layout_dependent(&one_empty));
+    assert!(EngineCore::layout_dependent(&key('a')));
     let same = KeyEvent { characters: vec!["1".to_owned(), "1".to_owned()], character: "1".to_owned(), ..(*key('a')).clone() };
-    assert!(!EngineCore::_layout_dependent(&same));
-    assert!(!EngineCore::_joins_parts(&KeyEvent { characters: Vec::new(), ..(*key('a')).clone() }));
+    assert!(!EngineCore::layout_dependent(&same));
+    assert!(!EngineCore::joins_parts(&KeyEvent { characters: Vec::new(), ..(*key('a')).clone() }));
     let dash = KeyEvent { characters: vec!["-".to_owned(), "-".to_owned()], character: "-".to_owned(), ..(*key('a')).clone() };
-    assert!(EngineCore::_joins_parts(&dash));
-    assert!(!EngineCore::_joins_parts(&KeyEvent { character: "+".to_owned(), ..dash }));
-    assert!(EngineCore::_is_boundary(&named("Return")));
-    assert!(!EngineCore::_is_boundary(&named("F1")));
+    assert!(EngineCore::joins_parts(&dash));
+    assert!(!EngineCore::joins_parts(&KeyEvent { character: "+".to_owned(), ..dash }));
+    assert!(EngineCore::is_boundary(&named("Return")));
+    assert!(!EngineCore::is_boundary(&named("F1")));
 }
 
 #[test]
@@ -749,7 +749,7 @@ fn the_tail_of_a_word_is_cut_off_only_if_it_can_be_a_tail() {
     let base = plan("ghbdtn", "привет", Some(','));
     for characters in [[",", ""], [",", " "], [",", ","]] {
         let odd = Arc::new(KeyEvent { character: ",".to_owned(), characters: characters.iter().map(|text| (*text).to_owned()).collect(), ..(*key(',')).clone() });
-        let replayed = EngineCore::_replay_sign_with_word(&Arc::new(CorrectionPlan { boundary: Some(odd), ..(*base).clone() }), &[]);
+        let replayed = EngineCore::replay_sign_with_word(&Arc::new(CorrectionPlan { boundary: Some(odd), ..(*base).clone() }), &[]);
         assert_eq!(replayed.strokes.len(), 6);
     }
     // What may follow a committed word and still let Pause reach it.
@@ -1034,7 +1034,7 @@ fn a_hotkey_and_a_plan_answer_for_themselves() {
     let word = plan("hello", "Hello", None);
     assert!(!word.case_fix());
     assert!(Arc::new(CorrectionPlan { replaced: keys("hello"), ..(*word).clone() }).case_fix());
-    assert!(EngineCore::_is_boundary(&named("KP_Enter")));
+    assert!(EngineCore::is_boundary(&named("KP_Enter")));
 }
 
 #[test]

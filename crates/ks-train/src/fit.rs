@@ -516,7 +516,7 @@ pub fn build_features_of_splits(inputs: &FitInputs, jobs: usize, stages: &mut dy
     let heads = trainable_prefixes(&inputs.tools.root, &inputs.models_dir, options)?;
     let labelling = labelling_base(&root, &inputs.models_dir, options)?;
     let mut captured_report = Map::new();
-    let file_name = |source: &CapturedSource| source.path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let file_name = |source: &CapturedSource| source.path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
     let mut extra: Vec<ActionRow> = Vec::new();
     let (capitals_report, english_report);
     let tools = &inputs.tools;
@@ -932,7 +932,7 @@ pub fn fit(request: &FitRequest<'_>, stages: &mut dyn Stages) -> Result<Value, S
     // The kept-neighbour question and every head have feature names of their own and a budget of their own.
     let start = base.as_ref().or(warm.as_ref());
     let own: Vec<&str> = std::iter::once(KEPT_FEATURE_PREFIX).chain(HEAD_PREFIXES.iter().map(|head| head.1)).collect();
-    let carried = base.as_ref().map(carried_prefixes).unwrap_or_default();
+    let carried = base.as_ref().map_or_default(carried_prefixes);
     let mut budgets: Vec<(String, usize)> = vec![(KEPT_FEATURE_PREFIX.to_owned(), kept_options.int("maximum_features").to::<usize>())];
     budgets.extend(heads.iter().map(|(prefix, budget)| (prefix.clone(), *budget)));
     budgets.retain(|(prefix, _)| !carried.contains(prefix));

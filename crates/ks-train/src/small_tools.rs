@@ -175,7 +175,7 @@ fn reference_inputs(root: &Path) -> Result<(Vec<String>, Box<dyn SpellChecker>, 
     }
     let speller = ks_hunspell::HunspellDictionary::new(LEXICON_LOCALE, &ks_config::history::data_dir());
     loaded_from(&speller, root, &dictionary)?;
-    let (frequencies, _) = LanguageModel::_read_arpa(&lexicon);
+    let (frequencies, _) = LanguageModel::read_arpa(&lexicon);
     let mut onboard: BTreeSet<String> = frequencies.iter().map(|(word, _)| word.to_owned()).collect();
     onboard.extend(locale_fallbacks(LEXICON_LOCALE).iter().map(|word| LanguageModel::normalize(word)));
     Ok((onboard.into_iter().collect(), Box::new(speller), pins))

@@ -532,11 +532,11 @@ fn edit_of(operation_name: &Value, position: &Value, letter: &Value) -> Edit {
 }
 
 fn edit_json(edit: &Edit) -> Value {
-    json!([edit.operation.as_str(), edit.position, edit.letter.map(String::from).unwrap_or_default()])
+    json!([edit.operation.as_str(), edit.position, edit.letter.map_or_default(String::from)])
 }
 
 fn choice_json(choice: &TypoChoice) -> Value {
-    json!([choice.word, choice.edit.operation.as_str(), choice.edit.position, choice.edit.letter.map(String::from).unwrap_or_default(), choice.weight, choice.candidates, hex(choice.margin)])
+    json!([choice.word, choice.edit.operation.as_str(), choice.edit.position, choice.edit.letter.map_or_default(String::from), choice.weight, choice.candidates, hex(choice.margin)])
 }
 
 #[test]

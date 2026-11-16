@@ -130,7 +130,7 @@ pub fn bits_from_sysfs(raw: &str) -> HashSet<u32> {
 }
 
 fn read_sysfs_text(path: &Path) -> String {
-    std::fs::read(path).map(|bytes| pystr::strip(&String::from_utf8_lossy(&bytes)).to_owned()).unwrap_or_default()
+    std::fs::read(path).map_or_default(|bytes| pystr::strip(&String::from_utf8_lossy(&bytes)).to_owned())
 }
 
 fn read_sysfs_hex(path: &Path) -> u32 {
@@ -739,7 +739,7 @@ impl WaylandXkbMonitor {
             (self.shared.xkb.state_update_mask)(core.state, depressed, 0, locked, 0, 0, layout_index.max(0).low::<u32>());
             (self.shared.xkb.state_key_get_utf32)(core.state, keycode + WAYLAND_XKB_KEYCODE_OFFSET)
         };
-        let character = if codepoint > 0 { char::from_u32(codepoint).map(String::from).unwrap_or_default() } else { String::new() };
+        let character = if codepoint > 0 { char::from_u32(codepoint).map_or_default(String::from) } else { String::new() };
         let result = if pystr::isprintable(&character) { character } else { String::new() };
         core.translations.insert(key, result.clone());
         result
@@ -2295,7 +2295,7 @@ impl WaylandApi for NativeWaylandApi {
     }
 
     fn active_application(&self) -> String {
-        self.shared.components().and_then(|components| components.adapter.active_window()).map(|window| window.application).unwrap_or_default()
+        self.shared.components().and_then(|components| components.adapter.active_window()).map_or_default(|window| window.application)
     }
 
     fn focused_window(&self) -> i64 {

@@ -253,7 +253,7 @@ pub(crate) fn call(engine: &KeySwitchEngine, name: &str, args: &Args<'_>, record
             done()
         }
         "_is_boundary" => match args.get(0, "event").and_then(key_from) {
-            Some(event) => answer(Value::Bool(EngineCore::_is_boundary(&event))),
+            Some(event) => answer(Value::Bool(EngineCore::is_boundary(&event))),
             None => Outcome::Unknown("_is_boundary of something else".to_owned()),
         },
         "_poll_current_group" => result_of(core.poll_current_group()),

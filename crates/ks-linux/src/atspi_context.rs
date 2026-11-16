@@ -108,7 +108,7 @@ fn only_password_masks(text: &str) -> bool {
 }
 
 fn read_process_name(process: u32) -> String {
-    std::fs::read_to_string(format!("/proc/{process}/comm")).map(|text| pystr::strip(&text).to_owned()).unwrap_or_default()
+    std::fs::read_to_string(format!("/proc/{process}/comm")).map_or_default(|text| pystr::strip(&text).to_owned())
 }
 
 fn refused(reason: RefusalReason) -> SelectionError {

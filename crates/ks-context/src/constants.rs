@@ -732,7 +732,7 @@ pub const PREFIX_V1_BEFORE_WORD_COUNT: usize = 2;
 pub const FIELD_CARET_LAG_MAX_CHARACTERS: usize = 2;
 
 // The most of the last typed letters a field read as their key goes down may not show yet: a browser
-// or an Electron editor reports the text a moment after the key (engine._typed_in_field).
+// or an Electron editor reports the text a moment after the key (engine.typed_in_field).
 pub const FIELD_PENDING_MAX_CHARACTERS: usize = 2;
 
 // The most an editor's input buffer shows when it is what UI Automation reads instead of the text: VS Code with its

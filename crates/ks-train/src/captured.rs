@@ -48,7 +48,7 @@ fn columns_of(version: i64) -> Option<Vec<String>> {
 pub fn captured_sources(manifest: &Path) -> Result<Vec<CapturedSource>, String> {
     let payload = read_json(manifest)?;
     let columns = payload.get("schema_version").and_then(Value::as_i64).and_then(columns_of).ok_or("invalid captured question manifest")?;
-    let listed: Vec<&str> = payload.get("columns").and_then(Value::as_array).map(|items| items.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    let listed: Vec<&str> = payload.get("columns").and_then(Value::as_array).map_or_default(|items| items.iter().filter_map(Value::as_str).collect());
     if listed != columns.iter().map(String::as_str).collect::<Vec<_>>() {
         return Err("invalid captured question manifest".to_owned());
     }
@@ -144,7 +144,7 @@ pub fn captured_rows(source: &CapturedSource) -> Result<Vec<(ContextEvidence, us
 }
 
 fn file_name(path: &Path) -> String {
-    path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_name().map_or_default(|name| name.to_string_lossy().into_owned())
 }
 
 fn canonical_digest(value: &Value) -> [u8; 32] {
@@ -208,7 +208,7 @@ pub fn captured_source_curriculum(tools: &Tools, source: &CapturedSource, option
     let taken: HashSet<usize> = chosen_unknown.iter().copied().collect();
     let mut keeps: Vec<usize> = chosen_unknown.clone();
     keeps.extend((0..keeps_ranked.len()).filter(|index| !taken.contains(index)).take(keep_budget - chosen_unknown.len()));
-    let stem = source.path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = source.path.file_stem().map_or_default(|stem| stem.to_string_lossy().into_owned());
     let category = format!("captured_{}", name.split('.').next().unwrap_or("").replace('-', "_"));
     let weight = source.weight * weight_scale;
     let mut counts = Counts::default();
@@ -259,8 +259,7 @@ pub fn captured_head_curriculum(tools: &Tools, split: &str, options: &Value, que
         .get("captured")
         .and_then(|table| table.get(split))
         .and_then(Value::as_array)
-        .map(|items| items.iter().map(|pair| (pair[0].as_str().unwrap_or("").to_owned(), pair[1].as_str().unwrap_or("").to_owned())).collect())
-        .unwrap_or_default();
+        .map_or_default(|items| items.iter().map(|pair| (pair[0].as_str().unwrap_or("").to_owned(), pair[1].as_str().unwrap_or("").to_owned())).collect());
     if named.is_empty() {
         return Ok((Vec::new(), json!({"frames": 0, "scope": "not used"})));
     }

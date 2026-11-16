@@ -70,7 +70,7 @@ pub fn set_aside_unreadable(path: &Path) -> Option<PathBuf> {
     let suffix = format!("{UNREADABLE_FILE_SUFFIX}{}", strftime(UNREADABLE_FILE_TIME_FORMAT, &local_time()));
     let target = with_name_suffix(path, &suffix);
     if let Ok(()) = std::fs::rename(path, &target) {
-        let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = target.file_name().map_or_default(|n| n.to_string_lossy().into_owned());
         warning(LOGGER_NAME, &format!("{} could not be read; kept as {}, defaults in use", path.display(), name));
         Some(target)
     } else {

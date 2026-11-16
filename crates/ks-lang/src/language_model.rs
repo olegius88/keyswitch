@@ -371,7 +371,7 @@ impl LanguageModel {
         let path = roots.iter().map(|root| root.join(format!("{locale}.lm"))).find(|path| path.is_file());
         let (frequencies, bigrams, source) = match path {
             Some(path) => {
-                let (frequencies, bigrams) = Self::_read_arpa(&path);
+                let (frequencies, bigrams) = Self::read_arpa(&path);
                 (frequencies, bigrams, path.display().to_string())
             }
             None => (WordTable::default(), WordTable::default(), EMERGENCY_SOURCE.to_string()),
@@ -399,8 +399,8 @@ impl LanguageModel {
         pystr::casefold(word).chars().filter(|&c| ucd::isalpha(c) || c == '\'' || c == '-').collect()
     }
 
-    /// `_read_arpa`: the unigrams and bigrams of an ARPA file; both empty when it cannot be read.
-    pub fn _read_arpa(path: &Path) -> (WordTable, WordTable) {
+    /// `read_arpa`: the unigrams and bigrams of an ARPA file; both empty when it cannot be read.
+    pub fn read_arpa(path: &Path) -> (WordTable, WordTable) {
         let Ok(content) = std::fs::read(path) else {
             return (WordTable::default(), WordTable::default());
         };
@@ -607,7 +607,7 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join("signs.lm");
         std::fs::write(&path, "\\1-grams:\n-1 hello\n\\2-grams:\n-1 !!! hello\n-1 hello !!!\n-1 hello world\n").unwrap();
-        let (unigrams, bigrams) = LanguageModel::_read_arpa(&path);
+        let (unigrams, bigrams) = LanguageModel::read_arpa(&path);
         assert!(unigrams.get("hello").is_some());
         assert_eq!(bigrams.len(), 1);
         let tables = LanguageModel::load_tables("en_US", ["!!!", "word"], std::slice::from_ref(&folder));
@@ -652,11 +652,11 @@ mod tests {
 
     #[test]
     fn an_arpa_file_that_is_gone_or_names_no_word() {
-        let (unigrams, bigrams) = LanguageModel::_read_arpa(Path::new("/nonexistent.arpa"));
+        let (unigrams, bigrams) = LanguageModel::read_arpa(Path::new("/nonexistent.arpa"));
         assert!(unigrams.is_empty() && bigrams.is_empty());
         let file = std::env::temp_dir().join(format!("ks-arpa-{}.arpa", std::process::id()));
         std::fs::write(&file, "\\\\data\\\\\n\\\\1-grams:\n-1 a\n\\\\2-grams:\n-1 1 b\n-1 a 2\n-1 a b\n").unwrap();
-        let (_, bigrams) = LanguageModel::_read_arpa(&file);
+        let (_, bigrams) = LanguageModel::read_arpa(&file);
         assert!(bigrams.len() <= 1);
         std::fs::remove_file(file).unwrap();
         let tables = LanguageModel::load_tables("en_US", ["123"], &[]);
@@ -730,7 +730,7 @@ mod tests {
     fn reads_an_arpa_file() {
         let path = std::env::temp_dir().join(format!("ks-lang-arpa-{}.lm", std::process::id()));
         std::fs::write(&path, "\\data\\\r\nngram 1=3\n\n\\1-grams:\n5 AB\n3 ab\n1 <s>\nx yz\n٣ cd\n7 e\n9\n\\2-grams:\n2 AB cd\n1 <s> ab\n4 ab\n\\end\\\n9 zz\n".as_bytes()).unwrap();
-        let (unigrams, bigrams) = LanguageModel::_read_arpa(&path);
+        let (unigrams, bigrams) = LanguageModel::read_arpa(&path);
         std::fs::remove_file(&path).unwrap();
         assert_eq!(unigrams.iter().collect::<Vec<_>>(), [("ab", 8), ("cd", 3)]);
         assert_eq!(bigrams.get(&bigram_key("ab", "cd")), Some(2));

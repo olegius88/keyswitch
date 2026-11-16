@@ -358,7 +358,7 @@ fn count_up(counts: &mut BTreeMap<String, i64>, key: String) {
 pub fn build_taiga(taiga: &Path, out: &Path) -> Result<BTreeMap<String, i64>, String> {
     let mut counts = BTreeMap::new();
     let mut train: Vec<PathBuf> = std::fs::read_dir(taiga).map_err(|error| error.to_string())?.filter_map(|entry| entry.ok().map(|entry| entry.path())).filter(|path| {
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
         name.starts_with("ru_taiga-ud-train-") && name.ends_with(".conllu")
     }).collect();
     train.sort();
@@ -811,7 +811,7 @@ pub fn build_capitals(request: &CapitalsRequest<'_>) -> Result<CapitalsTable, St
             let count = parts[2].trim().parse::<i64>().map_err(|_| "a count")?;
             *(if pystr::isascii(parts[1]) { &mut web_latin } else { &mut web_cyrillic }).entry(parts[1].to_owned()).or_insert(0) += count;
         }
-        word_files.insert(path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), checksum(path)?);
+        word_files.insert(path.file_name().map_or_default(|name| name.to_string_lossy().into_owned()), checksum(path)?);
     }
     let left_out = excluded_questions(request.members)?;
     let (mut technical_latin, mut technical_cyrillic): (BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
@@ -923,7 +923,7 @@ pub fn build_sources(manifest: &Path, messages: &Path, tatoeba: &Path) -> Result
             }
         }
         if let (false, Some(code)) = (lines.is_empty(), &code) {
-            let path = code.with_file_name(code.file_name().map(|name| name.to_string_lossy().replace(".txt.gz", ".qids.txt.gz")).unwrap_or_default());
+            let path = code.with_file_name(code.file_name().map_or_default(|name| name.to_string_lossy().replace(".txt.gz", ".qids.txt.gz")));
             for (number, line) in gz_text(&path)?.lines().enumerate() {
                 if lines.contains(&number) {
                     questions.insert(line.parse().map_err(|_| "a question")?);
@@ -1321,7 +1321,7 @@ pub fn build_devchat(root: &Path, comments: &Path, dump: &Path, out: &Path, earl
     let posts = comments.join("posts/question-of-post.json");
     let question_of: HashMap<i64, i64> = read_json(&posts)?.as_object().ok_or("posts")?.iter().filter_map(|(post, question)| Some((post.parse().ok()?, question.as_i64()?))).collect();
     let mut files: Vec<PathBuf> = std::fs::read_dir(comments).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path()).filter(|path| {
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
         name.starts_with("comments-") && name.ends_with(".json.gz")
     }).collect();
     files.sort();
@@ -1383,12 +1383,12 @@ Value::Object(_)) => value.as_i64().ok_or("a post")?,
         writer.close()?;
     }
     let mut written: Vec<PathBuf> = std::fs::read_dir(out).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path()).filter(|path| {
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
         name.starts_with("devchat-") && name.ends_with(".jsonl.gz")
     }).collect();
     written.sort();
     let hashes = |paths: &[PathBuf], hash: &dyn Fn(&Path) -> Result<String, String>| -> Result<Map<String, Value>, String> {
-        paths.iter().map(|path| Ok((path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), Value::String(hash(path)?)))).collect()
+        paths.iter().map(|path| Ok((path.file_name().map_or_default(|name| name.to_string_lossy().into_owned()), Value::String(hash(path)?)))).collect()
     };
     let receipt = json!({"namespace": DEVCHAT_NAMESPACE, "split": "by question", "counts": counts, "content_sha256": hashes(&written, &content_checksum)?, "comments_sha256": hashes(&files, &checksum)?,
         "posts_sha256": checksum(&posts)?, "dump_sha256": pinned, "builder_sha256": checksum(&root.join("crates/ks-train/src/messages.rs"))?, "earlier_members_sha256": hashes(earlier_files, &content_checksum)?});

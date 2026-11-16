@@ -219,7 +219,7 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
                 // A slip is never the word itself: a swap of two different letters, a letter more or less, a key's neighbour.
                 let Some(typo) = make_typo(&lowered, operation, seed / SAMPLE_MODULUS / OPERATIONS.len().to::<u64>(), corrector.neighbours_of(locale)) else { continue };
                 let capital = token != lower;
-                let typed = if capital { let mut letters = typo.chars(); let first = letters.next().map(|letter| pystr::upper(letter.encode_utf8(&mut [0; 4]))).unwrap_or_default(); format!("{first}{}", letters.as_str()) } else { typo.clone() };
+                let typed = if capital { let mut letters = typo.chars(); let first = letters.next().map_or_default(|letter| pystr::upper(letter.encode_utf8(&mut [0; 4]))); format!("{first}{}", letters.as_str()) } else { typo.clone() };
                 let judgement = judge(corrector, knowledge, &typed, locale, true);
                 let mut sample = Sample { half, locale, operation, word: lower, weight, capital, gate: judgement.reason.as_str().to_owned(), candidates: Vec::new() };
                 if matches!(judgement.reason, Reason::NoCandidate | Reason::Rare | Reason::Ambiguous | Reason::Corrected) {

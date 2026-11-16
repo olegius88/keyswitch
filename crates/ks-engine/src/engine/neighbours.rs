@@ -54,7 +54,7 @@ impl EngineCore {
             && trailing.is_empty()
             && head == 0
             && !boundary.deferred
-            && !Self::_reads_alike(plan)
+            && !Self::reads_alike(plan)
             && self.context_assists()
         {
             self.context_wait_sequence += 1;
@@ -177,7 +177,7 @@ impl EngineCore {
             after: &decision.replacement,
             field_override: Some(waiting.field.clone()),
             boundary_text: &previous_boundary.character,
-            after_origin: Self::_neighbour_origin(&previous.original),
+            after_origin: Self::neighbour_origin(&previous.original),
             ..PolicyOptions::default()
         })?;
         let mut pair_decision = result.decision;
@@ -327,7 +327,7 @@ impl EngineCore {
             after: word,
             field_override: Some(waiting.field.clone()),
             boundary_text: &previous_boundary.character,
-            after_origin: Self::_neighbour_origin(&previous.original),
+            after_origin: Self::neighbour_origin(&previous.original),
             ..PolicyOptions::default()
         })?;
         if !result.decision.should_convert {
@@ -508,7 +508,7 @@ impl EngineCore {
     /// neighbour as the right context the field will hold, the `field` origin it was
     /// trained on for words of every length; asking the refused frame returned `suggest`,
     /// which cancelled the wait and took the converted word back (02.10.2026).
-    fn _neighbour_origin(word: &str) -> AfterOrigin {
+    fn neighbour_origin(word: &str) -> AfterOrigin {
         let length = pystr::len(word);
         if 0 < length && length <= PLANNED_CONTEXT_WORD_MAX_CHARACTERS { AfterOrigin::PlannedNextConversion } else { AfterOrigin::Field }
     }
@@ -531,7 +531,7 @@ impl EngineCore {
         let alternative = alternatives.iter().find(|entry| entry.0 == group).map(|entry| entry.1.clone()).ok_or_else(|| EngineError(group.to_string()))?;
         let reading = text_for_group(&previous.strokes, group);
         let baseline = self.planned_baseline(&decision.original, &vec![(group, alternative.clone())], decision.source_group, &reading, group)?;
-        let trigger = boundary.map_or(CorrectionTrigger::Pause, |boundary| Self::_trigger_for_boundary(boundary));
+        let trigger = boundary.map_or(CorrectionTrigger::Pause, |boundary| Self::trigger_for_boundary(boundary));
         let field = field_with(&waiting.field, format!("{}{reading}{boundary_character}", waiting.field.before), waiting.field.after.clone());
         let result = self.context_policy.decide(&baseline, &alternative, group, &self.detector, trigger.as_str(), "assist", &PolicyOptions {
             field_override: Some(field),
@@ -598,7 +598,7 @@ impl EngineCore {
             after: &decision.replacement,
             field_override: field.clone(),
             boundary_text: &applied_boundary.character,
-            after_origin: Self::_neighbour_origin(&applied.replacement),
+            after_origin: Self::neighbour_origin(&applied.replacement),
             ..PolicyOptions::default()
         })?;
         if again.decision.should_convert {
@@ -631,7 +631,7 @@ impl EngineCore {
             // One that reads the same in either layout, alone after a kept word, stands between
             // that word and the next as it is (take_along): `Ytn - ult` kept `Ytn` for good
             // once `-` had cut the words apart, and only `где` converted.
-            if Self::_reads_alike(&word.plan) && kept.last().is_some_and(|last| !Self::_reads_alike(&last.plan)) {
+            if Self::reads_alike(&word.plan) && kept.last().is_some_and(|last| !Self::reads_alike(&last.plan)) {
                 let mut chain = kept;
                 chain.push(word.clone());
                 self.kept = chain;
@@ -642,7 +642,7 @@ impl EngineCore {
         if let Some(word) = word.filter(|word| word.plan.target_group != word.plan.source_group) {
             chain.push(word);
         }
-        let words: Vec<usize> = chain.iter().enumerate().filter(|(_, item)| !Self::_reads_alike(&item.plan)).map(|(index, _)| index).collect();
+        let words: Vec<usize> = chain.iter().enumerate().filter(|(_, item)| !Self::reads_alike(&item.plan)).map(|(index, _)| index).collect();
         self.kept = if words.len() > KEPT_WORDS_TAKEN_ALONG { chain.split_off(words[words.len() - KEPT_WORDS_TAKEN_ALONG]) } else { chain };
     }
 
@@ -734,7 +734,7 @@ impl EngineCore {
             // A sign that reads the same in either layout (`-` in `Ytn - ult`) is passed as it
             // stands: the word before it is asked with the converted word after the sign, and
             // the sign goes with it only if that word converts.
-            let passed = Self::_reads_alike(&previous);
+            let passed = Self::reads_alike(&previous);
             let Some(previous_boundary) = previous.boundary.clone() else {
                 break;
             };
@@ -783,7 +783,7 @@ impl EngineCore {
                         CorrectionTrigger::Space, None,
                     )?,
                 };
-                let origin = Self::_neighbour_origin(&previous.replacement);
+                let origin = Self::neighbour_origin(&previous.replacement);
                 let again = self.context_policy.decide(&baseline, &previous.replacement, previous.target_group, &self.detector, "space", "assist", &PolicyOptions {
                     after: &next_replacement,
                     field_override: Some(field.clone()),

@@ -202,7 +202,7 @@ fn surface_tokens(lines: &[Vec<String>]) -> Result<Vec<SurfaceToken>, String> {
 
 /// `read_conllu`.
 pub(crate) fn read_conllu(path: &Path, source: &str) -> Result<Vec<Sentence>, String> {
-    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
     let mut document = format!("{source}:unmarked-file:{name}");
     let (mut document_serial, mut sentence_serial) = (0, 0);
     let mut comments: HashMap<String, String> = HashMap::new();
@@ -427,7 +427,7 @@ fn captured_tatoeba_identifiers(root: &Path) -> Result<HashSet<String>, String> 
 
 /// `read_tatoeba`: one export, thinned deterministically by identifier before selection.
 fn read_tatoeba(path: &Path, source: &str, language: &str, namespace: &str, excluded: &HashSet<String>) -> Result<Vec<Sentence>, String> {
-    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
     let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
     let mut text = String::new();
     bzip2_rs::DecoderReader::new(std::io::BufReader::new(file)).read_to_string(&mut text).map_err(|error| format!("{name}: {error}"))?;
@@ -706,7 +706,7 @@ pub(crate) fn exposed_families(root: &Path, additional: &[PathBuf]) -> Result<(H
         }
         provenance.insert(relative(root, &path), checksum(&path)?);
         let expand = path.parent().and_then(Path::file_name).is_some_and(|name| name == "context_v1");
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
         let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
         let bytes = if Path::new(&name)
             .extension()
@@ -1361,7 +1361,7 @@ fn begin_output(base: &Path, output: &Path, generator: &str) -> Result<Value, St
         return Err("refusing to overwrite a corpus directory".to_owned());
     }
     let resolved_base = base.canonicalize().map_err(|error| error.to_string())?;
-    let parent = output.parent().map(Path::to_path_buf).unwrap_or_default();
+    let parent = output.parent().map_or_default(Path::to_path_buf);
     std::fs::create_dir_all(&parent).map_err(|error| error.to_string())?;
     let resolved = parent.canonicalize().map_err(|error| error.to_string())?.join(output.file_name().ok_or("an output without a name")?);
     if resolved.starts_with(&resolved_base) {

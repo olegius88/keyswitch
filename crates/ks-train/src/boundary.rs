@@ -108,7 +108,7 @@ fn onboard_vocabulary(root: &Path) -> Result<Vec<Vec<String>>, String> {
         if Some(checksum(&path)?.as_str()) != languages[locale]["sha256"].as_str() {
             return Err("onboard lexicon checksum mismatch".to_owned());
         }
-        let (frequencies, _) = LanguageModel::_read_arpa(&path);
+        let (frequencies, _) = LanguageModel::read_arpa(&path);
         let mut words: HashSet<String> = frequencies.iter().map(|(word, _)| word.to_owned()).collect();
         words.extend(locale_fallbacks(locale).iter().map(|word| (*word).to_owned()));
         let mut ordered: Vec<(Vec<u8>, String)> = words.into_iter().map(|word| (Sha256::digest(word.as_bytes()).to_vec(), word)).collect();

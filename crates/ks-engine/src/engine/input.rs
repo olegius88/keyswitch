@@ -262,7 +262,7 @@ impl EngineCore {
             self.action_goes_on("typed_in_another_window");
             self.clear_word(None, "typed_in_another_window");
             self.contexts.clear();
-            self.untracked_token = !Self::_is_boundary(&event);
+            self.untracked_token = !Self::is_boundary(&event);
             return Ok(());
         }
         if is_convert {
@@ -408,16 +408,16 @@ impl EngineCore {
             // Typed by a correction before an Enter that has gone on since: taken for the start of the line after that
             // Enter, it made a word of characters that are not there, and a correction of that word deleted others.
             self.clear_word(None, "late_key_after_its_action");
-            self.untracked_token = !Self::_is_boundary(&event);
+            self.untracked_token = !Self::is_boundary(&event);
             return Ok(());
         }
         if self.untracked_token {
-            if Self::_is_boundary(&event) {
+            if Self::is_boundary(&event) {
                 self.untracked_token = false;
             }
             return Ok(());
         }
-        if !(event.character.is_empty() || Self::_safe_text_stroke(&event) || pystr::len(&event.character) == 1 && pystr::isspace(&event.character))
+        if !(event.character.is_empty() || Self::safe_text_stroke(&event) || pystr::len(&event.character) == 1 && pystr::isspace(&event.character))
         {
             technical_event!(
                 self.shared, "input_not_representable", "key_name": event.key_name,
@@ -426,12 +426,12 @@ impl EngineCore {
                 "character_categories": event.characters.iter().map(|char| char.chars().next().map_or("empty", category)).collect::<Vec<_>>(),
             );
             self.clear_word(None, "unrepresentable_text");
-            self.untracked_token = !Self::_is_boundary(&event);
+            self.untracked_token = !Self::is_boundary(&event);
             return Ok(());
         }
         if self.strokes.len() + self.symbol_strokes.len() >= MAX_WORD_STROKES {
             self.clear_word(None, "token_too_long");
-            self.untracked_token = !Self::_is_boundary(&event);
+            self.untracked_token = !Self::is_boundary(&event);
             return Ok(());
         }
         if !self.strokes.is_empty() && (WORD_JOINERS.contains(&event.character.as_str()) || matches!(event.character.as_str(), "_" | "@" | "/" | "\\" | "=")) {
@@ -440,7 +440,7 @@ impl EngineCore {
             self.shared.update(Update { current_word: Some(text_for_group(&self.strokes, self.source_group)), ..Update::default() });
             return Ok(());
         }
-        if Self::_is_layout_letter(&event) {
+        if Self::is_layout_letter(&event) {
             self.last_committed_stale = true;
             if !pystr::isalpha(&event.character) && self.ambiguous_key_is_boundary(&event)? {
                 self.commit_word(&event)?;
@@ -469,7 +469,7 @@ impl EngineCore {
             self.maybe_early_switch()?;
             return Ok(());
         }
-        if Self::_is_boundary(&event) {
+        if Self::is_boundary(&event) {
             if self.strokes.is_empty() && event.character == "-" {
                 self.source_group = i64::from(event.group);
                 self.strokes.push(event.clone());
@@ -505,7 +505,7 @@ impl EngineCore {
             // Pause (extend_last_committed); anything else ends its reach.
             if WORD_BOUNDARY_KEYS.contains(&event.key_name.as_str()) || pystr::isspace(&event.character) {
                 self.symbol_strokes = Vec::new();
-            } else if Self::_layout_dependent(&event) {
+            } else if Self::layout_dependent(&event) {
                 self.symbol_strokes.push(event.clone());
             }
             if self.pause_reaches_past(std::slice::from_ref(&event)) {
@@ -529,7 +529,7 @@ impl EngineCore {
             return Ok(());
         }
         if !event.character.is_empty() {
-            if !(Self::_joins_parts(&event) && self.strokes.iter().all(|stroke| Self::_joins_parts(stroke))) {
+            if !(Self::joins_parts(&event) && self.strokes.iter().all(|stroke| Self::joins_parts(stroke))) {
                 // A token of signs typed the same in every layout (`+`, `=>`) is no word: the word
                 // before it stays Pause's until a letter or a digit comes (pause_reaches_past).
                 self.last_committed_stale = true;
@@ -544,7 +544,7 @@ impl EngineCore {
                 self.shared.update(Update { current_word: Some(text_for_group(&self.strokes, self.source_group)), ..Update::default() });
                 return Ok(());
             }
-            if Self::_layout_dependent(&event) {
+            if Self::layout_dependent(&event) {
                 // "@" typed in the US layout but meant as the RU quote, or the
                 // other way round: what it is depends on the word that follows,
                 // so it waits here until that word is decided (mention_head).
@@ -571,7 +571,7 @@ impl EngineCore {
     /// Composed text, surrogate pairs, combining marks and IME results do
     /// not have the one-key/one-deletion contract used by these backends.
     #[must_use]
-    pub fn _safe_text_stroke(event: &KeyEvent) -> bool {
+    pub fn safe_text_stroke(event: &KeyEvent) -> bool {
         event.characters.iter().all(|char| {
             let mut characters = char.chars();
             match (characters.next(), characters.next()) {
@@ -586,7 +586,7 @@ impl EngineCore {
 
     /// A printable key whose character differs between the layouts.
     #[must_use]
-    pub fn _layout_dependent(event: &KeyEvent) -> bool {
+    pub fn layout_dependent(event: &KeyEvent) -> bool {
         if event.character.is_empty() {
             return false;
         }
@@ -605,7 +605,7 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _is_layout_letter(event: &KeyEvent) -> bool {
+    pub fn is_layout_letter(event: &KeyEvent) -> bool {
         event.characters.iter().any(|character| pystr::isalpha(character))
     }
 
@@ -613,7 +613,7 @@ impl EngineCore {
     /// words typed in different layouts. A sign that is a letter in another layout is a letter of the
     /// word: `,` is the `б` of `cj,thb` (`собери`), `;` the `ж` of `ye;yj` (`нужно`).
     #[must_use]
-    pub fn _joins_parts(stroke: &KeyEvent) -> bool {
+    pub fn joins_parts(stroke: &KeyEvent) -> bool {
         let Some(first) = stroke.characters.first() else {
             return false;
         };
@@ -624,7 +624,7 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _is_boundary(event: &KeyEvent) -> bool {
+    pub fn is_boundary(event: &KeyEvent) -> bool {
         let name = event.key_name.as_str();
         if WORD_BOUNDARY_KEYS.contains(&name) || ACTION_BOUNDARY_KEYS.contains(&name) {
             return true;
@@ -654,7 +654,7 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _trigger_for_boundary(event: &KeyEvent) -> ks_lang::intent_model::CorrectionTrigger {
+    pub fn trigger_for_boundary(event: &KeyEvent) -> ks_lang::intent_model::CorrectionTrigger {
         use ks_lang::intent_model::CorrectionTrigger;
         let name = event.key_name.as_str();
         if name == "space" || (pystr::isspace(&event.character) && !is_action_boundary_key(name)) {

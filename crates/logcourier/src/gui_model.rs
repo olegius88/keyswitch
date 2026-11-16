@@ -104,14 +104,13 @@ pub fn group_label(group: &Value) -> String {
 pub fn summary(message: &str, stats: &Value, sources: &[Source], stamp: Option<&str>) -> String {
     let versions = stats["keyswitch_versions"].as_object();
     let listed: Vec<String> = versions
-        .map(|versions| {
+        .map_or_default(|versions| {
             versions
                 .iter()
                 .filter(|(source, _)| sources.iter().any(|item| item.id == **source))
                 .map(|(_, state)| format!("{}: {}", state["source_label"].as_str().unwrap_or(""), state["version"].as_str().unwrap_or("")))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let version_text = if listed.is_empty() { "ещё не определена по логам".to_owned() } else { listed.join("; ") };
     format!(
         "{message}\r\nВ очереди: {}; ждут каталога: {}.\r\nВерсия KeySwitch: {version_text}.\r\nОбъём очереди: {:.1} МиБ.\r\nПоследняя успешная отправка: {}.\r\nАрхивов для других ботов/групп: {} (не отправляются сюда).",

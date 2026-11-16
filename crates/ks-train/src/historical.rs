@@ -56,7 +56,7 @@ fn other(word: &str, group: i64) -> String {
 }
 
 fn list(payload: &Value, name: &str) -> Vec<String> {
-    payload.get(name).and_then(Value::as_array).map(|items| items.iter().map(|item| item.as_str().expect("a scenario word").to_owned()).collect()).unwrap_or_default()
+    payload.get(name).and_then(Value::as_array).map_or_default(|items| items.iter().map(|item| item.as_str().expect("a scenario word").to_owned()).collect())
 }
 
 fn context_group_of(text: &str) -> Option<i64> {

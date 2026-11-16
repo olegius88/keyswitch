@@ -8,7 +8,7 @@
 # makes that version the default of this machine, with clippy when it is named and the standard library of each target.
 set -euo pipefail
 
-version=1.99.1
+version=1.100.0
 components=()
 targets=()
 for name in "$@"; do

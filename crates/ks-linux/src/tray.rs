@@ -549,7 +549,7 @@ impl StatusNotifierItem {
             let state = if item.enabled { "автокоррекция включена" } else { "автокоррекция на паузе" };
             item.subtitle = if label == "—" {
                 let mut capital = state.chars();
-                capital.next().map(|first| first.to_uppercase().chain(capital).collect()).unwrap_or_default()
+                capital.next().map_or_default(|first| first.to_uppercase().chain(capital).collect())
             } else {
                 format!("{label} · {state}")
             };

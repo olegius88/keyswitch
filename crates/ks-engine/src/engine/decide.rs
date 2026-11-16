@@ -64,10 +64,10 @@ impl EngineCore {
         let around = if event.character.is_empty() {
             None
         } else {
-            Self::_typed_in_field(&snapshot, &event.character, &self.typed_ahead(std::slice::from_ref(event)))
+            Self::typed_in_field(&snapshot, &event.character, &self.typed_ahead(std::slice::from_ref(event)))
         };
         let (before, after) = around.unwrap_or((snapshot.before, snapshot.after));
-        let point = InsertionPoint { head: Self::_letters_before(&before), tail: Self::_letters_after(&after) };
+        let point = InsertionPoint { head: Self::letters_before(&before), tail: Self::letters_after(&after) };
         if point.inside_word() {
             technical_event!(
                 self.shared, "word_started_inside_text", "application": application,
@@ -104,10 +104,10 @@ impl EngineCore {
         // An input buffer read in place of the text was never the text around the word, and neither
         // was the first read (FieldContext.input_buffer_only).
         let buffer = snapshot.input_buffer_only(typed);
-        let around = Self::_typed_in_field(&snapshot, typed, ahead);
+        let around = Self::typed_in_field(&snapshot, typed, ahead);
         let letters = match &around {
             None => true,
-            Some((before, after)) => !Self::_letters_before(before).is_empty() || !Self::_letters_after(after).is_empty(),
+            Some((before, after)) => !Self::letters_before(before).is_empty() || !Self::letters_after(after).is_empty(),
         };
         if !buffer && letters {
             return true;
@@ -148,13 +148,13 @@ impl EngineCore {
         if let Some(snapshot) = snapshot.as_ref().filter(|snapshot| !snapshot.sensitive && !snapshot.selection && snapshot.application == application) {
             // Found as the early switch finds a word: the boundary and the keys queued behind it may
             // stand after it, the caret short of them, or its last letters may not be shown yet.
-            around = Self::_typed_in_field(snapshot, &fragment, &format!("{closing}{}", self.typed_ahead(strokes)));
+            around = Self::typed_in_field(snapshot, &fragment, &format!("{closing}{}", self.typed_ahead(strokes)));
         }
         let (Some(snapshot), Some((before, after))) = (snapshot, around) else {
             return Ok(Some(self.kept_inside_word(&fragment, source_group, "field_changed", &point)));
         };
-        let head = Self::_letters_before(&before);
-        let tail = if boundary.is_some() { String::new() } else { Self::_letters_after(&after) };
+        let head = Self::letters_before(&before);
+        let tail = if boundary.is_some() { String::new() } else { Self::letters_after(&after) };
         if head.is_empty() && tail.is_empty() {
             return Ok(None);
         }
@@ -290,9 +290,9 @@ impl EngineCore {
         // The words the engine saw typed first; a word typed into text already there (after a click)
         // has none of them, and the field's own text before it tells: `почему я не вижу в vscode d`,
         // `в vscode d` typed in the middle of the line, kept `d` (a laptop, 13.10.2026).
-        if !Self::_after_russian_term(&self.context_policy.stream.before_word(original)) {
+        if !Self::after_russian_term(&self.context_policy.stream.before_word(original)) {
             match self.field_before(original) {
-                Some(field) if Self::_after_russian_term(&field) => {}
+                Some(field) if Self::after_russian_term(&field) => {}
                 _ => return decision,
             }
         }
@@ -309,7 +309,7 @@ impl EngineCore {
 
     /// Whether text ends, on its line, with a Latin term of up to `STRANDED_TERM_MAX_WORDS` words after a
     /// Russian word, with no end of a sentence in between, and a space after it.
-    fn _after_russian_term(before: &str) -> bool {
+    fn after_russian_term(before: &str) -> bool {
         match before.chars().next_back() {
             // A letter joined to the term (`usb-c`, `gen-z`) is part of it, not a word of the phrase.
             Some(last) if char_isspace(last) => {}
@@ -342,7 +342,7 @@ impl EngineCore {
         if snapshot.sensitive || snapshot.selection || snapshot.application != application {
             return None;
         }
-        Self::_typed_in_field(&snapshot.bounded(), typed, " ").map(|around| around.0)
+        Self::typed_in_field(&snapshot.bounded(), typed, " ").map(|around| around.0)
     }
 
     /// Judge an early-switched word, now complete, as the user typed it.

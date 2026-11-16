@@ -760,7 +760,7 @@ impl OrthoModel {
         };
         let thresholds = PerScript { en, ru };
         let names = schema_features(schema);
-        let features = names.map(|names| Self::_features(fields.get("features"), scale, names)).transpose()?;
+        let features = names.map(|names| Self::features(fields.get("features"), scale, names)).transpose()?;
         if names.is_none() && (["features", "collapse_runs", "unscored_shapes"].iter().any(|name| fields.contains_key(*name)) || source_models.is_some()) {
             return value_error("a schema 1 orthotactic artifact carries no features");
         }
@@ -803,12 +803,12 @@ impl OrthoModel {
                 None => return value_error("invalid orthotactic stretch run"),
             },
         };
-        let prose_shape = Self::_shape(fields.get("prose_shape"), scale)?;
-        let acronym_shape = Self::_shape(fields.get("acronym_shape"), scale)?;
-        let centres = Self::_centres(&fields, schema, scale, "feature_centres", ORTHO_REPLACEMENT_ARTIFACT_SCHEMA_VERSION)?;
-        let compound_min_letters = Self::_compound_minimum(&fields, schema)?;
-        let target_centres = Self::_centres(&fields, schema, scale, "target_centres", ORTHO_PLAUSIBILITY_ARTIFACT_SCHEMA_VERSION)?;
-        let gated = Self::_gated(&fields, schema)?;
+        let prose_shape = Self::shape(fields.get("prose_shape"), scale)?;
+        let acronym_shape = Self::shape(fields.get("acronym_shape"), scale)?;
+        let centres = Self::centres(&fields, schema, scale, "feature_centres", ORTHO_REPLACEMENT_ARTIFACT_SCHEMA_VERSION)?;
+        let compound_min_letters = Self::compound_minimum(&fields, schema)?;
+        let target_centres = Self::centres(&fields, schema, scale, "target_centres", ORTHO_PLAUSIBILITY_ARTIFACT_SCHEMA_VERSION)?;
+        let gated = Self::gated(&fields, schema)?;
         Ok(OrthoModel {
             order,
             channels,
@@ -833,7 +833,7 @@ impl OrthoModel {
         })
     }
 
-    fn _features(raw: Option<&Value>, scale: f64, names: &'static [&'static str]) -> Result<PerScript<Vec<(&'static str, f64)>>, LoadError> {
+    fn features(raw: Option<&Value>, scale: f64, names: &'static [&'static str]) -> Result<PerScript<Vec<(&'static str, f64)>>, LoadError> {
         let Some(raw) = raw.and_then(Value::as_object).filter(|raw| has_exact_keys(raw, &SCRIPTS)) else {
             return value_error("orthotactic artifact must weigh its features for both scripts");
         };
@@ -854,7 +854,7 @@ impl OrthoModel {
     }
 
     /// The length a schema 5 artifact requires of the longer half of a compound, per script.
-    fn _compound_minimum(fields: &Map<String, Value>, schema: i64) -> Result<PerScript<Option<i64>>, LoadError> {
+    fn compound_minimum(fields: &Map<String, Value>, schema: i64) -> Result<PerScript<Option<i64>>, LoadError> {
         let invalid = "invalid orthotactic compound minimum";
         let empty = Map::new();
         let raw = match fields.get("compound_min_letters") {
@@ -870,7 +870,7 @@ impl OrthoModel {
     }
 
     /// Features a schema 6 artifact counts only for a token less plausible than the centre of its layout.
-    fn _gated(fields: &Map<String, Value>, schema: i64) -> Result<Vec<&'static str>, LoadError> {
+    fn gated(fields: &Map<String, Value>, schema: i64) -> Result<Vec<&'static str>, LoadError> {
         let invalid = "invalid orthotactic gated features";
         let empty = Vec::new();
         let raw = match fields.get("gated_features") {
@@ -897,7 +897,7 @@ impl OrthoModel {
 
     /// Centres of a plausibility (`feature_centres` of the source channel from schema 5, `target_centres` of the
     /// target channel from schema 6): required from that schema on, absent before.
-    fn _centres(fields: &Map<String, Value>, schema: i64, scale: f64, field: &str, since: i64) -> Result<Option<PerScript<f64>>, LoadError> {
+    fn centres(fields: &Map<String, Value>, schema: i64, scale: f64, field: &str, since: i64) -> Result<Option<PerScript<f64>>, LoadError> {
         let raw = fields.get(field).filter(|value| !value.is_null());
         if (schema >= since) != raw.is_some() {
             return Err(LoadError::value(format!("an orthotactic artifact of schema {since} or later carries {field}, and no other")));
@@ -913,7 +913,7 @@ impl OrthoModel {
         }
     }
 
-    fn _shape(raw: Option<&Value>, scale: f64) -> Result<PerScript<[f64; 4]>, LoadError> {
+    fn shape(raw: Option<&Value>, scale: f64) -> Result<PerScript<[f64; 4]>, LoadError> {
         let Some(raw) = raw.and_then(Value::as_object).filter(|raw| has_exact_keys(raw, &SCRIPTS)) else {
             return value_error("orthotactic artifact must carry a shape channel");
         };

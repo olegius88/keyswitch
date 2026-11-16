@@ -267,7 +267,7 @@ pub fn placement(bundle: &Bundle, process: u32) -> Result<Placement, UpdateError
 
 /// The version an archive of a release is named for: `KeySwitch-<version>-macos-<processor>.zip`.
 pub fn archive_version(archive: &Path) -> Result<SemanticVersion, UpdateError> {
-    let name = archive.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = archive.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
     let version = name.strip_prefix("KeySwitch-").and_then(|rest| rest.split_once("-macos-")).map(|(version, _)| version);
     version.ok_or_else(|| failed(format!("Архив обновления назван не как выпуск KeySwitch: {name}"))).and_then(SemanticVersion::parse)
 }
@@ -584,7 +584,7 @@ impl UpdateFiles {
     /// The outcome of an update for the next start to tell: `kind new old`, and where the old version stays when it
     /// could not go back.
     fn write_result(&self, kind: &str, new_version: &str, old_version: &str, place: Option<&Path>) {
-        let place = place.map(|place| format!(" {}", path_text(place))).unwrap_or_default();
+        let place = place.map_or_default(|place| format!(" {}", path_text(place)));
         self.write(UPDATE_RESULT_FILE, &format!("{kind} {new_version} {old_version}{place}\n"));
     }
 

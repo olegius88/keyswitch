@@ -215,7 +215,7 @@ impl EngineCore {
     ///
     /// An automatic correction was the engine's idea, so the user wants the keys
     /// as typed; a manual conversion was theirs, so they want its result.
-    fn _wanted_group(origin: &CorrectionPlan) -> i64 {
+    fn wanted_group(origin: &CorrectionPlan) -> i64 {
         if origin.automatic { origin.source_group } else { origin.target_group }
     }
 
@@ -257,7 +257,7 @@ impl EngineCore {
             if self.pending.as_ref().is_some_and(|pending| Arc::ptr_eq(pending, outcome)) {
                 let origin = self.chain_origin(outcome);
                 let offer = self.rule_offer(&origin, &application);
-                if Self::_wanted_group(&origin) == outcome.source_group {
+                if Self::wanted_group(&origin) == outcome.source_group {
                     // The first press, still waiting for its keys, would undo
                     // the user's own fix: it never runs.
                     self.log_pending_dropped("rule_requested");
@@ -272,7 +272,7 @@ impl EngineCore {
             if self.last_requested_plan.as_ref().is_some_and(|requested| Arc::ptr_eq(requested, outcome)) {
                 let origin = self.correction_origin.clone().unwrap_or_else(|| outcome.clone());
                 let offer = self.rule_offer(&origin, &application);
-                if Self::_wanted_group(&origin) == outcome.target_group {
+                if Self::wanted_group(&origin) == outcome.target_group {
                     self.shared.show_learning_prompt(offer);
                     return;
                 }
@@ -490,7 +490,7 @@ impl EngineCore {
             return;
         }
         let previous = self.last_correction.clone().expect("checked above");
-        let undo = Self::_undo_of(&previous, previous.boundary.clone(), previous.trailing.clone());
+        let undo = Self::undo_of(&previous, previous.boundary.clone(), previous.trailing.clone());
         self.queue_undo(undo, trigger_keycode);
     }
 
@@ -546,14 +546,14 @@ impl EngineCore {
         {
             return None;
         }
-        Some((Self::_undo_of(previous, committed.boundary.clone(), committed.trailing.clone()), after.len()))
+        Some((Self::undo_of(previous, committed.boundary.clone(), committed.trailing.clone()), after.len()))
     }
 
     /// The plan that puts `previous` back, deleting and typing again `trailing` and `boundary` after the word.
     ///
     /// A case fix and a typo correction typed keys other than the ones typed (CorrectionPlan.replaced,
     /// `CorrectionPlan.replaced_strokes)`: undo types those back, and undoing the undo types the fix again.
-    fn _undo_of(previous: &CorrectionPlan, boundary: Option<Stroke>, trailing: Strokes) -> PlanRef {
+    fn undo_of(previous: &CorrectionPlan, boundary: Option<Stroke>, trailing: Strokes) -> PlanRef {
         let mut replaced: Strokes = Vec::new();
         let mut replaced_strokes: Strokes = Vec::new();
         let strokes;

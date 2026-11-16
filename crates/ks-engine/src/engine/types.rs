@@ -99,7 +99,7 @@ pub struct CorrectionPlan {
     // (revert_with_next_word).
     pub revisit: Option<Arc<(DetectionDecision, Option<FieldContext>)>>,
     // The boundary sign was folded into `strokes` and is replayed in the new layout
-    // (_replay_sign_with_word): the word ended there, though no boundary follows it.
+    // (replay_sign_with_word): the word ended there, though no boundary follows it.
     pub sign_replayed: bool,
     // A phrase whose last word the early switch converted while it was typed shows letters
     // of both layouts, and `original` is that text. Undo types every key in `source_group`;

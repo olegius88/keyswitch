@@ -80,7 +80,7 @@ impl EngineCore {
         );
     }
 
-    fn _score_diagnostics(score: &WordScore) -> Value {
+    fn score_diagnostics(score: &WordScore) -> Value {
         json!({
             "value": logged(score.value),
             "known": score.known,
@@ -93,7 +93,7 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _decision_diagnostics(decision: &DetectionDecision) -> Map<String, Value> {
+    pub fn decision_diagnostics(decision: &DetectionDecision) -> Map<String, Value> {
         let mut map = Map::new();
         map.insert("should_convert".into(), json!(decision.should_convert));
         map.insert("replacement".into(), json!(decision.replacement));
@@ -101,8 +101,8 @@ impl EngineCore {
         map.insert("target_group".into(), json!(decision.target_group));
         map.insert("confidence".into(), json!(logged(decision.confidence)));
         map.insert("reason".into(), json!(decision.reason));
-        map.insert("source_score".into(), Self::_score_diagnostics(&decision.source_score));
-        map.insert("target_score".into(), Self::_score_diagnostics(&decision.target_score));
+        map.insert("source_score".into(), Self::score_diagnostics(&decision.source_score));
+        map.insert("target_score".into(), Self::score_diagnostics(&decision.target_score));
         map.insert("model_probability".into(), json!(decision.model_probability));
         map.insert("model_threshold".into(), json!(decision.model_threshold));
         map.insert("model_version".into(), json!(decision.model_version));
@@ -117,7 +117,7 @@ impl EngineCore {
             trigger, original, alternatives, application, enabled, trigger_enabled, manual_layout_protected, application_excluded,
             decision, caret_unknown, protection, source_group, early_switch_origin, idle_ms, context, literal_head,
         } = evaluation;
-        let mut decision_payload = decision.map(Self::_decision_diagnostics);
+        let mut decision_payload = decision.map(Self::decision_diagnostics);
         // Never put text typed inside an excluded application into the log,
         // even when detailed diagnostics are explicitly enabled.
         let logged_original = if application_excluded { "<redacted>" } else { original };
@@ -149,7 +149,7 @@ impl EngineCore {
         {
             let trigger_kind = ks_lang::intent_model::CorrectionTrigger::parse(trigger).unwrap_or(ks_lang::intent_model::CorrectionTrigger::Space);
             let shadow = self.decide_word(original, alternatives, group, application, trigger_kind, WordOptions::default())?;
-            shadow_payload = Some(Self::_decision_diagnostics(&shadow));
+            shadow_payload = Some(Self::decision_diagnostics(&shadow));
         }
         let (context_words, context_group) = match context {
             Some(context) => context,

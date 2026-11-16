@@ -109,7 +109,7 @@ impl EngineCore {
         if waiting.plan.application != application || self.application_excluded(&application) {
             return Ok(());
         }
-        let trigger = Self::_trigger_for_boundary(event);
+        let trigger = Self::trigger_for_boundary(event);
         let mode = self.text_setting("detection.context_policy", "assist");
         let result = self.context_policy.decide(&waiting.decision, &waiting.plan.replacement, waiting.plan.target_group, &self.detector, trigger.as_str(), &mode, &PolicyOptions {
             field_override: Some(waiting.field.clone()),

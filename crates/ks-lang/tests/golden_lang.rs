@@ -209,7 +209,7 @@ fn language_tables() {
             }
             (Value::Object(header), _) => {
                 let locale = header["locale"].as_str().unwrap();
-                let (unigrams, bigrams) = LanguageModel::_read_arpa(Path::new(&format!("/usr/share/onboard/models/{locale}.lm")));
+                let (unigrams, bigrams) = LanguageModel::read_arpa(Path::new(&format!("/usr/share/onboard/models/{locale}.lm")));
                 fail.check("arpa words", locale, unigrams.len().to::<u64>(), header["words"].as_u64().unwrap());
                 fail.check("arpa bigrams", locale, bigrams.len().to::<u64>(), header["bigrams"].as_u64().unwrap());
                 target = Target::Arpa(unigrams, bigrams);

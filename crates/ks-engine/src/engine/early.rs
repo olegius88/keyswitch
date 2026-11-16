@@ -34,7 +34,7 @@ impl EngineCore {
         if self.boundary_model.is_some()
             && let Some(last) = self.strokes.last()
             && !pystr::isalpha(&last.character)
-            && Self::_is_layout_letter(last)
+            && Self::is_layout_letter(last)
         {
             // A sign key that ends the prefix may still be punctuation; the boundary model
             // decides it once the word ends. A sign key with a letter after it is a letter of
@@ -154,7 +154,7 @@ impl EngineCore {
                 });
                 return (snapshot, "sensitive_field");
             }
-            let around = Self::_typed_in_field(&snapshot, original, &self.typed_ahead(&self.strokes));
+            let around = Self::typed_in_field(&snapshot, original, &self.typed_ahead(&self.strokes));
             if around.is_none() && snapshot.input_buffer_only(original) && !snapshot.selection && snapshot.application == application {
                 // Not the text the prefix went into (FieldContext.input_buffer_only): the observed keys stand.
                 return (field, "");
@@ -177,7 +177,7 @@ impl EngineCore {
     /// may be missing, the caret right after the rest. Text typed ahead may follow the word, and
     /// the caret may be seen short of it (`caret_lag`). None for any other text.
     #[must_use]
-    pub fn _typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
+    pub fn typed_in_field(field: &FieldContext, typed: &str, ahead: &str) -> Option<(String, String)> {
         let boundaries: Vec<usize> = ahead.char_indices().map(|(index, _)| index).chain(std::iter::once(ahead.len())).collect();
         for &end in boundaries.iter().rev() {
             let shown = format!("{typed}{}", ahead.get(..end).unwrap_or_default());

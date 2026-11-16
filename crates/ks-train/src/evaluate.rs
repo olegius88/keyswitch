@@ -401,7 +401,7 @@ fn claim_test_access(ledger: &Path, identity: &Identity) -> Result<(), String> {
         let mut paths: Vec<PathBuf> = std::fs::read_dir(ledger).map_err(|error| error.to_string())?.filter_map(|entry| entry.ok().map(|entry| entry.path())).collect();
         paths.sort();
         for path in paths {
-            let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
             if !name.ends_with(".access.json") || name == mine {
                 continue;
             }

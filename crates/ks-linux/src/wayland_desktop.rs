@@ -308,8 +308,7 @@ pub fn parse_gnome_state(raw_json: &str) -> Result<DesktopSnapshot, DesktopParse
     let layouts: Vec<String> = data
         .get("layouts")
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).filter(|item| !item.is_empty()).map(str::to_owned).collect())
-        .unwrap_or_default();
+        .map_or_default(|items| items.iter().filter_map(Value::as_str).filter(|item| !item.is_empty()).map(str::to_owned).collect());
     // -1: the extension has not seen the current source applied yet; the layout is unknown till then.
     let mut current = int_field(&data, "current_layout", -1);
     if !(0 <= current && current.to::<usize>() < layouts.len()) {

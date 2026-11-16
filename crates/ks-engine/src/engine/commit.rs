@@ -95,7 +95,7 @@ impl EngineCore {
             )
         });
         let whole_keys = strokes_of(&[&typed, std::slice::from_ref(boundary)]);
-        if typed.iter().all(|stroke| Self::_joins_parts(stroke)) && self.pause_reaches_past(&whole_keys) {
+        if typed.iter().all(|stroke| Self::joins_parts(stroke)) && self.pause_reaches_past(&whole_keys) {
             // `цуиоы - `: a dash between words is no word of its own, and Pause still converts `цуиоы`.
             self.extend_last_committed(&whole_keys);
         } else {
@@ -123,7 +123,7 @@ impl EngineCore {
         let caret_unknown = self.caret_unknown();
         self.caret_moved = false;
         let mut excluded = self.application_excluded(&application);
-        let trigger = Self::_trigger_for_boundary(boundary);
+        let trigger = Self::trigger_for_boundary(boundary);
         // The layout picked by hand protects the word it was picked for, up to a joining sign (protected_joined_part).
         let analyzable = enabled && trigger_enabled && segmentation_certain && !caret_unknown;
         let protected_part = if manual_layout_protected && analyzable && !excluded && head == 0 && trailing.is_empty() {
@@ -299,18 +299,18 @@ impl EngineCore {
                 || inside.is_some()
                 || self.insertion.as_ref().is_some_and(InsertionPoint::inside_word));
             if let Some((plan, found)) = joint {
-                self.pending = Some(Self::_replay_sign_with_word(&plan, &opened));
+                self.pending = Some(Self::replay_sign_with_word(&plan, &opened));
                 self.learning_prompt_after = None;
                 self.pending_trigger_keycode = i64::from(boundary.keycode);
                 decided = DetectionDecision { should_convert: true, ..found };
             } else if decided.should_convert {
                 let base = self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary");
-                let quotation_closed = mention.first().is_some_and(|first| Self::_quotation_closed(first, &trailing, Some(boundary)));
+                let quotation_closed = mention.first().is_some_and(|first| Self::quotation_closed(first, &trailing, Some(boundary)));
                 let base = base.replaced_with(|plan| {
                     plan.trailing.clone_from(&trailing);
                     plan.head = if !mention.is_empty() && quotation_closed { Vec::new() } else { mention.clone() };
                 });
-                let mut converted = Self::_replay_sign_with_word(&self.with_signs(&base, &signs), &opened);
+                let mut converted = Self::replay_sign_with_word(&self.with_signs(&base, &signs), &opened);
                 if boundary.deferred {
                     // Enter/Tab has not reached the editor. Do not delete it
                     // as a character or include it in the text replacement.

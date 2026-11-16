@@ -121,8 +121,7 @@ pub fn load_rows(directory: &Path, split: &str) -> Result<Vec<CorpusRow>, String
             split: text(&value, "split")?,
             quarantine_reasons: value["quarantine_reasons"]
                 .as_array()
-                .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
-                .unwrap_or_default(),
+                .map_or_default(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect()),
             lemma: text(&value, "lemma")?,
             language: text(&value, "language")?,
             source: text(&value, "source")?,

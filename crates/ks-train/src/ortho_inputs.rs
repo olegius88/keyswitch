@@ -1188,7 +1188,7 @@ pub fn freeze_independent(root: &Path, description: &Path, directory: &Path) -> 
     }
     let mut words: BTreeSet<&str> = LOOKED_AT_WORDS.iter().copied().collect();
     words.extend(ortho::AUTHORED_WORDS.iter().copied());
-    let history: Map<String, Value> = HISTORY.iter().map(|entry| entry.0).chain(DEVELOPMENT_SETS).map(|set| { let path = root.join(DIRECTORY).join(set); Ok((path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default(), json!(checksum(&path.join("tokens.jsonl.gz"))?))) }).collect::<Result<_, String>>()?;
+    let history: Map<String, Value> = HISTORY.iter().map(|entry| entry.0).chain(DEVELOPMENT_SETS).map(|set| { let path = root.join(DIRECTORY).join(set); Ok((path.file_name().map_or_default(|name| name.to_string_lossy().into_owned()), json!(checksum(&path.join("tokens.jsonl.gz"))?))) }).collect::<Result<_, String>>()?;
     let receipt = json!({
         "schema_version": INDEPENDENT_SCHEMA, "set": set_name, "source": {"excluded_pages": excluded, "files": described["files"], "sample_namespace": namespace},
         "population": "the corpus' own rules (label, to_keys, shape_of; population) with this verdict; a type whose served keys, every run read once, match a row of the snapshot, of an opened set or of a case written by hand is left out",

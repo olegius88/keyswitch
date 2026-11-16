@@ -36,7 +36,7 @@ impl EngineCore {
         if event.character == "'" || event.character == "-" {
             return Ok(false);
         }
-        if self.strokes.iter().any(|stroke| !pystr::isalpha(&stroke.character) && Self::_is_layout_letter(stroke)) {
+        if self.strokes.iter().any(|stroke| !pystr::isalpha(&stroke.character) && Self::is_layout_letter(stroke)) {
             return Ok(false);
         }
         let strokes = self.strokes.clone();
@@ -90,7 +90,7 @@ impl EngineCore {
         };
         let mut tail = 0;
         for stroke in strokes.iter().rev() {
-            if pystr::isalpha(&stroke.character) || !Self::_is_layout_letter(stroke) {
+            if pystr::isalpha(&stroke.character) || !Self::is_layout_letter(stroke) {
                 break;
             }
             tail += 1;
@@ -173,7 +173,7 @@ impl EngineCore {
             || !self.detector.is_protected_token(&text_for_group(strokes, source_group))
             || self.detector.is_protected_token(&text_for_group(core, source_group))
             || !core.iter().all(|stroke| {
-                pystr::isalpha(&stroke.character) || Self::_is_layout_letter(stroke) || WORD_JOINERS.contains(&stroke.character.as_str())
+                pystr::isalpha(&stroke.character) || Self::is_layout_letter(stroke) || WORD_JOINERS.contains(&stroke.character.as_str())
             })
         {
             return 0;
@@ -219,7 +219,7 @@ impl EngineCore {
     /// it is settled as typed (`joined_head`); 0 otherwise. Pause converts the part after them alone, whatever
     /// decides automatic corrections (`schedule_manual_conversion`).
     pub fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
-        let last_join = strokes.iter().rposition(|stroke| Self::_joins_parts(stroke));
+        let last_join = strokes.iter().rposition(|stroke| Self::joins_parts(stroke));
         let targets = self.other_groups(source_group);
         let Some(last_join) = last_join else {
             return 0;
@@ -229,13 +229,13 @@ impl EngineCore {
         }
         let head = last_join + 1;
         let tail = &strokes[head..];
-        if tail.len() < JOINED_PART_MIN_LETTERS || !tail.iter().all(|stroke| pystr::isalpha(&stroke.character) || Self::_is_layout_letter(stroke)) {
+        if tail.len() < JOINED_PART_MIN_LETTERS || !tail.iter().all(|stroke| pystr::isalpha(&stroke.character) || Self::is_layout_letter(stroke)) {
             return 0;
         }
         let mut segment: Strokes = Vec::new();
         let mut lettered = false;
         for stroke in &strokes[..head] {
-            if !Self::_joins_parts(stroke) {
+            if !Self::joins_parts(stroke) {
                 segment.push(stroke.clone());
             } else if !segment.is_empty() {
                 // Signs in a row (`C++-`) join as one; each run of letters must be settled as typed.
@@ -398,13 +398,13 @@ impl EngineCore {
             || strokes.len() - count < REPLAYED_SIGNS_MIN_STEM_LETTERS
             || strokes[..strokes.len() - count]
                 .iter()
-                .any(|stroke| !(pystr::isalpha(&stroke.character) || pystr::isalpha(stroke.character_for(target)) || Self::_joins_parts(stroke)))
+                .any(|stroke| !(pystr::isalpha(&stroke.character) || pystr::isalpha(stroke.character_for(target)) || Self::joins_parts(stroke)))
             || self.model(source_group).score(&text_for_group(strokes, source_group)).known
         {
             // A token with digits or other signs inside (`з+1ю` for `p+1.`) is judged whole, as before,
             // and so is one whose rest is a single letter: `чё` is not `ч` with a backtick. A key that is
             // a letter in the other layout is a letter of the word: `Ct,z/` is `Себя.`; a sign typed the
-            // same in both layouts joins its parts (_joins_parts): `mongo-cthdbcf/` is `mongo-сервиса.`.
+            // same in both layouts joins its parts (joins_parts): `mongo-cthdbcf/` is `mongo-сервиса.`.
             return 0;
         }
         count
@@ -431,7 +431,7 @@ impl EngineCore {
     /// one opened the word (`opened`): then it closes the quotation, and `"john"` keeps
     /// both quotes.
     #[must_use]
-    pub fn _replay_sign_with_word(plan: &PlanRef, opened: &[Stroke]) -> PlanRef {
+    pub fn replay_sign_with_word(plan: &PlanRef, opened: &[Stroke]) -> PlanRef {
         let Some(boundary) = plan.boundary.clone() else {
             return plan.clone();
         };
@@ -551,7 +551,7 @@ impl EngineCore {
             && keys.iter().all(|key| {
                 !is_action_boundary_key(&key.key_name)
                     && ((!key.characters.is_empty() && key.characters.iter().all(|character| character == " ") && key.character == " ")
-                        || Self::_joins_parts(key))
+                        || Self::joins_parts(key))
             })
     }
 
@@ -626,7 +626,7 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _letters_before(text: &str) -> String {
+    pub fn letters_before(text: &str) -> String {
         let mut start = text.len();
         for (index, character) in text.char_indices().rev() {
             if !ks_text::ucd::isalpha(character) {
@@ -638,13 +638,13 @@ impl EngineCore {
     }
 
     #[must_use]
-    pub fn _letters_after(text: &str) -> String {
+    pub fn letters_after(text: &str) -> String {
         let end = text.char_indices().find(|(_, character)| !ks_text::ucd::isalpha(*character)).map_or(text.len(), |(index, _)| index);
         text.get(..end).unwrap_or_default().to_owned()
     }
 
     #[must_use]
-    pub fn _reads_alike(plan: &CorrectionPlan) -> bool {
+    pub fn reads_alike(plan: &CorrectionPlan) -> bool {
         // A token of signs that the other layout types the same (`-`, `2`): nothing in it to convert.
         plan.original == plan.replacement && !any_alpha(&plan.original)
     }

@@ -68,7 +68,7 @@ fn main() {
         let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
         let root = required("--tree");
         let resource_dir = root.join("resources");
-        let (artifact, seal, prefix, prefix_seal, corpus, output) = (required("--candidate"), option(&arguments, "--seal").map(PathBuf::from).unwrap_or_default(), required("--prefix-candidate"), option(&arguments, "--prefix-seal").map(PathBuf::from).unwrap_or_default(), required("--corpus"), required("--output"));
+        let (artifact, seal, prefix, prefix_seal, corpus, output) = (required("--candidate"), option(&arguments, "--seal").map_or_default(PathBuf::from), required("--prefix-candidate"), option(&arguments, "--prefix-seal").map_or_default(PathBuf::from), required("--corpus"), required("--output"));
         let ledger = option(&arguments, "--ledger").map_or_else(|| root.join(".t/reliable-release-2026-09-12/context-action-test-ledger"), PathBuf::from);
         let request = ks_train::evaluate::EvaluationRequest {
             root: &root,

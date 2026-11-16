@@ -1277,12 +1277,12 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let mut pins = crate::fit::provenance(request.root, &request.root.join("model/context_v3/recipe.json"))?;
     // Every message file of the folder, whichever split is read: a development result and the test it allows pin the same.
     let mut folder: Vec<PathBuf> = std::fs::read_dir(directory).map_err(|error| error.to_string())?.flatten().map(|entry| entry.path()).filter(|path| {
-        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = path.file_name().map_or_default(|name| name.to_string_lossy().into_owned());
         name.starts_with("devchat-") && name.ends_with(".jsonl.gz")
     }).collect();
     folder.sort();
     for path in folder {
-        pins.insert(format!("messages/{}", path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default()), content_checksum(&path)?);
+        pins.insert(format!("messages/{}", path.file_name().map_or_default(|name| name.to_string_lossy().into_owned())), content_checksum(&path)?);
     }
     pins.insert("model/context_v3/devchat-test-batches.json".to_owned(), crate::corpus::checksum(&request.root.join("model/context_v3/devchat-test-batches.json"))?);
     let pins = serde_json::to_value(pins).map_err(|error| error.to_string())?;

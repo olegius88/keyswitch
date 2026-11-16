@@ -21,7 +21,7 @@ impl EngineCore {
     //
     // The log said only that one was there, and the one correction a user lost this way in October could
     // not be told apart from a space typed early (notebook, 10.10.2026: Pause found nothing to convert after it).
-    fn _late_key_kind(event: &KeyEvent) -> &'static str {
+    fn late_key_kind(event: &KeyEvent) -> &'static str {
         if is_modifier_key(&event.key_name) {
             return "modifier";
         }
@@ -43,7 +43,7 @@ impl EngineCore {
         "other_key"
     }
 
-    fn _late_text_key(event: &KeyEvent) -> bool {
+    fn late_text_key(event: &KeyEvent) -> bool {
         event.pressed
             && !event.character.is_empty()
             && pystr::isprintable(&event.character)
@@ -104,7 +104,7 @@ impl EngineCore {
     ///
     /// The text before the caret ends with the word and its boundary, and then with as much
     /// of the text typed ahead as the window has taken in so far.
-    fn _field_refusal(plan: &CorrectionPlan, field: Option<&FieldContext>, suffix: &str, ahead: &str) -> &'static str {
+    fn field_refusal(plan: &CorrectionPlan, field: Option<&FieldContext>, suffix: &str, ahead: &str) -> &'static str {
         let Some(field) = field else {
             return "unread";
         };
@@ -256,7 +256,7 @@ impl EngineCore {
         let queued = self.shared.take_queued();
         let mut late = rollover.clone();
         let mut kept: Vec<QueueItem> = Vec::new();
-        let mut refusal: &'static str = rollover.iter().find(|stroke| !Self::_late_text_key(stroke)).map_or("", |stroke| Self::_late_key_kind(stroke));
+        let mut refusal: &'static str = rollover.iter().find(|stroke| !Self::late_text_key(stroke)).map_or("", |stroke| Self::late_key_kind(stroke));
         for item in &queued {
             match item {
                 QueueItem::Key(key) => {
@@ -280,10 +280,10 @@ impl EngineCore {
                     } else if self.typed_elsewhere(key) {
                         // The hook saw it on its way to another window: it does not stand after the word.
                         refusal = "another_window";
-                    } else if Self::_late_text_key(key) && Self::_safe_text_stroke(key) {
+                    } else if Self::late_text_key(key) && Self::safe_text_stroke(key) {
                         late.push(key.clone());
                     } else if refusal.is_empty() {
-                        refusal = Self::_late_key_kind(key);
+                        refusal = Self::late_key_kind(key);
                     }
                 }
                 QueueItem::LayoutSelection(_) | QueueItem::Stop => {
@@ -311,7 +311,7 @@ impl EngineCore {
             if plan.mode == EARLY_PLAN_MODE {
                 // A switch planned on the first letters of a word whose other letters and Enter are all typed: the
                 // Enter decides the whole word a moment later, and the switch is given up as before.
-                Self::_late_key_kind(&action).clone_into(&mut self.late_refusal);
+                Self::late_key_kind(&action).clone_into(&mut self.late_refusal);
                 self.shared.put_back(queued);
                 return None;
             }
@@ -485,7 +485,7 @@ impl EngineCore {
             return false;
         }
         let typed_again = || plan.strokes.iter().chain(plan.trailing.iter());
-        if typed_again().any(|stroke| !Self::_safe_text_stroke(stroke)) || typed_again().chain(plan.boundary.iter()).any(|stroke| !self.backend.types_again(stroke)) {
+        if typed_again().any(|stroke| !Self::safe_text_stroke(stroke)) || typed_again().chain(plan.boundary.iter()).any(|stroke| !self.backend.types_again(stroke)) {
             self.action_goes_on("unrepresentable_text");
             self.clear_word(None, "unrepresentable_text");
             technical_event!(
@@ -502,9 +502,9 @@ impl EngineCore {
             // Read after the field: whatever the field can show was typed by then.
             let typed: Strokes = plan.strokes.iter().chain(plan.trailing.iter()).cloned().collect();
             let ahead = self.typed_ahead(&typed);
-            let refusal = Self::_field_refusal(&plan, field.as_ref(), &suffix, &ahead);
-            if refusal == "other_text" && plan.mode == "early" && field.as_ref().is_some_and(|field| Self::_typed_in_field(field, &plan.original, &ahead).is_some()) {
-                // The field has not taken the last letters in yet (_typed_in_field). The word is
+            let refusal = Self::field_refusal(&plan, field.as_ref(), &suffix, &ahead);
+            if refusal == "other_text" && plan.mode == "early" && field.as_ref().is_some_and(|field| Self::typed_in_field(field, &plan.original, &ahead).is_some()) {
+                // The field has not taken the last letters in yet (typed_in_field). The word is
                 // still the one typed: it stays tracked for a later letter or its boundary.
                 technical_event!(self.shared, "early_switch_dropped", "reason": "field_behind", "current_word_length": self.strokes.len());
                 return false;
@@ -692,7 +692,7 @@ impl EngineCore {
             "boundary": plan.boundary.as_ref().map(|boundary| boundary.key_name.as_str()),
         );
         if plan.mode == "undo" && !plan.replaced_strokes.is_empty() {
-            // A typo correction typed other keys than the user's: its undo typed those back (_undo_of), and the word is
+            // A typo correction typed other keys than the user's: its undo typed those back (undo_of), and the word is
             // the user's own from now on (personal_words). Not before the undo lands: one given up (a modifier still
             // coming up, another window) leaves the correction on screen, and the word would stay uncorrected after.
             let word = text_for_group(&plan.strokes, plan.source_group);
@@ -894,13 +894,13 @@ mod tests {
             (key("F1", "", 0), "other_key"),
             (key("a", "\u{7}", 0), "other_key"),
         ] {
-            assert_eq!(EngineCore::_late_key_kind(&event), kind, "{}", event.key_name);
+            assert_eq!(EngineCore::late_key_kind(&event), kind, "{}", event.key_name);
         }
     }
 
     #[test]
     fn only_text_is_late_text() {
-        assert!(EngineCore::_late_text_key(&key("a", "a", 0)));
+        assert!(EngineCore::late_text_key(&key("a", "a", 0)));
         for event in [
             KeyEvent { pressed: false, ..key("a", "a", 0) },
             key("F1", "", 0),
@@ -913,7 +913,7 @@ mod tests {
             key("a", "a", ALT_MASK),
             key("a", "a", SUPER_MASK),
         ] {
-            assert!(!EngineCore::_late_text_key(&event), "{}", event.key_name);
+            assert!(!EngineCore::late_text_key(&event), "{}", event.key_name);
         }
     }
 
@@ -928,11 +928,11 @@ mod tests {
             field.selection = selection;
             field
         };
-        assert_eq!(EngineCore::_field_refusal(&plan, None, "", ""), "unread");
-        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("other", "app", "ghbdtn", false, false)), "", ""), "other_field");
-        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "other", "ghbdtn", false, false)), "", ""), "other_field");
-        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", true, false)), "", ""), "sensitive_or_selected");
-        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, true)), "", ""), "sensitive_or_selected");
-        assert_eq!(EngineCore::_field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, false)), "", ""), "");
+        assert_eq!(EngineCore::field_refusal(&plan, None, "", ""), "unread");
+        assert_eq!(EngineCore::field_refusal(&plan, Some(&shown("other", "app", "ghbdtn", false, false)), "", ""), "other_field");
+        assert_eq!(EngineCore::field_refusal(&plan, Some(&shown("field", "other", "ghbdtn", false, false)), "", ""), "other_field");
+        assert_eq!(EngineCore::field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", true, false)), "", ""), "sensitive_or_selected");
+        assert_eq!(EngineCore::field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, true)), "", ""), "sensitive_or_selected");
+        assert_eq!(EngineCore::field_refusal(&plan, Some(&shown("field", "app", "ghbdtn", false, false)), "", ""), "");
     }
 }
