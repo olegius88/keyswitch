@@ -71,8 +71,11 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   back. A Mac keyboard has no `Pause`, so on macOS the manual conversion and the
   double press that offers a rule default to `Control+Option+K`;
 - layout switching with a lone tap of a modifier, as in Punto Switcher and
-  Caramba: the left or right `Shift` or `Ctrl`, pressed and released with no
-  other key, switches the layout (see
+  Caramba: either `Shift`, the left or right `Shift` or `Ctrl`, pressed and
+  released with no other key, switches the layout, a double tap of that key
+  converts the last word or the selected text, and both `Shift` keys together
+  turn automatic switching off and on. A new installation works both `Shift`
+  keys this way; an update leaves the settings as they were (see
   [Which keys switch the layout](#which-keys-switch-the-layout));
 - manual conversion with a lone tap of a modifier: another of these keys can do
   what `Pause` does (see the same section);
@@ -151,9 +154,11 @@ KDE whatever the keyboard layout settings say), on macOS `Control+Space` or the
   одной клавишей» (below);
 - the «Переключить на …» (switch to …) item of the tray menu;
 - the setting «Переключать раскладку одной клавишей» (switch the layout with a
-  single key) on the «Горячие клавиши» (hotkeys) page: the left or right `Shift`
-  or `Ctrl`, pressed and released with no other key, switches the layout EN ⇄
-  RU. It is off by default. `Shift` with a letter, a click or a turn of the
+  single key) on the «Горячие клавиши» (hotkeys) page: either `Shift`, the left
+  or right `Shift` or `Ctrl`, pressed and released with no other key, switches
+  the layout EN ⇄ RU. A new installation has «Любой Shift» (either Shift); an
+  installation updated from an earlier version keeps what it had (off by
+  default). `Shift` with a letter, a click or a turn of the
   wheel with the key held, `Ctrl+C` and a hold longer than half a second switch
   nothing, and the key itself reaches the program as usual. The first word after
   such a switch stays as typed, as after any manual switch. Leave it off where
@@ -163,16 +168,50 @@ KDE whatever the keyboard layout settings say), on macOS `Control+Space` or the
   Wayland KeySwitch notices a touchpad scroll by the touch: a scroll whose
   fingers were down before the key does not end the tap.
 
+The setting «Двойное нажатие переводит слово» (a double tap converts the word)
+below it: two quick taps of that key (the second at most half a second after the
+first) do what `Pause` does (`Control+Option+K` on macOS): they convert the last
+word, or give back a word KeySwitch has just corrected itself. The first tap has
+switched the layout already; the second takes it back and converts, so the
+layout ends as after `Pause`. With nothing to convert and text selected, a double
+tap does what `Shift+Pause` does (`Control+Option+L` on macOS): it retypes the
+selection in the other layout; with nothing selected, or a selection that cannot
+be read, it switches the layout, as `Pause` with no word does. A double tap
+offers no switching rule: the double press of `Pause` still does.
+
+The setting «Оба Shift выключают автопереключение» (both Shifts turn automatic
+switching off): the left and the right `Shift` pressed together and released with
+no other key turn automatic switching off or on, as the «Автопереключение» item
+of the tray menu and `Ctrl+Alt+P` do. A notice at the caret says «Автопереключение
+выключено» or «Автопереключение включено» for two seconds (its «Больше не
+показывать» button turns it off), and the tray icon shows the pause as usual.
+Where both `Shift` keys together already do something in the system, KeySwitch
+leaves that chord alone: on Linux it reads the XKB options from the X server,
+GNOME's settings and KDE's `kxkbrc`, and with `grp:shifts_toggle` (both Shifts
+switch the layout), `shift:both_capslock`, `shift:both_capslock_cancel` or
+`shift:both_shiftlock` the settings window says why the setting is unavailable;
+and where the system switched the layout while both keys were down, automatic
+switching stays as it was too.
+
+Both settings are on in a new installation and off in one updated from an
+earlier version: an update changes no setting. KeySwitch tells a new
+installation at its first start by its empty settings and data folders: any
+file there (settings, rules, history, hints, the log) means it is not a new
+installation. The first hint of a new installation names these keys and the
+page where they are changed.
+
 The setting «Преобразовать последнее слово одной клавишей» (convert the last
-word with a single key) on the same page offers the same keys, and a tap counts
+word with a single key) on the same page offers the same keys but «Любой Shift»,
+and a tap counts
 there as it does here, but such a tap does what `Pause` does (`Control+Option+K`
 on macOS): it converts the last word, or switches the layout when there is
 nothing to convert, and a second tap right after the first offers a switching
 rule for the word. It works while autocorrection is paused and in excluded
 applications, as `Pause` does. It is off by default. One key cannot both switch
 the layout and convert: the settings window does not let one setting take a key
-the other one has, and where a settings file edited by hand names one key in
-both, the key only switches the layout.
+the other one has (with «Любой Shift» both `Shift` keys are taken), and where a
+settings file edited by hand names one key in both, the key only switches the
+layout.
 
 ## Install on Windows
 
