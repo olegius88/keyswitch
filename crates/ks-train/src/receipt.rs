@@ -4,8 +4,8 @@ use ks_cast::To as _;
 use crate::artifact::{tree_of, typed};
 use crate::corpus::{checksum, read_json};
 use crate::evaluate::{
-    Earliness, EvaluationRequest, FIRST_PLANS_VERSION, INSTALLED, PROFILES, PROTOCOLS, SWITCH_KEY_HISTOGRAM_KEYS, SWITCH_KEY_HISTOGRAM_LATER, earliness, evaluation_identity, protocol_set,
-    validate_candidate_seal, validate_prefix_seal,
+    Earliness, EvaluationRequest, FIRST_PLANS_VERSION, INSTALLED, PROFILES, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, SWITCH_KEY_HISTOGRAM_KEYS, SWITCH_KEY_HISTOGRAM_LATER, earliness,
+    evaluation_identity, protocol_set, validate_candidate_seal, validate_prefix_seal,
 };
 use crate::fit::readable;
 use crate::physical::hex_digest;
@@ -258,7 +258,9 @@ fn validate_first_block(block: &PublicFirst, words: i64, correct_sequences: i64)
 
 /// A pair's earliness, held to its counts: every wrong first plan in one class, the bins and the kinds adding up to the
 /// rows they count, the sum of the keys within what the bins allow, the false early switches within the correct plans
-/// that kept their text (`preserved`) and those that spoiled it (`corrupted`).
+/// that kept their text (`preserved`) and those that spoiled it (`corrupted`). Two bounds follow from the others and are
+/// not checked apart: the rows with a counted key are within the rows switched, since a right start undone is never
+/// negative, and the false early switches are within the correct plans, which are the kept and the spoiled ones.
 fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, (preserved, corrupted): (i64, i64), correct_sequences: i64) -> Result<(), String> {
     const INCONSISTENT: &str = "inconsistent first-plan earliness";
     let (wrong, correct) = (counts["initially_wrong"], counts["initially_correct"]);
@@ -301,7 +303,6 @@ fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, (
         || early.started_right_ended_wrong > wrong - early.first_word_correct
         || early.started_right_ended_wrong > switched - early.switch_key_rows
         || early.switch_key_rows > early.first_word_correct
-        || early.switch_key_rows > switched
         || early.switch_key_histogram.values().sum::<i64>() != early.switch_key_rows
         || early.switch_key_sum < least
         || (early.switch_key_histogram[SWITCH_KEY_HISTOGRAM_LATER] == 0 && early.switch_key_sum != least)
@@ -309,7 +310,6 @@ fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, (
         || first.false_early_on_focus > first.false_early
         || first.false_early_flicker > preserved
         || first.false_early_corrupted > corrupted
-        || first.false_early > correct
         || first.early_returns > correct
         || sequence.false_early != sequence.false_early_flicker + sequence.false_early_corrupted
         || sequence.false_early > correct_sequences
@@ -692,12 +692,11 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     let head: ReportHead = typed(&tree).map_err(|_| NOT_ACCEPTED)?;
     let recipe = read_json(&root.join(RECIPE))?;
     let protocols = read_json(&root.join(PROTOCOLS))?;
-    let version = head.protocol_version().unwrap_or_default();
-    let protocol = protocol_set(&protocols, version).ok_or(NOT_ACCEPTED)?;
+    // A receipt is exported of a test of the protocol the tree evaluates by, the one its identity names.
+    let protocol = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION).ok_or(NOT_ACCEPTED)?;
     if head.schema_version != 1 || head.split != TEST_SPLIT || !head.answers(&identity.value, &protocol["sequence"], &recipe["gate_policy"]) || !head.promotion_passed || head.execution_error.is_some() {
         return Err(NOT_ACCEPTED.to_owned());
     }
-    let first_plans = version >= FIRST_PLANS_VERSION;
     if std::fs::read(request.ledger.join(format!("{}.access.json", identity.key))).map_err(|error| error.to_string())? != crate::artifact::canonical(&identity.value)
         || std::fs::read(request.ledger.join(format!("{}.outcome.json", identity.key))).map_err(|error| error.to_string())? != std::fs::read(report_path).map_err(|error| error.to_string())?
     {
@@ -713,12 +712,8 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     let (selection, profiles) = (report.selection.as_ref().ok_or(NOT_ACCEPTED)?, report.profiles.as_ref().ok_or(NOT_ACCEPTED)?);
     let public_profile = |private: &Profile| -> Result<PublicProfile, String> {
         // Of the first plans, the counts and the earliness of the gated pairs and of the installed reference; no case.
-        let first = if first_plans {
-            let first = private.first.as_ref().ok_or(NOT_ACCEPTED)?;
-            Some(PublicFirst { counts: first.counts.public(), earliness: first.earliness.public(), gates: first.gates.clone() })
-        } else {
-            None
-        };
+        let first = private.first.as_ref().ok_or(NOT_ACCEPTED)?;
+        let first = Some(PublicFirst { counts: first.counts.public(), earliness: first.earliness.public(), gates: first.gates.clone() });
         let early_off = PublicEarlyOff { counts: private.early_off.counts.clone(), gates: private.early_off.gates.clone() };
         Ok(PublicProfile { counts: private.counts.clone(), gates: private.gates.clone(), early_off, first })
     };
@@ -727,8 +722,8 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
         selected_rows: selection.selected_rows,
         trimmed_rows: selection.trimmed_rows,
         unsupported_rows: selection.unsupported.len().to::<i64>(),
-        first_ineligible_rows: first_plans.then(|| selection.first_ineligible.len().to::<i64>()),
-        installed_reference: if first_plans { report.installed_reference.clone() } else { None },
+        first_ineligible_rows: Some(selection.first_ineligible.len().to::<i64>()),
+        installed_reference: report.installed_reference.clone(),
         profiles: PublicProfiles { portable: public_profile(&profiles.portable)?, reference_hunspell: public_profile(&profiles.reference_hunspell)? },
     };
     let payload = read_json(request.artifact)?;

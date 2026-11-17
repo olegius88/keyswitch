@@ -904,6 +904,19 @@ pub fn unchanged_since(request: &EvaluationRequest<'_>, identity: &Identity) -> 
     Ok(())
 }
 
+/// The installed pair of a tree, by the digests of its two models: the reference a replay compares with.
+pub fn installed_reference(root: &Path) -> Result<InstalledReference, String> {
+    Ok(InstalledReference { context_sha256: checksum(&root.join(INSTALLED_CONTEXT))?, prefix_sha256: checksum(&root.join(INSTALLED_PREFIX))? })
+}
+
+/// The installed pair of a tree is still the one a replay started with.
+pub fn installed_unchanged_since(root: &Path, reference: &InstalledReference) -> Result<(), String> {
+    if installed_reference(root)? != *reference {
+        return Err("the installed pair changed during sequence replay".to_owned());
+    }
+    Ok(())
+}
+
 /// `evaluate`: the report of a development diagnostic, or of the sealed test, read once.
 pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
     let split = request.split;
@@ -942,8 +955,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
     };
     // The installed pair is a reference, not an input the seal or the test membership names: the report says which one
     // it was, and the pair must not change while it is replayed.
-    let installed_reference = || -> Result<InstalledReference, String> { Ok(InstalledReference { context_sha256: checksum(&pairs.installed)?, prefix_sha256: checksum(&pairs.prefix_installed)? }) };
-    let reference = installed_reference()?;
+    let reference = installed_reference(root)?;
     let gate_policy = read_json(&root.join("model/context_v3/recipe.json"))?["gate_policy"].clone();
     let mut report = Report {
         schema_version: 1,
@@ -981,9 +993,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
     if !request.unsealed {
         unchanged_since(request, &identity)?;
     }
-    if installed_reference()? != reference {
-        return Err("the installed pair changed during sequence replay".to_owned());
-    }
+    installed_unchanged_since(root, &reference)?;
     if split == "test" {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
     } else {

@@ -5,7 +5,7 @@ mod eval_support;
 mod support;
 
 use ks_train::corpus::CorpusRow;
-use ks_train::evaluate::{first_plan, opening_letters, select_rows, sequence_plan, sequence_plans};
+use ks_train::evaluate::{first_plan, installed_reference, installed_unchanged_since, opening_letters, select_rows, sequence_plan, sequence_plans};
 use ks_train::sequence_report::{Documents, InstalledReference, Report, Unsupported};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -231,6 +231,28 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     assert_eq!((intervention.event, intervention.observed.as_str(), wrong.focus_letters), (1, "g", Some(6)));
     let kinds: Vec<&str> = first.cases.candidate.iter().chain(&profile.cases.candidate).flat_map(|case| &case.corrections).map(|item| item.kind.as_deref().expect("a kind")).collect();
     assert!(!kinds.is_empty() && kinds.iter().all(|kind| !kind.is_empty()), "{kinds:?}");
+}
+
+/// The installed pair a replay compares with is named by the digests of its two models, and one changed while the replay
+/// runs stops its report.
+#[test]
+fn an_installed_pair_changed_during_a_replay_stops_its_report() {
+    let root = scratch("installed-reference");
+    let models = root.join("resources/models");
+    std::fs::create_dir_all(&models).expect("a folder");
+    for name in ["context_policy_v1.json", "prefix_policy_v1.json"] {
+        std::fs::write(models.join(name), name).expect("a model");
+    }
+    let reference = installed_reference(&root).expect("the installed pair");
+    assert_eq!(reference, InstalledReference { context_sha256: digest(b"context_policy_v1.json"), prefix_sha256: digest(b"prefix_policy_v1.json") });
+    installed_unchanged_since(&root, &reference).expect("nothing changed yet");
+    for name in ["prefix_policy_v1.json", "context_policy_v1.json"] {
+        std::fs::write(models.join(name), b"another").expect("a model");
+        assert!(installed_unchanged_since(&root, &reference).unwrap_err().contains("the installed pair changed during sequence replay"));
+        std::fs::write(models.join(name), name).expect("a model");
+    }
+    std::fs::remove_file(models.join("prefix_policy_v1.json")).expect("the model goes");
+    assert!(installed_unchanged_since(&root, &reference).is_err());
 }
 
 #[test]

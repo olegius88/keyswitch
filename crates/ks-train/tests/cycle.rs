@@ -3,11 +3,12 @@
 mod support;
 
 use ks_cast::To as _;
-use ks_train::evaluate::{EvaluationRequest, earliness, evaluation_identity, protocol, validate_candidate_seal, validate_prefix_seal};
+use ks_train::evaluate::{EvaluationRequest, TOP_LEVEL_PROTOCOL_VERSION, audited_sequence, earliness, evaluation_identity, protocol, validate_candidate_seal, validate_prefix_seal};
 use ks_train::artifact::{canonical, tree_of, typed};
 use ks_train::corpus::checksum;
 use ks_train::receipt::{export_receipt, validate_full_report};
 use ks_train::sequence_report::{AllPairs, Case, CorrectionRecord, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile, PublicFirst, PublicTest, Report, protocol_version};
+use ks_text::json::Kept;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -603,6 +604,49 @@ fn a_report_is_recomputed_from_its_private_cases() {
             cases[at].trimmed_right += 1;
         });
     });
+    // A word typed first only correctly: its wrong plan is gone from every pair and profile.
+    refused_typed("first-plan coverage", &|report| {
+        let name = first_cases(report).baseline[first_wrong].identifier.clone();
+        everywhere_first(report, &|cases| cases.retain(|case| !(case.initially_wrong && case.identifier == name)));
+    });
+    // A first case of the row's document typed in the other layout, or opening with what is not a letter.
+    first_edited(first_right, OTHER, &|case| case.group = case.group.map(|group| 1 - group));
+    first_edited(first_right, OTHER, &|case| {
+        case.expected.insert(0, '1');
+        case.actual.insert(0, '1');
+    });
+    // A word named without first plans has none in any pair or profile, and is named once.
+    let without = |report: &mut Report, times: usize| {
+        let name = first_cases(report).baseline[first_right].identifier.clone();
+        everywhere_first(report, &|cases| cases.retain(|case| case.identifier != name));
+        first_ineligible(report).extend(std::iter::repeat_n(name, times));
+    };
+    let mut once = good_typed.clone();
+    without(&mut once, 1);
+    validate_full_report(&tree_of(&once), &sealed.identity).expect("a word named once without first plans");
+    refused_typed("invalid first-plan selection", &|report| without(report, 2));
+    // A report of protocol 4, as the receipts of that version were made of: no correction names its kind, and there are
+    // neither first plans nor an installed pair. It is checked as that protocol checked it.
+    let mut four = good_typed.clone();
+    four.protocol = protocol_four(&FITTED);
+    assert_eq!(protocol_version(&four.protocol), Some(4));
+    four.installed_reference = None;
+    four.selection.as_mut().expect("the selection").first_ineligible.clear();
+    for (_, profile) in four.profiles.as_mut().expect("the profiles").each_mut() {
+        (profile.first, profile.installed) = (None, None);
+        for cases in [&mut profile.cases.baseline, &mut profile.cases.candidate, &mut profile.early_off.cases.baseline, &mut profile.early_off.cases.candidate] {
+            for correction in cases.iter_mut().flat_map(|case| &mut case.corrections) {
+                correction.kind = None;
+            }
+        }
+    }
+    validate_full_report(&tree_of(&four), &sealed.identity).expect("a report of protocol 4");
+}
+
+/// The sequence block of protocol 4, as the protocols file of the tree states it and a report carries it.
+fn protocol_four(fitted: &Fitted) -> Kept {
+    let sequence = audited_sequence(&read(&fitted.tree.join("model/context_v3/protocols.json")), TOP_LEVEL_PROTOCOL_VERSION).expect("the protocol of version 4");
+    Report::carry(&sequence).expect("a protocol")
 }
 
 /// A chat test that passed, as a ledger holds it, for this candidate.
@@ -732,11 +776,14 @@ fn a_receipt_is_exported_only_from_a_report_its_ledger_confirms() {
         let asked = request(fitted, &resources, "test", &path, &ledger);
         export_receipt(&asked, &path, &chat, &output).expect_err("refused")
     };
-    let edits: [&dyn Fn(&mut Value); 7] = [
+    // A report of protocol 4 under the identity of this tree: no receipt of that version is exported any more.
+    let four = protocol_four(fitted);
+    let edits: [&dyn Fn(&mut Value); 8] = [
         &|report| report["schema_version"] = json!(2),
         &|report| report["split"] = json!("development"),
         &|report| report["identity"] = json!({}),
         &|report| report["protocol"] = json!("other"),
+        &|report| *report = tree_of(&Report { protocol: four.clone(), ..parsed(report) }),
         &|report| report["gate_policy"] = json!("other"),
         &|report| report["promotion_passed"] = json!(false),
         &|report| report["execution_error"] = json!("failed"),
@@ -999,6 +1046,16 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let run = promotion("few", &few);
     let (held, said) = told(&mut promote(&run));
     assert!(!held && said.contains("short of the release receipt"), "{said}");
+    // A report without the first plans of a profile is an error, not zeros that hold a floor of no margin: nothing is
+    // installed and the chat test is not read.
+    let mut without = parsed(&accepted_report(&SEALED));
+    without.profiles.as_mut().expect("the profiles").reference_hunspell.first = None;
+    let run = promotion("without-first", &tree_of(&without));
+    let before = installed(&run);
+    let (held, said) = told(&mut promote(&run));
+    assert!(!held && said.contains("reference_hunspell: the report holds no first plans"), "{said}");
+    assert_eq!(installed(&run), before);
+    assert!(!run.report.with_file_name("devchat-test.json").exists());
     // The default mode is held to its first plans.
     let mut behind = parsed(&accepted_report(&SEALED));
     let first = behind.profiles.as_mut().expect("the profiles").reference_hunspell.first.as_mut().expect("the first plans");

@@ -8,7 +8,7 @@ use ks_train::corpus::read_json;
 use ks_train::artifact::{tree_of, typed};
 use ks_train::evaluate::{Earliness, FirstFalseEarly, PROTOCOLS, SequenceFalseEarly, SEQUENCE_PROTOCOL_VERSION, protocol_set};
 use ks_train::receipt::{validate_evidence, validate_receipt};
-use ks_train::sequence_report::{ByPair, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
+use ks_train::sequence_report::{AllPairs, ByPair, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -631,6 +631,25 @@ fn the_earliness_of_a_receipt_holds_together() {
         early.correct_sequence_plans.false_early = 100_000;
     });
     with(EARLY, &|early| early.correct_sequence_plans.early_returns = 100_000);
+    // A row whose switch key is counted had its first word right: one more switched row, its key counted, and no more
+    // first words right.
+    with(EARLY, &|early| {
+        early.later += 1;
+        early.never -= 1;
+        *early.first_correction_kinds.get_mut("early").unwrap() += 1;
+        early.switch_key_rows += 1;
+        *early.switch_key_histogram.get_mut("4").unwrap() += 1;
+        early.switch_key_sum += 4;
+    });
+    // The flickers are within the correct plans that kept their text: the baseline spoiled one, so all its correct plans
+    // flickering is one too many, though no more than its correct plans.
+    refuses_five_typed(EARLY, |test| {
+        let first = first_of(test);
+        let flickers = first.counts.baseline.preserved_correct + 1;
+        assert_eq!(flickers, first.counts.baseline.initially_correct);
+        let plans = &mut first.earliness.baseline.correct_first_plans;
+        (plans.false_early, plans.false_early_flicker) = (flickers, flickers);
+    });
     // A right early start undone needs a switch and a wrong first word to stand on.
     with(EARLY, &|early| {
         early.started_right_ended_wrong = early.inside_word + early.last_letter + early.boundary_key + early.later - early.switch_key_rows + 1;
@@ -649,4 +668,18 @@ fn the_earliness_of_a_receipt_holds_together() {
     early.switch_key_sum += 20;
     later["test"] = tree_of(&test);
     check(&later).unwrap();
+}
+
+/// A pair or a profile is found by its name, and a name no report holds finds nothing.
+#[test]
+fn a_pair_or_a_profile_of_another_name_is_not_found() {
+    let pairs = AllPairs::build(|pair| Ok::<_, String>(pair.to_owned())).unwrap();
+    for (name, _) in pairs.published() {
+        assert_eq!(pairs.named(name).map(String::as_str), Some(name));
+    }
+    assert_eq!(pairs.named("candidate_context_baseline_prefix").map(String::as_str), Some("candidate_context_baseline_prefix"));
+    assert_eq!(pairs.named("released"), None);
+    let test = test_of(&receipt());
+    assert!(test.profiles.named("portable").is_some() && test.profiles.named("reference_hunspell").is_some());
+    assert!(test.profiles.named("spelling").is_none());
 }

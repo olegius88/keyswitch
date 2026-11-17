@@ -4,10 +4,10 @@
 use ks_cast::To as _;
 use crate::artifact::typed;
 use crate::corpus::read_json;
-use crate::evaluate::{EvaluationRequest, FIRST_PLANS_VERSION, evaluate, validate_candidate_seal, validate_prefix_seal};
+use crate::evaluate::{EvaluationRequest, evaluate, validate_candidate_seal, validate_prefix_seal};
 use crate::mixed::{DevchatRequest, devchat};
 use crate::receipt::{export_receipt, validate_receipt};
-use crate::sequence_report::{PairCounts, Profiles, Report};
+use crate::sequence_report::{Profiles, Report};
 use ks_text::{Indent, JsonOptions};
 use serde::Deserialize;
 use serde_json::Value;
@@ -181,19 +181,15 @@ fn installed_files(request: &PromoteRequest<'_>) -> [(PathBuf, &'static str); 4]
     ]
 }
 
-/// `restoration_shortfall`: where the sealed test leaves the candidate short of the release receipt's floors. From
-/// protocol 5 on the default mode is held to its first plans, where every wrong word stands at the start of a text and so
-/// can be restored; its protocol-4 plans keep their gates.
-fn restoration_shortfall(report: &Report) -> Vec<String> {
+/// `restoration_shortfall`: where the sealed test leaves the candidate short of the release receipt's floors. The default
+/// mode is held to its first plans, where every wrong word stands at the start of a text and so can be restored; its
+/// sequences keep their gates. A report without the first plans of a profile is no test a receipt can be made of: an
+/// error, before the developer-chat test is read.
+fn restoration_shortfall(report: &Report) -> Result<Vec<String>, String> {
     let mut failures = Vec::new();
-    let first_plans = report.protocol_version().is_some_and(|version| version >= FIRST_PLANS_VERSION);
-    let none = PairCounts::default();
     for (name, profile) in report.profiles.iter().flat_map(Profiles::each) {
-        let default = match (first_plans, &profile.first) {
-            (false, _) => (&profile.counts.candidate, &profile.counts.baseline),
-            (true, Some(first)) => (&first.counts.candidate, &first.counts.baseline),
-            (true, None) => (&none, &none),
-        };
+        let first = profile.first.as_ref().ok_or_else(|| format!("{name}: the report holds no first plans of the default mode, which the receipt's floors are read from"))?;
+        let default = (&first.counts.candidate, &first.counts.baseline);
         let control = (&profile.early_off.counts.candidate, &profile.early_off.counts.baseline);
         for (mode, (candidate, baseline)) in [("default", default), ("early_off", control)] {
             let restored = candidate.exactly_restored;
@@ -206,7 +202,7 @@ fn restoration_shortfall(report: &Report) -> Vec<String> {
             }
         }
     }
-    failures
+    Ok(failures)
 }
 
 /// `promote`: the checks, the sealed test (once), the install and the receipt.
@@ -232,7 +228,7 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
         println!("the sealed test did not pass; nothing is installed");
         return Ok(1);
     }
-    let shortfall = restoration_shortfall(&report);
+    let shortfall = restoration_shortfall(&report)?;
     if !shortfall.is_empty() {
         println!("the sealed test leaves the candidate short of the release receipt's restoration floors ({}); nothing is installed and the developer-chat test is not read", shortfall.join("; "));
         return Ok(1);
@@ -265,7 +261,7 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
 mod tests {
     use super::*;
     use crate::evaluate::Earliness;
-    use crate::sequence_report::{AllPairs, EarlyOff, FirstBlock, FirstGates, Gated, Gates, Profile};
+    use crate::sequence_report::{AllPairs, EarlyOff, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile};
 
     fn comparison(text: &str) -> Comparison {
         ks_text::json::loads(text).expect("a comparison")
@@ -283,9 +279,10 @@ mod tests {
         assert_eq!(calibration_shortfall(&unnamed), ["portable"]);
     }
 
-    /// Protocol 4 holds the default mode to its sequences, protocol 5 to its first plans; early_off is held as before.
+    /// The default mode is held to its first plans, not to its sequences; early_off is held as before; a report without
+    /// first plans holds no floor at all.
     #[test]
-    fn the_default_floor_is_read_where_the_protocol_of_the_report_puts_it() {
+    fn the_default_floor_is_read_from_the_first_plans() {
         let counts = |candidate: i64, baseline: i64| Gated { candidate: PairCounts { exactly_restored: candidate, initially_wrong: candidate, ..PairCounts::default() }, baseline: PairCounts { exactly_restored: baseline, ..PairCounts::default() } };
         let held = || Gates {
             correct_text_preserved: true,
@@ -314,13 +311,13 @@ mod tests {
                 early_off: EarlyOff { counts: control, cases: none(), gates: held() },
             }
         };
-        let report = |version: i64, sequences: Gated<PairCounts>, first: Gated<PairCounts>| {
+        let report = |sequences: Gated<PairCounts>, first: Gated<PairCounts>| {
             let same = || profile(sequences.clone(), first.clone(), counts(10, 9));
             Report {
                 schema_version: 1,
                 split: "test".to_owned(),
                 identity: ks_text::json::loads(r#"{"unsealed": true}"#).expect("a tree"),
-                protocol: ks_text::json::loads(format!(r#"{{"version": {version}}}"#)).expect("a tree"),
+                protocol: ks_text::json::loads(r#"{"version": 5}"#).expect("a tree"),
                 gate_policy: ks_text::json::loads("{}").expect("a tree"),
                 promotion_passed: true,
                 installed_reference: None,
@@ -333,15 +330,17 @@ mod tests {
         let short = |profile: &str| vec![format!("{profile}/default: the margin over the baseline pair")];
         let mut names = short("portable");
         names.extend(short("reference_hunspell"));
-        assert_eq!(restoration_shortfall(&report(4, counts(5, 6), counts(9, 9))), names);
-        assert!(restoration_shortfall(&report(4, counts(6, 6), counts(5, 9))).is_empty());
-        assert_eq!(restoration_shortfall(&report(5, counts(9, 9), counts(5, 6))), names);
-        assert!(restoration_shortfall(&report(5, counts(5, 6), counts(6, 6))).is_empty());
+        assert_eq!(restoration_shortfall(&report(counts(9, 9), counts(5, 6))).expect("first plans"), names);
+        assert!(restoration_shortfall(&report(counts(5, 6), counts(6, 6))).expect("first plans").is_empty());
         // early_off keeps its margin of one row and its share.
-        let mut behind = report(5, counts(9, 9), counts(6, 6));
+        let mut behind = report(counts(9, 9), counts(6, 6));
         for (_, profile) in behind.profiles.iter_mut().flat_map(Profiles::each_mut) {
             profile.early_off.counts = counts(9, 9);
         }
-        assert_eq!(restoration_shortfall(&behind), ["portable/early_off: the margin over the baseline pair", "reference_hunspell/early_off: the margin over the baseline pair"]);
+        assert_eq!(restoration_shortfall(&behind).expect("first plans"), ["portable/early_off: the margin over the baseline pair", "reference_hunspell/early_off: the margin over the baseline pair"]);
+        // No first plans: not zeros that would hold the floor of no margin.
+        let mut without = report(counts(6, 6), counts(6, 6));
+        without.profiles.as_mut().expect("the profiles").reference_hunspell.first = None;
+        assert!(restoration_shortfall(&without).expect_err("no first plans").starts_with("reference_hunspell: the report holds no first plans"));
     }
 }

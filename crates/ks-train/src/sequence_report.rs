@@ -499,12 +499,6 @@ pub struct ReportHead {
 }
 
 impl ReportHead {
-    /// The version of the sequence protocol the report names, when it names one.
-    #[must_use]
-    pub fn protocol_version(&self) -> Option<i64> {
-        protocol_version(&self.protocol)
-    }
-
     /// Whether the report names this identity, this protocol and this gate policy: what its test was run against.
     pub fn answers<I: Serialize + ?Sized, P: Serialize + ?Sized, G: Serialize + ?Sized>(&self, identity: &I, protocol: &P, gate_policy: &G) -> bool {
         carries(&self.identity, identity) && carries(&self.protocol, protocol) && carries(&self.gate_policy, gate_policy)
