@@ -203,10 +203,12 @@ impl EngineCore {
         // maybe_correct_after_pause ends no word: its plans alone carry no boundary key.
         self.pause_agreement_open = plan.automatic && plan.boundary.is_none() && (plan.mode == "pause" || plan.mode == "context_phrase");
         // What is typed from now on stands after this correction's text, and the count of characters after a typo
-        // correction starts at the signs and the boundary it typed after its word.
+        // correction or a change of layout starts at the signs and the boundary it typed after its word.
         self.typed_after_correction = plan.automatic.then(Vec::new);
-        self.after_typo = (plan.automatic && plan.mode == TYPO_PLAN_MODE).then(|| plan.trailing.len() + usize::from(plan.boundary.is_some()));
-        self.typo_erase_unseen = false;
+        self.corrected_word = self.corrected_word_of(plan);
+        self.after_correction = (plan.automatic && (plan.mode == TYPO_PLAN_MODE || self.corrected_word.is_some()))
+            .then(|| plan.trailing.len() + usize::from(plan.boundary.is_some()));
+        self.erase_unseen = false;
     }
 
     /// A key that types text, as the engine takes it: it stands after the last correction's text. A key of no character
@@ -215,8 +217,8 @@ impl EngineCore {
         if event.character.is_empty() {
             return;
         }
-        self.typo_erase_unseen = false;
-        if let Some(after) = self.after_typo.as_mut() {
+        self.erase_unseen = false;
+        if let Some(after) = self.after_correction.as_mut() {
             *after += 1;
         }
         if let Some(typed) = self.typed_after_correction.as_mut() {
@@ -225,35 +227,56 @@ impl EngineCore {
     }
 
     /// Backspace: the text after the last correction is no longer known key by key, and the count after a typo correction
-    /// goes one down; at none the key erases a letter of the corrected word, which is then the user's to finish, unless
-    /// the Backspaces began before the user could see the correction (`typo_erase_unseen`).
+    /// or a change of layout goes one down; at none the key erases a letter of the corrected word. A typo correction is
+    /// then the user's to finish, and a change of layout may be remembered as their rule (`layout_correction_erased`),
+    /// unless the Backspaces began before the user could see the correction (`erase_unseen`). In a word whose layout was
+    /// changed while it is still typed, every Backspace erases a letter of it.
     pub fn note_backspace(&mut self) {
         self.typed_after_correction = None;
-        if self.after_typo.is_some() && self.monotonic() - self.last_correction_time < TYPO_ERASE_UNSEEN_SECONDS {
-            self.typo_erase_unseen = true;
+        if let Some(word) = self.corrected_in_progress() {
+            let changed_at_pause = self.early_switch_origin.is_none();
+            self.layout_correction_erased(word);
+            if changed_at_pause {
+                // The count was of the letters typed after the change inside this word, which is erased into now. The
+                // count of an early switch is of the correction before it, and goes on.
+                self.after_correction = None;
+                self.corrected_word = None;
+                return;
+            }
         }
-        match self.after_typo {
+        let shown_at = self.corrected_word.as_ref().map_or(self.last_correction_time, |word| word.shown_at);
+        if self.after_correction.is_some() && self.monotonic() - shown_at < ERASE_UNSEEN_SECONDS {
+            self.erase_unseen = true;
+        }
+        match self.after_correction {
             Some(0) => {
-                self.after_typo = None;
-                // The count starts with a typo correction and ends with the next correction (remember_correction).
+                self.after_correction = None;
+                if let Some(word) = self.corrected_word.take() {
+                    self.layout_correction_erased(word);
+                    return;
+                }
+                // The count starts with a typo correction or a change of layout and ends with the next correction
+                // (remember_correction).
                 let previous = self.last_correction.as_ref().expect("the count is of the last correction, a typo correction");
                 let letters = previous.replaced_strokes.len();
-                if self.typo_erase_unseen {
+                if self.erase_unseen {
                     technical_event!(self.shared, "typo_correction_erased_unseen", "letters": letters);
                     return;
                 }
                 self.typo_erased = Some(text_for_group(&previous.replaced_strokes, previous.target_group));
                 technical_event!(self.shared, "typo_correction_erased", "letters": letters);
             }
-            Some(after) => self.after_typo = Some(after - 1),
+            Some(after) => self.after_correction = Some(after - 1),
             None => {}
         }
     }
 
     /// The text after the last correction is no longer known: a key the engine does not follow, a caret move or the like.
+    /// Backspace can no longer tell when it reaches the corrected word either.
     pub fn forget_text_after_correction(&mut self) {
         self.typed_after_correction = None;
-        self.after_typo = None;
+        self.after_correction = None;
+        self.corrected_word = None;
     }
 
     /// Whether ``plan``, the reversal of the last correction, asks for that correction instead.

@@ -35,7 +35,8 @@ mod scenario {
     use ks_mac::macos_native::{NativeAccessibility, NativeMacAPI};
     use ks_mac::macos_objc::frontmost_application;
     use ks_ui::constants::HINT_CARD_WIDTH_PIXELS;
-    use ks_ui::hints::{HINT_NEVER_LABEL, HINT_OK_LABEL, HintState};
+    use ks_config::learning::LearningStore;
+    use ks_ui::hints::{HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_UNDO_REMEMBERED_LABEL, HintState};
     use ks_ui::windows_ui_model::HINTS_SETTING_TITLE;
     use serde_json::json;
 
@@ -765,6 +766,41 @@ mod scenario {
         Ok(())
     }
 
+    /// A word converted by itself, erased and typed again as first typed: it stays, a notice at the caret says it is
+    /// remembered, and a real click on its «Отменить» takes the rule back.
+    fn remembered_word(driver: &Driver, root: &Path) -> Result<(), String> {
+        let remembered = || LearningStore::new(Some(root.join("data/learning.json")), None).is_ok_and(|store| store.keeps(1, "руддщ"));
+        // The Russian layout picked by hand protects the next word: that word is spent, and the one after it is converted.
+        driver.put_text("")?;
+        driver.select(1)?;
+        driver.type_keys("тест ", true)?;
+        std::thread::sleep(SETTLED);
+        driver.type_keys("руддщ ", true)?;
+        std::thread::sleep(SETTLED);
+        driver.check("the word converted by itself", driver.value() == "тест hello ", &driver.value());
+        for _ in "hello ".chars() {
+            driver.key(BACKSPACE, true)?;
+            driver.key(BACKSPACE, false)?;
+        }
+        driver.select(1)?;
+        driver.type_keys("руддщ ", true)?;
+        std::thread::sleep(SETTLED);
+        driver.check("the word typed again as first typed stays", driver.value() == "тест руддщ ", &driver.value());
+        driver.check("and is remembered", wait_for(HINT_GOES, || remembered().then_some(())).is_some(), "");
+        let process = driver.program.get();
+        let notice = wait_for(CARET_HINT_APPEARS, || hint_window(process).and(driver.on_screen("AXStaticText", "«руддщ» запомнено")));
+        driver.check("a notice of the remembered word", notice.is_some(), &format!("windows {:?}", windows_of(process)));
+        let Some(undo) = driver.on_screen("AXButton", HINT_UNDO_REMEMBERED_LABEL).and_then(ax_frame) else {
+            driver.check("the «Отменить» of the notice", false, "no button in the accessibility tree");
+            return Ok(());
+        };
+        driver.click(undo);
+        let taken_back = wait_for(HINT_GOES, || (!remembered() && hint_window(process).is_none()).then_some(()));
+        driver.check("«Отменить» takes the rule back", taken_back.is_some(), "");
+        driver.check("a click on «Отменить» leaves the editor in front", driver.front() == "TextEdit", &driver.front());
+        Ok(())
+    }
+
     fn selection(driver: &Driver) -> Result<(), String> {
         const CASES: [(&str, Option<&str>, char, &str, Option<i32>); 7] = [
             ("layout", Some("ghbdtn vbh"), 'l', "привет мир", Some(1)),
@@ -941,6 +977,7 @@ mod scenario {
         let outcome = (|| -> Result<(), String> {
             driver.release_modifiers()?;
             typing(&driver)?;
+            remembered_word(&driver, &root)?;
             selection(&driver)?;
             words(&driver)?;
             conversion(&driver)?;

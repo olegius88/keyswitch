@@ -104,11 +104,12 @@ pub const UNDO_AVAILABLE_WINDOW_SECONDS: f64 = 10.0;
 /// after the word and what was typed since, three or four words. Every one of them is deleted and typed again while the
 /// keyboard is held, and on X11, where nothing holds it, typed over whatever comes meanwhile.
 pub const UNDO_REACH_MAX_KEYS: usize = 24;
-/// A Backspace this soon after a typo correction, and the Backspaces right after it, were pressed before the person could
-/// read the corrected word: the edit is of the text as they typed it, often the slip just corrected. Erasing a correction
-/// found wrong starts later, once the changed word is read. Such a run reaching the corrected word leaves it to be
-/// corrected as any word (`note_backspace`), not the person's to finish.
-pub const TYPO_ERASE_UNSEEN_SECONDS: f64 = 0.6;
+/// A Backspace this soon after an automatic correction, and the Backspaces right after it, were pressed before the person
+/// could read the corrected word: the edit is of the text as they typed it, often the slip just corrected. Erasing a
+/// correction found wrong starts later, once the changed word is read. Such a run reaching a typo correction leaves the
+/// word to be corrected as any word, not the person's to finish; reaching a change of layout, it remembers nothing of the
+/// word typed again there (`note_backspace`).
+pub const ERASE_UNSEEN_SECONDS: f64 = 0.6;
 /// The signs, besides letters, digits and spaces, the undo hotkey types again after the word it puts back: those an editor
 /// leaves as typed when they stand alone. Brackets and quotes are paired by editors, and `--` or `...` turned into a dash
 /// or an ellipsis, so text holding them is not known by its keys.

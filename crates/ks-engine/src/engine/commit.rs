@@ -65,6 +65,9 @@ impl EngineCore {
             segmentation_certain = true;
             abstained = false;
         }
+        // The word typed where a change of layout was erased, if it is the word as first typed, is the user's rule from
+        // now on: made before the word is decided, it keeps this word too.
+        self.settle_erased_layout(&typed[..typed.len() - trailing.len()], &application);
         let mut signs: Strokes = Vec::new();
         if trailing.is_empty() && segmentation_certain && !self.insertion.as_ref().is_some_and(InsertionPoint::inside_word) {
             let count = self.replayed_signs(&strokes, source_group);
@@ -542,6 +545,7 @@ impl EngineCore {
             self.pending_trigger_keycode = i64::from(boundary.keycode);
         }
         self.settle_erased_typo(&strokes);
+        self.end_corrected_word(&typed, trailing.len());
         self.strokes = Vec::new();
         self.insertion = None;
         self.source_group = -1;

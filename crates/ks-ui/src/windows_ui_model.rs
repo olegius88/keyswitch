@@ -6,7 +6,9 @@ use ks_cast::To as _;
 use std::fmt;
 
 use ks_config::app_quirks::MENTION_HEADS;
-use ks_config::constants::{DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS, HINTS_SETTING, HOTKEYS_CONVERT_LAST};
+use ks_config::constants::{
+    DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS, DETECTION_REMEMBER_RETYPED, HINTS_SETTING, HOTKEYS_CONVERT_LAST,
+};
 use ks_config::history::HistoryEntry;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::LogStatus;
@@ -131,6 +133,11 @@ pub fn both_shifts_toggle_subtitle(taken: Option<&str>) -> String {
 pub const FIELD_CATCH_UP_TITLE: &str = "Ждать отстающее поле";
 pub const FIELD_CATCH_UP_DESCRIPTION: &str = "Браузеры и редакторы на Electron показывают набранное с задержкой. Сколько ждать, \
                                               пока поле покажет слово, прежде чем отказаться от его исправления";
+/// What every settings window says of `detection.remember_retyped`, beside the list of rules.
+pub const REMEMBER_RETYPED_TITLE: &str = "Запоминать слово, набранное заново после исправления";
+pub const REMEMBER_RETYPED_DESCRIPTION: &str = "Если KeySwitch сам перевёл слово, а его стёрли и набрали снова так же, в той же раскладке, \
+                                                слово становится правилом «Не переводить». У курсора появляется сообщение \
+                                                с кнопкой «Отменить», которая убирает это правило";
 pub const FIELD_CATCH_UP_LABELS: [(&str, &str); 5] =
     [("off", "Не ждать"), ("100", "0,1 с"), ("300", "0,3 с"), ("500", "0,5 с"), ("1000", "1 с")];
 
@@ -489,6 +496,12 @@ pub fn update_settings() -> Vec<SettingSpec> {
             Bool,
         ),
     ]
+}
+
+/// Shown with the list of switching rules.
+#[must_use]
+pub fn rule_settings() -> Vec<SettingSpec> {
+    vec![spec(DETECTION_REMEMBER_RETYPED.path(), REMEMBER_RETYPED_TITLE, &format!("{REMEMBER_RETYPED_DESCRIPTION}."), Bool)]
 }
 
 #[must_use]
@@ -1030,6 +1043,7 @@ mod tests {
             hotkey_settings(),
             system_settings(),
             update_settings(),
+            rule_settings(),
             diagnostic_settings(),
             application_settings(),
         ];
@@ -1040,7 +1054,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 18 + 1 + 6 + 10 + 11 + 2 + 1 + 1);
+        assert_eq!(count, 18 + 1 + 6 + 10 + 11 + 2 + 1 + 1 + 1);
     }
 
     #[test]

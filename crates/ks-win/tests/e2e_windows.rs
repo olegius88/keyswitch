@@ -30,7 +30,7 @@ mod scenario {
     use ks_config::learning::LearningStore;
     use ks_ui::constants::HINT_TYPING_SETTLE_SECONDS;
     use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
-    use ks_ui::hints::{Click, HINT_NEVER_LABEL, HINT_OK_LABEL};
+    use ks_ui::hints::{Click, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_UNDO_REMEMBERED_LABEL, REMEMBERED_HINT_ID};
     use ks_win::constants::{HINT_CARD_CLASS, SETTINGS_WINDOW_CLASS, SHELL_TRAY_WINDOW_CLASSES, VK_BACK, VK_END, VK_ESCAPE, VK_F1, VK_HOME, VK_LSHIFT, VK_PAUSE, VK_RCONTROL, VK_RETURN, VK_RSHIFT, VK_SHIFT, WM_TRAY};
     use ks_win::hint_card::link_areas;
     use ks_win::hint_layout::Area;
@@ -913,13 +913,14 @@ mod scenario {
         Ok(())
     }
 
-    /// A click on the card, the way a person makes one: the middle of a link, or the text, by screen coordinates.
-    fn click_on_card(card: HWND, link: Click) -> Result<(), String> {
+    /// A click on the card, the way a person makes one: the middle of a link, or the text, by screen coordinates. `second`
+    /// is what the card's second link says.
+    fn click_on_card(card: HWND, link: Click, second: &str) -> Result<(), String> {
         let place = window_rect(card);
         // SAFETY: a plain query; the card was found visible just before.
         let dpi = (unsafe { GetDpiForWindow(card) }).bits::<i32>();
         let size = (place.right - place.left, place.bottom - place.top);
-        let (ok, never) = link_areas(dpi, size, HINT_OK_LABEL, HINT_NEVER_LABEL);
+        let (ok, never) = link_areas(dpi, size, HINT_OK_LABEL, second);
         let middle = |area: Area| (place.left + i32::midpoint(area.left, area.right), place.top + i32::midpoint(area.top, area.bottom));
         let (x, y) = match link {
             Click::Ok => middle(ok),
@@ -953,7 +954,7 @@ mod scenario {
         if hint_card(process).is_none() {
             return Err("typing took the card away".to_owned());
         }
-        click_on_card(card, link)?;
+        click_on_card(card, link, HINT_NEVER_LABEL)?;
         // SAFETY: the card is a window of another process; the call takes it by value and fails if it is gone.
         if !editor.pump_until(STANDARD, |_| unsafe { IsWindow(card) } == 0) {
             return Err("a click on the card did not take it away".to_owned());
@@ -1093,6 +1094,63 @@ mod scenario {
         Ok(())
     }
 
+    /// A word converted by itself, erased with Backspace and typed again as first typed: it stays, a rule of the user's keeps
+    /// it, a notice at the caret says so with the hints off, and a click on its «Отменить» takes the rule back. The layout
+    /// picked by hand protects no word here (`detection.respect_manual_layout` is off): the word typed again stays all the
+    /// same.
+    fn remembered_word(editor: &Editor, root: &Path, process: u32) -> Result<(), String> {
+        let store = LearningStore::new(Some(root.join("data/learning.json")), None).map_err(|error| format!("{error:?}"))?;
+        let remembered = || {
+            let _ = store.load();
+            store.keeps(1, "руддщ")
+        };
+        // The hook comes up after the process: the first word is typed again until the engine answers.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            editor.prepare(1)?;
+            editor.scans(&HELLO)?;
+            editor.scans(&[SCAN_SPACE])?;
+            match editor.expect("hello ", 0, LONG) {
+                Ok(()) => break,
+                Err(error) if attempt >= START_ATTEMPTS => return Err(error),
+                Err(_) => editor.pump(PHASE_SETTLE),
+            }
+        }
+        // Read, then erased key by key: no Home or click between, which would make it another place.
+        editor.pump(WINDOW_OPENS);
+        for _ in "hello ".chars() {
+            editor.virtual_key(VK_BACK)?;
+        }
+        editor.expect("", 0, LONG)?;
+        if !editor.api.request_layout(editor.layouts.1) || !editor.pump_until(STANDARD, |editor| editor.group() == 1) {
+            return Err(format!("the Russian layout was not picked: {}", editor.group()));
+        }
+        editor.scans(&HELLO)?;
+        editor.scans(&[SCAN_SPACE])?;
+        editor.expect("руддщ ", 1, LONG)?;
+        if !editor.pump_until(STANDARD, |_| remembered()) {
+            return Err(format!("the word typed again was not remembered: {:?}", store.rules()));
+        }
+        if !editor.pump_until(LONG, |_| hint_card(process).is_some()) {
+            return Err("no notice of the remembered word".to_owned());
+        }
+        let card = hint_card(process).ok_or("the notice went at once")?;
+        in_front(editor, "the notice appeared")?;
+        click_on_card(card, Click::Never, HINT_UNDO_REMEMBERED_LABEL)?;
+        // SAFETY: the card is a window of another process; the call takes it by value and fails if it is gone.
+        if !editor.pump_until(STANDARD, |_| unsafe { IsWindow(card) } == 0) {
+            return Err("a click on «Отменить» did not take the notice away".to_owned());
+        }
+        if !editor.pump_until(STANDARD, |_| !remembered()) {
+            return Err(format!("«Отменить» left the rule: {:?}", store.rules()));
+        }
+        if hint_how(root, REMEMBERED_HINT_ID).is_some() {
+            return Err(format!("the notice was written down as a hint: {}", hints_file(root)));
+        }
+        in_front(editor, "a click on «Отменить»")
+    }
+
     /// A phase of the hints: a program of its own, with a clean data folder holding `seed` as `hints.json`.
     fn with_program(
         editor: &Editor, binary: &Path, name: &str, setting: bool, seed: Option<String>, arguments: &[&str],
@@ -1128,6 +1186,9 @@ mod scenario {
         }
         with_program(editor, binary, "off", false, None, &["--hidden"], hints_off)?;
         println!("WINDOWS_HINTS_OFF_E2E_OK");
+        with_program(editor, binary, "remembered", false, None, &["--hidden"], remembered_word)?;
+        println!("WINDOWS_REMEMBERED_WORD_E2E_OK");
+        editor.activate();
         // The file says this is the first start of a new installation, as a run on a clean system would have written.
         let fresh = format!("{{\"last_run_version\": \"{VERSION}\", \"fresh_install\": true}}");
         with_program(editor, binary, "tray", true, Some(fresh), &["--hidden"], tray_hint)?;

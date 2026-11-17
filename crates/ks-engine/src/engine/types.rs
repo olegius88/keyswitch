@@ -359,6 +359,27 @@ pub enum ConvertOutcome {
     Switch,
 }
 
+/// The word of an automatic change of layout, as Backspace may reach it (`EngineCore::corrected_word`, `layout_erased`).
+#[derive(Clone, Debug)]
+pub struct CorrectedWord {
+    /// Its keys, as the person pressed them.
+    pub keys: Strokes,
+    /// The layout the keys were typed in, and the one the correction took them to.
+    pub source_group: i64,
+    pub target_group: i64,
+    /// The kind of plan that changed it.
+    pub mode: &'static str,
+    /// When the person could first see the change (`monotonic`): when it was typed, or the early switch inside the word.
+    pub shown_at: f64,
+    /// The change was made inside the word, which is still being typed (Pause's timer): the word is every key typed up to
+    /// its boundary.
+    pub in_progress: bool,
+    /// Erased by Backspaces begun sooner after `shown_at` than a person reads the word (`ERASE_UNSEEN_SECONDS`).
+    pub unseen: bool,
+    /// How long after `shown_at` the Backspaces that reached the word began.
+    pub erased_after: f64,
+}
+
 /// A plan `execute_correction` carried out, as it was asked to run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedPlan {

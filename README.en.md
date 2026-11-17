@@ -55,8 +55,10 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - switching rules: a double press of `Pause/Break` offers a rule for the last
   word, `Enter` opens the rule window already filled in from the situation (the
   word matches the letters, starts with them or contains them; case-sensitive or
-  not; convert or keep), and the rule exists only once OK is pressed. The rules
-  are listed on the Maintenance page;
+  not; convert or keep), and the rule exists only once OK is pressed. A word the
+  program converted by itself, erased and typed again as it was, becomes a "keep
+  the word" rule by itself, with a notice at the caret and its undo button. The
+  rules are listed on the Maintenance page;
 - system layout switching and correction of the already typed word through
   Win32 `SendInput` or XTEST;
 - respect for manual layout selection: the first completed word after the user
@@ -343,9 +345,20 @@ word contains them, starts with them or matches them), case sensitivity and the
 action can be changed there. The rule exists only after OK or `Enter` in that
 window; `Esc`, Cancel, typing on or letting the prompt time out store nothing. A
 single `Pause` and an undo with `Ctrl+Alt+Z` only fix the text and teach
-nothing. Rules outrank the model's decision; they are listed, added, edited and
-removed on the Maintenance page and switched off by the "Правила переключения"
-setting.
+nothing. A rule is also made by itself when a word KeySwitch converted is erased
+with Backspace and typed again at the same place as it was typed, in the same
+layout (`тыгыдык` became `nsuslsr`, was erased and typed as `тыгыдык` in the Russian
+layout): the word is remembered as a "keep the word" rule, and a notice at the
+caret says so, "Слово «тыгыдык» запомнено: больше не переводится." (the word is
+remembered and no longer converted), with "Отменить" (undo), which removes the
+rule. Nothing is remembered when the converted form is typed again, when a click,
+a caret move, another window or Enter comes between the erasing and the typing,
+or when the erasing began sooner than the word can be read (within 0.6 seconds of
+the conversion). The setting "Запоминать слово, набранное заново после
+исправления" (remember a word typed again after a correction), beside the rules,
+turns this off. Rules outrank the model's decision; they are listed, added,
+edited and removed on the Maintenance page and switched off by the "Правила
+переключения" setting.
 
 Keys other programs send on Windows - remote control (TeamViewer, AnyDesk),
 macros, on-screen keyboards - are not treated as typing by default: KeySwitch

@@ -61,3 +61,7 @@ pub const SHIFT_KEYS_VERSION: &str = "0.74.0";
 pub const AUTO_SWITCH_OFF_NOTICE: &str = "Автопереключение выключено";
 pub const AUTO_SWITCH_ON_NOTICE: &str = "Автопереключение включено";
 pub const AUTO_SWITCH_NOTICE_SECONDS: f64 = 2.0;
+/// The release that remembers a word erased and typed again after a change of layout, and says so.
+pub const REMEMBERED_WORD_VERSION: &str = "0.74.0";
+/// The longest word the notice of a remembered word names whole; a longer one is cut short with an ellipsis.
+pub const REMEMBERED_WORD_SHOWN_MAX_CHARACTERS: usize = 24;

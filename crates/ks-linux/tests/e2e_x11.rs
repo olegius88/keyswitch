@@ -15,7 +15,7 @@ use std::time::Instant;
 use gtk::prelude::*;
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, ENABLED};
+use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, ENABLED, GENERAL_HINTS};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
@@ -26,9 +26,9 @@ use ks_linux::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
 use ks_linux::gtk_model::prompt_position;
 use ks_linux::gtk_prompt::{LearningPromptWindow, PromptAnchor, PromptCallbacks, RuleCallbacks, RuleEditorWindow};
 use ks_linux::linux_app::{engine_builder, new_backend};
-use ks_ui::hints::{Click, EngineInput, Hints, Moment, RUNNING_PLATFORM, subscribe};
+use ks_ui::hints::{Click, EngineInput, HINT_UNDO_REMEMBERED_LABEL, Hints, Moment, REMEMBERED_HINT_ID, RUNNING_PLATFORM, subscribe};
 use serde_json::json;
-use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, pump_until, start_window_manager, WINDOW_MANAGER, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, ESCAPE_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, CONTROL_R_KEYSYM, dbus_call};
+use support::{Case, IDLE_PAUSE, SETTLE, CONTEXT_RESOLUTION, Typer, entry_window, pump, pump_until, start_window_manager, WINDOW_MANAGER, STARTUP, judge, GRACE, INTER_CASE, PAUSE_KEYSYM, RETURN_KEYSYM, ESCAPE_KEYSYM, BACKSPACE_KEYSYM, LEARNING_CONFIRMATION, MENU_LAYOUT, EARLY_SETUP, SLOW_CHARACTER, SHIFT_L_KEYSYM, SHIFT_R_KEYSYM, CONTROL_R_KEYSYM, dbus_call};
 
 const CASES: [Case; 15] = [
     Case("EN pause correction", 0, "ghbdtn", "привет", 1, IDLE_PAUSE),
@@ -426,6 +426,8 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
         let stand = HintStand { folder, settings: &settings, application: &application, engine: &engine, backend: &backend, typer: &typer, entry: &entry, group: &group, activated: &activated };
         hint_over_the_field(&stand, "alone", &driver, &settle)?;
         println!("HINT_KEEPS_THE_KEYBOARD_E2E_OK");
+        remembered_word_at_the_caret(&stand, &driver, &settle)?;
+        println!("REMEMBERED_WORD_E2E_OK");
         let mut manager = start_window_manager(&typer)?;
         let under_manager = window_manager_cases(&stand, &window, &driver, &settle);
         let _ = manager.kill();
@@ -610,6 +612,96 @@ fn hint_over_the_field(stand: &HintStand<'_>, name: &str, driver_slot: &RefCell<
     })();
     driver.close();
     *driver_slot.borrow_mut() = None;
+    outcome
+}
+
+/// A word KeySwitch converted by itself, erased with Backspace and typed again as first typed: the word stays, a rule keeps it
+/// from then on, a notice at the caret says so, and a real click on its «Отменить» takes the rule back.
+fn remembered_word_at_the_caret(stand: &HintStand<'_>, driver_slot: &RefCell<Option<Rc<HintDriver>>>, settle: &dyn Fn(u64)) -> Result<(), String> {
+    let origin = Instant::now();
+    let data = stand.folder.join("hints-remembered");
+    std::fs::create_dir_all(&data).map_err(|error| error.to_string())?;
+    std::fs::write(data.join("hints.json"), format!(r#"{{"last_run_version": "{}"}}"#, ks_config::logsetup::VERSION)).map_err(|error| error.to_string())?;
+    // The hints off: the notice reports what was done, and shows all the same, with no hint of the correction before it.
+    stand.settings.write(GENERAL_HINTS, false, false).map_err(|error| format!("{error:?}"))?;
+    let hints = Hints::start(stand.settings.clone(), &data, RUNNING_PLATFORM, &Moment::now(origin, 0));
+    let clicks: Rc<RefCell<Vec<(String, Click)>>> = Rc::default();
+    let recorder = clicks.clone();
+    let clicked: HintClicked = Rc::new(move |id: &str, click| recorder.borrow_mut().push((id.to_owned(), click)));
+    let (placer, restorer) = (stand.backend.clone(), stand.backend.clone());
+    let calls = HintCalls {
+        position: Box::new(move |_, window, x, y| placer.position_window(window, x, y)),
+        restore: Box::new(move |window| restorer.restore_window(window)),
+        clicked,
+        open_page: Box::new(|_| {}),
+        hide_card: Box::new(|_| {}),
+    };
+    let driver = HintDriver::new(hints, origin, HintScreen::new(stand.application, calls));
+    driver.engine_built(stand.engine.shared.clone());
+    *driver_slot.borrow_mut() = Some(driver.clone());
+    let outcome = (|| -> Result<(), String> {
+        stand.typer.clear_field()?;
+        settle(SETTLE);
+        // The Russian layout picked by hand protects the next word: that word is spent, and the one after it is converted.
+        stand.backend.switch_group(1).map_err(|error| format!("{error:?}"))?;
+        stand.typer.type_keys("ntcn ")?;
+        settle(SETTLE);
+        stand.typer.clear_field()?;
+        stand.typer.type_keys("hello ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "hello " || (stand.group)() != 0 {
+            return Err(format!("the word converted by itself: text={:?} group={}", stand.entry.text().as_str(), (stand.group)()));
+        }
+        // Read, erased, and typed again in the Russian layout, picked by hand.
+        for _ in "hello ".chars() {
+            stand.typer.tap_keysym(BACKSPACE_KEYSYM)?;
+        }
+        settle(INTER_CASE);
+        stand.backend.switch_group(1).map_err(|error| format!("{error:?}"))?;
+        stand.typer.type_keys("hello ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "руддщ " || !stand.engine.learning().keeps(1, "руддщ") {
+            return Err(format!("the word typed again: text={:?} rules={:?}", stand.entry.text().as_str(), stand.engine.learning().rules()));
+        }
+        let deadline = Instant::now() + std::time::Duration::from_millis(HINT_APPEARS);
+        while driver.card_id().is_none() && Instant::now() < deadline {
+            settle(20);
+        }
+        if driver.card_id() != Some(REMEMBERED_HINT_ID) {
+            return Err(format!("no notice of the remembered word: {:?}", driver.card_id()));
+        }
+        settle(INTER_CASE);
+        let card = hint_card().ok_or("no card of the notice on the screen")?;
+        let button = button_with_label(card.upcast_ref(), HINT_UNDO_REMEMBERED_LABEL).ok_or("the notice has no button to take the rule back")?;
+        let (x, y) = button_centre(&card, &button, stand.typer)?;
+        stand.typer.click_at(x, y)?;
+        if !pump_until(FOCUS_ARRIVES, || !clicks.borrow().is_empty()) {
+            return Err("the click on «Отменить» was not heard".to_owned());
+        }
+        if clicks.borrow()[0] != (REMEMBERED_HINT_ID.to_owned(), Click::Never) {
+            return Err(format!("the click reported {:?}", clicks.borrow()));
+        }
+        driver.clicked(REMEMBERED_HINT_ID, Click::Never);
+        settle(INTER_CASE);
+        if hint_card().is_some() || stand.engine.learning().keeps(1, "руддщ") {
+            return Err(format!("«Отменить» left the card or the rule: {:?}", stand.engine.learning().rules()));
+        }
+        // The rule taken back, the word is converted again.
+        stand.entry.grab_focus();
+        stand.typer.clear_field()?;
+        stand.backend.switch_group(1).map_err(|error| format!("{error:?}"))?;
+        stand.typer.type_keys("ntcn ")?;
+        settle(SETTLE);
+        stand.typer.type_keys("hello ")?;
+        settle(SETTLE);
+        if stand.entry.text() != "тест hello " {
+            return Err(format!("after «Отменить»: text={:?}", stand.entry.text().as_str()));
+        }
+        Ok(())
+    })();
+    driver.close();
+    *driver_slot.borrow_mut() = None;
+    stand.settings.write(GENERAL_HINTS, true, false).map_err(|error| format!("{error:?}"))?;
     outcome
 }
 

@@ -13,8 +13,8 @@ pub mod schedule;
 pub mod store;
 
 pub use catalogue::{
-    CATALOGUE, CorrectionInfo, Destination, HINT_NEVER_AGAIN_LABEL, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, Hint, Opens, Place, Platform, RUNNING_PLATFORM, TapKeys,
-    SettingsPage,
+    CATALOGUE, CorrectionInfo, Destination, HINT_NEVER_AGAIN_LABEL, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, HINT_UNDO_REMEMBERED_LABEL, Hint, Opens,
+    Place, Platform, REMEMBERED_HINT_ID, RUNNING_PLATFORM, SettingsPage, TapKeys,
 };
 pub use controller::{Click, EngineInput, HintPresenter, Hints, subscribe};
 pub use schedule::{HintSettings, HintView, Moment, Scheduler, Step};

@@ -18,7 +18,7 @@ use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::config::SettingsStore;
 use ks_config::constants::{
     DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS,
-    DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS,
+    DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS, DETECTION_REMEMBER_RETYPED,
 };
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
@@ -28,7 +28,8 @@ use ks_config::constants::HINTS_SETTING;
 use ks_ui::hints::{HintView, Place};
 use ks_ui::windows_ui_model::{
     BOTH_SHIFTS_TOGGLE_TITLE, DOUBLE_TAP_CONVERTS_TITLE, EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE,
-    both_shifts_toggle_subtitle, double_tap_converts_description, hotkey_problem_text, settings_window_title,
+    REMEMBER_RETYPED_DESCRIPTION, REMEMBER_RETYPED_TITLE, both_shifts_toggle_subtitle, double_tap_converts_description, hotkey_problem_text,
+    settings_window_title,
 };
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
@@ -1461,6 +1462,7 @@ impl Builder<'_> {
              Дважды нажмите Pause, затем Enter: окно правила откроется заполненным для последнего слова. Правило появляется только по кнопке OK.",
         );
         learning.add(&self.switch_row("detection.learning", "Правила действуют", "Двойное нажатие Pause предлагает правило для последнего слова"));
+        learning.add(&self.switch_row(DETECTION_REMEMBER_RETYPED.path(), REMEMBER_RETYPED_TITLE, REMEMBER_RETYPED_DESCRIPTION));
         let status = action_row("Правила пользователя", &learning_summary(self.services.engine.learning.count()));
         let add_rule = button("Добавить…");
         add_rule.connect_clicked(|_| gtk_app::open_rule_editor_for(RuleDraft::default()));

@@ -1,8 +1,9 @@
 //! Switching rules the user added one by one in the rule window.
 //!
 //! A rule says what to do with a typed word that meets its condition: convert it to the other layout, or keep it as
-//! typed. Nothing is written here unless the user pressed OK in the rule window: a manual conversion, an undo or a
-//! cancelled correction teaches nothing on its own.
+//! typed. Nothing is written here unless the user pressed OK in the rule window, or erased a word the program converted
+//! by itself and typed it again as first typed, which makes a "keep" rule of it (`detection.remember_retyped`): a manual
+//! conversion, an undo or a cancelled correction teaches nothing on its own.
 
 use crate::config::set_aside_unreadable;
 use crate::constants::{

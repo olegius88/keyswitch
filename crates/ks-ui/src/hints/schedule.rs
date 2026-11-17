@@ -11,6 +11,11 @@
 //! - when several are due, the one first in the catalogue goes first.
 //!
 //! A hint is seen once it is drawn. One that could not wait for its moment stays unseen until the next event of its kind.
+//!
+//! The notice of a remembered word (`Hint::notice`) reports what the program did, so none of this holds it back but the
+//! typing and a rule prompt: it shows each time, with the hints off too, takes the place of a hint on screen, waits for
+//! the typing to stop however long it takes, and counts neither for the quiet period nor for the day. A newer one takes
+//! the place of an older one. Its second button, «Отменить», takes the rule back (`notice_word`).
 
 use ks_updates::SemanticVersion;
 use std::time::Instant;
@@ -23,10 +28,10 @@ use crate::constants::{
     HINT_WHATS_NEW_DELAY_SECONDS, HINTS_PER_DAY_MAX, TIMESTAMP_DATE_CHARACTERS,
 };
 use super::catalogue::{
-    Condition, CorrectionInfo, Counted, HINT_NEVER_AGAIN_LABEL, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, Hint, Hotkeys, MODE_MANUAL, Opens,
-    Place, Platform,
-    SettingsPage, Trigger, Wording,
+    Condition, CorrectionInfo, Counted, HINT_NEVER_AGAIN_LABEL, HINT_NEVER_LABEL, HINT_OK_LABEL, HINT_TITLE, HINT_UNDO_REMEMBERED_LABEL, Hint, Hotkeys,
+    MODE_MANUAL, Opens, Place, Platform, SettingsPage, Trigger, Wording,
 };
+use ks_engine::RememberedWord;
 use super::store::{Counter, HintState, How};
 
 /// The settings the hints follow.
@@ -70,12 +75,15 @@ pub struct HintView {
     pub place: Place,
     pub title: &'static str,
     pub text: String,
-    /// The two buttons: «Понятно» and «Больше не показывать подсказки» («Больше не показывать» for a hint that repeats).
+    /// The two buttons: «Понятно» and «Больше не показывать подсказки» («Больше не показывать» for a hint that repeats,
+    /// «Отменить» for the notice of a remembered word).
     pub ok: &'static str,
     pub never: &'static str,
     /// What a click on the text opens.
     pub opens: Option<Opens>,
     index: usize,
+    /// The word a notice is about.
+    remembered: Option<RememberedWord>,
 }
 
 impl HintView {
@@ -83,7 +91,7 @@ impl HintView {
     /// «Больше не показывать» turns it off, with the two buttons of a hint that repeats.
     #[must_use]
     pub fn notice(id: &'static str, place: Place, text: &str) -> HintView {
-        HintView { id, place, title: HINT_TITLE, text: text.to_owned(), ok: HINT_OK_LABEL, never: HINT_NEVER_AGAIN_LABEL, opens: None, index: usize::MAX }
+        HintView { id, place, title: HINT_TITLE, text: text.to_owned(), ok: HINT_OK_LABEL, never: HINT_NEVER_AGAIN_LABEL, opens: None, index: usize::MAX, remembered: None }
     }
 }
 
@@ -107,6 +115,7 @@ struct Pending<A> {
     not_before: f64,
     presses: i64,
     presses_at: f64,
+    remembered: Option<RememberedWord>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,6 +123,7 @@ struct Visible {
     id: &'static str,
     caret: bool,
     until: f64,
+    notice: bool,
 }
 
 pub struct Scheduler<A> {
@@ -131,6 +141,8 @@ pub struct Scheduler<A> {
     last_manual_at: Option<f64>,
     caret_failures: i64,
     cards: Vec<SettingsPage>,
+    /// The word of the notice on screen.
+    shown_notice: Option<RememberedWord>,
 }
 
 impl<A: Clone> Scheduler<A> {
@@ -153,6 +165,7 @@ impl<A: Clone> Scheduler<A> {
             last_manual_at: None,
             caret_failures: 0,
             cards: Vec::new(),
+            shown_notice: None,
         };
         let not_before = moment.seconds + HINT_WHATS_NEW_DELAY_SECONDS;
         for (index, hint) in catalogue.iter().enumerate() {
@@ -179,10 +192,11 @@ impl<A: Clone> Scheduler<A> {
     }
 
     /// Whether a platform should look for the caret when a correction is made: some hint at the caret that a correction
-    /// sets off may still show. A hint that repeats is set off by another event, which looks for the caret itself.
+    /// sets off may still show. A hint that repeats, and a notice, are set off by other events, which look for the caret
+    /// themselves.
     #[must_use]
     pub fn wants_caret_anchor(&self) -> bool {
-        self.catalogue.iter().any(|hint| hint.places.contains(&Place::Caret) && !hint.repeats() && self.may_show(hint))
+        self.catalogue.iter().any(|hint| hint.places.contains(&Place::Caret) && !hint.repeats() && !hint.notice() && self.may_show(hint))
     }
 
     /// Whether `tick` has anything to do: a hint waits or is on screen.
@@ -201,9 +215,16 @@ impl<A: Clone> Scheduler<A> {
         self.state.is_seen(hint.id)
     }
 
-    /// The rules of every place: hints on, this platform, not seen.
+    /// The rules of every place: hints on, this platform, not seen. A notice is on its platforms always.
     fn may_show(&self, hint: &Hint) -> bool {
+        if hint.notice() {
+            return hint.shows_on(self.platform);
+        }
         self.settings.enabled && hint.shows_on(self.platform) && !self.seen(hint)
+    }
+
+    fn is_notice(&self, pending: &Pending<A>) -> bool {
+        self.catalogue[pending.index].notice()
     }
 
     /// Whether the news of `hint` is for this run: the last update went to this version, from one before the hint's.
@@ -236,6 +257,11 @@ impl<A: Clone> Scheduler<A> {
     }
 
     fn queue(&mut self, index: usize, place: Place, anchor: Option<A>, moment: &Moment, not_before: f64) {
+        self.queue_with(index, place, anchor, moment, not_before, None);
+    }
+
+    /// `queue`, for a notice of `remembered`.
+    fn queue_with(&mut self, index: usize, place: Place, anchor: Option<A>, moment: &Moment, not_before: f64, remembered: Option<RememberedWord>) {
         let entry = Pending {
             index,
             place,
@@ -244,6 +270,7 @@ impl<A: Clone> Scheduler<A> {
             not_before,
             presses: moment.typed_presses,
             presses_at: moment.seconds,
+            remembered,
         };
         self.pending.retain(|pending| pending.index != index);
         self.pending.push(entry);
@@ -319,6 +346,24 @@ impl<A: Clone> Scheduler<A> {
         }
     }
 
+    /// A word remembered as a rule (`word`) after it was erased and typed again; `anchor` is where the caret was. The
+    /// notice goes at the caret, or near the tray icon when no caret was found, and a newer one takes the place of one
+    /// still waiting.
+    pub fn remembered(&mut self, word: RememberedWord, anchor: Option<A>, moment: &Moment) {
+        let catalogue = self.catalogue;
+        let Some(index) = catalogue.iter().position(|hint| hint.notice() && self.may_show(hint)) else {
+            return;
+        };
+        let place = if anchor.is_some() { Place::Caret } else { Place::Tray };
+        self.queue_with(index, place, anchor, moment, moment.seconds, Some(word));
+    }
+
+    /// The word of the notice `id` on screen, which its «Отменить» takes back.
+    #[must_use]
+    pub fn notice_word(&self, id: &str) -> Option<RememberedWord> {
+        self.visible.filter(|visible| visible.notice && visible.id == id).and(self.shown_notice.clone())
+    }
+
     /// The rule prompt shown or gone. One shown right after a manual conversion means the user found the double press
     /// alone; a hint at the caret on screen gives way to it.
     pub fn prompt(&mut self, shown: bool, moment: &Moment) -> Option<Step<A>> {
@@ -340,21 +385,30 @@ impl<A: Clone> Scheduler<A> {
         match self.visible {
             Some(visible) if visible.caret => {
                 self.visible = None;
+                self.shown_notice = None;
                 Some(Step::Hide(visible.id))
             }
             _ => None,
         }
     }
 
-    /// The settings changed. Hints turned off take down what shows and forget what waits.
+    /// The settings changed. Hints turned off take down what shows and forget what waits, but for a notice.
     pub fn set_settings(&mut self, settings: HintSettings) -> Option<Step<A>> {
         let turned_off = self.settings.enabled && !settings.enabled;
         self.settings = settings;
         if !turned_off {
             return None;
         }
-        self.pending.clear();
-        self.visible.take().map(|visible| Step::Hide(visible.id))
+        self.forget_hints();
+        let visible = self.visible.filter(|visible| !visible.notice)?;
+        self.visible = None;
+        Some(Step::Hide(visible.id))
+    }
+
+    /// What waits, but for a notice.
+    fn forget_hints(&mut self) {
+        let catalogue = self.catalogue;
+        self.pending.retain(|pending| catalogue[pending.index].notice());
     }
 
     /// The settings window opened: each page may show a card again.
@@ -380,12 +434,13 @@ impl<A: Clone> Scheduler<A> {
                 | Trigger::AutomaticCorrections { .. }
                 | Trigger::ManualConversions { .. }
                 | Trigger::Updated
-                | Trigger::KeptByChoice => false,
+                | Trigger::KeptByChoice
+                | Trigger::Remembered => false,
             };
             if !due || !self.may_show(hint) {
                 continue;
             }
-            let Some(view) = self.view(index, place) else { continue };
+            let Some(view) = self.view(index, place, None) else { continue };
             self.state.see(hint.id, self.version, &moment.timestamp, How::Shown);
             self.pending.retain(|pending| pending.index != index);
             self.cards.push(page);
@@ -395,18 +450,27 @@ impl<A: Clone> Scheduler<A> {
         None
     }
 
-    fn view(&self, index: usize, place: Place) -> Option<HintView> {
+    fn view(&self, index: usize, place: Place, remembered: Option<RememberedWord>) -> Option<HintView> {
         let hint = &self.catalogue[index];
-        let wording = Wording { platform: self.platform, version: self.version, hotkeys: &self.settings.hotkeys };
+        let subject = remembered.as_ref().map_or("", |word| word.rule.pattern.as_str());
+        let wording = Wording { platform: self.platform, version: self.version, hotkeys: &self.settings.hotkeys, subject };
+        let never = if hint.notice() {
+            HINT_UNDO_REMEMBERED_LABEL
+        } else if hint.repeats() {
+            HINT_NEVER_AGAIN_LABEL
+        } else {
+            HINT_NEVER_LABEL
+        };
         Some(HintView {
             id: hint.id,
             place,
             title: HINT_TITLE,
             text: hint.text(&wording)?,
             ok: HINT_OK_LABEL,
-            never: if hint.repeats() { HINT_NEVER_AGAIN_LABEL } else { HINT_NEVER_LABEL },
+            never,
             opens: hint.opens.map(|destination| destination.resolve(self.version)),
             index,
+            remembered,
         })
     }
 
@@ -433,29 +497,39 @@ impl<A: Clone> Scheduler<A> {
     /// A hint handed out to draw is reported back with `drawn` or `not_drawn`.
     pub fn tick(&mut self, moment: &Moment) -> Option<Step<A>> {
         let now = moment.seconds;
-        if let Some(visible) = self.visible {
-            if now < visible.until {
-                return None;
-            }
-            self.visible = None;
-            self.state.set_how(visible.id, How::Timeout);
-            self.dirty = true;
-            return Some(Step::Hide(visible.id));
-        }
-        self.pending.retain(|pending| pending.place != Place::Caret || now - pending.queued_at <= HINT_SETTLE_WAIT_MAX_SECONDS);
         for pending in &mut self.pending {
             if pending.presses != moment.typed_presses {
                 pending.presses = moment.typed_presses;
                 pending.presses_at = now;
             }
         }
-        if !self.room(moment) {
-            return None;
+        // A notice ready to show takes the place of whatever shows.
+        let notice_ready = self.pending.iter().any(|pending| self.is_notice(pending) && self.ready(pending, now));
+        if let Some(visible) = self.visible {
+            if now < visible.until && !notice_ready {
+                return None;
+            }
+            self.visible = None;
+            if visible.notice {
+                self.shown_notice = None;
+            } else {
+                self.state.set_how(visible.id, How::Timeout);
+                self.dirty = true;
+            }
+            return Some(Step::Hide(visible.id));
         }
+        let catalogue = self.catalogue;
+        self.pending.retain(|pending| {
+            pending.place != Place::Caret || catalogue[pending.index].notice() || now - pending.queued_at <= HINT_SETTLE_WAIT_MAX_SECONDS
+        });
+        let room = self.room(moment);
         // A hint with nothing to say now (a hotkey it names cleared, keys it tells of not set) goes, and the next one is due.
-        while let Some(chosen) = (0..self.pending.len()).filter(|at| self.ready(&self.pending[*at], now)).min_by_key(|at| self.pending[*at].index) {
+        while let Some(chosen) = (0..self.pending.len())
+            .filter(|at| self.ready(&self.pending[*at], now) && (room || self.is_notice(&self.pending[*at])))
+            .min_by_key(|at| (!self.is_notice(&self.pending[*at]), self.pending[*at].index))
+        {
             let pending = self.pending.remove(chosen);
-            let Some(view) = self.view(pending.index, pending.place) else { continue };
+            let Some(view) = self.view(pending.index, pending.place, pending.remembered) else { continue };
             return match pending.anchor {
                 Some(anchor) if pending.place == Place::Caret => Some(Step::Caret(view, anchor)),
                 _ => Some(Step::Tray(view)),
@@ -464,25 +538,36 @@ impl<A: Clone> Scheduler<A> {
         None
     }
 
-    /// The platform drew `view`: it is seen, and the next one waits the quiet period.
+    /// The platform drew `view`: it is seen, and the next one waits the quiet period. A notice is neither seen nor counted.
     pub fn drawn(&mut self, view: &HintView, moment: &Moment) {
         let caret = view.place == Place::Caret;
         let timeout = if caret { HINT_CARET_TIMEOUT_SECONDS } else { HINT_TRAY_TIMEOUT_SECONDS };
         if caret {
             self.caret_failures = 0;
         }
-        self.visible = Some(Visible { id: view.id, caret, until: moment.seconds + timeout });
+        let notice = self.catalogue[view.index].notice();
+        self.visible = Some(Visible { id: view.id, caret, until: moment.seconds + timeout, notice });
+        if notice {
+            self.shown_notice.clone_from(&view.remembered);
+            return;
+        }
         self.last_shown_at = Some(moment.seconds);
         self.state.count_shown(moment.day());
         self.state.see(view.id, self.version, &moment.timestamp, How::Shown);
         self.dirty = true;
     }
 
-    /// The platform could not draw `view`: it stays unseen. At the caret this counts as a caret not found.
+    /// The platform could not draw `view`: it stays unseen. At the caret this counts as a caret not found; a notice that
+    /// could not be drawn there goes near the tray icon at once.
     pub fn not_drawn(&mut self, view: &HintView, moment: &Moment) {
-        if view.place == Place::Caret {
-            self.caret_missed(view.index, moment);
+        if view.place != Place::Caret {
+            return;
         }
+        if self.catalogue[view.index].notice() {
+            self.queue_with(view.index, Place::Tray, None, moment, moment.seconds, view.remembered.clone());
+            return;
+        }
+        self.caret_missed(view.index, moment);
     }
 
     /// The user closed a hint. «Больше не показывать подсказки» turns them off: true then, and the caller writes
@@ -491,13 +576,18 @@ impl<A: Clone> Scheduler<A> {
         if self.visible.is_some_and(|visible| visible.id == id) {
             self.visible = None;
         }
+        if self.catalogue.iter().any(|hint| hint.id == id && hint.notice()) {
+            // The notice is not recorded: it shows again for the next word.
+            self.shown_notice = None;
+            return false;
+        }
         self.state.set_how(id, how);
         self.dirty = true;
         if how != How::Forever || self.catalogue.iter().any(|hint| hint.id == id && hint.repeats()) {
             return false;
         }
         self.settings.enabled = false;
-        self.pending.clear();
+        self.forget_hints();
         true
     }
 
