@@ -54,3 +54,7 @@ pub const HINTS_INTRODUCED_VERSION: &str = "0.71.0";
 pub const LAYOUT_SWITCH_KEY_VERSION: &str = "0.70.0";
 /// The release that tells of a word left as typed for a layout picked by hand.
 pub const KEPT_BY_CHOICE_VERSION: &str = "0.74.0";
+/// The release that remembers a word erased and typed again after a change of layout, and says so.
+pub const REMEMBERED_WORD_VERSION: &str = "0.74.0";
+/// The longest word the notice of a remembered word names whole; a longer one is cut short with an ellipsis.
+pub const REMEMBERED_WORD_SHOWN_MAX_CHARACTERS: usize = 24;

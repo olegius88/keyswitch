@@ -19,6 +19,7 @@ mod manual;
 mod mention;
 mod neighbours;
 mod pause;
+mod retyped;
 mod selection;
 mod shared;
 mod state;
@@ -32,10 +33,10 @@ pub use layout_tap::{
     CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS,
     LAYOUT_SWITCH_KEY_TITLE, LAYOUT_TAP_SOURCE, single_key_conflict,
 };
-pub use shared::{Command, QueueItem, Shared};
+pub use shared::{Command, QueueItem, RememberedWord, Shared};
 pub use types::*;
 
-use crate::constants::{WHOLE_TOKEN_WORD_MIN_LETTERS, DOUBLE_CAPITALS, DOUBLE_CAPITALS_MIN_LETTERS, UNSCORED_CORRECTION_CONFIDENCE, STRANDED_TERM_MAX_WORDS, MAX_REMEMBERED_APPLICATION_CONTEXTS, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX, EARLY_SWITCH_CONFIDENCE, PREFIX_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, EARLY_PLAN_MODE, LATE_KEYS_OWED_SECONDS, LATE_KEYS_RETURN_SECONDS, LATE_STROKE_GRACE_SECONDS, TYPO_ENGLISH_LOCALE, UNDO_AVAILABLE_WINDOW_SECONDS, UNDO_REACH_MAX_KEYS, UNDO_REACH_SIGNS, TYPO_PLAN_MODE, TYPO_ERASE_UNSEEN_SECONDS, DEFAULT_FIELD_CATCH_UP, FIELD_CATCH_UP_CHOICES, FIELD_CATCH_UP_OFF, MILLISECONDS_PER_SECOND, HOOK_SILENCE_MS, INPUT_DELAY_REPORT_INTERVAL_SECONDS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS, HOOK_GAP_MS, SELECTION_HOTKEYS, ACTION_TIMEOUT_SECONDS, MAX_WORD_STROKES, BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, MANUAL_RELEASE_TIMEOUT_SECONDS, PAUSE_CORRECTION_AGREEMENT_SECONDS, DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, TRUSTED_SHORT_WORD_MAX_LENGTH, CONTEXT_ACTION_FEATURE_VERSION, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, KEPT_WORDS_TAKEN_ALONG, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, ENGINE_SWITCH_GRACE_SECONDS, NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS, NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR, JOINED_PART_MIN_LETTERS, REPLAYED_SIGNS_MIN_STEM_LETTERS, PAUSE_WORD_START_LETTERS, PAUSE_WORD_START_MAX_LETTERS, PAUSE_WORD_START_MIN_WORDS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, PAUSE_TRAILING_MAX_KEYS, KEPT_WORD_PROSE_MIN_COUNT, DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS, DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX, DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX, LEGACY_RULE_CONFIRMATIONS_REQUIRED, LOGGED_SCORE_DECIMALS};
+use crate::constants::{WHOLE_TOKEN_WORD_MIN_LETTERS, DOUBLE_CAPITALS, DOUBLE_CAPITALS_MIN_LETTERS, UNSCORED_CORRECTION_CONFIDENCE, STRANDED_TERM_MAX_WORDS, MAX_REMEMBERED_APPLICATION_CONTEXTS, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MIN, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX, EARLY_SWITCH_CONFIDENCE, PREFIX_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, EARLY_PLAN_MODE, LATE_KEYS_OWED_SECONDS, LATE_KEYS_RETURN_SECONDS, LATE_STROKE_GRACE_SECONDS, TYPO_ENGLISH_LOCALE, UNDO_AVAILABLE_WINDOW_SECONDS, UNDO_REACH_MAX_KEYS, UNDO_REACH_SIGNS, TYPO_PLAN_MODE, ERASE_UNSEEN_SECONDS, DEFAULT_FIELD_CATCH_UP, FIELD_CATCH_UP_CHOICES, FIELD_CATCH_UP_OFF, MILLISECONDS_PER_SECOND, HOOK_SILENCE_MS, INPUT_DELAY_REPORT_INTERVAL_SECONDS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS, HOOK_GAP_MS, SELECTION_HOTKEYS, ACTION_TIMEOUT_SECONDS, MAX_WORD_STROKES, BASIC_MULTILINGUAL_PLANE_MAX_CODEPOINT, MANUAL_RELEASE_TIMEOUT_SECONDS, PAUSE_CORRECTION_AGREEMENT_SECONDS, DOUBLE_CONVERT_PRESS_WINDOW_SECONDS, TRUSTED_SHORT_WORD_MAX_LENGTH, CONTEXT_ACTION_FEATURE_VERSION, KEPT_CONTEXT_WORD_MAX_CHARACTERS, PLANNED_CONTEXT_WORD_MAX_CHARACTERS, KEPT_WORDS_TAKEN_ALONG, CONTEXT_WAIT_SETTLE_MIN_SECONDS, STALE_PRESS_SECONDS, ENGINE_SWITCH_GRACE_SECONDS, NATURAL_SOURCE_BOUNDARY_MIN_CHARACTERS, NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR, JOINED_PART_MIN_LETTERS, REPLAYED_SIGNS_MIN_STEM_LETTERS, PAUSE_WORD_START_LETTERS, PAUSE_WORD_START_MAX_LETTERS, PAUSE_WORD_START_MIN_WORDS, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, PAUSE_TRAILING_MAX_KEYS, KEPT_WORD_PROSE_MIN_COUNT, DEFAULT_PAUSE_DELAY_SECONDS, PAUSE_DELAY_SETTING_MIN_SECONDS, PAUSE_DELAY_SETTING_MAX_SECONDS, DEFAULT_CONFIDENCE_THRESHOLD, CONFIDENCE_SETTING_MIN, CONFIDENCE_SETTING_MAX, DEFAULT_MINIMUM_WORD_LENGTH, MINIMUM_WORD_LENGTH_SETTING_MIN, MINIMUM_WORD_LENGTH_SETTING_MAX, LEGACY_RULE_CONFIRMATIONS_REQUIRED, LOGGED_SCORE_DECIMALS};
 use ks_backend::{FieldContext, FieldReader, InputBackend, KeyEvent};
 use ks_config::config::SettingsStore;
 use ks_config::history::HistoryStore;
@@ -183,11 +184,12 @@ pub struct EngineCore {
     pub typo_keys: KeyTemplates,
     pub personal: Arc<PersonalWords>,
     pub personal_pending: String,
-    /// How many characters stand between the end of the word the last typo correction typed and the caret, while the
-    /// engine can count them: the trailing signs and boundary the correction typed, then one more for each key of text and
-    /// one less for each Backspace. A Backspace at none erases a letter of that word (`typo_erased`). Any other key that
-    /// moves the caret or changes the text, and any later correction, end the count.
-    pub after_typo: Option<usize>,
+    /// How many characters stand between the end of the word the last automatic correction typed, a typo correction or a
+    /// change of layout (`corrected_word`), and the caret, while the engine can count them: the trailing signs and boundary
+    /// the correction typed, then one more for each key of text and one less for each Backspace. A Backspace at none erases
+    /// a letter of that word (`typo_erased`, `layout_erased`). Any other key that moves the caret or changes the text, and
+    /// any later correction, end the count.
+    pub after_correction: Option<usize>,
     /// The word as typed whose typo correction a Backspace erased into: the word then typed at its place is the user's to
     /// finish and is not corrected again (`typo_plan`), and it becomes their own word if it is that word again
     /// (`settle_erased_typo`). The next word committed, a click, a caret move or another window end it.
@@ -197,10 +199,20 @@ pub struct EngineCore {
     /// Backspace, a caret move, a click, a shortcut, Enter, Tab, another window, a key the engine does not follow and any
     /// other correction end it.
     pub typed_after_correction: Option<Strokes>,
-    /// The Backspaces since the last text key began sooner after the last typo correction than a person sees it
-    /// (`TYPO_ERASE_UNSEEN_SECONDS`): they were pressed to edit the text as typed, so reaching the corrected word they leave
-    /// the word to be corrected as any other (`note_backspace`). A key of text ends the run, as a new correction does.
-    pub typo_erase_unseen: bool,
+    /// The Backspaces since the last text key began sooner after the last automatic correction than a person sees it
+    /// (`ERASE_UNSEEN_SECONDS`): they were pressed to edit the text as typed, so reaching a typo correction they leave the
+    /// word to be corrected as any other, and reaching a change of layout they remember nothing (`note_backspace`). A key
+    /// of text ends the run, as a new correction does.
+    pub erase_unseen: bool,
+    /// The word of the last automatic change of layout, while Backspace may still reach it (`note_backspace`): its keys,
+    /// the layout they were typed in and the one the correction took them to. A word the change was made inside of
+    /// (Pause's timer, `in_progress`) is the whole word being typed, until its boundary ends it (`end_corrected_word`).
+    pub corrected_word: Option<CorrectedWord>,
+    /// The word of an automatic change of layout a Backspace erased into: the word committed next at its place, read as
+    /// first typed in the layout it was typed in, is remembered as a "keep" rule (`settle_erased_layout`), and while the
+    /// letters typed there begin it, nothing converts them (`retyping_erased_word`). The next word committed, a click, a
+    /// caret move, another window or Enter end it.
+    pub layout_erased: Option<CorrectedWord>,
     term_tables: RefCell<Option<Arc<TermTables>>>,
     hotkey_cache: RefCell<HashMap<String, Arc<Hotkey>>>,
     /// Every plan `execute_correction` carried out, when a replay asks for them.
@@ -356,10 +368,12 @@ impl EngineCore {
             typo_keys: KeyTemplates::default(),
             personal: Arc::new(personal),
             personal_pending: String::new(),
-            after_typo: None,
+            after_correction: None,
             typo_erased: None,
             typed_after_correction: None,
-            typo_erase_unseen: false,
+            erase_unseen: false,
+            corrected_word: None,
+            layout_erased: None,
             term_tables: RefCell::new(None),
             hotkey_cache: RefCell::new(HashMap::new()),
             executed: None,

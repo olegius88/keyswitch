@@ -119,6 +119,9 @@ impl EngineCore {
         if self.flag("detection.learning", true) && self.learning.keeps_continuation(source, original) {
             return "learned_keep_rule";
         }
+        if self.retyping_erased_word(&self.strokes) {
+            return "retyping_erased_word";
+        }
         if self.flag("detection.protect_code", true) && self.detector.is_protected_token(original) {
             return "protected_token";
         }
@@ -382,7 +385,7 @@ impl EngineCore {
     /// so a literal comma left out here leaves one letter of the word on screen.
     pub fn finish_early_switch(&mut self, strokes: Strokes, boundary: Option<Stroke>, application: &str, final_group: i64, trailing: Strokes) {
         let origin = self.early_switch_origin.take();
-        self.early_switch_at = None;
+        let switched_at = self.early_switch_at.take();
         let Some(origin) = origin else {
             return;
         };
@@ -395,6 +398,9 @@ impl EngineCore {
         };
         let plan = Arc::new(plan);
         self.remember_correction(&plan);
+        // The person saw the word change when the layout switched under it, not at its boundary.
+        let shown_at = switched_at.unwrap_or(self.last_correction_time);
+        self.corrected_word = self.corrected_word.take().map(|word| CorrectedWord { shown_at, ..word });
         self.last_committed = Some(Arc::new(CorrectionPlan {
             automatic: false,
             trailing,

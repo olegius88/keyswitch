@@ -57,7 +57,7 @@ use crate::win32_controls::{self as w32, Brushes, Fonts, MessageKind, Themed, sc
 use crate::windows_backend::key_name_exists;
 use crate::windows_native::wide;
 use crate::windows_system::{WindowsApplicationCatalog, open_directory};
-use crate::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, locations_text};
+use crate::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, PROMPT_BORDER, UpdateController, SettingSpec, ControlKind, UpdateView, dark_from_apps_use_light_theme, update_view, PAGE_NAMES, UpdateSnapshot, py_str, truthy, Palette, palette, dark_theme, stepped_text, choice_value, parse_number, control_text, status_line, string_list, sorted_casefold, with_application, capture_hint_text, catalog_label, with_word, without, history_row, learning_count_text, rule_row, log_state_text, DiagnosticsInput, diagnostics_text, RESET_BUTTON_LABEL, RESET_BUTTON_HINT, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, update_settings, diagnostic_settings, rule_settings, locations_text};
 
 const LOGGER: &str = "keyswitch.desktop_ui";
 const ID_BASE: usize = 1000;
@@ -2454,7 +2454,9 @@ impl Builder<'_> {
         }
         cells.push(self.spacer());
         let actions = flow_row(cells, self.px(GROUP_GAP_PIXELS));
-        let learning = self.section("Правила переключения", vec![count_node, list, note, actions]);
+        let mut learning_rows = vec![count_node, list, note, actions];
+        learning_rows.extend(rule_settings().iter().map(|spec| self.setting(spec)));
+        let learning = self.section("Правила переключения", learning_rows);
         let reset_note = self.label("Вернуть все параметры по умолчанию. История и правила переключения сохранятся.", LabelStyle::Normal, 0, 0);
         let (reset, _) = self.button_cell("Сбросить настройки", Button::ResetSettings, 0);
         let settings = self.section("Настройки", vec![reset_note, flow_row(vec![reset, self.spacer()], self.px(GROUP_GAP_PIXELS))]);

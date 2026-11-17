@@ -145,9 +145,12 @@ pub const CONVERT_LAST_KEYS: [&str; 4] = LAYOUT_SWITCH_KEYS;
 /// `general.hints`: the one-time hints about what the program can do (`ks_ui::hints`). A settings file written before
 /// it existed gains it from the defaults, as the selection hotkeys do.
 pub const HINTS_SETTING: &str = "general.hints";
-/// Settings the Python program never had. Each default leaves the engine as the Python's was, so the traces of the
-/// Python's engine hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
-pub const SETTINGS_SINCE_PYTHON: [&str; 3] = [DETECTION_LAYOUT_SWITCH_KEY.path(), DETECTION_CONVERT_LAST_KEY.path(), HINTS_SETTING];
+/// Settings the Python program never had. Each default leaves the engine as the Python's was in what the traces of the
+/// Python's engine type (`detection.remember_retyped` acts only on a word converted, erased and typed again as first
+/// typed, which none of them does), so those traces hold none of these keys and name the defaults without them
+/// (`settings_diagnostics::defaults_sha256`).
+pub const SETTINGS_SINCE_PYTHON: [&str; 4] =
+    [DETECTION_LAYOUT_SWITCH_KEY.path(), DETECTION_CONVERT_LAST_KEY.path(), HINTS_SETTING, DETECTION_REMEMBER_RETYPED.path()];
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
@@ -211,6 +214,7 @@ macro_rules! for_each_setting {
             DETECTION_CORRECT_TYPOS, DetectionCorrectTypos, bool, "detection.correct_typos";
             DETECTION_CORRECT_TYPOS_ENGLISH, DetectionCorrectTyposEnglish, bool, "detection.correct_typos_english";
             DETECTION_LEARNING, DetectionLearning, bool, "detection.learning";
+            DETECTION_REMEMBER_RETYPED, DetectionRememberRetyped, bool, "detection.remember_retyped";
             DETECTION_INJECTED_INPUT, DetectionInjectedInput, bool, "detection.injected_input";
             HOTKEYS_TOGGLE, HotkeysToggle, String, "hotkeys.toggle";
             HOTKEYS_CONVERT_LAST, HotkeysConvertLast, String, "hotkeys.convert_last";
@@ -299,6 +303,9 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
             "correct_typos_english": false,
             // Switching rules from the rule window act, and a double press of the conversion hotkey offers one.
             "learning": true,
+            // A word the program converted by itself, erased with Backspace and typed again as it was first typed, in the
+            // layout it was typed in, becomes a "keep" rule of the user's (engine `settle_erased_layout`).
+            "remember_retyped": true,
             // Keys other programs inject (remote control, macros, on-screen keyboards) count as typing on this
             // keyboard. Off: the machine where they are typed has its own switcher, and waiting for their key-ups
             // held Enter back.

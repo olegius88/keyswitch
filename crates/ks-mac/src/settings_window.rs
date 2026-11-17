@@ -11,7 +11,7 @@ use ks_engine::LearningPrompt;
 use ks_engine::engine::{Hotkey, single_key_conflict};
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt, layout_hint, prompt_word_line};
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings, update_view};
+use ks_ui::windows_ui_model::{hotkey_problem_text, is_hotkey_setting, settings_window_title, SettingSpec, truthy, ControlKind, control_text, choice_value, parse_number, status_line, string_list, history_row, learning_count_text, rule_row, catalog_label, autocorrection_settings, trigger_settings, application_settings, manual_switch_settings, hotkey_settings, system_settings, diagnostic_settings, rule_settings, update_view};
 use ks_updates::UpdateSnapshot;
 use objc2::encode::{Encode, Encoding, RefEncode};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
@@ -884,6 +884,7 @@ fn build_page(ui: &mut Ui, identifier: &str, page: Id) -> f64 {
             button(page, target, "Добавить…", ACTION_ADD_RULE, MARGIN, y, 140.0);
             button(page, target, "Удалить все", ACTION_CLEAR_RULES, MARGIN + 150.0, y, 140.0);
             y += 40.0;
+            y = ui.add_specs(page, &rule_settings(), y);
             y = ui.add_specs(page, &diagnostic_settings(), y);
             button(page, target, "Открыть папку журнала", ACTION_OPEN_LOGS, MARGIN, y, 200.0);
             button(page, target, "Сбросить настройки", ACTION_RESET_SETTINGS, MARGIN + 210.0, y, 180.0);

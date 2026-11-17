@@ -15,5 +15,6 @@ pub mod rule_editor;
 pub mod unicode_category;
 
 pub use engine::{
-    CorrectionPlan, EngineCore, EngineError, EngineParts, EngineSnapshot, Hotkey, KeySwitchEngine, LearningPrompt, Shared, Stroke,
+    CorrectionPlan, EngineCore, EngineError, EngineParts, EngineSnapshot, Hotkey, KeySwitchEngine, LearningPrompt, RememberedWord, Shared,
+    Stroke,
 };

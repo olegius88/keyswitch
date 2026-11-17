@@ -6,6 +6,7 @@ use super::layout_tap::{configured_convert_last_key, configured_layout_switch_ke
 use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, POINTER_KEY_NAME, WHEEL_KEY_NAME};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
+use ks_config::learning::{LearnedRule, LearningStore};
 use ks_config::pycompat::truthy;
 use ks_context::input_context::Clock;
 use ks_text::pystr;
@@ -113,6 +114,52 @@ pub(super) type SelectionNoticeCallback = Arc<dyn Fn(&str) + Send + Sync>;
 pub(super) type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
 pub(super) type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
 pub(super) type KeptByChoiceCallback = Arc<dyn Fn() + Send + Sync>;
+pub(super) type RememberedCallback = Arc<dyn Fn(&RememberedWord) + Send + Sync>;
+
+/// A word the engine remembered as a "keep" rule: a change of layout it made by itself was erased with Backspace and the
+/// word typed again as it was first typed (`EngineCore::settle_erased_layout`). The windows are told of it with the rule,
+/// and `forget` takes the rule back.
+#[derive(Clone)]
+pub struct RememberedWord {
+    pub rule: LearnedRule,
+    learning: Arc<LearningStore>,
+    shared: Arc<Shared>,
+}
+
+impl RememberedWord {
+    #[must_use]
+    pub fn new(rule: LearnedRule, learning: Arc<LearningStore>, shared: Arc<Shared>) -> RememberedWord {
+        RememberedWord { rule, learning, shared }
+    }
+
+    /// «Отменить» of its notice: the rule goes, if it is still there. True when it was.
+    pub fn forget(&self) -> bool {
+        let removed = self.learning.remove_rule(&self.rule);
+        let error = removed.as_ref().err().map(ToString::to_string);
+        let removed = removed.unwrap_or(false);
+        technical_event!(
+            self.shared, "remembered_word_forgotten", "letters": pystr::len(&self.rule.pattern), "source_group": self.rule.source_group,
+            "removed": removed, "error": error,
+        );
+        if removed {
+            self.shared.update(Update { last_action: Some(format!("Правило удалено: «{}»", self.rule.pattern)), ..Update::default() });
+        }
+        removed
+    }
+}
+
+/// Two notices of one word are one: the same rule, of the same store.
+impl PartialEq for RememberedWord {
+    fn eq(&self, other: &RememberedWord) -> bool {
+        self.rule == other.rule && Arc::ptr_eq(&self.learning, &other.learning)
+    }
+}
+
+impl std::fmt::Debug for RememberedWord {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("RememberedWord").field("rule", &self.rule).finish_non_exhaustive()
+    }
+}
 
 /// What the Python's `_lock` guards. It is never held while calling a callback, the backend or the settings.
 struct Guarded {
@@ -125,6 +172,7 @@ struct Guarded {
     learning_prompt_callbacks: Vec<LearningPromptCallback>,
     rule_request_callbacks: Vec<RuleRequestCallback>,
     kept_by_choice_callbacks: Vec<KeptByChoiceCallback>,
+    remembered_callbacks: Vec<RememberedCallback>,
 }
 
 pub struct Shared {
@@ -205,6 +253,7 @@ impl Shared {
                 learning_prompt_deadline: None,
                 learning_prompt_callbacks: Vec::new(),
                 kept_by_choice_callbacks: Vec::new(),
+                remembered_callbacks: Vec::new(),
                 rule_request_callbacks: Vec::new(),
             }),
             log_redactor: Mutex::new(ks_config::log_privacy::LogRedactor::new()),
@@ -628,6 +677,16 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
 
     pub fn kept_by_choice_callbacks(&self) -> Vec<KeptByChoiceCallback> {
         locked(&self.guarded).kept_by_choice_callbacks.clone()
+    }
+
+    /// Told on the engine's thread of a word remembered as a "keep" rule after it was erased and typed again as first
+    /// typed: the windows say so at the caret, with the way to take it back.
+    pub fn subscribe_remembered(&self, callback: RememberedCallback) {
+        locked(&self.guarded).remembered_callbacks.push(callback);
+    }
+
+    pub fn remembered_callbacks(&self) -> Vec<RememberedCallback> {
+        locked(&self.guarded).remembered_callbacks.clone()
     }
 
     /// `self.learning_prompt`.

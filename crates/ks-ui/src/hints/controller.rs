@@ -16,7 +16,7 @@
 use ks_config::config::SettingsStore;
 use ks_config::constants::HINTS_SETTING;
 use ks_config::logsetup::{self, VERSION};
-use ks_engine::{CorrectionPlan, EngineSnapshot, LearningPrompt, Shared};
+use ks_engine::{CorrectionPlan, EngineSnapshot, LearningPrompt, RememberedWord, Shared};
 use ks_updates::SemanticVersion;
 use serde_json::Value;
 use std::path::Path;
@@ -47,7 +47,7 @@ pub trait HintPresenter<A> {
 pub enum Click {
     /// «Понятно».
     Ok,
-    /// «Больше не показывать подсказки».
+    /// «Больше не показывать подсказки»; «Отменить» of the notice of a remembered word.
     Never,
     /// The text of the hint.
     Text,
@@ -63,12 +63,14 @@ pub enum EngineInput<A> {
     Prompt { shown: bool },
     /// A word left as typed only because its layout was picked by hand, where the model would have converted it.
     KeptByChoice { anchor: Option<A> },
+    /// A word remembered as a rule after it was erased and typed again as first typed.
+    Remembered { word: RememberedWord, anchor: Option<A> },
 }
 
 /// The engine's subscriptions the hints need, made once the engine is built. On the engine's thread the caret is looked
 /// for with `anchor`: at a correction only while `wants_anchor` says a hint at the caret may still show
-/// (`Hints::caret_anchor_wanted`), at a word kept for a layout picked by hand always, which is seldom. `post` carries each
-/// input to the main thread.
+/// (`Hints::caret_anchor_wanted`), at a word kept for a layout picked by hand and at a word remembered always, which is
+/// seldom. `post` carries each input to the main thread.
 pub fn subscribe<A: Send + 'static>(
     shared: &Shared, wants_anchor: Arc<AtomicBool>, anchor: Arc<dyn Fn() -> Option<A> + Send + Sync>,
     post: Arc<dyn Fn(EngineInput<A>) + Send + Sync>,
@@ -82,7 +84,10 @@ pub fn subscribe<A: Send + 'static>(
         deliver(EngineInput::Correction { correction: CorrectionInfo::of(plan), anchor: found });
     }));
     let deliver = post.clone();
-    shared.subscribe_kept_by_choice(Arc::new(move || deliver(EngineInput::KeptByChoice { anchor: anchor() })));
+    let find = anchor.clone();
+    shared.subscribe_kept_by_choice(Arc::new(move || deliver(EngineInput::KeptByChoice { anchor: find() })));
+    let deliver = post.clone();
+    shared.subscribe_remembered(Arc::new(move |word: &RememberedWord| deliver(EngineInput::Remembered { word: word.clone(), anchor: anchor() })));
     shared.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| post(EngineInput::Prompt { shown: prompt.is_some() })));
 }
 
@@ -252,6 +257,10 @@ impl<A: Clone> Hints<A> {
                 self.scheduler.kept_by_choice(anchor, moment);
                 None
             }
+            EngineInput::Remembered { word, anchor } => {
+                self.scheduler.remembered(word, anchor, moment);
+                None
+            }
         };
         self.settle(presenter, step, moment);
     }
@@ -284,7 +293,8 @@ impl<A: Clone> Hints<A> {
     }
 
     /// What the user did to the hint `id`: it goes away, and «Больше не показывать подсказки» turns `general.hints` off
-    /// («Больше не показывать» of a hint that repeats turns off that hint alone).
+    /// («Больше не показывать» of a hint that repeats turns off that hint alone; «Отменить» of the notice of a remembered
+    /// word takes the rule back).
     pub fn clicked(&mut self, presenter: &mut dyn HintPresenter<A>, id: &str, click: Click, moment: &Moment) {
         let how = match click {
             Click::Ok | Click::Closed => How::Ok,
@@ -292,6 +302,12 @@ impl<A: Clone> Hints<A> {
             Click::Text => How::Click,
         };
         presenter.hide(id);
+        if click == Click::Never
+            && let Some(word) = self.scheduler.notice_word(id)
+        {
+            let removed = word.forget();
+            logsetup::info(LOGGER, &format!("{id}: the rule taken back, removed {removed}"));
+        }
         if click == Click::Text
             && let Some(opens) = self.scheduler.opens_of(id)
         {
@@ -311,8 +327,9 @@ impl<A: Clone> Hints<A> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use crate::hints::catalogue::{HINT_UNDO_REMEMBERED_LABEL, REMEMBERED_HINT_ID};
     use ks_backend::{BackendError, BackendProbe, FocusInfo, InputBackend, Injection, KeyFilter, KeyListener};
-    use ks_config::learning::RuleAction;
+    use ks_config::learning::{LearnedRule, LearningStore, RuleAction};
     use std::path::PathBuf;
     use std::sync::Mutex;
 
@@ -339,22 +356,26 @@ mod tests {
     struct Screen {
         log: Vec<String>,
         draws: bool,
+        /// The text and the second button of every card drawn.
+        cards: Vec<(String, &'static str)>,
     }
 
     impl Screen {
         fn new(draws: bool) -> Screen {
-            Screen { log: Vec::new(), draws }
+            Screen { log: Vec::new(), draws, cards: Vec::new() }
         }
     }
 
     impl HintPresenter<Anchor> for Screen {
         fn show_caret(&mut self, view: &HintView, anchor: &Anchor) -> bool {
             self.log.push(format!("caret {} at {anchor:?}", view.id));
+            self.cards.push((view.text.clone(), view.never));
             self.draws
         }
 
         fn show_tray(&mut self, view: &HintView) -> bool {
             self.log.push(format!("tray {}", view.id));
+            self.cards.push((view.text.clone(), view.never));
             self.draws
         }
 
@@ -574,11 +595,166 @@ mod tests {
         }
     }
 
+    fn engine_of(root: &Path) -> Arc<Shared> {
+        let settings = Arc::new(SettingsStore::new(Some(root.join("config.json"))));
+        Shared::new(settings, Arc::new(Minimal), Arc::new(|| 0.0), 2, EngineSnapshot::default())
+    }
+
+    /// `pattern` remembered as a keep rule of the Russian layout, in a store of its own.
+    fn remembered(root: &Path, shared: &Arc<Shared>, pattern: &str) -> (RememberedWord, Arc<LearningStore>) {
+        let learning = Arc::new(LearningStore::new(Some(root.join(format!("learning-{pattern}.json"))), None).unwrap());
+        let rule = learning.add_rule(LearnedRule { action: RuleAction::Keep, ..LearnedRule::new(pattern, 1, 0) }).unwrap();
+        (RememberedWord::new(rule, learning.clone(), shared.clone()), learning)
+    }
+
+    fn told(word: &RememberedWord, anchor: Option<Anchor>) -> EngineInput<Anchor> {
+        EngineInput::Remembered { word: word.clone(), anchor }
+    }
+
+    #[test]
+    fn a_remembered_word_is_told_at_the_caret_and_its_undo_takes_the_rule_back() {
+        let setup = setup("remembered");
+        let shared = engine_of(&setup.data);
+        let mut hints = hints(&setup);
+        let mut screen = Screen::new(true);
+        let (word, learning) = remembered(&setup.data, &shared, "тыгыдык");
+        hints.engine_input(&mut screen, told(&word, Some(AT)), &at(0.0));
+        // It waits for the typing to stop, as a hint at the caret does.
+        hints.tick(&mut screen, &at(0.5));
+        assert!(screen.log.is_empty());
+        hints.tick(&mut screen, &at(1.0));
+        assert_eq!(screen.log, ["caret remembered_word at (100, 200)"]);
+        assert_eq!(screen.cards, [("Слово «тыгыдык» запомнено: больше не переводится.".to_owned(), HINT_UNDO_REMEMBERED_LABEL)]);
+        // «Отменить»: the rule goes, the card goes, and nothing is written of it.
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Never, &at(2.0));
+        assert_eq!(learning.count(), 0);
+        assert_eq!(screen.log.last().unwrap(), "hide remembered_word");
+        assert!(!hints.state().is_seen(REMEMBERED_HINT_ID) && hints.state().how(REMEMBERED_HINT_ID).is_none());
+        assert_ne!(setup.settings.get(HINTS_SETTING), Some(Value::Bool(false)), "the hints stay on");
+        // The next word is told too, at once: no quiet period, and «Понятно» leaves the rule.
+        let (next, kept) = remembered(&setup.data, &shared, "ксл");
+        hints.engine_input(&mut screen, told(&next, Some(AT)), &at(3.0));
+        hints.tick(&mut screen, &at(4.0));
+        assert_eq!(screen.log.last().unwrap(), "caret remembered_word at (100, 200)");
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Ok, &at(5.0));
+        assert_eq!(kept.count(), 1);
+        // Gone from the screen, its «Отменить» has nothing to take back.
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Never, &at(6.0));
+        assert_eq!(kept.count(), 1);
+        // On its own it goes after a while, and the rule stays.
+        hints.engine_input(&mut screen, told(&next, Some(AT)), &at(7.0));
+        hints.tick(&mut screen, &at(8.0));
+        hints.tick(&mut screen, &at(20.5));
+        assert_eq!(screen.log.last().unwrap(), "hide remembered_word");
+        assert!(!hints.needs_tick() && kept.count() == 1);
+    }
+
+    #[test]
+    fn a_remembered_word_is_told_with_the_hints_off_past_their_limits_and_over_another_hint() {
+        let setup = setup("remembered-limits");
+        let shared = engine_of(&setup.data);
+        let mut hints = hints(&setup);
+        let mut screen = Screen::new(true);
+        // A hint on screen gives way to the notice.
+        hints.engine_input(&mut screen, EngineInput::Correction { correction: LAYOUT, anchor: Some(AT) }, &at(0.0));
+        hints.tick(&mut screen, &at(1.0));
+        let (first, _) = remembered(&setup.data, &shared, "один");
+        hints.engine_input(&mut screen, told(&first, Some(AT)), &at(2.0));
+        hints.tick(&mut screen, &at(3.0));
+        hints.tick(&mut screen, &at(3.25));
+        assert_eq!(
+            screen.log,
+            ["caret first_correction_undo at (100, 200)", "hide first_correction_undo", "caret remembered_word at (100, 200)"]
+        );
+        assert_eq!(hints.state().how("first_correction_undo").as_deref(), Some("timeout"));
+        // A newer word takes the place of the one on screen, and the undo is of the newer one.
+        let (second, second_store) = remembered(&setup.data, &shared, "два");
+        hints.engine_input(&mut screen, told(&second, Some(AT)), &at(4.0));
+        hints.tick(&mut screen, &at(5.0));
+        hints.tick(&mut screen, &at(5.25));
+        assert_eq!(screen.log[3..], ["hide remembered_word", "caret remembered_word at (100, 200)"]);
+        assert_eq!(screen.cards.last().unwrap().0, "Слово «два» запомнено: больше не переводится.");
+        // The hints turned off leave the notice on screen.
+        setup.settings.set(HINTS_SETTING, Value::Bool(false), true).unwrap();
+        hints.settings_changed(&mut screen, &at(6.0));
+        assert_eq!(screen.log.len(), 5);
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Never, &at(7.0));
+        assert_eq!(second_store.count(), 0);
+        // With the hints off, and long past the three of a day, a word is told all the same; the typing holds it back
+        // however long it goes on.
+        for (number, pattern) in ["три", "четыре", "пять", "шесть"].into_iter().enumerate() {
+            let (word, _) = remembered(&setup.data, &shared, pattern);
+            let start = 10.0 + 30.0 * f64::from(u8::try_from(number).unwrap());
+            hints.engine_input(&mut screen, told(&word, Some(AT)), &Moment { typed_presses: 1, ..at(start) });
+            for step in 1..20 {
+                hints.tick(&mut screen, &Moment { typed_presses: step + 1, ..at(start + f64::from(u8::try_from(step).unwrap()) * 0.5) });
+            }
+            hints.tick(&mut screen, &Moment { typed_presses: 20, ..at(start + 11.0) });
+            assert_eq!(screen.cards.last().unwrap().0, format!("Слово «{pattern}» запомнено: больше не переводится."));
+            hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Ok, &at(start + 12.0));
+        }
+        // «Больше не показывать подсказки» of another hint leaves a notice that waits for the typing to stop.
+        let (waiting, _) = remembered(&setup.data, &shared, "семь");
+        let busy = |seconds: f64| Moment { typed_presses: 30, ..at(seconds) };
+        hints.engine_input(&mut screen, told(&waiting, Some(AT)), &busy(200.0));
+        hints.clicked(&mut screen, "first_start", Click::Never, &busy(200.5));
+        hints.tick(&mut screen, &busy(201.5));
+        assert_eq!(screen.cards.last().unwrap().0, "Слово «семь» запомнено: больше не переводится.");
+    }
+
+    #[test]
+    fn a_remembered_word_with_no_caret_or_no_card_is_told_near_the_tray_icon() {
+        let setup = setup("remembered-tray");
+        let shared = engine_of(&setup.data);
+        let mut hints = hints(&setup);
+        let mut screen = Screen::new(true);
+        let (word, learning) = remembered(&setup.data, &shared, "тыгыдык");
+        hints.engine_input(&mut screen, told(&word, None), &at(0.0));
+        assert_eq!(screen.log, ["tray remembered_word"]);
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Never, &at(1.0));
+        assert_eq!(learning.count(), 0);
+        // A card at the caret that could not be drawn goes to the tray at once.
+        let mut failing = Screen::new(false);
+        let (other, _) = remembered(&setup.data, &shared, "ксл");
+        hints.engine_input(&mut failing, told(&other, Some(AT)), &at(2.0));
+        hints.tick(&mut failing, &at(3.0));
+        hints.tick(&mut failing, &at(3.25));
+        assert_eq!(failing.log, ["caret remembered_word at (100, 200)", "tray remembered_word"]);
+        assert!(!hints.needs_tick(), "the tray could not draw it either: let go");
+        // A rule prompt takes the notice at the caret down, as any hint there.
+        let (third, kept) = remembered(&setup.data, &shared, "три");
+        hints.engine_input(&mut screen, told(&third, Some(AT)), &at(4.0));
+        hints.tick(&mut screen, &at(5.0));
+        hints.engine_input(&mut screen, EngineInput::Prompt { shown: true }, &at(6.0));
+        assert_eq!(screen.log.last().unwrap(), "hide remembered_word");
+        hints.clicked(&mut screen, REMEMBERED_HINT_ID, Click::Never, &at(7.0));
+        assert_eq!(kept.count(), 1, "nothing on screen to take back");
+        // One notice is one word of one store.
+        let copy = third.clone();
+        let (same_word, _) = remembered(&setup.data, &shared, "тыгыдык");
+        assert!(format!("{third:?}").contains("три") && copy == third && word != third && same_word != word);
+    }
+
+    #[test]
+    fn a_catalogue_without_the_notice_or_without_it_on_this_platform_tells_nothing() {
+        let setup = setup("remembered-catalogue");
+        let shared = engine_of(&setup.data);
+        let (word, _) = remembered(&setup.data, &shared, "тыгыдык");
+        let notice = CATALOGUE.iter().find(|hint| hint.notice()).copied().unwrap();
+        let elsewhere: &'static [Hint] = Box::leak(vec![Hint { platforms: &[Platform::Windows], ..notice }].into_boxed_slice());
+        let without: &'static [Hint] = Box::leak(vec![CATALOGUE[0]].into_boxed_slice());
+        for catalogue in [elsewhere, without] {
+            let mut hints = Hints::<Anchor>::with_catalogue(catalogue, setup.settings.clone(), &setup.data, Platform::Linux, version("0.71.0"), &at(0.0));
+            let mut screen = Screen::new(true);
+            hints.engine_input(&mut screen, told(&word, None), &at(0.0));
+            assert!(screen.log.is_empty() && !hints.needs_tick());
+        }
+    }
+
     #[test]
     fn the_engine_hands_over_its_snapshots_corrections_and_prompts() {
         let root = folder("engine");
-        let settings = Arc::new(SettingsStore::new(Some(root.join("config.json"))));
-        let shared = Shared::new(settings, Arc::new(Minimal), Arc::new(|| 0.0), 2, EngineSnapshot::default());
+        let shared = engine_of(&root);
         let posted: Arc<Mutex<Vec<EngineInput<Anchor>>>> = Arc::new(Mutex::new(Vec::new()));
         let wants = Arc::new(AtomicBool::new(true));
         let sink = posted.clone();
@@ -593,6 +769,10 @@ mod tests {
         }
         for callback in shared.kept_by_choice_callbacks() {
             callback();
+        }
+        let (word, _) = remembered(&root, &shared, "тыгыдык");
+        for callback in shared.remembered_callbacks() {
+            callback(&word);
         }
         shared.show_learning_prompt(LearningPrompt {
             source_group: 0,
@@ -611,6 +791,7 @@ mod tests {
                 EngineInput::Correction { correction: LAYOUT, anchor: Some(AT) },
                 EngineInput::Correction { correction: LAYOUT, anchor: None },
                 EngineInput::KeptByChoice { anchor: Some(AT) },
+                EngineInput::Remembered { word, anchor: Some(AT) },
                 EngineInput::Prompt { shown: true },
             ]
         );

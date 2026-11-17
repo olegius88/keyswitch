@@ -13,6 +13,7 @@ use ks_updates::{RELEASE_PAGE_PREFIX, SemanticVersion};
 use crate::constants::{
     AUTOMATIC_CORRECTIONS_FOR_HISTORY_HINT, AUTOMATIC_CORRECTIONS_FOR_NOTIFICATIONS_HINT, AUTOMATIC_CORRECTIONS_FOR_PAUSE_HINT,
     HINTS_INTRODUCED_VERSION, KEPT_BY_CHOICE_VERSION, LAYOUT_SWITCH_KEY_VERSION, MANUAL_CONVERSIONS_FOR_SELECTION_HINT,
+    REMEMBERED_WORD_SHOWN_MAX_CHARACTERS, REMEMBERED_WORD_VERSION,
 };
 use crate::tray_model::{EXCLUSIONS_LABEL, HISTORY_LABEL, NOTIFICATIONS_LABEL, SOUND_LABEL};
 use crate::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_TITLE, MAC_SYSTEM_PAGE_TITLE, PAGE_NAMES};
@@ -23,6 +24,10 @@ pub const HINT_OK_LABEL: &str = "Понятно";
 pub const HINT_NEVER_LABEL: &str = "Больше не показывать подсказки";
 /// The second button of a hint that shows again each time its event comes: it turns off that hint alone.
 pub const HINT_NEVER_AGAIN_LABEL: &str = "Больше не показывать";
+/// The second button of the notice of a remembered word: it takes the rule back.
+pub const HINT_UNDO_REMEMBERED_LABEL: &str = "Отменить";
+/// The notice of a word remembered as a rule after it was erased and typed again (`Trigger::Remembered`).
+pub const REMEMBERED_HINT_ID: &str = "remembered_word";
 /// The button of the Windows 11 taskbar behind which it puts the icons of new programs (README, «Установка в Windows»).
 pub const WINDOWS_HIDDEN_ICONS_BUTTON: &str = "Показать скрытые значки";
 /// `detection.layout_switch_key` of 0.70.0 and its title in every settings window, on the hotkeys page.
@@ -147,6 +152,10 @@ pub enum Trigger {
     /// A word left as typed only because its layout was picked by hand, where the model would have converted it
     /// (`Shared::subscribe_kept_by_choice`). Shown each time, until «Больше не показывать».
     KeptByChoice,
+    /// A word the program converted by itself, erased and typed again as first typed, remembered as a rule
+    /// (`Shared::subscribe_remembered`). It reports what the program did, not what it can do: shown each time, whatever
+    /// the hints setting and the limits of the hints, with «Отменить» that takes the rule back.
+    Remembered,
 }
 
 /// What a click on the text of a hint opens.
@@ -232,12 +241,14 @@ pub fn mac_chord(hotkey: &str) -> String {
     if reading == hotkey { reading } else { format!("{hotkey} ({reading})") }
 }
 
-/// What a text is made of besides constants: the platform, the version running and the hotkeys of the settings.
+/// What a text is made of besides constants: the platform, the version running, the hotkeys of the settings, and the word
+/// a notice is about (empty for a hint).
 #[derive(Clone, Copy, Debug)]
 pub struct Wording<'a> {
     pub platform: Platform,
     pub version: SemanticVersion,
     pub hotkeys: &'a Hotkeys,
+    pub subject: &'a str,
 }
 
 impl Wording<'_> {
@@ -285,6 +296,13 @@ impl Hint {
         self.trigger == Trigger::KeptByChoice
     }
 
+    /// Whether it reports what the program did (`Trigger::Remembered`): it shows each time, with the hints off too, and
+    /// none of the limits of the hints holds it back.
+    #[must_use]
+    pub fn notice(&self) -> bool {
+        self.trigger == Trigger::Remembered
+    }
+
     #[must_use]
     pub fn shows_on(&self, platform: Platform) -> bool {
         self.platforms.contains(&platform)
@@ -320,7 +338,9 @@ impl Hint {
                 correction.automatic && counted.automatic_corrections >= at_least && holds(condition)
             }
             Trigger::ManualConversions { at_least } => correction.manual() && counted.manual_conversions >= at_least,
-            Trigger::FirstStart | Trigger::SettingsPage | Trigger::WhatsNew | Trigger::Updated | Trigger::KeptByChoice => false,
+            Trigger::FirstStart | Trigger::SettingsPage | Trigger::WhatsNew | Trigger::Updated | Trigger::KeptByChoice | Trigger::Remembered => {
+                false
+            }
         }
     }
 
@@ -341,7 +361,8 @@ impl Hint {
             | Trigger::SettingsPage
             | Trigger::WhatsNew
             | Trigger::Updated
-            | Trigger::KeptByChoice => Counted::default(),
+            | Trigger::KeptByChoice
+            | Trigger::Remembered => Counted::default(),
         }
     }
 }
@@ -488,6 +509,19 @@ fn kept_by_choice(wording: &Wording<'_>) -> String {
     )
 }
 
+/// The word a notice names, cut short with an ellipsis when it is longer than `REMEMBERED_WORD_SHOWN_MAX_CHARACTERS`.
+fn shortened(word: &str) -> String {
+    if word.chars().count() <= REMEMBERED_WORD_SHOWN_MAX_CHARACTERS {
+        return word.to_owned();
+    }
+    let kept: String = word.chars().take(REMEMBERED_WORD_SHOWN_MAX_CHARACTERS - 1).collect();
+    format!("{kept}…")
+}
+
+fn remembered_word(wording: &Wording<'_>) -> String {
+    format!("Слово «{}» запомнено: больше не переводится.", shortened(wording.subject))
+}
+
 fn updated(wording: &Wording<'_>) -> String {
     format!("KeySwitch обновлён до {}. Настройки, правила и история сохранены.", wording.version)
 }
@@ -495,7 +529,7 @@ fn updated(wording: &Wording<'_>) -> String {
 // --------------------------------------------------------------------------------------------------------- catalogue
 
 /// The hints in the order they are shown when several are due at once.
-pub static CATALOGUE: [Hint; 14] = [
+pub static CATALOGUE: [Hint; 15] = [
     Hint {
         id: "first_start",
         group: Group::Intro,
@@ -624,6 +658,17 @@ pub static CATALOGUE: [Hint; 14] = [
         text: kept_by_choice,
     },
     Hint {
+        id: REMEMBERED_HINT_ID,
+        group: Group::Intro,
+        version: Some(REMEMBERED_WORD_VERSION),
+        trigger: Trigger::Remembered,
+        places: &[Place::Caret],
+        platforms: EVERY_PLATFORM,
+        opens: None,
+        hotkeys: &[],
+        text: remembered_word,
+    },
+    Hint {
         id: "hints_intro",
         group: Group::Intro,
         version: Some(HINTS_INTRODUCED_VERSION),
@@ -663,6 +708,7 @@ pub static CATALOGUE: [Hint; 14] = [
 mod tests {
     use super::*;
     use crate::constants::HINT_TEXT_MAX_CHARACTERS;
+    use ks_config::constants::MAX_WORD_STROKES;
     use crate::windows_ui_model::{AUTOCORRECTION_PAGE_TITLE, HOTKEYS_PAGE_TITLE, SYSTEM_PAGE_TITLE};
     use ks_config::config::default_settings;
     use serde_json::Value;
@@ -686,7 +732,7 @@ mod tests {
 
     fn text_of(id: &str, platform: Platform, hotkeys: &Hotkeys) -> String {
         let hint = CATALOGUE.iter().find(|hint| hint.id == id).unwrap();
-        hint.text(&Wording { platform, version: version(), hotkeys }).unwrap()
+        hint.text(&Wording { platform, version: version(), hotkeys, subject: "" }).unwrap()
     }
 
     #[test]
@@ -726,7 +772,7 @@ mod tests {
             variants.push(Hotkeys { convert_last: "Ctrl+Alt+K".to_owned(), ..shipped(*platform) });
             for hotkeys in &variants {
                 for hint in &CATALOGUE {
-                    let text = hint.text(&Wording { platform: *platform, version: version(), hotkeys }).unwrap();
+                    let text = hint.text(&Wording { platform: *platform, version: version(), hotkeys, subject: "" }).unwrap();
                     assert!(text.chars().count() <= HINT_TEXT_MAX_CHARACTERS, "{} on {platform:?}: {} characters", hint.id, text.chars().count());
                     assert!(!text.contains('{') && !text.contains('}'), "{text}");
                     for name in hint.hotkeys {
@@ -789,7 +835,22 @@ mod tests {
     fn a_hint_whose_hotkey_is_cleared_has_no_text() {
         let hint = CATALOGUE.iter().find(|hint| hint.id == "selection_commands").unwrap();
         let cleared = Hotkeys { selection_case: "  ".to_owned(), ..shipped(Platform::Linux) };
-        assert_eq!(hint.text(&Wording { platform: Platform::Linux, version: version(), hotkeys: &cleared }), None);
+        assert_eq!(hint.text(&Wording { platform: Platform::Linux, version: version(), hotkeys: &cleared, subject: "" }), None);
+    }
+
+    #[test]
+    fn the_notice_of_a_remembered_word_names_it_and_cuts_a_long_one_short() {
+        let hint = CATALOGUE.iter().find(|hint| hint.id == REMEMBERED_HINT_ID).unwrap();
+        assert!(hint.notice() && !hint.repeats());
+        let hotkeys = shipped(Platform::Linux);
+        let say = |subject: &str| hint.text(&Wording { platform: Platform::Linux, version: version(), hotkeys: &hotkeys, subject }).unwrap();
+        assert_eq!(say("тыгыдык"), "Слово «тыгыдык» запомнено: больше не переводится.");
+        let long = "a".repeat(REMEMBERED_WORD_SHOWN_MAX_CHARACTERS);
+        assert_eq!(say(&long), format!("Слово «{long}» запомнено: больше не переводится."));
+        let longer = "б".repeat(MAX_WORD_STROKES);
+        let text = say(&longer);
+        assert!(text.contains(&format!("«{}…»", "б".repeat(REMEMBERED_WORD_SHOWN_MAX_CHARACTERS - 1))), "{text}");
+        assert!(text.chars().count() <= HINT_TEXT_MAX_CHARACTERS);
     }
 
     #[test]
@@ -880,7 +941,7 @@ mod tests {
         assert!(three.fired_by(correction(MODE_SYMBOLS, false, false), counted(0, 3), always));
         assert!(!three.fired_by(correction(MODE_SYMBOLS, false, false), counted(0, 2), always));
         assert!(!three.fired_by(correction(MODE_UNDO, false, false), counted(0, 3), always));
-        for trigger in [Trigger::FirstStart, Trigger::SettingsPage, Trigger::WhatsNew, Trigger::Updated, Trigger::KeptByChoice] {
+        for trigger in [Trigger::FirstStart, Trigger::SettingsPage, Trigger::WhatsNew, Trigger::Updated, Trigger::KeptByChoice, Trigger::Remembered] {
             assert!(!hint(trigger).fired_by(correction("boundary", true, false), counted(99, 99), always));
             assert_eq!(hint(trigger).needs(), Counted::default());
         }

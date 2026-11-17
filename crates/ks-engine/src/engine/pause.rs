@@ -263,6 +263,11 @@ impl EngineCore {
         if !segmentation_certain {
             return Ok(());
         }
+        if self.retyping_erased_word(&typed) {
+            // The word the engine converted here was erased, and these letters begin it again as first typed.
+            technical_event!(self.shared, "pause_correction_skipped", "reason": "retyping_erased_word", "idle_ms": idle_ms, "word_characters": pystr::len(&original));
+            return Ok(());
+        }
         let inside_word = self.insertion.as_ref().is_some_and(InsertionPoint::inside_word);
         let target = alternatives.first().map_or(source_group, |entry| entry.0);
         let alternative = alternatives.iter().find(|entry| entry.0 == target).map_or("", |entry| entry.1.as_str()).to_owned();
