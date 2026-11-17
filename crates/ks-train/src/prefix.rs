@@ -38,6 +38,8 @@ const PROFILES: [&str; 2] = ["portable", "reference_hunspell"];
 const PREFIX_MIN_EARLY_RECALL_FLOOR: f64 = 0.70;
 const WAIT_LABEL: u8 = 2;
 const CONVERT_LABEL: usize = 1;
+/// The application of every row of a word corpus: no name of an application carries a label.
+const WORD_CORPUS_APPLICATION: &str = "Editor";
 
 #[derive(Clone, Debug)]
 pub struct ParentWord {
@@ -49,6 +51,174 @@ pub struct ParentWord {
     pub category: String,
     pub application: String,
     pub role: FieldRole,
+    /// Typed in the other layout as well as as meant; otherwise only as meant.
+    pub paired: bool,
+    /// In its own situation only; otherwise in the nine situations of the prefix-v1 curriculum.
+    pub own_context: bool,
+}
+
+/// How a recipe labels the frames and which of them it measures. Without the recipe's keys, the rules every sealed recipe
+/// was fitted under.
+#[derive(Clone, Debug)]
+pub struct FrameRules {
+    /// A prefix typed in the other layout converts from this many letters and waits before it.
+    pub convert_from: usize,
+    /// Known terms, case-folded and sorted: a prefix typed in the other layout that begins one waits.
+    pub terms: Option<Arc<Vec<String>>>,
+    /// Measure the prefixes the engine asks the model about (its other reading all letters, its last key a letter);
+    /// otherwise those whose both readings are letters.
+    pub engine_support: bool,
+    /// The fewest letters a measured prefix has.
+    pub minimum_characters: usize,
+}
+
+impl Default for FrameRules {
+    fn default() -> Self {
+        FrameRules { convert_from: PREFIX_V2_SHORT_PREFIX_CHARACTERS, terms: None, engine_support: false, minimum_characters: PREFIX_MIN_CHARACTERS }
+    }
+}
+
+/// The label of a prefix: kept when typed as meant; typed in the other layout, it waits while it is short, while it
+/// continues a word of the typed layout's lexicon or begins a known term, and converts after.
+#[must_use]
+pub fn label_of(desired: bool, length: usize, ambiguous: bool, term: bool, rules: &FrameRules) -> u8 {
+    if !desired {
+        0
+    } else if length < rules.convert_from || ambiguous || term {
+        PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL
+    } else {
+        1
+    }
+}
+
+/// Whether the model is asked about a prefix, and so whether a conversion there counts.
+#[must_use]
+pub fn supported_of(original: &str, alternate: &str, rules: &FrameRules) -> bool {
+    let length = pystr::len(original);
+    let interior_capital = |text: &str| text.chars().skip(1).any(|character| pystr::isupper(character.encode_utf8(&mut [0_u8; 4])));
+    let letters = if rules.engine_support {
+        original.chars().last().is_some_and(|character| pystr::isalpha(character.encode_utf8(&mut [0_u8; 4])))
+    } else {
+        pystr::isalpha(original)
+    };
+    (rules.minimum_characters..=PREFIX_MAX_CHARACTERS).contains(&length) && letters && pystr::isalpha(alternate) && !interior_capital(original) && !interior_capital(alternate)
+}
+
+/// Whether a prefix begins one of the sorted terms.
+#[must_use]
+pub fn begins_a_term(terms: &[String], prefix: &str) -> bool {
+    let key = pystr::casefold(prefix);
+    let index = terms.partition_point(|term| term.as_str() < key.as_str());
+    terms.get(index).is_some_and(|term| term.starts_with(&key))
+}
+
+/// The terms the engine knows: the identifier lexicon and the protected tokens, case-folded and sorted.
+pub fn known_terms(resource_dir: &Path) -> Result<Vec<String>, String> {
+    #[derive(serde::Deserialize)]
+    struct Identifiers {
+        identifiers: Vec<String>,
+    }
+    let identifiers: Identifiers = ks_text::json::loads(std::fs::read(resource_dir.join("identifiers.json")).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?;
+    let protected = std::fs::read_to_string(resource_dir.join("protected_tokens.txt")).map_err(|error| error.to_string())?;
+    let mut terms: Vec<String> = identifiers.identifiers.iter().map(String::as_str).chain(protected.lines().map(str::trim).filter(|line| !line.is_empty() && !line.starts_with('#'))).map(pystr::casefold).collect();
+    terms.sort();
+    terms.dedup();
+    Ok(terms)
+}
+
+/// Which prefixes a fit measures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Support {
+    /// Both readings letters: every sealed recipe.
+    Legacy,
+    /// What the engine asks the model about.
+    Engine,
+}
+
+/// How a fit chooses its epoch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EpochSelection {
+    /// The best zero-false frontier on development: every sealed recipe.
+    Frontier,
+    /// The least development loss among the epochs with a zero-false frontier.
+    DevelopmentLoss,
+}
+
+/// How the importance of a split's frames is scaled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportanceNormalization {
+    /// To a mean of one over the split.
+    MeanOne,
+}
+
+/// The keys of a recipe that a sealed prefix-v1 recipe does not have; each one absent is the rule those were fitted under.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+pub struct RecipeOptions {
+    /// A word corpus, relative to the tree.
+    pub corpus: Option<String>,
+    /// Without it the importance of a frame is its family's share, as every sealed recipe has it.
+    pub importance_normalization: Option<ImportanceNormalization>,
+    pub convert_from_characters: Option<usize>,
+    pub minimum_prefix_characters: Option<usize>,
+    #[serde(default)]
+    pub wait_on_known_terms: bool,
+    pub support: Option<Support>,
+    pub early_stop_patience: Option<usize>,
+    pub epoch_selection: Option<EpochSelection>,
+}
+
+impl RecipeOptions {
+    /// The options of a recipe file.
+    pub fn of(recipe_path: &Path) -> Result<RecipeOptions, String> {
+        let bytes = std::fs::read(recipe_path).map_err(|error| format!("{}: {error}", recipe_path.display()))?;
+        ks_text::json::loads(bytes).map_err(|error| format!("{}: {error}", recipe_path.display()))
+    }
+
+    /// Whether the fit writes what a word corpus's fit adds beside its seal.
+    #[must_use]
+    pub fn reports_classes(&self) -> bool {
+        self.corpus.is_some() || self.early_stop_patience.is_some()
+    }
+}
+
+/// The rules a recipe names.
+pub fn frame_rules(options: &RecipeOptions, resource_dir: &Path) -> Result<FrameRules, String> {
+    let mut rules = FrameRules::default();
+    rules.convert_from = options.convert_from_characters.unwrap_or(rules.convert_from);
+    rules.minimum_characters = options.minimum_prefix_characters.unwrap_or(rules.minimum_characters);
+    if options.wait_on_known_terms {
+        rules.terms = Some(Arc::new(known_terms(resource_dir)?));
+    }
+    rules.engine_support = options.support == Some(Support::Engine);
+    Ok(rules)
+}
+
+/// The parents of a word corpus's split: each row a word in its own situation, typed in the other layout too when paired.
+pub fn load_word_parents(directory: &Path, split: &str) -> Result<Vec<ParentWord>, String> {
+    if !FITTING_SPLITS.contains(&split) {
+        return Err("prefix-v2 may read only exposed train/development/calibration splits".to_owned());
+    }
+    crate::prefix_words::read_split(directory, split)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            Ok(ParentWord {
+                original: row.text,
+                group: row.group,
+                family: row.family,
+                before: row.before,
+                identifier: format!("prefix-words:{split}:{index}"),
+                category: row.class.as_str().to_owned(),
+                application: WORD_CORPUS_APPLICATION.to_owned(),
+                role: role_named(&row.role)?,
+                paired: row.paired,
+                own_context: true,
+            })
+        })
+        .collect()
 }
 
 struct PrefixContext {
@@ -110,6 +280,8 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
             category: category.to_owned(),
             application: row.get("application").and_then(Value::as_str).unwrap_or("").to_owned(),
             role: role_named(row.get("role").and_then(Value::as_str).unwrap_or("unknown"))?,
+            paired: category == "correct",
+            own_context: SAFETY_CATEGORIES.contains(&category),
         };
         if !seen.insert(parent.identifier.clone()) {
             return Err("duplicate old prefix parent identifier".to_owned());
@@ -175,7 +347,7 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
 
 /// `contexts_for`, sorted and without repeats as `contexts` leaves them.
 fn contexts_of(parent: &ParentWord) -> Vec<PrefixContext> {
-    let values: Vec<PrefixContext> = if SAFETY_CATEGORIES.contains(&parent.category.as_str()) {
+    let values: Vec<PrefixContext> = if parent.own_context {
         vec![PrefixContext { identifier: "existing", before: parent.before.clone(), application: parent.application.clone(), role: parent.role }]
     } else {
         let comment = if parent.group != 0 { "// пояснение " } else { "// explanation " };
@@ -223,6 +395,8 @@ fn indexes_of(portable: &Lexicons, spelling: &Lexicons) -> Indexes {
 /// A frame of the curriculum, with what the epochs and the metrics read.
 pub struct PrefixFrame {
     pub label: u8,
+    /// The parent's class and group, an index into `SplitFrames::classes`.
+    pub class: u16,
     pub parent_family: u32,
     pub sequence: u32,
     pub length: u32,
@@ -241,6 +415,8 @@ pub struct SplitFrames {
     pub names: Vec<String>,
     pub families: Vec<String>,
     pub pairs: usize,
+    /// `<category>:<group>` of the parents, by the frames' `class`.
+    pub classes: Vec<String>,
 }
 
 struct ParentFrames {
@@ -251,10 +427,9 @@ struct ParentFrames {
 }
 
 /// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller.
-fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>) -> ParentFrames {
+fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, rules: &FrameRules) -> ParentFrames {
     let variants = contexts_of(parent);
-    let categories_correct = parent.category == "correct";
-    let states: &[bool] = if categories_correct { &[false, true] } else { &[false] };
+    let states: &[bool] = if parent.paired { &[false, true] } else { &[false] };
     let parent_length = pystr::len(&parent.original);
     let length_count = parent_length.min(maximum_prefix_length);
     let weight = 1.0 / (family_count.to::<f64>() * variants.len().to::<f64>() * PROFILES.len().to::<f64>() * states.len().to::<f64>() * length_count.to::<f64>());
@@ -286,11 +461,8 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                     assert_eq!((pystr::len(&original), pystr::len(&alternate)), (length, length), "a prefix of that many letters");
                     assert!((0..=1).contains(&source), "a side of the pair");
                     let ambiguous = indexes.portable[source.to::<usize>()].completions(&original).completions > 0;
-                    let label = if *desired {
-                        if length < PREFIX_V2_SHORT_PREFIX_CHARACTERS || ambiguous { PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL } else { 1 }
-                    } else {
-                        0
-                    };
+                    let term = *desired && rules.terms.as_ref().is_some_and(|terms| begins_a_term(terms, &original));
+                    let label = label_of(*desired, length, ambiguous, term, rules);
                     let mut field = FieldContext::new(context.application.as_str(), pair_id.as_str());
                     field.before.clone_from(&context.before);
                     field.role = context.role;
@@ -308,12 +480,10 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
                         })
                         .collect();
                     // The prefix decision requires four to twelve letters and no interior capitals.
-                    let supported = (PREFIX_MIN_CHARACTERS..=PREFIX_MAX_CHARACTERS).contains(&length)
-                        && pystr::isalpha(&original)
-                        && pystr::isalpha(&alternate)
-                        && !original.chars().skip(1).chain(alternate.chars().skip(1)).any(|character| pystr::isupper(character.encode_utf8(&mut [0_u8; 4])));
+                    let supported = supported_of(&original, &alternate, rules);
                     out.frames.push(PrefixFrame {
                         label,
+                        class,
                         parent_family: family,
                         sequence: sequence_number,
                         length: length.to::<u32>(),
@@ -333,13 +503,16 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, models: [&
 }
 
 /// `generate_frames`: paired snapshots with unit total sampling mass per physical family, by `jobs` threads.
-fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, jobs: usize) -> SplitFrames {
+fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, rules: &FrameRules, jobs: usize) -> SplitFrames {
     let mut family_counts: BTreeMap<&str, u64> = BTreeMap::new();
     for parent in parents {
         *family_counts.entry(&parent.family).or_insert(0) += 1;
     }
     let families: Vec<String> = family_counts.keys().map(|name| (*name).to_owned()).collect();
     let family_number: HashMap<&str, u32> = families.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
+    let class_name = |parent: &ParentWord| format!("{}:{}", parent.category, parent.group);
+    let classes: Vec<String> = parents.iter().map(class_name).collect::<BTreeSet<String>>().into_iter().collect();
+    let class_number: HashMap<&str, u16> = classes.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u16>())).collect();
     let next = AtomicUsize::new(0);
     let done: std::sync::Mutex<Vec<Option<ParentFrames>>> = std::sync::Mutex::new((0..parents.len()).map(|_| None).collect());
     std::thread::scope(|scope| {
@@ -348,7 +521,8 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(parent) = parents.get(index) else { break };
-                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], models, indexes, maximum_prefix_length, feature_version, ortho);
+                    let class = class_number[class_name(parent).as_str()];
+                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], class, models, indexes, maximum_prefix_length, feature_version, ortho, rules);
                     done.lock().expect("a worker finished")[index] = Some(built);
                 }
             });
@@ -380,7 +554,7 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
         sequences += part.sequences.len().to::<u32>();
         pairs += part.pairs.len().to::<u32>();
     }
-    SplitFrames { frames, names, families, pairs: pairs.to::<usize>() }
+    SplitFrames { frames, names, families, pairs: pairs.to::<usize>(), classes }
 }
 
 /// `feature_vocabulary`: Kahan feature mass; family weight precedes class multipliers.
@@ -411,7 +585,7 @@ fn feature_vocabulary(split: &SplitFrames, minimum: f64, maximum: usize) -> Vec<
     selected
 }
 
-fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value) -> Packed {
+fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value, mean_one: bool) -> Packed {
     let vocabulary: HashMap<&str, u32> = names.iter().enumerate().map(|(index, name)| (name.as_str(), index.to::<u32>())).collect();
     let column: Vec<Option<u32>> = split.names.iter().map(|name| vocabulary.get(name.as_str()).copied()).collect();
     let (keep, wait) = (cfg.float("keep_importance"), cfg.float("wait_importance"));
@@ -437,7 +611,7 @@ fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value) -> Packed {
     // A family's weight is a share of one unit, about a thousandth of a row: AdaGrad's accumulators start at 1 and such
     // gradients never move them, so the optimiser is plain descent with a tiny step. A recipe may scale the split's
     // importance to a mean of one; without the key the importance is the family share, as every sealed recipe has it.
-    if cfg.get("importance_normalization").and_then(Value::as_str) == Some("mean_one") && !packed.importance.is_empty() {
+    if mean_one && !packed.importance.is_empty() {
         let mean = fsum(&packed.importance).expect("finite importance") / packed.importance.len().to::<f64>();
         for value in &mut packed.importance {
             *value /= mean;
@@ -451,6 +625,7 @@ struct Sequence {
     profile: u8,
     desired: bool,
     full_length: u32,
+    class: u16,
     candidates: Vec<(u32, f64)>,
 }
 
@@ -478,6 +653,7 @@ fn sequence_scores(split: &SplitFrames, probabilities: &[f64]) -> Vec<Sequence> 
         value.profile = frame.profile;
         value.desired = frame.desired;
         value.full_length = frame.full_length;
+        value.class = frame.class;
         if frame.supported && best_action(scores) == CONVERT_LABEL {
             value.candidates.push((frame.length, scores[CONVERT_LABEL]));
         }
@@ -518,6 +694,58 @@ fn metrics_value(metrics: &[Metrics; 2]) -> Value {
     json!({PROFILES[0]: metrics[0].value(), PROFILES[1]: metrics[1].value()})
 }
 
+/// A class of parents at one threshold, both profiles together.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+pub struct ClassMetrics {
+    pub sequences: i64,
+    pub desired: i64,
+    pub converted: i64,
+    pub converted_before_end: i64,
+    #[serde(rename = "false")]
+    pub false_conversions: i64,
+    /// Sequences typed in the other layout by the length of their first conversion, `0` for none.
+    pub first_conversion_length: BTreeMap<u32, i64>,
+}
+
+/// What a word corpus's fit writes beside its seal (`classes.json`): where it stopped, and each class on development and
+/// calibration at the chosen threshold and on calibration at every threshold of the grid.
+#[derive(serde::Serialize)]
+struct ClassReport<'a> {
+    model_version: &'a str,
+    threshold: f64,
+    epoch: i64,
+    stopped_after_epoch: Option<i64>,
+    development: BTreeMap<String, ClassMetrics>,
+    calibration: BTreeMap<String, ClassMetrics>,
+    calibration_by_threshold: BTreeMap<String, BTreeMap<String, ClassMetrics>>,
+}
+
+/// The metrics of each class of parents, both profiles together, and the length of the first conversion of each
+/// sequence typed in the other layout.
+fn class_metrics(scores: &[Sequence], threshold: f64, classes: &[String]) -> BTreeMap<String, ClassMetrics> {
+    let mut by_class: BTreeMap<String, ClassMetrics> = BTreeMap::new();
+    for value in scores {
+        let counts = by_class.entry(classes[usize::from(value.class)].clone()).or_default();
+        let first = value.candidates.iter().filter(|candidate| candidate.1 >= threshold).map(|candidate| candidate.0).min();
+        counts.sequences += 1;
+        counts.desired += i64::from(value.desired);
+        counts.converted += i64::from(value.desired && first.is_some());
+        counts.converted_before_end += i64::from(value.desired && first.is_some_and(|length| length < value.full_length));
+        counts.false_conversions += i64::from(!value.desired && first.is_some());
+        if value.desired {
+            *counts.first_conversion_length.entry(first.unwrap_or(0)).or_insert(0) += 1;
+        }
+    }
+    by_class
+}
+
+/// Whether a fit with this patience stops after this epoch: neither the chosen frontier nor the development loss has
+/// improved for `patience` epochs.
+#[must_use]
+pub fn patience_spent(epoch: usize, last_selection: usize, last_loss: usize, patience: Option<usize>) -> bool {
+    patience.is_some_and(|patience| epoch.saturating_sub(last_selection.max(last_loss)) >= patience)
+}
+
 #[derive(Clone)]
 struct Selection {
     threshold: f64,
@@ -535,6 +763,12 @@ impl Selection {
     fn value(&self) -> Value {
         json!({"threshold": self.threshold, "minimum_recall": self.minimum_recall, "pooled_recall": self.pooled_recall, "loss": self.loss, "by_profile": self.by_profile, "net_benefit": 0, "minimum_net_benefit": 0})
     }
+}
+
+/// Whether an epoch replaces the chosen one: by the frontier (`better`), or, when the recipe selects by development loss,
+/// by a lower loss among the epochs that have a zero-false frontier.
+fn chosen_over(candidate: &Selection, known: &Selection, by_loss: bool) -> bool {
+    if by_loss { candidate.loss < known.loss } else { better(candidate, known) }
 }
 
 fn better(candidate: &Selection, known: &Selection) -> bool {
@@ -595,10 +829,21 @@ fn calibration_passed(metrics: &[Metrics; 2], minimum_recall: f64) -> bool {
 /// The inputs of a fit; what a seal pins.
 fn prefix_provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut result = provenance(root, recipe_path)?;
-    for name in ["model/prefix_v1/corpus.json", "model/prefix_v1/config.json", "model/prefix_v1/train.jsonl.gz", "model/prefix_v1/development.jsonl.gz", "model/prefix_v1/calibration.jsonl.gz"] {
-        result.insert(name.to_owned(), checksum(&root.join(name))?);
+    let names: Vec<String> = match corpus_of(recipe_path) {
+        Some(corpus) => ["corpus.json", "config.json", "held-out.json.gz", "train.jsonl.gz", "development.jsonl.gz", "calibration.jsonl.gz"].iter().map(|name| format!("{corpus}/{name}")).collect(),
+        None => ["model/prefix_v1/corpus.json", "model/prefix_v1/config.json", "model/prefix_v1/train.jsonl.gz", "model/prefix_v1/development.jsonl.gz", "model/prefix_v1/calibration.jsonl.gz"].map(str::to_owned).to_vec(),
+    };
+    for name in names {
+        let digest = checksum(&root.join(&name))?;
+        result.insert(name, digest);
     }
     Ok(result)
+}
+
+/// The corpus folder a recipe names, relative to the tree; without one (or without a readable recipe, which the fit
+/// refuses on its own) the recipe reads the prefix-v1 corpus.
+fn corpus_of(recipe_path: &Path) -> Option<String> {
+    RecipeOptions::of(recipe_path).ok().and_then(|options| options.corpus)
 }
 
 /// The inputs a fit read at its start are the ones it seals.
@@ -646,14 +891,23 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         }
     let cfg = read_json(request.recipe)?;
     let feature_version = cfg.int("runtime_feature_version");
+    // A recipe that names a corpus reads that word corpus whole; one that does not reads its share of prefix-v1.
+    let options = RecipeOptions::of(request.recipe)?;
+    let directory: PathBuf = request.root.join(options.corpus.as_deref().unwrap_or("model/prefix_v1"));
+    let words = options.corpus.is_some();
+    if words && !crate::prefix_words::is_word_corpus(&directory) {
+        return Err(format!("{} holds no word corpus", directory.display()));
+    }
     let frozen = prefix_provenance(request.root, request.recipe)?;
     std::fs::create_dir_all(output).map_err(|error| error.to_string())?;
-    let directory: PathBuf = request.root.join("model/prefix_v1");
-    let limits = &cfg["maximum_families"];
     let mut parents: HashMap<&str, Vec<ParentWord>> = HashMap::new();
     for split in FITTING_SPLITS {
-        parents.insert(split, load_parents(&directory, split, limits.int(split), cfg.int("maximum_words_per_family"))?);
+        let loaded = if words { load_word_parents(&directory, split)? } else { load_parents(&directory, split, cfg["maximum_families"].int(split), cfg.int("maximum_words_per_family"))? };
+        parents.insert(split, loaded);
     }
+    let rules = frame_rules(&options, request.resource_dir)?;
+    let patience = options.early_stop_patience;
+    let by_loss = options.epoch_selection == Some(EpochSelection::DevelopmentLoss);
     let family_sets: Vec<BTreeSet<&str>> = FITTING_SPLITS.iter().map(|split| parents[split].iter().map(|row| row.family.as_str()).collect()).collect();
     for left in 0..family_sets.len() {
         for right in left + 1..family_sets.len() {
@@ -673,16 +927,16 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     } else {
         None
     };
-    let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, ortho.as_ref(), request.jobs);
+    let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, ortho.as_ref(), &rules, request.jobs);
     let train_frames = frames_of(TRAIN);
     println!("train: {} frames", train_frames.frames.len());
     let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());
     if names.is_empty() {
         return Err("no prefix features survive the family-mass cutoff".to_owned());
     }
-    let train = packed_rows(&train_frames, &names, &cfg);
+    let train = packed_rows(&train_frames, &names, &cfg, options.importance_normalization == Some(ImportanceNormalization::MeanOne));
     let development_frames = frames_of(DEVELOPMENT);
-    let development = packed_rows(&development_frames, &names, &cfg);
+    let development = packed_rows(&development_frames, &names, &cfg, options.importance_normalization == Some(ImportanceNormalization::MeanOne));
     // A feature survived, so a TRAIN frame holds it.
     assert!(train.rows() != 0, "TRAIN frames under the surviving features");
     if development.rows() == 0 {
@@ -697,6 +951,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let denominator = fsum(&development.importance).expect("finite importance");
     let thresholds: Vec<f64> = cfg["thresholds"].as_array().ok_or("thresholds")?.iter().filter_map(Value::as_f64).collect();
     let learning_rate = cfg.float("learning_rate");
+    let (mut best_loss, mut best_loss_epoch, mut stopped) = (f64::INFINITY, 0, None);
     for epoch in 0..cfg.int("epochs") {
         kernel::epoch(&train, &mut weights, &mut accumulator, learning_rate);
         let rounded: Vec<f64> = weights.iter().map(|value| py_round_ndigits(*value, DETERMINISTIC_ROUNDING_DECIMALS).expect("a finite weight")).collect();
@@ -706,13 +961,20 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         assert!(loss.is_finite(), "prefix optimisation diverged");
         let candidate = assess(&sequence_scores(&development_frames, &probabilities), &thresholds, loss);
         if let Some(found) = &candidate
-            && selected.as_ref().is_none_or(|known| better(found, known)) {
+            && selected.as_ref().is_none_or(|known| chosen_over(found, known, by_loss)) {
                 best.clone_from(&rounded);
                 selected = Some(found.clone());
                 selected_epoch = epoch + 1;
             }
+        if loss < best_loss {
+            (best_loss, best_loss_epoch) = (loss, epoch + 1);
+        }
         history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": candidate.as_ref().map_or(Value::Null, Selection::value)}));
         println!("prefix-v2 epoch {}: development loss {loss:.9}, early recall {:?}", epoch + 1, candidate.as_ref().map(|found| found.minimum_recall));
+        if patience_spent((epoch + 1).to::<usize>(), selected_epoch.to::<usize>(), best_loss_epoch.to::<usize>(), patience) {
+            stopped = Some(epoch + 1);
+            break;
+        }
     }
     let selected = selected.ok_or("no zero-false development epoch frontier")?;
     let row_of = |index: usize| best[index * ACTIONS..(index + 1) * ACTIONS].to_vec();
@@ -777,6 +1039,21 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     write("prefix-candidate.json", &raw)?;
     ks_context::prefix_schema::VersionedPrefixModel::load(&output.join("prefix-candidate.json")).map_err(|error| format!("prefix export does not load: {}", error.name))?;
     write("seal.json", &readable(&seal))?;
+    // What a word corpus's fit adds, beside the seal: a sealed prefix-v1 recipe's outputs stay as they were.
+    if options.reports_classes() {
+        let report = ClassReport {
+            model_version: &version,
+            threshold,
+            epoch: selected_epoch,
+            stopped_after_epoch: stopped,
+            development: class_metrics(&final_development, threshold, &development_frames.classes),
+            calibration: class_metrics(&scores, threshold, &calibration_frames.classes),
+            // What each threshold of the grid would do on calibration, class by class: which kept words a lower one converts.
+            calibration_by_threshold: thresholds.iter().map(|candidate| (candidate.to_string(), class_metrics(&scores, *candidate, &calibration_frames.classes))).collect(),
+        };
+        let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
+        write("classes.json", (ks_text::json::dumps(&report, &options) + "\n").as_bytes())?;
+    }
     write("recipe.json", &std::fs::read(request.recipe).map_err(|error| error.to_string())?)?;
     Ok(seal)
 }
@@ -791,7 +1068,59 @@ mod tests {
     use super::*;
 
     fn sequence(profile: u8, desired: bool, candidates: &[(u32, f64)]) -> Sequence {
-        Sequence { profile, desired, full_length: 6, candidates: candidates.to_vec() }
+        Sequence { profile, desired, full_length: 6, class: 0, candidates: candidates.to_vec() }
+    }
+
+    #[test]
+    fn a_prefix_typed_in_the_other_layout_converts_from_the_recipes_letters_unless_a_word_or_a_term_goes_on() {
+        let (four, three) = (FrameRules::default(), FrameRules { convert_from: 3, ..FrameRules::default() });
+        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &four)), [2, 2, 1]);
+        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &three)), [2, 1, 1]);
+        assert_eq!((label_of(true, 5, true, false, &three), label_of(true, 5, false, true, &three), label_of(false, 5, false, false, &three)), (2, 2, 0));
+        let terms = vec!["git".to_owned(), "github".to_owned(), "kubectl".to_owned()];
+        assert!(begins_a_term(&terms, "Gith") && begins_a_term(&terms, "kub") && !begins_a_term(&terms, "gk") && !begins_a_term(&terms, "zzz"));
+    }
+
+    #[test]
+    fn the_engine_rule_asks_about_a_prefix_whose_other_reading_is_letters_and_whose_last_key_is_a_letter() {
+        let engine = FrameRules { engine_support: true, ..FrameRules::default() };
+        let legacy = FrameRules::default();
+        // `<kap` is `Бкап`: the engine asks; the legacy rule wants letters on both sides.
+        assert!(supported_of("<kap", "Бкап", &engine) && !supported_of("<kap", "Бкап", &legacy));
+        assert!(supported_of("hous", "рщгы", &engine) && supported_of("hous", "рщгы", &legacy));
+        // A sign inside the prefix is a letter of the other layout; one that ends it may be punctuation; a capital inside a
+        // word is not asked about.
+        assert!(supported_of("lj,f", "доба", &engine) && !supported_of("lj,f", "доба", &legacy));
+        assert!(!supported_of("ljf,", "доаб", &engine));
+        assert!(!supported_of("hoUs", "рщГы", &engine) && !supported_of("hou", "рщг", &engine));
+        assert!(supported_of("hou", "рщг", &FrameRules { minimum_characters: 3, ..engine }));
+    }
+
+    #[test]
+    fn an_epoch_is_chosen_by_its_frontier_or_by_its_development_loss() {
+        let point = |recall: f64, loss: f64| Selection { threshold: 0.99, minimum_recall: recall, pooled_recall: recall, loss, by_profile: json!({}) };
+        let (early, late) = (point(0.86, 0.17), point(0.84, 0.15));
+        assert!(!chosen_over(&late, &early, false) && chosen_over(&late, &early, true));
+        assert!(chosen_over(&early, &late, false) && !chosen_over(&early, &late, true));
+    }
+
+    #[test]
+    fn a_fit_stops_when_neither_its_frontier_nor_its_loss_moved_for_its_patience() {
+        assert!(!patience_spent(30, 25, 20, None));
+        assert!(!patience_spent(30, 25, 20, Some(10)));
+        assert!(patience_spent(35, 25, 20, Some(10)));
+        assert!(!patience_spent(35, 25, 30, Some(10)));
+    }
+
+    #[test]
+    fn the_class_metrics_count_each_class_and_where_its_first_conversion_came() {
+        let classes = vec!["name:0".to_owned(), "rare:1".to_owned()];
+        let scores = [Sequence { class: 1, ..sequence(0, true, &[(4, 0.99), (5, 0.999)]) }, sequence(1, false, &[(5, 0.999)]), Sequence { class: 1, ..sequence(0, true, &[]) }];
+        let value = class_metrics(&scores, 0.99, &classes);
+        let rare = &value["rare:1"];
+        assert_eq!((rare.desired, rare.converted_before_end, rare.first_conversion_length.clone()), (2, 1, [(0, 1), (4, 1)].into_iter().collect()));
+        assert_eq!(value["name:0"].false_conversions, 1);
+        assert_eq!(ks_text::json::dumps(&value["name:0"], &JsonOptions::default()), r#"{"sequences": 1, "desired": 0, "converted": 0, "converted_before_end": 0, "false": 1, "first_conversion_length": {}}"#);
     }
 
     /// Each profile: a sequence to convert, converted early at 0.99, and one to keep, converted at 0.9.

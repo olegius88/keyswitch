@@ -35,6 +35,7 @@ pub mod ortho_inputs;
 pub mod physical;
 pub mod prefix;
 pub mod prefix_corpus;
+pub mod prefix_words;
 pub mod rows;
 pub mod promote;
 pub mod receipt;

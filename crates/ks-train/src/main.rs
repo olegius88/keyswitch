@@ -22,7 +22,7 @@
 //! `ks-train ortho --tree <root> --fit|--verify|--test|--promote|--inputs|--lexicon-sources [--web-source <file>] [--prose-source <folder>]|--freeze-inputs [--output <folder>]`
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
-//! `ks-train prefix-corpus --tree <root> [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
+//! `ks-train prefix-corpus --tree <root> [--config <file> --base <frozen base> [--hold-out <development.jsonl.gz>...]] [--freeze <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
@@ -185,6 +185,19 @@ fn main() {
     if arguments.first().map(String::as_str) == Some("prefix-corpus") {
         let root = PathBuf::from(option(&arguments, "--tree").expect("--tree is required"));
         let resources = ks_lang::Resources::new(root.join("resources"));
+        if let Some(config) = option(&arguments, "--config") {
+            let (config, base) = (PathBuf::from(config), PathBuf::from(option(&arguments, "--base").expect("--base is required with --config")));
+            let hold_out: Vec<PathBuf> = all_of(&arguments, "--hold-out").into_iter().map(PathBuf::from).collect();
+            let request = ks_train::prefix_words::WordCorpusRequest { root: &root, resources: &resources, config: &config, base: &base, hold_out: &hold_out, output: option(&arguments, "--freeze").map(Path::new) };
+            match ks_train::prefix_words::command(&request) {
+                Ok(counts) => println!("{}", ks_text::json::dumps(&counts, &JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() })),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         if let Err(error) = ks_train::prefix_corpus::command(&root, &resources, option(&arguments, "--freeze").map(Path::new)) {
             eprintln!("{error}");
             std::process::exit(1);
@@ -647,7 +660,10 @@ fn base_command(arguments: &[String]) -> Result<serde_json::Value, String> {
             let manifest = base::merge(&root, &required("--base")?, &required("--technical")?, &required("--output")?)?;
             Ok(serde_json::json!({"test_membership_sha256": manifest["test_membership_sha256"], "partitioning": manifest["partitioning"], "alias_audit": manifest["alias_audit"]}))
         }
-        Some("inventory") => base::prefix_inventory(&root, &option(arguments, "--corpus").map_or_else(|| root.join("model/prefix_v1"), PathBuf::from), &required("--output")?),
+        Some("inventory") => {
+            let named: Vec<PathBuf> = all_of(arguments, "--corpus").into_iter().map(PathBuf::from).collect();
+            base::prefix_inventory(&root, &if named.is_empty() { vec![root.join("model/prefix_v1")] } else { named }, &required("--output")?)
+        }
         _ => Err("base freeze|reconcile|technical|merge|inventory".to_owned()),
     }
 }

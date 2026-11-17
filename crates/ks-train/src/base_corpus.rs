@@ -1104,16 +1104,19 @@ pub fn merge(root: &Path, base_directory: &Path, extension_directory: &Path, out
     Ok(manifest)
 }
 
-/// `prefix_exposure_inventory`: the physical aliases of every word the prefix model's fitting inputs expose. Its test split
-/// is not opened: its words trained nothing.
-pub fn prefix_inventory(root: &Path, corpus: &Path, output: &Path) -> Result<Value, String> {
+/// `prefix_exposure_inventory`: the physical aliases of every word the prefix model's fitting inputs expose, of every
+/// corpus named (the prefix-v1 corpus and a word corpus may both be). A test split is not opened: its words trained nothing.
+pub fn prefix_inventory(root: &Path, corpora: &[PathBuf], output: &Path) -> Result<Value, String> {
     if output.exists() {
         return Err("refusing to overwrite an exposure inventory".to_owned());
+    }
+    if corpora.is_empty() {
+        return Err("an exposure inventory of no corpus".to_owned());
     }
     let (mut by_split, mut by_scope): (BTreeMap<&str, BTreeSet<String>>, BTreeMap<&str, BTreeSet<String>>) = Default::default();
     let mut provenance: BTreeMap<String, String> = BTreeMap::new();
     let name_of = |path: &Path| path.strip_prefix(root).unwrap_or(path).display().to_string();
-    for split in PREFIX_SPLITS {
+    for (corpus, split) in corpora.iter().flat_map(|corpus| PREFIX_SPLITS.iter().map(move |split| (corpus, *split))) {
         let path = corpus.join(format!("{split}.jsonl.gz"));
         provenance.insert(name_of(&path), checksum(&path)?);
         let file = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
@@ -1127,15 +1130,22 @@ pub fn prefix_inventory(root: &Path, corpus: &Path, output: &Path) -> Result<Val
             }
         }
     }
-    let manifest = corpus.join("corpus.json");
-    provenance.insert(name_of(&manifest), checksum(&manifest)?);
+    for corpus in corpora {
+        let manifest = corpus.join("corpus.json");
+        provenance.insert(name_of(&manifest), checksum(&manifest)?);
+    }
     let aliases: BTreeSet<&String> = by_split.values().flatten().collect();
     let mut counts = Map::new();
     counts.insert("aliases".to_owned(), json!(aliases.len()));
     for (split, values) in &by_split {
         counts.insert((*split).to_owned(), json!(values.len()));
     }
-    let result = json!({"schema_version": 1, "kind": "actual-prefix-model-input-exposure", "test_json_opened": false, "model_scoring": false, "scope": "expanded physical aliases of every typed word and whole-word family in the prefix-v1 train, development and calibration splits, the inputs of prefix-v2 training; the prefix test split was not opened", "scopes": {"text": "typed word form", "family": "whole-word physical family"}, "aliases_sha256": aliases, "aliases_by_split": by_split, "aliases_by_scope": by_scope, "counts": counts, "provenance": provenance});
+    let scope = if corpora.len() == 1 {
+        "expanded physical aliases of every typed word and whole-word family in the prefix-v1 train, development and calibration splits, the inputs of prefix-v2 training; the prefix test split was not opened".to_owned()
+    } else {
+        format!("expanded physical aliases of every typed word and whole-word family in the train, development and calibration splits of {} prefix corpora, the inputs of prefix model training; no prefix test split was opened", corpora.len())
+    };
+    let result = json!({"schema_version": 1, "kind": "actual-prefix-model-input-exposure", "test_json_opened": false, "model_scoring": false, "scope": scope, "scopes": {"text": "typed word form", "family": "whole-word physical family"}, "aliases_sha256": aliases, "aliases_by_split": by_split, "aliases_by_scope": by_scope, "counts": counts, "provenance": provenance});
     write_json(output, &result)?;
     Ok(json!({"output": output.display().to_string(), "counts": result["counts"]}))
 }
@@ -1194,6 +1204,31 @@ mod tests {
         let mut first = rows[0].clone();
         first.lemma = String::new();
         assert!(!row_aliases(&first).is_empty());
+    }
+
+    #[test]
+    fn an_inventory_of_two_prefix_corpora_holds_the_aliases_of_both() {
+        let folder = scratch("inventories");
+        let corpus = |name: &str, word: &str| {
+            let directory = folder.join(name);
+            std::fs::create_dir_all(&directory).expect("a folder");
+            for split in PREFIX_SPLITS {
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+                encoder.write_all(format!("{}\n", json!({"text": format!("{word}{split}"), "family": "fam"})).as_bytes()).expect("in memory");
+                std::fs::write(directory.join(format!("{split}.jsonl.gz")), encoder.finish().expect("in memory")).expect("a split");
+            }
+            std::fs::write(directory.join("corpus.json"), b"{}").expect("a receipt");
+            directory
+        };
+        let (first, second) = (corpus("first", "word"), corpus("second", "other"));
+        let one = prefix_inventory(&folder, std::slice::from_ref(&first), &folder.join("one.json")).expect("an inventory");
+        let both = prefix_inventory(&folder, &[first, second], &folder.join("both.json")).expect("an inventory");
+        let union: BTreeSet<String> = ["wordtrain", "worddevelopment", "wordcalibration", "othertrain", "otherdevelopment", "othercalibration", "fam"].iter().flat_map(|text| expanded_aliases(text)).collect();
+        assert_eq!(both["counts"]["aliases"], json!(union.len()));
+        assert!(one["counts"]["aliases"].as_u64() < both["counts"]["aliases"].as_u64());
+        let written = read_json(&folder.join("both.json")).expect("the inventory");
+        assert!(written["scope"].as_str().expect("a scope").contains("of 2 prefix corpora") && written["provenance"]["second/corpus.json"].is_string());
+        assert!(prefix_inventory(&folder, &[], &folder.join("none.json")).unwrap_err().contains("no corpus"));
     }
 
     #[test]

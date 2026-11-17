@@ -452,7 +452,7 @@
    "value_tokens": 21
   },
   "ks-train": {
-   "expect_roots": 37,
+   "expect_roots": 38,
    "files": {
     "src/artifact.rs": {
      "literal_compares": 1,
@@ -621,6 +621,9 @@
     "src/prefix_corpus.rs": {
      "string_key_index": 6,
      "value_tokens": 17
+    },
+    "src/prefix_words.rs": {
+     "literal_compares": 4
     },
     "src/promote.rs": {
      "literal_compares": 1,
@@ -824,6 +827,12 @@
      "expect_roots": 1,
      "string_key_index": 6,
      "value_tokens": 24
+    },
+    "tests/prefix_words.rs": {
+     "expect_roots": 1,
+     "literal_compares": 1,
+     "string_key_index": 20,
+     "value_tokens": 43
     },
     "tests/quality_ratchet.rs": {
      "expect_roots": 1,

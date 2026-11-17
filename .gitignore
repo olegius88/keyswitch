@@ -6,3 +6,6 @@ dist/
 /CLAUDE.md
 /target
 target*/
+# Prefix corpus v3: rebuilt from pinned sources by `ks-train prefix-corpus --config`, receipt in corpus.json
+/model/prefix_v3/*.jsonl.gz
+/model/prefix_v3/held-out.json.gz
