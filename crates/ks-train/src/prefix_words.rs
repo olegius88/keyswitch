@@ -116,13 +116,15 @@ impl Class {
         }
     }
 
-    /// The hard negatives: words typed as meant that a reading of their keys most easily takes for the other layout.
+    /// The hard negatives: words typed as meant that a reading of their keys most easily takes for the other layout. Typed
+    /// in Latin, every token no lexicon of words holds (terms long and short, sign-led tokens, address parts) and the
+    /// names: the long terms are what held the threshold of earlier fits (`verifycsrftoken`, `vgcfgbackup`).
     #[must_use]
     pub fn hard(self, group: i64) -> bool {
         match self {
             Class::SignLed | Class::ShortTerm | Class::EnglishKeys | Class::LowKeys => true,
-            Class::Name => group == 0,
-            Class::Frequent | Class::Rare | Class::Unknown | Class::Term | Class::Address => false,
+            Class::Name | Class::Term | Class::Address => group == 0,
+            Class::Frequent | Class::Rare | Class::Unknown => false,
         }
     }
 }
@@ -1118,7 +1120,7 @@ mod tests {
         assert_eq!(word_class("house", 0, &frequent, true, true, false), Class::Rare);
         assert_eq!(word_class("xyzzy", 0, &frequent, false, false, false), Class::Unknown);
         assert!(Class::LowKeys.hard(0) && Class::LowKeys.hard(1) && Class::LowKeys.paired());
-        assert!(Class::Name.hard(0) && !Class::Name.hard(1) && Class::SignLed.hard(1) && !Class::Term.hard(0) && !Class::Address.hard(0));
+        assert!(Class::Name.hard(0) && !Class::Name.hard(1) && Class::SignLed.hard(1) && Class::Term.hard(0) && Class::Address.hard(0) && !Class::Term.hard(1) && !Class::Rare.hard(0));
         assert!(Class::EnglishKeys.paired() && !Class::Address.paired());
         for class in [Class::Frequent, Class::Rare, Class::Name, Class::Unknown, Class::EnglishKeys, Class::LowKeys, Class::Term, Class::ShortTerm, Class::SignLed, Class::Address] {
             assert_eq!(ks_text::json::dumps(&class, &compact()), format!("\"{}\"", class.as_str()));
