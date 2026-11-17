@@ -155,10 +155,10 @@ pub enum EpochSelection {
     Frontier,
     /// The least development loss among the epochs with a zero-false frontier.
     DevelopmentLoss,
-    /// Each direction's threshold the first of the grid its calibration allows (`direction_threshold`), and the epoch
-    /// that, at those thresholds, switches the most development words typed in the other layout by the switch key, then
-    /// at the lowest mean key (`KeySelection`); patience watches the same measure.
-    SwitchKey,
+    /// On development alone: each direction at its first clean threshold of the grid, the epoch whose mean switch key is
+    /// lowest among those not worse than the floor model in either direction (`KeyMeasure`, `chosen_epoch`); then each
+    /// direction's threshold on calibration, read once, not below its development threshold (`calibrated_thresholds`).
+    MeanKey,
 }
 
 /// How the importance of a split's frames is scaled.
@@ -189,6 +189,11 @@ pub struct RecipeOptions {
     pub minimum_calibration_hard_words_per_direction: Option<usize>,
     /// Schema four: the thousandths of the training families whose frames read no term list.
     pub closed_term_families_per_mille: Option<u64>,
+    /// The model an epoch chosen by the mean key must not be worse than on development, relative to the tree, its
+    /// version and the threshold it is measured at.
+    pub floor_model: Option<String>,
+    pub floor_model_version: Option<String>,
+    pub floor_threshold: Option<f64>,
 }
 
 impl RecipeOptions {
@@ -1117,86 +1122,153 @@ fn calibration_passed(metrics: &[Metrics; 2], minimum_recall: f64) -> bool {
     metrics.iter().all(|counts| counts.desired != 0 && counts.sequences != counts.desired && counts.false_conversions == 0 && counts.converted_before_end.to::<f64>() / counts.desired.to::<f64>() >= minimum_recall)
 }
 
-/// The threshold a direction's calibration allows: the first of the grid at which, in both profiles, no sequence typed
-/// as meant in that direction converts and enough of those typed in the other layout convert before their end. None
-/// when no threshold passes or a profile lacks either kind of sequence.
-fn direction_threshold(scores: &[Sequence], grid: &[f64], direction: usize, minimum_recall: f64) -> Option<f64> {
-    if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
-        return None;
-    }
+/// The grid sorted, each threshold once.
+fn sorted_grid(grid: &[f64]) -> Vec<f64> {
     let mut sorted = grid.to_vec();
     sorted.sort_by(f64::total_cmp);
     sorted.dedup();
-    sorted.into_iter().find(|threshold| {
-        let metrics = direction_metrics(scores, [*threshold, *threshold]);
-        metrics.iter().all(|profile| {
+    sorted
+}
+
+/// A direction's development threshold: the first of the grid at which, in both profiles, no sequence typed as meant in
+/// that direction converts. None when none is clean or a profile lacks either kind of sequence.
+fn clean_threshold(scores: &[Sequence], grid: &[f64], direction: usize) -> Option<f64> {
+    sorted_grid(grid).into_iter().find(|threshold| {
+        direction_metrics(scores, [*threshold, *threshold]).iter().all(|profile| {
+            let cell = &profile[direction];
+            cell.desired != 0 && cell.kept != 0 && cell.false_conversions == 0
+        })
+    })
+}
+
+/// A direction's threshold on calibration: the first of the grid, not below its development threshold, at which, in
+/// both profiles, no sequence typed as meant in that direction converts and enough of those typed in the other layout
+/// convert before their end. None when no threshold passes.
+fn calibrated_direction(scores: &[Sequence], grid: &[f64], direction: usize, floor: f64, minimum_recall: f64) -> Option<f64> {
+    if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
+        return None;
+    }
+    sorted_grid(grid).into_iter().filter(|threshold| *threshold >= floor).find(|threshold| {
+        direction_metrics(scores, [*threshold, *threshold]).iter().all(|profile| {
             let cell = &profile[direction];
             cell.desired != 0 && cell.kept != 0 && cell.false_conversions == 0 && cell.early_recall() >= minimum_recall
         })
     })
 }
 
-/// The thresholds both directions' calibration allows, or none when one of them allows none.
-fn direction_thresholds(scores: &[Sequence], grid: &[f64], minimum_recall: f64) -> Option<[f64; 2]> {
-    Some([direction_threshold(scores, grid, 0, minimum_recall)?, direction_threshold(scores, grid, 1, minimum_recall)?])
+/// Both directions' thresholds on calibration, each not below its development threshold; a direction that allows none
+/// keeps the top of the grid, and the calibration has not passed.
+fn calibrated_thresholds(scores: &[Sequence], grid: &[f64], floors: [f64; 2], minimum_recall: f64) -> ([f64; 2], bool) {
+    let found = [calibrated_direction(scores, grid, 0, floors[0], minimum_recall), calibrated_direction(scores, grid, 1, floors[1], minimum_recall)];
+    match found {
+        [Some(latin), Some(cyrillic)] => ([latin, cyrillic], true),
+        _ => (found.map(|threshold| threshold.unwrap_or(1.0)), false),
+    }
 }
 
-/// An epoch as the switch key ranks it: at the thresholds its calibration allows, the share of the development words
-/// typed in the other layout switched by `SWITCH_KEY`, summed over the two directions, then the mean switch key.
+/// Epochs whose measures are this close are equal: the lower development loss, then the earlier epoch, is chosen.
+pub const EQUAL_MEAN_KEY: f64 = 0.01;
+
+/// What an epoch must not be worse than in each direction: the mean key and the count switched by `SWITCH_KEY` of the
+/// installed model on the same development words at its threshold, both profiles together.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct KeyFloor {
+    pub mean_key: [f64; 2],
+    pub switched_by_key: [i64; 2],
+}
+
+impl KeyFloor {
+    fn of(metrics: &[DirectionMetrics; 2]) -> KeyFloor {
+        KeyFloor { mean_key: metrics.map(|cell| cell.mean_key()), switched_by_key: metrics.map(|cell| cell.switched_by_key) }
+    }
+}
+
+/// An epoch as the mean key measures it, on development alone: each direction at its development threshold.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub struct KeySelection {
+pub struct KeyMeasure {
+    pub epoch: i64,
+    /// Each direction's development threshold.
     pub thresholds: [f64; 2],
-    /// The two directions' shares of words switched by the switch key, added: each direction weighs the same.
-    pub share_by_key: f64,
-    /// The mean switch key over every development word typed in the other layout.
-    pub mean_key: f64,
+    /// Each direction's mean switch key, both profiles together, and its count switched by `SWITCH_KEY`.
+    pub mean_key: [f64; 2],
+    pub switched_by_key: [i64; 2],
+    /// The two directions' mean keys added: the lower, the earlier.
+    pub measure: f64,
     pub loss: f64,
-    /// Each profile and direction, `[profile][direction]`.
-    pub development: [[DirectionMetrics; 2]; 2],
-    pub calibration: [[DirectionMetrics; 2]; 2],
+    /// Not worse than the floor in either direction: only such an epoch can be chosen.
+    pub counts: bool,
 }
 
-impl KeySelection {
-    /// The epoch's measure, or none when its calibration allows no threshold in a direction.
-    fn of(development: &[Sequence], calibration: &[Sequence], grid: &[f64], minimum_recall: f64, loss: f64) -> Option<KeySelection> {
-        let thresholds = direction_thresholds(calibration, grid, minimum_recall)?;
-        let measured = direction_metrics(development, thresholds);
-        let both = pooled(&measured);
-        let all = both[0].merged(both[1]);
-        Some(KeySelection {
-            thresholds,
-            share_by_key: both[0].share_by_key() + both[1].share_by_key(),
-            mean_key: all.mean_key(),
-            loss,
-            development: measured,
-            calibration: direction_metrics(calibration, thresholds),
-        })
-    }
-
-    /// Whether this epoch replaces the chosen one: more words switched by the switch key, or as many and a lower mean
-    /// key. An equal one leaves the earlier epoch chosen.
-    fn better_than(&self, known: &KeySelection) -> bool {
-        self.share_by_key.total_cmp(&known.share_by_key).then_with(|| known.mean_key.total_cmp(&self.mean_key)).is_gt()
+impl KeyMeasure {
+    /// The measure of an epoch's development scores; none when a direction has no development threshold.
+    fn of(epoch: i64, scores: &[Sequence], grid: &[f64], loss: f64, floor: &KeyFloor) -> Option<KeyMeasure> {
+        let thresholds = [clean_threshold(scores, grid, 0)?, clean_threshold(scores, grid, 1)?];
+        let both = pooled(&direction_metrics(scores, thresholds));
+        let (mean_key, switched_by_key) = (both.map(|cell| cell.mean_key()), both.map(|cell| cell.switched_by_key));
+        let counts = (0..2).all(|direction| mean_key[direction] <= floor.mean_key[direction] && switched_by_key[direction] >= floor.switched_by_key[direction]);
+        Some(KeyMeasure { epoch, thresholds, mean_key, switched_by_key, measure: mean_key[0] + mean_key[1], loss, counts })
     }
 }
 
-/// The words of a calibration typed as meant, by direction: distinct words, and of them the hard ones.
-fn calibration_cells(parents: &[ParentWord]) -> [(usize, usize); 2] {
+/// The floor of a fit by the mean key: the installed model's mean key and count switched by `SWITCH_KEY` on the
+/// development words, in each direction, both profiles together, at its own threshold. The recipe names the model, its
+/// version and the threshold; a model of another version is refused.
+fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &RecipeOptions) -> Result<KeyFloor, String> {
+    let (Some(path), Some(version), Some(threshold)) = (&options.floor_model, &options.floor_model_version, options.floor_threshold) else {
+        return Err("a fit by the mean key names its floor: floor_model, floor_model_version and floor_threshold".to_owned());
+    };
+    let floor = ks_context::prefix_schema::VersionedPrefixModel::load(&root.join(path)).map_err(|error| format!("{path} does not load: {}", error.name))?;
+    if floor.version() != version {
+        return Err(format!("{path} is {}, the recipe names {version}", floor.version()));
+    }
+    let frames = maker.frames_of_schema(DEVELOPMENT, parents, floor.feature_version)?;
+    let scores = sequence_scores(&frames, &runtime_probabilities(&floor.model, &frames));
+    Ok(KeyFloor::of(&pooled(&direction_metrics(&scores, [threshold, threshold]))))
+}
+
+/// The chosen epoch among measured ones: of those that count, the lowest measure; those within `EQUAL_MEAN_KEY` of it are
+/// equal, and of equal ones the lower development loss, then the earlier epoch.
+fn chosen_epoch(measures: &[KeyMeasure]) -> Option<&KeyMeasure> {
+    let counting: Vec<&KeyMeasure> = measures.iter().filter(|measure| measure.counts).collect();
+    let lowest = counting.iter().map(|measure| measure.measure).fold(f64::INFINITY, f64::min);
+    counting.into_iter().filter(|measure| measure.measure <= lowest + EQUAL_MEAN_KEY).min_by(|left, right| left.loss.total_cmp(&right.loss).then(left.epoch.cmp(&right.epoch)))
+}
+
+/// A direction's cell of a split's words typed as meant: its distinct words, the hard ones, and their distinct heads of
+/// four keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Cell {
+    pub words: usize,
+    pub hard: usize,
+    pub heads: usize,
+}
+
+/// The keys of a word's first four letters, as the US layout writes them.
+fn head_of(word: &str, group: i64) -> String {
+    let keys = if group == 1 { pair().translate(word, "ru", "us").expect("the pair of layouts") } else { word.to_owned() };
+    pystr::casefold(&keys).chars().take(SWITCH_KEY.to::<usize>()).collect()
+}
+
+/// The words of a split typed as meant, by direction.
+fn cells_of(parents: &[ParentWord]) -> [Cell; 2] {
     let mut words: [BTreeMap<&str, bool>; 2] = [BTreeMap::new(), BTreeMap::new()];
+    let mut heads: [BTreeSet<String>; 2] = [BTreeSet::new(), BTreeSet::new()];
     for parent in parents {
-        let hard = words[usize::from(parent.group == 1)].entry(&parent.original).or_insert(false);
+        let direction = usize::from(parent.group == 1);
+        let hard = words[direction].entry(&parent.original).or_insert(false);
         *hard = *hard || parent.hard;
+        heads[direction].insert(head_of(&parent.original, parent.group));
     }
-    words.map(|cell| (cell.len(), cell.values().filter(|hard| **hard).count()))
+    [0, 1].map(|direction| Cell { words: words[direction].len(), hard: words[direction].values().filter(|hard| **hard).count(), heads: heads[direction].len() })
 }
 
-/// A recipe that names the size of a direction's calibration cell is not fitted on a smaller one.
-fn check_calibration_cells(parents: &[ParentWord], options: &RecipeOptions) -> Result<[(usize, usize); 2], String> {
-    let cells = calibration_cells(parents);
+/// A recipe that names the size of a direction's cell is not fitted on a smaller one, in development or in calibration.
+fn check_cells(split: &str, parents: &[ParentWord], options: &RecipeOptions) -> Result<[Cell; 2], String> {
+    let cells = cells_of(parents);
     let (words, hard) = (options.minimum_calibration_words_per_direction.unwrap_or(0), options.minimum_calibration_hard_words_per_direction.unwrap_or(0));
-    for (direction, (found, found_hard)) in cells.iter().enumerate() {
-        if *found < words || *found_hard < hard {
-            return Err(format!("calibration typed in layout group {direction} holds {found} words, {found_hard} hard: the recipe asks for {words} and {hard}"));
+    for (direction, cell) in cells.iter().enumerate() {
+        if cell.words < words || cell.hard < hard {
+            return Err(format!("{split} typed in layout group {direction} holds {} words, {} hard: the recipe asks for {words} and {hard}", cell.words, cell.hard));
         }
     }
     Ok(cells)
@@ -1205,6 +1277,9 @@ fn check_calibration_cells(parents: &[ParentWord], options: &RecipeOptions) -> R
 /// The inputs of a fit; what a seal pins.
 fn prefix_provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut result = provenance(root, recipe_path)?;
+    if let Some(floor) = RecipeOptions::of(recipe_path).ok().and_then(|options| options.floor_model) {
+        result.insert(floor.clone(), checksum(&root.join(&floor))?);
+    }
     let names: Vec<String> = match corpus_of(recipe_path) {
         Some(corpus) => ["corpus.json", "config.json", "held-out.json.gz", "train.jsonl.gz", "development.jsonl.gz", "calibration.jsonl.gz"].iter().map(|name| format!("{corpus}/{name}")).collect(),
         None => ["model/prefix_v1/corpus.json", "model/prefix_v1/config.json", "model/prefix_v1/train.jsonl.gz", "model/prefix_v1/development.jsonl.gz", "model/prefix_v1/calibration.jsonl.gz"].map(str::to_owned).to_vec(),
@@ -1239,6 +1314,9 @@ pub struct PrefixRequest<'a> {
     pub reuse_installed: bool,
     /// A folder of frames kept by what they read (`FramesCache`).
     pub frames_cache: Option<&'a Path>,
+    /// A fit by the mean key that does not read calibration: its thresholds are its development thresholds, and it has
+    /// not passed calibration. Recipes are compared so; calibration is read once, by the fit of the chosen recipe.
+    pub development_only: bool,
 }
 
 /// `reuse_installed`: the installed candidate and its seal as the output of a fit, when the seal pins this tree's inputs.
@@ -1300,24 +1378,29 @@ impl FrameMaker {
     }
 
     /// What the frames read besides their parents, worded for the frames cache.
-    fn settings(&self, closed: Option<u64>) -> String {
+    fn settings(&self, feature_version: i64, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
-            "features {}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}",
-            self.feature_version, self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support
+            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}",
+            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support
         )
     }
 
-    /// The frames of a split's parents, read back from the cache when it holds them. Only training closes the term lists
-    /// to some families: development and calibration read them as the engine does.
+    /// The frames of a split's parents in the recipe's schema.
     fn frames(&self, split: &str, parents: &[ParentWord]) -> Result<SplitFrames, String> {
+        self.frames_of_schema(split, parents, self.feature_version)
+    }
+
+    /// The frames of a split's parents in a schema, read back from the cache when it holds them. Only training closes the
+    /// term lists to some families: development and calibration read them as the engine does.
+    fn frames_of_schema(&self, split: &str, parents: &[ParentWord], feature_version: i64) -> Result<SplitFrames, String> {
         let closed = self.rules.closed_term_families_per_mille.filter(|_| split == TRAIN);
         let readers = PrefixReaders { ortho: self.ortho.as_ref(), terms: self.terms.as_ref() };
-        let build = || generate_frames(parents, [&self.portable, &self.spelling], &self.indexes, self.maximum_prefix_length, self.feature_version, readers, closed, &self.rules, self.jobs);
+        let build = || generate_frames(parents, [&self.portable, &self.spelling], &self.indexes, self.maximum_prefix_length, feature_version, readers, closed, &self.rules, self.jobs);
         let Some(cache) = &self.cache else {
             return Ok(build());
         };
-        let key = cache.key(&self.settings(closed), parents);
+        let key = cache.key(&self.settings(feature_version, closed), parents);
         if let Some(found) = cache.read(&key) {
             println!("{split}: frames read from the cache");
             return Ok(found);
@@ -1351,20 +1434,27 @@ impl ProfileDirections {
     }
 }
 
-/// A direction's calibration cell: its words typed as meant and the hard ones.
+/// The floor an epoch chosen by the mean key was held to: the model, its threshold, its development measures.
 #[derive(serde::Serialize)]
-struct CalibrationCell {
-    words: usize,
-    hard: usize,
+struct FloorSeal {
+    model_version: String,
+    threshold: f64,
+    #[serde(flatten)]
+    measures: KeyFloor,
 }
 
-/// What a fit by the switch key adds to its seal.
+/// What a fit by the mean key adds to its seal.
 #[derive(serde::Serialize)]
 struct DirectionSeal {
     thresholds: [f64; 2],
-    calibration_cells: [CalibrationCell; 2],
+    development_thresholds: [f64; 2],
+    calibration_read: bool,
+    floor: FloorSeal,
+    development_cells: [Cell; 2],
+    calibration_cells: [Cell; 2],
     development: ProfileDirections,
-    calibration: ProfileDirections,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    calibration: Option<ProfileDirections>,
 }
 
 /// What it adds to its artifact: the threshold of each direction.
@@ -1429,7 +1519,10 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let rules = frame_rules(&options, request.resource_dir)?;
     let patience = options.early_stop_patience;
     let selection_rule = options.epoch_selection.unwrap_or(EpochSelection::Frontier);
-    let (by_loss, by_key) = (selection_rule == EpochSelection::DevelopmentLoss, selection_rule == EpochSelection::SwitchKey);
+    let (by_loss, by_key) = (selection_rule == EpochSelection::DevelopmentLoss, selection_rule == EpochSelection::MeanKey);
+    if request.development_only && !by_key {
+        return Err("only a fit by the mean key leaves calibration unread".to_owned());
+    }
     let family_sets: Vec<BTreeSet<&str>> = FITTING_SPLITS.iter().map(|split| parents[split].iter().map(|row| row.family.as_str()).collect()).collect();
     for left in 0..family_sets.len() {
         for right in left + 1..family_sets.len() {
@@ -1438,7 +1531,8 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             }
         }
     }
-    let cells = check_calibration_cells(&parents[CALIBRATION], &options)?;
+    let development_cells = check_cells(DEVELOPMENT, &parents[DEVELOPMENT], &options)?;
+    let calibration_cells = check_cells(CALIBRATION, &parents[CALIBRATION], &options)?;
     let maker = FrameMaker::new(request.root, request.resource_dir, feature_version, numbers.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
     let train_frames = maker.frames(TRAIN, &parents[TRAIN])?;
     println!("train: {} frames", train_frames.frames.len());
@@ -1455,14 +1549,20 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     if development.rows() == 0 {
         return Err("empty training or development split".to_owned());
     }
-    // The switch key chooses each epoch's thresholds on calibration, so its frames are made before the epochs.
-    let calibration_frames = maker.frames(CALIBRATION, &parents[CALIBRATION])?;
-    let calibration = by_key.then(|| packed_rows(&calibration_frames, &names, &cfg, mean_one));
+    // The floor of the mean key: the installed model on the same development words, at its own threshold.
+    let floor = if by_key { Some(key_floor(&maker, &parents[DEVELOPMENT], request.root, &options)?) } else { None };
+    // Calibration is read once: before the epochs only by the rule of v88, which chooses on development and needs no
+    // calibration frames until the end; by the mean key after the epochs, for the chosen one.
     let mut weights = vec![0.0; names.len() * ACTIONS];
     let mut accumulator = vec![1.0; names.len() * ACTIONS];
     let mut best = weights.clone();
     let mut selected_epoch = 0;
-    let (mut selected, mut key_selected): (Option<Selection>, Option<KeySelection>) = (None, None);
+    let mut selected: Option<Selection> = None;
+    // By the mean key: every epoch's measure, and the weights of those that may still be chosen (`chosen_epoch`: the lowest
+    // measure only falls, so an epoch above it by more than `EQUAL_MEAN_KEY` never comes back).
+    let mut measures: Vec<KeyMeasure> = Vec::new();
+    let mut kept_weights: BTreeMap<i64, Vec<f64>> = BTreeMap::new();
+    let (mut lowest_measure, mut measure_epoch) = (f64::INFINITY, 0);
     let mut history = Vec::new();
     let denominator = fsum(&development.importance).expect("finite importance");
     let thresholds = numbers.thresholds;
@@ -1477,47 +1577,53 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         let loss = fsum(&terms).expect("finite losses") / denominator;
         assert!(loss.is_finite(), "prefix optimisation diverged");
         let development_scores = sequence_scores(&development_frames, &probabilities);
-        let (record, improved) = if let Some(calibration) = &calibration {
-            let calibration_scores = sequence_scores(&calibration_frames, &kernel::predict(calibration, &rounded));
-            let candidate = KeySelection::of(&development_scores, &calibration_scores, &thresholds, minimum_recall, loss);
-            let improved = candidate.as_ref().is_some_and(|found| key_selected.as_ref().is_none_or(|known| found.better_than(known)));
-            println!("prefix-v2 epoch {}: development loss {loss:.9}, switched by key {SWITCH_KEY} {:?}", epoch + 1, candidate.as_ref().map(|found| found.share_by_key));
-            let record = serde_json::to_value(&candidate).map_err(|error| error.to_string())?;
-            if improved {
-                key_selected = candidate;
+        if let Some(floor) = &floor {
+            let measure = KeyMeasure::of(epoch + 1, &development_scores, &thresholds, loss, floor);
+            println!(
+                "prefix-v2 epoch {}: development loss {loss:.9}, mean key {:?}, counts {:?}",
+                epoch + 1,
+                measure.as_ref().map(|found| found.mean_key),
+                measure.as_ref().map(|found| found.counts)
+            );
+            history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": serde_json::to_value(&measure).map_err(|error| error.to_string())?}));
+            if let Some(found) = measure.filter(|found| found.counts) {
+                if found.measure < lowest_measure {
+                    (lowest_measure, measure_epoch) = (found.measure, epoch + 1);
+                }
+                kept_weights.insert(found.epoch, rounded.clone());
+                measures.push(found);
+                kept_weights.retain(|kept, _| measures.iter().any(|known| known.epoch == *kept && known.measure <= lowest_measure + EQUAL_MEAN_KEY));
             }
-            (record, improved)
         } else {
             let candidate = assess(&development_scores, &thresholds, loss);
             let improved = candidate.as_ref().is_some_and(|found| selected.as_ref().is_none_or(|known| chosen_over(found, known, by_loss)));
             println!("prefix-v2 epoch {}: development loss {loss:.9}, early recall {:?}", epoch + 1, candidate.as_ref().map(|found| found.minimum_recall));
-            let record = candidate.as_ref().map_or_default(Selection::value);
+            history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": candidate.as_ref().map_or_default(Selection::value)}));
             if improved {
                 selected = candidate;
+                best.clone_from(&rounded);
+                selected_epoch = epoch + 1;
             }
-            (record, improved)
-        };
-        if improved {
-            best.clone_from(&rounded);
-            selected_epoch = epoch + 1;
         }
         if loss < best_loss {
             (best_loss, best_loss_epoch) = (loss, epoch + 1);
         }
-        history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": record}));
-        // The switch key's patience watches its own measure, not the loss.
-        let watched_loss_epoch = if by_key { selected_epoch } else { best_loss_epoch };
-        if patience_spent((epoch + 1).to::<usize>(), selected_epoch.to::<usize>(), watched_loss_epoch.to::<usize>(), patience) {
+        // By the mean key, patience watches the measure and the loss: the measure is a step function that may stand for
+        // epochs and then move.
+        let watched = if by_key { measure_epoch } else { selected_epoch };
+        if patience_spent((epoch + 1).to::<usize>(), watched.to::<usize>(), best_loss_epoch.to::<usize>(), patience) {
             stopped = Some(epoch + 1);
             break;
         }
     }
-    let (selection_loss, selection_value) = if by_key {
-        let chosen = key_selected.ok_or("no epoch whose calibration allows a threshold in both directions")?;
-        (chosen.loss, serde_json::to_value(&chosen).map_err(|error| error.to_string())?)
+    let (selection_loss, selection_value, development_thresholds) = if by_key {
+        let chosen = chosen_epoch(&measures).ok_or("no epoch is as early as the installed model in both directions")?.clone();
+        best.clone_from(kept_weights.get(&chosen.epoch).expect("the weights of an epoch that may be chosen are kept"));
+        selected_epoch = chosen.epoch;
+        (chosen.loss, serde_json::to_value(&chosen).map_err(|error| error.to_string())?, chosen.thresholds)
     } else {
         let chosen = selected.ok_or("no zero-false development epoch frontier")?;
-        (chosen.loss, chosen.value())
+        (chosen.loss, chosen.value(), [1.0, 1.0])
     };
     let row_of = |index: usize| best[index * ACTIONS..(index + 1) * ACTIONS].to_vec();
     let table: Map<String, Value> = names.iter().enumerate().map(|(index, name)| (name.clone(), json!(row_of(index)))).collect();
@@ -1534,13 +1640,22 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         })
         .collect();
     let model = PrefixModel { weights: WeightTable::from_entries(entries), version: version.clone(), conversion_threshold: 1.0 };
+    let final_development = sequence_scores(&development_frames, &kernel::predict(&development, &best));
+    // The program's own softmax must answer as the trainer's kernel did where the epoch was chosen: the thresholds are
+    // then the ones the engine meets.
+    if by_key && direction_metrics(&final_development, development_thresholds) != direction_metrics(&sequence_scores(&development_frames, &runtime_probabilities(&model, &development_frames)), development_thresholds) {
+        return Err("the program's scoring of the written weights differs from the trainer's on development".to_owned());
+    }
+    let calibration_frames = if request.development_only { None } else { Some(maker.frames(CALIBRATION, &parents[CALIBRATION])?) };
     // The runtime's own softmax: what the installed candidate answers.
-    let scores = sequence_scores(&calibration_frames, &runtime_probabilities(&model, &calibration_frames));
-    let (per_direction, passed) = if by_key {
-        direction_thresholds(&scores, &thresholds, minimum_recall).map_or(([1.0, 1.0], false), |found| (found, true))
-    } else {
-        let (threshold, passed) = calibrated_threshold(&scores, &thresholds, minimum_recall);
-        ([threshold, threshold], passed)
+    let scores = calibration_frames.as_ref().map(|frames| sequence_scores(frames, &runtime_probabilities(&model, frames)));
+    let (per_direction, passed) = match &scores {
+        None => (development_thresholds, false),
+        Some(scores) if by_key => calibrated_thresholds(scores, &thresholds, development_thresholds, minimum_recall),
+        Some(scores) => {
+            let (threshold, passed) = calibrated_threshold(scores, &thresholds, minimum_recall);
+            ([threshold, threshold], passed)
+        }
     };
     let threshold = per_direction[0].max(per_direction[1]);
     let actions: Vec<&str> = ks_context::context_model::ACTIONS.iter().map(|action| action.as_str()).collect();
@@ -1553,7 +1668,8 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let raw = crate::artifact::canonical(&payload);
     let mut budgets = Map::new();
     let mut pair_counts = Map::new();
-    for (split, frames) in [(TRAIN, &train_frames), (DEVELOPMENT, &development_frames), (CALIBRATION, &calibration_frames)] {
+    for (split, frames) in [(TRAIN, Some(&train_frames)), (DEVELOPMENT, Some(&development_frames)), (CALIBRATION, calibration_frames.as_ref())] {
+        let Some(frames) = frames else { continue };
         let mut amounts = vec![0.0_f64; frames.families.len()];
         let mut errors = vec![0.0_f64; frames.families.len()];
         for frame in &frames.frames {
@@ -1572,20 +1688,29 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         pair_counts.insert(split.to_owned(), json!(frames.pairs));
     }
     let selected_parents: Map<String, Value> = FITTING_SPLITS.iter().map(|split| ((*split).to_owned(), json!(parents[split].iter().map(|row| row.identifier.as_str()).collect::<Vec<_>>()))).collect();
-    let final_development = sequence_scores(&development_frames, &kernel::predict(&development, &best));
+    let calibration_value = scores.as_ref().map_or(Value::Null, |scores| metrics_value(&sequence_metrics(scores, threshold)));
     let mut seal = json!({
         "schema_version": 1, "candidate_sha256": hex(&Sha256::digest(&raw)), "provenance": frozen, "recipe": cfg, "model_version": version, "features": names.len(),
         "epoch": selected_epoch, "development_loss": selection_loss, "threshold": threshold, "epoch_selection": selection_value, "epoch_history": history,
         "training_rows": train.rows(), "development_rows": development.rows(), "family_budgets": budgets, "pair_counts": pair_counts, "selected_parents": selected_parents,
-        "development": metrics_value(&sequence_metrics(&final_development, threshold)), "calibration": metrics_value(&sequence_metrics(&scores, threshold)), "calibration_passed": passed,
+        "development": metrics_value(&sequence_metrics(&final_development, threshold)), "calibration": calibration_value, "calibration_passed": passed,
         "promotion_accepted": false, "independent_test_evaluated": false, "scope": cfg["scope"],
     });
     if by_key {
+        let floor = floor.expect("a fit by the mean key has its floor");
         let fields = DirectionSeal {
             thresholds: per_direction,
-            calibration_cells: cells.map(|(words, hard)| CalibrationCell { words, hard }),
+            development_thresholds,
+            calibration_read: scores.is_some(),
+            floor: FloorSeal {
+                model_version: options.floor_model_version.clone().unwrap_or_default(),
+                threshold: options.floor_threshold.unwrap_or_default(),
+                measures: floor,
+            },
+            development_cells,
+            calibration_cells,
             development: ProfileDirections::of(direction_metrics(&final_development, per_direction)),
-            calibration: ProfileDirections::of(direction_metrics(&scores, per_direction)),
+            calibration: scores.as_ref().map(|scores| ProfileDirections::of(direction_metrics(scores, per_direction))),
         };
         merged(&mut seal, &fields)?;
     }
@@ -1603,7 +1728,10 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             thresholds: per_direction,
             grid: thresholds,
             development: SavedSplit::of(&final_development, &development_frames, true),
-            calibration: SavedSplit::of(&scores, &calibration_frames, false),
+            calibration: match (&scores, &calibration_frames) {
+                (Some(scores), Some(frames)) => SavedSplit::of(scores, frames, false),
+                _ => SavedSplit { classes: Vec::new(), sequences: Vec::new() },
+            },
         };
         write(SCORES_FILE, &saved_bytes(&saved)?)?;
         write("classes.json", &ClassReport::of(&saved).bytes())?;
@@ -1877,37 +2005,63 @@ mod tests {
     }
 
     #[test]
-    fn each_direction_takes_the_first_threshold_its_own_calibration_allows() {
+    fn a_direction_is_clean_on_development_at_the_first_threshold_no_word_typed_as_meant_converts() {
         let grid = [0.999, 0.985, 0.99, 0.995, 0.999];
-        assert_eq!(direction_thresholds(&calibration(), &grid, 0.7), Some([0.999, 0.985]));
-        // Too much recall asked of the Cyrillic direction at no threshold: it is converted at 0.99 only.
-        assert_eq!(direction_threshold(&calibration(), &[0.995, 0.999], 1, 0.7), None);
-        assert!(direction_thresholds(&calibration(), &[0.995, 0.999], 0.7).is_none());
-        // A recall floor below the program's is no rule.
-        assert_eq!(direction_threshold(&calibration(), &grid, 1, 0.5), None);
+        // The Latin word to keep converts at 0.995 and below; the Cyrillic one never.
+        assert_eq!((clean_threshold(&calibration(), &grid, 0), clean_threshold(&calibration(), &grid, 1)), (Some(0.999), Some(0.985)));
+        assert_eq!(clean_threshold(&calibration(), &[0.99], 0), None);
         // A direction without words to keep in a profile has no threshold.
         let lacking: Vec<Sequence> = calibration().into_iter().filter(|value| value.desired || value.source == 0 || value.profile == 0).collect();
-        assert_eq!(direction_threshold(&lacking, &grid, 1, 0.7), None);
+        assert_eq!(clean_threshold(&lacking, &grid, 1), None);
     }
 
     #[test]
-    fn an_epoch_is_chosen_by_the_words_it_switches_by_the_switch_key_then_by_the_mean_key() {
-        let development = |key: u32| -> Vec<Sequence> { (0..2).flat_map(|profile| [typed(profile, 0, true, &[(key, 0.999)]), typed(profile, 1, true, &[(5, 0.99)])]).collect() };
+    fn calibration_takes_each_direction_s_first_threshold_not_below_its_development_threshold() {
+        let grid = [0.999, 0.985, 0.99, 0.995, 0.999];
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.985], 0.7), ([0.999, 0.985], true));
+        // Development made the Cyrillic direction clean at 0.99 only: calibration does not go below it.
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.99], 0.7), ([0.999, 0.99], true));
+        // Too much recall asked of the Cyrillic direction at no threshold: it is converted at 0.99 only. It keeps the top of
+        // the grid, and calibration has not passed.
+        assert_eq!(calibrated_direction(&calibration(), &[0.995, 0.999], 1, 0.985, 0.7), None);
+        assert_eq!(calibrated_thresholds(&calibration(), &[0.995, 0.999], [0.985, 0.985], 0.7), ([0.999, 1.0], false));
+        // A recall floor below the program's is no rule.
+        assert_eq!(calibrated_direction(&calibration(), &grid, 1, 0.985, 0.5), None);
+    }
+
+    /// Development of both profiles: the Latin word to convert switches at `key`, the Cyrillic one at 5; a word to keep in
+    /// each direction as in `calibration`.
+    fn switching(key: u32) -> Vec<Sequence> {
+        (0..2)
+            .flat_map(|profile| [typed(profile, 0, true, &[(key, 0.999)]), typed(profile, 0, false, &[(5, 0.995)]), typed(profile, 1, true, &[(5, 0.99)]), typed(profile, 1, false, &[])])
+            .collect()
+    }
+
+    #[test]
+    fn an_epoch_is_measured_by_its_mean_key_on_development_and_counts_only_if_no_later_than_the_floor() {
         let grid = [0.985, 0.99, 0.995, 0.999];
-        let early = KeySelection::of(&development(4), &calibration(), &grid, 0.7, 0.2).expect("thresholds in both directions");
-        assert_eq!(early.thresholds, [0.999, 0.985]);
-        assert!((early.share_by_key - 1.0).abs() < 1e-12 && (early.mean_key - 4.5).abs() < 1e-12);
-        let late = KeySelection::of(&development(5), &calibration(), &grid, 0.7, 0.1).expect("thresholds");
-        assert!(early.better_than(&late) && !late.better_than(&early));
-        // The same share: the lower mean key wins, and an equal one leaves the earlier epoch.
-        let sooner = KeySelection { mean_key: 4.0, ..early.clone() };
-        assert!(sooner.better_than(&early) && !early.better_than(&sooner) && !early.better_than(&early.clone()));
-        assert!(KeySelection::of(&development(4), &calibration(), &[0.9999], 0.7, 0.2).is_none());
-        assert_eq!(early.calibration[1][1].kept, 1);
+        let floor = KeyFloor { mean_key: [4.5, 5.0], switched_by_key: [2, 0] };
+        let early = KeyMeasure::of(1, &switching(4), &grid, 0.2, &floor).expect("a clean threshold in both directions");
+        assert_eq!((early.thresholds, early.mean_key, early.switched_by_key), ([0.999, 0.985], [4.0, 5.0], [2, 0]));
+        assert!((early.measure - 9.0).abs() < 1e-12 && early.counts);
+        // Later than the floor in the Latin direction, or fewer words switched by the switch key: it does not count.
+        assert!(!KeyMeasure::of(1, &switching(5), &grid, 0.2, &floor).expect("measured").counts);
+        assert!(!KeyMeasure::of(1, &switching(4), &grid, 0.2, &KeyFloor { switched_by_key: [3, 0], ..floor }).expect("measured").counts);
+        // No clean threshold in a direction: no measure.
+        assert!(KeyMeasure::of(1, &switching(4), &[0.99], 0.2, &floor).is_none());
+        let measure = |epoch: i64, measure: f64, loss: f64, counts: bool| KeyMeasure { epoch, measure, loss, counts, ..early.clone() };
+        // Of measures within `EQUAL_MEAN_KEY` of the lowest, the lower loss, then the earlier epoch; an epoch that does not
+        // count is never chosen.
+        let measures = [measure(1, 9.0, 0.2, true), measure(2, 9.005, 0.1, true), measure(3, 8.0, 0.0, false)];
+        assert_eq!(chosen_epoch(&measures).map(|found| found.epoch), Some(2));
+        let tied = [measure(1, 9.0, 0.1, true), measure(2, 9.0, 0.1, true)];
+        assert_eq!(chosen_epoch(&tied).map(|found| found.epoch), Some(1));
+        assert_eq!(chosen_epoch(&[measure(4, 8.5, 0.5, true), measures[0].clone()]).map(|found| found.epoch), Some(4));
+        assert!(chosen_epoch(&[measure(3, 8.0, 0.0, false)]).is_none());
     }
 
     #[test]
-    fn a_calibration_cell_counts_distinct_words_typed_as_meant_by_direction_and_its_hard_ones() {
+    fn a_cell_counts_distinct_words_typed_as_meant_by_direction_its_hard_ones_and_their_heads() {
         let parent = |original: &str, group: i64, hard: bool| ParentWord {
             original: original.to_owned(),
             group,
@@ -1921,13 +2075,15 @@ mod tests {
             own_context: true,
             hard,
         };
-        let parents = [parent("cntk", 0, true), parent("cntk", 0, false), parent("house", 0, false), parent("офсет", 1, true)];
-        assert_eq!(calibration_cells(&parents), [(2, 1), (1, 1)]);
+        let parents = [parent("cntk", 0, true), parent("cntk", 0, false), parent("house", 0, false), parent("housing", 0, false), parent("офсет", 1, true)];
+        let cells = [Cell { words: 3, hard: 1, heads: 2 }, Cell { words: 1, hard: 1, heads: 1 }];
+        assert_eq!(cells_of(&parents), cells);
         let options = |words: usize, hard: usize| RecipeOptions { minimum_calibration_words_per_direction: Some(words), minimum_calibration_hard_words_per_direction: Some(hard), ..RecipeOptions::default() };
-        assert_eq!(check_calibration_cells(&parents, &options(1, 1)), Ok([(2, 1), (1, 1)]));
-        assert!(check_calibration_cells(&parents, &options(2, 1)).unwrap_err().contains("layout group 1 holds 1 words, 1 hard"));
-        assert!(check_calibration_cells(&parents, &options(1, 2)).unwrap_err().contains("layout group 0 holds 2 words, 1 hard"));
-        assert!(check_calibration_cells(&[], &RecipeOptions::default()).is_ok());
+        assert_eq!(check_cells(CALIBRATION, &parents, &options(1, 1)), Ok(cells));
+        assert!(check_cells(CALIBRATION, &parents, &options(2, 1)).unwrap_err().contains("calibration typed in layout group 1 holds 1 words, 1 hard"));
+        assert!(check_cells(DEVELOPMENT, &parents, &options(1, 2)).unwrap_err().contains("development typed in layout group 0 holds 3 words, 1 hard"));
+        assert!(check_cells(CALIBRATION, &[], &RecipeOptions::default()).is_ok());
+        assert_eq!(head_of("офсет", 1), "jact");
     }
 
     #[test]
@@ -1971,9 +2127,9 @@ mod tests {
     #[test]
     fn fields_are_merged_only_into_an_object_and_only_from_a_record() {
         let mut tree = json!({"a": 1});
-        merged(&mut tree, &CalibrationCell { words: 2, hard: 1 }).expect("merged");
-        assert_eq!(tree, json!({"a": 1, "words": 2, "hard": 1}));
+        merged(&mut tree, &Cell { words: 2, hard: 1, heads: 3 }).expect("merged");
+        assert_eq!(tree, json!({"a": 1, "words": 2, "hard": 1, "heads": 3}));
         assert!(merged(&mut tree, &5).is_err());
-        assert!(merged(&mut json!([1]), &CalibrationCell { words: 2, hard: 1 }).is_err());
+        assert!(merged(&mut json!([1]), &Cell { words: 2, hard: 1, heads: 3 }).is_err());
     }
 }

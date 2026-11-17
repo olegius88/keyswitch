@@ -622,16 +622,38 @@ mod words {
         refused(&fit(&elsewhere, &scratch("words-fit-none").join("out")), "holds no word corpus");
     }
 
-    /// The changes of a recipe that chooses its epoch by the switch key, over a small corpus a model learns at once.
-    const KEY_CHANGES: [(&str, &str); 9] = [
+    /// The changes of a recipe that chooses its epoch by the mean key, over a small corpus a model learns at once. Its floor
+    /// is the installed model at the top of the grid, where it converts nothing: any epoch is as early.
+    const KEY_CHANGES: [(&str, &str); 11] = [
         ("epochs", "30"), ("early_stop_patience", "10"), ("learning_rate", "0.5"), ("minimum_feature_mass", "1.0"), ("support", "\"engine\""),
-        ("importance_normalization", "\"mean_one\""), ("epoch_selection", "\"switch_key\""), ("minimum_calibration_words_per_direction", "2"),
-        ("minimum_calibration_hard_words_per_direction", "0"),
+        ("importance_normalization", "\"mean_one\""), ("epoch_selection", "\"mean_key\""), ("minimum_calibration_words_per_direction", "2"),
+        ("minimum_calibration_hard_words_per_direction", "0"), ("floor_model", "\"resources/models/prefix_policy_v1.json\""), ("floor_threshold", "1.0"),
     ];
+
+    /// `KEY_CHANGES` and the version of the installed model the floor names.
+    fn key_recipe(small: &Path, name: &str, extra: &[(&str, &str)]) -> PathBuf {
+        #[derive(Deserialize)]
+        struct Installed {
+            version: String,
+        }
+        let installed: Installed = read(&small.join("resources/models/prefix_policy_v1.json"));
+        let version = format!("\"{}\"", installed.version);
+        let mut changes = KEY_CHANGES.to_vec();
+        changes.push(("floor_model_version", version.as_str()));
+        changes.extend_from_slice(extra);
+        word_recipe(small, name, &changes)
+    }
 
     #[derive(Deserialize)]
     struct KeyChoice {
-        share_by_key: f64,
+        measure: f64,
+        counts: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct Floor {
+        model_version: String,
+        mean_key: [f64; 2],
     }
 
     #[derive(Deserialize)]
@@ -650,8 +672,13 @@ mod words {
     struct KeySeal {
         threshold: f64,
         thresholds: [f64; 2],
+        development_thresholds: [f64; 2],
+        calibration_read: bool,
+        calibration_passed: bool,
+        floor: Floor,
         epoch_selection: KeyChoice,
         calibration_cells: [Cell; 2],
+        development_cells: [Cell; 2],
         development: Profiles,
     }
 
@@ -671,20 +698,27 @@ mod words {
     }
 
     #[test]
-    fn a_fit_by_the_switch_key_takes_a_threshold_for_each_direction_and_reads_its_frames_back() {
+    fn a_fit_by_the_mean_key_takes_a_threshold_for_each_direction_and_reads_its_frames_back() {
         let small = small_tree("words-key", &recipe());
         small_word_corpus(&small, "words-key", true);
-        let recipe_path = word_recipe(&small, "words-key", &KEY_CHANGES);
+        let recipe_path = key_recipe(&small, "words-key", &[]);
         let cache = scratch("words-key-frames");
-        let fit = |output: &Path| {
-            let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(output).arg("--frames-cache").arg(&cache).args(["--jobs", "2"]).output().expect("the trainer starts");
+        let fit = |output: &Path, extra: &[&str]| {
+            let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(output).arg("--frames-cache").arg(&cache).args(["--jobs", "2"]).args(extra).output().expect("the trainer starts");
             assert!(output.join("seal.json").exists(), "{}{}", String::from_utf8_lossy(&answer.stdout), String::from_utf8_lossy(&answer.stderr));
-            String::from_utf8_lossy(&answer.stdout).into_owned()
+            (answer.status.success(), String::from_utf8_lossy(&answer.stdout).into_owned())
         };
+        // A fit that compares recipes reads no calibration: its thresholds are development's, and it succeeds unpassed.
+        let probe = scratch("words-key-development").join("out");
+        let (succeeded_unread, said) = fit(&probe, &["--development-only"]);
+        assert!(succeeded_unread && !said.contains("calibration:"), "{said}");
+        let unread: KeySeal = read(&probe.join("seal.json"));
+        assert!(!unread.calibration_read && !unread.calibration_passed && unread.thresholds == unread.development_thresholds);
         let (first, second) = (scratch("words-key-first").join("out"), scratch("words-key-second").join("out"));
-        let said = fit(&first);
-        assert!(said.contains("switched by key 4") && !said.contains("read from the cache"), "{said}");
-        let said = fit(&second);
+        let (_, said) = fit(&first, &[]);
+        // The development-only fit made the frames of training and development, not those of calibration.
+        assert!(said.contains("mean key") && said.contains("development: frames read from the cache") && !said.contains("calibration: frames read from the cache"), "{said}");
+        let (_, said) = fit(&second, &[]);
         for split in ["train", "development", "calibration"] {
             assert!(said.contains(&format!("{split}: frames read from the cache")), "{said}");
         }
@@ -694,7 +728,11 @@ mod words {
         let (seal, artifact, classes): (KeySeal, Artifact, Classes) = (read(&first.join("seal.json")), read(&first.join("prefix-candidate.json")), read(&first.join("classes.json")));
         assert_eq!(seal.threshold, seal.thresholds[0].max(seal.thresholds[1]));
         assert_eq!((artifact.conversion_thresholds, classes.thresholds), (seal.thresholds, seal.thresholds));
-        assert!(seal.epoch_selection.share_by_key > 0.0 && seal.development.portable[1].desired > 0);
+        assert!(seal.epoch_selection.measure > 0.0 && seal.epoch_selection.counts && seal.development.portable[1].desired > 0);
+        assert!(seal.calibration_read && seal.thresholds.iter().zip(seal.development_thresholds).all(|(found, floor)| *found >= floor));
+        // The floor converts nothing at the top of the grid: every word typed in the other layout counts its boundary.
+        assert!(!seal.floor.model_version.is_empty() && seal.floor.mean_key.iter().all(|key| *key > 4.0));
+        assert_eq!(seal.development_cells.map(|cell| cell.words).iter().all(|words| *words > 0), true);
         // Typed in Latin: four English words and four led by a sign key, which are hard; in Cyrillic four Russian words.
         assert_eq!(seal.calibration_cells.map(|cell| (cell.words, cell.hard)), [(8, 4), (4, 0)]);
 
@@ -722,13 +760,20 @@ mod words {
     }
 
     #[test]
-    fn a_fit_on_a_calibration_cell_smaller_than_its_recipe_asks_is_refused() {
+    fn a_fit_on_a_cell_smaller_than_its_recipe_asks_or_without_its_floor_is_refused() {
         let small = small_tree("words-small-cell", &recipe());
         small_word_corpus(&small, "words-small-cell", true);
-        let mut changes = KEY_CHANGES.to_vec();
-        changes.push(("minimum_calibration_words_per_direction", "1000"));
-        let recipe_path = word_recipe(&small, "words-small-cell", &changes);
-        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(scratch("words-small-cell-out").join("out")).output().expect("the trainer starts");
-        refused(&answer, "calibration typed in layout group 0 holds 8 words, 4 hard: the recipe asks for 1000 and 0");
+        let fit = |recipe_path: &Path, name: &str| trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(recipe_path).arg("--output").arg(scratch(name).join("out")).output().expect("the trainer starts");
+        let recipe_path = key_recipe(&small, "words-small-cell", &[("minimum_calibration_words_per_direction", "1000")]);
+        refused(&fit(&recipe_path, "words-small-cell-out"), "development typed in layout group 0 holds");
+        refused(&fit(&recipe_path, "words-small-cell-out"), "the recipe asks for 1000 and 0");
+        let recipe_path = key_recipe(&small, "words-small-cell", &[("floor_model_version", "\"prefix-v2-000000000000\"")]);
+        refused(&fit(&recipe_path, "words-floor-version"), "the recipe names prefix-v2-000000000000");
+        let recipe_path = word_recipe(&small, "words-small-cell", &KEY_CHANGES);
+        refused(&fit(&recipe_path, "words-floor-none"), "a fit by the mean key names its floor");
+        // Only a fit by the mean key leaves calibration unread.
+        let recipe_path = word_recipe(&small, "words-small-cell", &[("epochs", "2")]);
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(scratch("words-unread").join("out")).arg("--development-only").output().expect("the trainer starts");
+        refused(&answer, "only a fit by the mean key leaves calibration unread");
     }
 }

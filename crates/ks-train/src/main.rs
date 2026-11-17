@@ -1,5 +1,5 @@
 //! `ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]`
-//! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--jobs N]`
+//! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--development-only] [--jobs N]`
 //! `ks-train prefix-report --fit <folder> --output <file>`
 //! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|calibration|--words <file> [--minimum-characters N] [--frames-cache <folder>] --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
@@ -62,11 +62,13 @@ fn main() {
             jobs,
             reuse_installed: arguments.iter().any(|argument| argument == "--reuse-installed"),
             frames_cache: option(&arguments, "--frames-cache").map(Path::new),
+            development_only: arguments.iter().any(|argument| argument == "--development-only"),
         };
         match ks_train::prefix::fit(&request) {
             Ok(seal) => {
                 println!("{} calibration passed: {}", seal["model_version"].as_str().unwrap_or(""), seal["calibration_passed"]);
-                std::process::exit(i32::from(seal["calibration_passed"].as_bool() != Some(true)));
+                // A fit that leaves calibration unread compares recipes on development: it has not passed and need not.
+                std::process::exit(i32::from(!request.development_only && seal["calibration_passed"].as_bool() != Some(true)));
             }
             Err(error) => {
                 eprintln!("{error}");
