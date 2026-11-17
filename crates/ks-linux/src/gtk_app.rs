@@ -604,6 +604,10 @@ impl App {
             let handler: crate::tray::ActionHandler = Arc::new(|action| post_app(move |app| app.tray_action(action)));
             match StatusNotifierItem::new(handler, &self.services.resource_dir) {
                 Ok(tray) => {
+                    if let Some(reason) = tray.waiting() {
+                        // At the start of a session the panel may come up after the program: the icon appears with it.
+                        logsetup::warning(LOGGER, &format!("Панель со значками ещё не запущена, значок появится вместе с ней: {reason}"));
+                    }
                     tray.set_indicator_style(&self.settings().get("appearance.indicator_style").unwrap_or_else(|| json!("letters")));
                     let snapshot = self.services.engine.snapshot();
                     tray.set_layout(snapshot.current_group);
