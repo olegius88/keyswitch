@@ -577,7 +577,7 @@ fn typo_correction() {
             let group = (row["group"].as_u64().expect("group")).to::<usize>();
             let word = row["word"].as_str().expect("text");
             let reading = row["reading"].as_str().expect("text");
-            let judgement = corrector.judge(word, locales[group], &[(locales[1 - group], reading)], row["capital"].as_bool().expect("flag"), &known);
+            let judgement = corrector.judge_counted(word, locales[group], &[(locales[1 - group], reading)], row["capital"].as_bool().expect("flag"), &known);
             failures.check("reason", index, &json!(judgement.reason.as_str()), &row["reason"]);
             failures.check("candidates", index, &json!(judgement.candidates), &row["candidates"]);
             failures.check("order", index, &json!(judgement.count_order()), &row["order"]);

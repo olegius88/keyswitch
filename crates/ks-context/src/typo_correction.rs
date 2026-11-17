@@ -9,6 +9,13 @@
 //! enough and far more likely than every other candidate together. The decision reads nothing a platform provides (no
 //! spell checker), so it is the same on every system.
 //!
+//! The subtitle list alone is not enough to type over the user's word. It holds stumps of words a line's end cut
+//! (`кажетс`, `сегодн`) and names films say (`форман`), and its counts are those of films: `сьрока` is one slip from
+//! `сорока` and from `строка`, and films say `сорока` more often, though written text says `строка` far more often. So
+//! the choice is confirmed in a second, independent list, the words of written text the term tables count
+//! (`confirm_in_writing`): the word must be counted there often enough, and the same noisy channel over the words one
+//! slip away that written text counts must choose it as clearly. A choice the two lists do not make together is left.
+//!
 //! The correction types keys, not text: a swap or a deletion reuses the keys the user typed, with their Shift and Caps
 //! Lock, and a letter not pressed in the word takes the key of the last press that typed it (`KeyTemplates`). A letter no
 //! key has typed yet cannot be typed, and its candidate is not made.
@@ -18,7 +25,7 @@ use crate::constants::{
     KEYBOARD_ROW_LENGTHS, TYPO_ALPHABETS, TYPO_CANDIDATE_MIN_COUNT, TYPO_COUNT_LOG_SCALE, TYPO_DELETION_LOG_PROBABILITY, TYPO_FORM_SEPARATOR,
     TYPO_FREQUENCY_MAX_BYTES, TYPO_FREQUENCY_SCHEMA_VERSION, TYPO_INSERTION_LOG_PROBABILITY, TYPO_MIN_LETTERS, TYPO_OCCURRENCE_HASH_BYTES,
     TYPO_POSTERIOR_RATIO, TYPO_SECTIONS, TYPO_SUBSTITUTION_LOG_PROBABILITY, TYPO_TRANSPOSED_LETTERS, TYPO_TRANSPOSITION_LOG_PROBABILITY,
-    VERSION_HASH_CHARACTERS,
+    TYPO_WRITTEN_MIN_COUNT, TYPO_WRITTEN_SECTIONS, VERSION_HASH_CHARACTERS,
 };
 use crate::context_model::TermTables;
 use ks_backend::KeyEvent;
@@ -90,6 +97,10 @@ pub struct TypoPolicy {
     pub candidate_min_count: i64,
     pub posterior_ratio: f64,
     pub log_probabilities: [(Operation, f64); 4],
+    /// The fewest times the written list must count a corrected word (`confirm_in_writing`).
+    pub written_min_count: u64,
+    /// How many times the chosen word's posterior in the written list must exceed the others' there together.
+    pub written_posterior_ratio: f64,
 }
 
 impl Default for TypoPolicy {
@@ -103,6 +114,8 @@ impl Default for TypoPolicy {
                 (Operation::Insertion, TYPO_INSERTION_LOG_PROBABILITY),
                 (Operation::Substitution, TYPO_SUBSTITUTION_LOG_PROBABILITY),
             ],
+            written_min_count: TYPO_WRITTEN_MIN_COUNT.to::<u64>(),
+            written_posterior_ratio: TYPO_POSTERIOR_RATIO,
         }
     }
 }
@@ -435,6 +448,15 @@ pub struct Candidate {
     pub edits: Vec<Edit>,
 }
 
+/// A word one slip away from the typed one that the written list counts: its count there (both spellings of `ё`) and
+/// every slip that turns it into the typed word.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WrittenCandidate {
+    pub word: String,
+    pub count: u64,
+    pub edits: Vec<Edit>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
     Shape,
@@ -445,6 +467,10 @@ pub enum Reason {
     NoCandidate,
     Rare,
     Ambiguous,
+    /// The subtitle list's choice is no word written text counts often enough: a stump or noise of the subtitles.
+    Unwritten,
+    /// Written text prefers another word one slip away, or does not prefer the choice clearly: a near tie.
+    Contested,
     Corrected,
 }
 
@@ -460,6 +486,8 @@ impl Reason {
             Reason::NoCandidate => "no_candidate",
             Reason::Rare => "rare",
             Reason::Ambiguous => "ambiguous",
+            Reason::Unwritten => "unwritten",
+            Reason::Contested => "contested",
             Reason::Corrected => "corrected",
         }
     }
@@ -478,16 +506,27 @@ pub struct TypoChoice {
     pub margin: f64,
 }
 
+/// What the written list says of a choice: how often it counts the chosen word, and the natural logarithm of that word's
+/// posterior over the sum of the others' in the written list (infinite when it counts no other word one slip away,
+/// negative when it prefers another).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WrittenEvidence {
+    pub count: u64,
+    pub margin: f64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypoJudgement {
     pub reason: Reason,
     pub choice: Option<TypoChoice>,
     pub candidates: usize,
+    /// The written list's view of the choice, once it was asked (`confirm_in_writing`).
+    pub written: Option<WrittenEvidence>,
 }
 
 impl TypoJudgement {
     fn bare(reason: Reason) -> Self {
-        TypoJudgement { reason, choice: None, candidates: 0 }
+        TypoJudgement { reason, choice: None, candidates: 0, written: None }
     }
 
     /// The decimal order of magnitude of the chosen candidate's count, for the log; -1 without one.
@@ -548,8 +587,22 @@ impl TypoCorrector {
     ///
     /// `readings` are the same keys read in the other layouts, by locale; `capital_allowed` says whether a capital may open
     /// the word here (the start of a message or of a sentence; a capital in the middle of one is a name); `known` says
-    /// whether the engine knows a reading from elsewhere.
-    pub fn judge(&self, word: &str, locale: &str, readings: &[(&str, &str)], capital_allowed: bool, known: &dyn Fn(&str) -> bool) -> TypoJudgement {
+    /// whether the engine knows a reading from elsewhere; `written` is how often the written list of `locale` counts a
+    /// lowercase form (`written_section`), 0 for one it does not count. The subtitle list chooses (`judge_counted`) and
+    /// written text confirms the choice (`confirm_in_writing`).
+    pub fn judge(
+        &self, word: &str, locale: &str, readings: &[(&str, &str)], capital_allowed: bool, known: &dyn Fn(&str) -> bool, written: &dyn Fn(&str) -> u64,
+    ) -> TypoJudgement {
+        let judgement = self.judge_counted(word, locale, readings, capital_allowed, known);
+        if judgement.reason != Reason::Corrected {
+            return judgement;
+        }
+        let rivals = self.written_candidates(&pystr::casefold(word), locale, written);
+        confirm_in_writing(&self.policy, judgement, &rivals)
+    }
+
+    /// The choice of the subtitle list alone: `judge` before written text confirms it.
+    pub fn judge_counted(&self, word: &str, locale: &str, readings: &[(&str, &str)], capital_allowed: bool, known: &dyn Fn(&str) -> bool) -> TypoJudgement {
         let Some(lexicon) = self.lexicon(locale).filter(|lexicon| word_shape(word, &lexicon.alphabet)) else {
             return TypoJudgement::bare(Reason::Shape);
         };
@@ -598,12 +651,85 @@ impl TypoCorrector {
             .collect()
     }
 
+    /// The words one slip away from a lowercase word that the written list counts, each with every slip that leads to it.
+    ///
+    /// Not only the subtitle list's candidates: a word written text counts and films hardly say (`скрипт`) may be the
+    /// clear second the subtitle list does not see.
+    #[must_use]
+    pub fn written_candidates(&self, lower: &str, locale: &str, written: &dyn Fn(&str) -> u64) -> Vec<WrittenCandidate> {
+        let lexicon = self.lexicon(locale).expect("a locale the corrector has a list for");
+        let mut found: IndexMap<String, (u64, Vec<Edit>)> = IndexMap::new();
+        for edit in edits(lower, &lexicon.alphabet, self.neighbours_of(locale)) {
+            let candidate = edit.apply(lower);
+            if let Some(entry) = found.get_mut(&candidate) {
+                entry.1.push(edit);
+                continue;
+            }
+            found.insert(candidate.clone(), (written_count(&candidate, written), vec![edit]));
+        }
+        found.into_iter().filter(|(_, (count, _))| *count > 0).map(|(word, (count, edits))| WrittenCandidate { word, count, edits }).collect()
+    }
+
     /// The noisy-channel choice among the candidates: each scores the logarithm of its count plus that of the sum of its
     /// slips' probabilities; the best is taken when it is frequent enough and clear enough of the rest.
     #[must_use]
     pub fn decide(&self, candidates: &[Candidate], capital: bool) -> TypoJudgement {
         decide_under(&self.policy, candidates, capital)
     }
+}
+
+/// The section of the written list (`TermTables::term`) that counts the words of a locale's text, if it has one.
+#[must_use]
+pub fn written_section(locale: &str) -> Option<&'static str> {
+    TYPO_WRITTEN_SECTIONS.iter().find(|entry| entry.0 == locale).map(|entry| entry.1)
+}
+
+/// How often the written list counts a lowercase form, spelt with `ё` or with `е`: written text stores the two apart
+/// (`ещё`, `еще`), and either is the word.
+fn written_count(form: &str, written: &dyn Fn(&str) -> u64) -> u64 {
+    let plain: String = form.chars().map(|c| if c == YO { YE } else { c }).collect();
+    written(form) + if plain == form { 0 } else { written(&plain) }
+}
+
+/// A `Corrected` judgement held to written text: the chosen word must be counted there `written_min_count` times or more
+/// (`Unwritten` otherwise), and the same noisy channel over the words one slip away that written text counts (`rivals`)
+/// must choose it, clear of the others by the posterior ratio (`Contested` otherwise). Any other judgement is returned as
+/// it is. Two lists of different texts agree on a slip when its correction is plain; where films and written text choose
+/// differently (`сьрока`: `сорока` or `строка`), or one of them sees a near tie, the word is the user's to fix.
+#[must_use]
+pub fn confirm_in_writing(policy: &TypoPolicy, judgement: TypoJudgement, rivals: &[WrittenCandidate]) -> TypoJudgement {
+    let Some(choice) = judgement.choice.as_ref().filter(|_| judgement.reason == Reason::Corrected) else {
+        return judgement;
+    };
+    let written = written_evidence(policy, &choice.word, rivals);
+    let reason = if written.count < policy.written_min_count {
+        Reason::Unwritten
+    } else if written.margin < ks_text::log(policy.written_posterior_ratio).expect("a positive ratio") {
+        Reason::Contested
+    } else {
+        Reason::Corrected
+    };
+    TypoJudgement { reason, written: Some(written), ..judgement }
+}
+
+/// What the written list says of `chosen` among the words one slip away it counts: the chosen word's count, and its
+/// noisy-channel margin there under the slips of `policy`. A rival scored as high as the choice or higher makes the margin
+/// zero or less, below any ratio above one; a choice written text does not count has no margin at all.
+#[must_use]
+pub fn written_evidence(policy: &TypoPolicy, chosen: &str, rivals: &[WrittenCandidate]) -> WrittenEvidence {
+    let chosen = pystr::casefold(chosen);
+    let Some(place) = rivals.iter().position(|rival| rival.word == chosen) else {
+        return WrittenEvidence { count: 0, margin: f64::NEG_INFINITY };
+    };
+    let totals: Vec<f64> = rivals
+        .iter()
+        .map(|rival| {
+            let slips: Vec<f64> = rival.edits.iter().map(|edit| policy.log_probability(edit.operation)).collect();
+            rival.count.to::<f64>().ln() + log_sum(&slips)
+        })
+        .collect();
+    let others: Vec<f64> = totals.iter().enumerate().filter(|(index, _)| *index != place).map(|(_, &total)| total).collect();
+    WrittenEvidence { count: rivals[place].count, margin: if others.is_empty() { f64::INFINITY } else { totals[place] - log_sum(&others) } }
 }
 
 /// `TypoCorrector.decide` under any policy: the candidates do not depend on it, so the measurement tool scores one list under many.
@@ -641,7 +767,7 @@ pub fn decide_under(policy: &TypoPolicy, candidates: &[Candidate], capital: bool
     } else {
         Reason::Corrected
     };
-    TypoJudgement { reason, choice: Some(choice), candidates: candidates.len() }
+    TypoJudgement { reason, choice: Some(choice), candidates: candidates.len(), written: None }
 }
 
 fn log_sum(values: &[f64]) -> f64 {

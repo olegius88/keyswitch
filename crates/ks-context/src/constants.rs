@@ -777,8 +777,24 @@ pub const TYPO_MIN_LETTERS: usize = 5;
 pub const TYPO_CANDIDATE_MIN_COUNT: usize = 20;
 
 // How many times the posterior of the best candidate must exceed the posteriors of all the other candidates together:
-// a word with two plausible readings is left as typed.
+// a word with two plausible readings is left as typed. The written list is held to the same ratio: on the development
+// slips that leaves 38,924 right corrections and 127 wrong ones, where asking written text only to prefer the choice
+// (a ratio of one) leaves 39,297 and 188.
 pub const TYPO_POSTERIOR_RATIO: f64 = 3.0;
+
+// Fewest times the written list (the `russian` and `english` sections of context-term-frequency.json: words of the
+// training parts of Stack Overflow, Tatoeba and Taiga, each counted five times or more) must count a corrected word.
+// The subtitle list holds stumps of words cut at a line's end (`кажетс`, `сегодн`) and names films say (`форман`); of
+// its Russian forms of five letters and more counted twenty times, the reference Hunspell dictionary (offline, never at
+// run time) rejects 31 % of those written text never counts, 4.0 % of those it counts five to nine times, 3.0 % of ten
+// to nineteen and 2.4 % of twenty to forty-nine. On the development texts (`ks-train typo-evaluation`, the reporting half of the
+// synthetic slips) the subtitle list alone makes 40,121 right corrections and 337 wrong ones; held to written text at
+// 5, 10 and 20 it makes 39,200, 38,924 and 38,495 right ones and 128, 127 and 127 wrong ones, and of correctly typed
+// Russian Tatoeba sentences (627,393 words) it corrects 23, 17 and 14 words where it alone corrected 41.
+pub const TYPO_WRITTEN_MIN_COUNT: usize = 10;
+
+// The section of the written list that counts the words of each language's text.
+pub const TYPO_WRITTEN_SECTIONS: &[(&str, &str)] = &[("en_US", "english"), ("ru_RU", "russian")];
 
 // Natural logarithms of the probability of one particular slip (the noisy channel), by the operation that undoes it.
 // Only their differences change a decision. Tuned on the tuning half of the synthetic development typos of

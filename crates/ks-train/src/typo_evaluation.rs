@@ -9,7 +9,10 @@ use crate::tools::reference_models;
 use flate2::read::MultiGzDecoder;
 use ks_config::personal_words::PersonalWords;
 use ks_context::context_model::TermTables;
-use ks_context::typo_correction::{Candidate, OPERATIONS, Operation, Reason, TypoCorrector, TypoJudgement, TypoLexicon, TypoPolicy, decide_under, known_elsewhere};
+use ks_context::typo_correction::{
+    Candidate, OPERATIONS, Operation, Reason, TypoCorrector, TypoJudgement, TypoLexicon, TypoPolicy, WrittenCandidate, confirm_in_writing, decide_under,
+    known_elsewhere, written_evidence, written_section,
+};
 use ks_engine::engine::{PUNCTUATION, WORD_JOINERS};
 use ks_lang::Resources;
 use ks_lang::detector::ProtectedTokens;
@@ -31,6 +34,11 @@ const TRANSPOSED_LETTERS: usize = 2;
 const CANDIDATE_MIN_COUNT: i64 = 20;
 const TRANSPOSITION_LOG_PROBABILITY: f64 = -1.4;
 const MIN_COUNTS: [i64; 4] = [10, 20, 50, 100];
+/// The floors of the written list measured (`written_floors`): the fewest times it must count a corrected word.
+const WRITTEN_MIN_COUNTS: [u64; 4] = [5, 10, 20, 50];
+/// The ratios the written list's choice is measured at (`written_floors`), the floor as the policy has it: 1 asks only that
+/// written text prefer the choice.
+const WRITTEN_RATIOS: [f64; 4] = [1.0, 1.5, 2.0, 3.0];
 const RATIOS: [f64; 7] = [1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0];
 const DELETION_LOGS: [f64; 4] = [-3.7, -5.0, -6.5, -8.0];
 const INSERTION_LOGS: [f64; 3] = [-1.4, -2.5, -3.7];
@@ -137,6 +145,11 @@ impl Knowledge {
         let lexicons: Vec<&WordTable> = self.models.iter().map(|model| &*model.frequencies).collect();
         known_elsewhere(text, &lexicons, &self.terms, self.identifiers.as_ref(), &self.protected, &|_| false)
     }
+
+    /// How often the written list of `locale` counts a lowercase form, as the engine asks it.
+    fn written(&self, locale: &str, form: &str) -> u64 {
+        written_section(locale).map_or(0, |section| self.terms.term(section).count(form))
+    }
 }
 
 /// `make_typo`: one slip in a lowercase word that the operation undoes, chosen by `seed`.
@@ -186,11 +199,22 @@ struct Sample {
     capital: bool,
     gate: String,
     candidates: Vec<Candidate>,
+    /// The words one slip away the written list counts, which confirm a choice (`confirm_in_writing`).
+    rivals: Vec<WrittenCandidate>,
 }
 
 fn judge(corrector: &TypoCorrector, knowledge: &Knowledge, token: &str, locale: &str, capital_allowed: bool) -> TypoJudgement {
     let (other, reading) = other_reading(token, locale);
-    corrector.judge(token, locale, &[(other, reading.as_str())], capital_allowed, &|text| knowledge.known(text))
+    corrector.judge(token, locale, &[(other, reading.as_str())], capital_allowed, &|text| knowledge.known(text), &|form| knowledge.written(locale, form))
+}
+
+/// The subtitle list's judgement of a token and the words the written list counts one slip away from it: what `judge`
+/// decides from, kept apart so that every floor of the written list is measured on one pass (`written_floors`).
+fn judge_apart(corrector: &TypoCorrector, knowledge: &Knowledge, token: &str, locale: &str, capital_allowed: bool) -> (TypoJudgement, Vec<WrittenCandidate>) {
+    let (other, reading) = other_reading(token, locale);
+    let judgement = corrector.judge_counted(token, locale, &[(other, reading.as_str())], capital_allowed, &|text| knowledge.known(text));
+    let rivals = if judgement.reason == Reason::Corrected { corrector.written_candidates(&pystr::casefold(token), locale, &|form| knowledge.written(locale, form)) } else { Vec::new() };
+    (judgement, rivals)
 }
 
 fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Knowledge) -> Result<Vec<Sample>, String> {
@@ -221,10 +245,11 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
                 let capital = token != lower;
                 let typed = if capital { let mut letters = typo.chars(); let first = letters.next().map_or_default(|letter| pystr::upper(letter.encode_utf8(&mut [0; 4]))); format!("{first}{}", letters.as_str()) } else { typo.clone() };
                 let judgement = judge(corrector, knowledge, &typed, locale, true);
-                let mut sample = Sample { half, locale, operation, word: lower, weight, capital, gate: judgement.reason.as_str().to_owned(), candidates: Vec::new() };
-                if matches!(judgement.reason, Reason::NoCandidate | Reason::Rare | Reason::Ambiguous | Reason::Corrected) {
+                let mut sample = Sample { half, locale, operation, word: lower, weight, capital, gate: judgement.reason.as_str().to_owned(), candidates: Vec::new(), rivals: Vec::new() };
+                if matches!(judgement.reason, Reason::NoCandidate | Reason::Rare | Reason::Ambiguous | Reason::Unwritten | Reason::Contested | Reason::Corrected) {
                     sample.gate = String::new();
                     sample.candidates = corrector.candidates(&typo, locale);
+                    sample.rivals = corrector.written_candidates(&typo, locale, &|form| knowledge.written(locale, form));
                 }
                 samples.push(sample);
             }
@@ -233,12 +258,14 @@ fn synthetic_samples(directory: &Path, corrector: &TypoCorrector, knowledge: &Kn
     Ok(samples)
 }
 
-fn score(samples: &[Sample], policy: &TypoPolicy, half: u64) -> Value {
+/// The slips of one half scored under `policy`, with written text confirming each choice or not (`written`).
+fn score(samples: &[Sample], policy: &TypoPolicy, half: u64, written: bool) -> Value {
     let minimum = policy.minimum_weight();
     let mut table: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     for sample in samples.iter().filter(|sample| sample.half == half && sample.weight >= minimum) {
         let outcome = if sample.gate.is_empty() {
-            let judgement = decide_under(policy, &sample.candidates, sample.capital);
+            let counted = decide_under(policy, &sample.candidates, sample.capital);
+            let judgement = if written { confirm_in_writing(policy, counted, &sample.rivals) } else { counted };
             match (&judgement.choice, judgement.reason) {
                 (Some(choice), Reason::Corrected) => if pystr::casefold(&choice.word) == sample.word { "right".to_owned() } else { "wrong".to_owned() },
                 _ => judgement.reason.as_str().to_owned(),
@@ -260,6 +287,21 @@ fn score(samples: &[Sample], policy: &TypoPolicy, half: u64) -> Value {
     }).collect())
 }
 
+/// The synthetic slips scored under each floor of the written list (`WRITTEN_MIN_COUNTS`) and each ratio
+/// (`WRITTEN_RATIOS`), the rest of `policy` as it is, and under the subtitle list alone: what each costs in corrections and
+/// what it saves in wrong ones. `put` takes the name of each variant and half with its table, as `score` makes it.
+fn written_floors<T>(samples: &[Sample], policy: &TypoPolicy, score: impl Fn(&[Sample], &TypoPolicy, u64, bool) -> T, mut put: impl FnMut(String, T)) {
+    let mut variants: Vec<(String, TypoPolicy, bool)> =
+        WRITTEN_MIN_COUNTS.iter().map(|&floor| (format!("floor {floor}"), TypoPolicy { written_min_count: floor, ..policy.clone() }, true)).collect();
+    variants.extend(WRITTEN_RATIOS.iter().map(|&ratio| (format!("ratio {ratio}"), TypoPolicy { written_posterior_ratio: ratio, ..policy.clone() }, true)));
+    variants.push(("subtitles alone".to_owned(), policy.clone(), false));
+    for (name, variant, written) in variants {
+        for (half, label) in [(0, "tuning half"), (1, "report half")] {
+            put(format!("{name}, {label}"), score(samples, &variant, half, written));
+        }
+    }
+}
+
 fn wilson_upper(wrong: i64, total: i64) -> f64 {
     if total == 0 {
         return 1.0;
@@ -274,7 +316,7 @@ fn wilson_upper(wrong: i64, total: i64) -> f64 {
 
 fn policy_record(policy: &TypoPolicy) -> Value {
     let probabilities: Map<String, Value> = policy.log_probabilities.iter().map(|(operation, value)| (operation.as_str().to_owned(), json!(value))).collect();
-    json!({"candidate_min_count": policy.candidate_min_count, "posterior_ratio": policy.posterior_ratio, "log_probabilities": probabilities})
+    json!({"candidate_min_count": policy.candidate_min_count, "posterior_ratio": policy.posterior_ratio, "log_probabilities": probabilities, "written_min_count": policy.written_min_count, "written_posterior_ratio": policy.written_posterior_ratio})
 }
 
 /// `tune`: the most right corrections on the tuning half whose wrong share stays within the acceptance.
@@ -294,12 +336,17 @@ fn tune(samples: &[Sample]) -> Result<(TypoPolicy, Vec<Value>), String> {
                 let mut choices: Vec<(i64, i64, f64, bool)> = Vec::new();
                 for sample in &tuning {
                     if let Some(choice) = decide_under(&trial, &sample.candidates, sample.capital).choice {
-                        choices.push((sample.weight, choice.weight, choice.margin, pystr::casefold(&choice.word) == sample.word));
+                        // Written text confirms the choice, held here to the ratio tried for the subtitle list: the smaller of
+                        // the two margins decides.
+                        let written = written_evidence(&trial, &choice.word, &sample.rivals);
+                        if written.count >= trial.written_min_count {
+                            choices.push((sample.weight, choice.weight, choice.margin.min(written.margin), pystr::casefold(&choice.word) == sample.word));
+                        }
                     }
                 }
                 for minimum in MIN_COUNTS {
                     for ratio in RATIOS {
-                        let policy = TypoPolicy { candidate_min_count: minimum, posterior_ratio: ratio, log_probabilities: channel };
+                        let policy = TypoPolicy { candidate_min_count: minimum, posterior_ratio: ratio, log_probabilities: channel, ..TypoPolicy::default() };
                         let (floor, threshold) = (policy.minimum_weight(), ratio.ln());
                         let taken: Vec<bool> = choices.iter().filter(|(weight, chosen, margin, _)| *weight >= floor && *chosen >= floor && *margin >= threshold).map(|choice| choice.3).collect();
                         let right = taken.iter().filter(|value| **value).count().to::<i64>();
@@ -326,7 +373,9 @@ fn tsv_safe(text: &str) -> String {
 /// `clean`: every word of the development texts judged as typed.
 fn clean(directory: &Path, corrector: &TypoCorrector, knowledge: &Knowledge, out: &Path) -> Result<Value, String> {
     let (mut words, mut eligible, mut corrections): (BTreeMap<String, i64>, BTreeMap<String, i64>, BTreeMap<String, i64>) = Default::default();
-    let mut cache: HashMap<(String, bool), TypoJudgement> = HashMap::new();
+    let mut cache: HashMap<(String, bool), (TypoJudgement, Vec<WrittenCandidate>)> = HashMap::new();
+    // The corrections each floor of the written list would leave, and those the subtitle list alone makes.
+    let mut floors: BTreeMap<String, BTreeMap<String, i64>> = BTreeMap::new();
     let mut rows: Vec<String> = Vec::new();
     let mut sources: Vec<(&str, Vec<(String, String)>)> = Vec::new();
     for name in PROSE_FILES.iter().chain(&FORUM_FILES) {
@@ -340,11 +389,21 @@ fn clean(directory: &Path, corrector: &TypoCorrector, knowledge: &Knowledge, out
                 let kind = if name == "code-dev" { "code" } else if FORUM_FILES.contains(&name) { "forum" } else { "prose" };
                 let key = format!("{name}:{locale}");
                 *words.entry(key.clone()).or_insert(0) += 1;
-                let judgement = cache.entry((token.clone(), capital_allowed)).or_insert_with(|| judge(corrector, knowledge, &token, locale, capital_allowed));
-                if judgement.reason == Reason::Shape {
+                let (counted, rivals) = cache.entry((token.clone(), capital_allowed)).or_insert_with(|| judge_apart(corrector, knowledge, &token, locale, capital_allowed));
+                if counted.reason == Reason::Shape {
                     continue;
                 }
                 *eligible.entry(key.clone()).or_insert(0) += 1;
+                if counted.reason == Reason::Corrected {
+                    *floors.entry("subtitles_alone".to_owned()).or_default().entry(key.clone()).or_insert(0) += 1;
+                }
+                for floor in WRITTEN_MIN_COUNTS {
+                    let policy = TypoPolicy { written_min_count: floor, ..corrector.policy.clone() };
+                    if confirm_in_writing(&policy, counted.clone(), rivals).reason == Reason::Corrected {
+                        *floors.entry(floor.to_string()).or_default().entry(key.clone()).or_insert(0) += 1;
+                    }
+                }
+                let judgement = confirm_in_writing(&corrector.policy, counted.clone(), rivals);
                 if judgement.reason == Reason::Corrected {
                     let choice = judgement.choice.as_ref().ok_or("a correction without a choice")?;
                     *corrections.entry(key).or_insert(0) += 1;
@@ -356,6 +415,11 @@ fn clean(directory: &Path, corrector: &TypoCorrector, knowledge: &Knowledge, out
     std::fs::write(out.join("clean-corrections.tsv"), format!("corpus\tkind\tlocale\tqid\tword\tcorrection\toperation\tcount_order\tmargin\ttext\n{}\n", rows.join("\n"))).map_err(|error| error.to_string())?;
     let mut report: Map<String, Value> = words.iter().map(|(key, count)| { let fixed = corrections.get(key).copied().unwrap_or(0); (key.clone(), json!({"words": count, "eligible": eligible.get(key).copied().unwrap_or(0), "corrections": fixed, "per_10000_words": (fixed * PROSE_WORDS_PER_FALSE).to::<f64>() / (*count).to::<f64>()})) }).collect();
     report.insert("accepted".to_owned(), json!({"prose_words_per_false_correction": PROSE_WORDS_PER_FALSE, "forum_words_per_false_correction": FORUM_WORDS_PER_FALSE, "code": 0}));
+    for (floor, corpora) in floors {
+        for (corpus, count) in corpora {
+            report.insert(format!("corrections_by_written_floor {floor} {corpus}"), count.into());
+        }
+    }
     Ok(Value::Object(report))
 }
 
@@ -416,8 +480,10 @@ fn field_words(manifest: &Path, corrector: &TypoCorrector, knowledge: &Knowledge
     for streams in devices.values_mut() {
         streams.sort_by(|a, b| a.1["t"].as_str().unwrap_or("").cmp(b.1["t"].as_str().unwrap_or("")));
     }
-    let mut cache: HashMap<(String, bool), TypoJudgement> = HashMap::new();
+    let mut cache: HashMap<(String, bool), (TypoJudgement, Vec<WrittenCandidate>)> = HashMap::new();
     let mut rows: Vec<(String, String, Vec<String>)> = Vec::new();
+    // The corrections the subtitle list alone makes, and the device and word of each: what written text takes away.
+    let mut alone: Vec<(String, String)> = Vec::new();
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
     let mut vocabulary: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let scratch = std::env::temp_dir().join(format!("ks-typo-{}", std::process::id()));
@@ -445,13 +511,20 @@ fn field_words(manifest: &Path, corrector: &TypoCorrector, knowledge: &Knowledge
                     add(&mut counts, "personal");
                     continue;
                 }
-                let judgement = cache.entry((token.clone(), capital_allowed)).or_insert_with(|| judge(corrector, knowledge, &token, locale, capital_allowed));
-                if judgement.reason == Reason::Shape {
+                let (counted, rivals) = cache.entry((token.clone(), capital_allowed)).or_insert_with(|| judge_apart(corrector, knowledge, &token, locale, capital_allowed));
+                if counted.reason == Reason::Shape {
                     continue;
                 }
                 add(&mut counts, "eligible");
                 let erased = item["excluded"].as_str() == Some("erased");
-                if !erased && matches!(judgement.reason, Reason::NoCandidate | Reason::Rare | Reason::Ambiguous | Reason::Corrected) && personal.keep(&token) {
+                if let Some(choice) = counted.choice.as_ref().filter(|_| counted.reason == Reason::Corrected) {
+                    add(&mut counts, "subtitles_alone_corrections");
+                    let mark = if erased && retyped.contains(&pystr::casefold(&choice.word)) { "subtitles_alone_erased_retyped_as_correction" } else if erased && !retyped.is_empty() { "subtitles_alone_erased_retyped_otherwise" } else if erased { "subtitles_alone_erased" } else { "subtitles_alone_kept" };
+                    add(&mut counts, mark);
+                    alone.push((device.clone(), pystr::casefold(&token)));
+                }
+                let judgement = &confirm_in_writing(&corrector.policy, counted.clone(), rivals);
+                if !erased && matches!(judgement.reason, Reason::NoCandidate | Reason::Rare | Reason::Ambiguous | Reason::Unwritten | Reason::Contested | Reason::Corrected) && personal.keep(&token) {
                     mine.insert(pystr::casefold(&token));
                 }
                 if judgement.reason != Reason::Corrected {
@@ -469,6 +542,7 @@ fn field_words(manifest: &Path, corrector: &TypoCorrector, knowledge: &Knowledge
     let _ = std::fs::remove_dir_all(&scratch);
     let harmful: Vec<&Vec<String>> = rows.iter().filter(|(device, word, _)| vocabulary[device].contains(word)).map(|row| &row.2).collect();
     counts.insert("corrections_of_words_that_became_the_owner_s".to_owned(), harmful.len().to::<i64>());
+    counts.insert("subtitles_alone_corrections_of_words_that_became_the_owner_s".to_owned(), alone.iter().filter(|(device, word)| vocabulary[device].contains(word)).count().to::<i64>());
     let header = "device\tbattery\tapp\ttime\tword\tcorrection\toperation\tcount_order\tmargin\tmark\tretyped_next\n";
     let table = |lines: Vec<&Vec<String>>| format!("{header}{}", lines.iter().map(|row| row.join("\t") + "\n").collect::<String>());
     std::fs::write(out.join("field-corrections.tsv"), table(rows.iter().map(|row| &row.2).collect())).map_err(|error| error.to_string())?;
@@ -589,11 +663,14 @@ pub fn command(request: &Request<'_>, resources: &Arc<Resources>) -> Result<(), 
             let (tuned, tried) = tune(&samples)?;
             std::fs::write(request.out.join("synthetic-tuning.json"), crate::train_json_unsorted(&Value::Array(tried))).map_err(|error| error.to_string())?;
             report.insert("tuned_policy".to_owned(), policy_record(&tuned));
-            report.insert("tuned_on_tuning_half".to_owned(), score(&samples, &tuned, 0));
-            report.insert("tuned_on_report_half".to_owned(), score(&samples, &tuned, 1));
+            report.insert("tuned_on_tuning_half".to_owned(), score(&samples, &tuned, 0, true));
+            report.insert("tuned_on_report_half".to_owned(), score(&samples, &tuned, 1, true));
         }
-        report.insert("synthetic_tuning_half".to_owned(), score(&samples, &corrector.policy, 0));
-        report.insert("synthetic_report_half".to_owned(), score(&samples, &corrector.policy, 1));
+        report.insert("synthetic_tuning_half".to_owned(), score(&samples, &corrector.policy, 0, true));
+        report.insert("synthetic_report_half".to_owned(), score(&samples, &corrector.policy, 1, true));
+        written_floors(&samples, &corrector.policy, score, |name, table| {
+            report.insert(format!("synthetic_by_written_floor {name}"), table);
+        });
     }
     if matches!(request.measurement, "clean" | "all") {
         report.insert("clean".to_owned(), clean(request.messages, &corrector, &knowledge, request.out)?);
@@ -638,7 +715,8 @@ mod tests {
     }
 
     fn sample(half: u64, word: &str, weight: i64, gate: &str, candidates: Vec<Candidate>) -> Sample {
-        Sample { half, locale: "ru_RU", operation: Operation::Deletion, word: word.to_owned(), weight, capital: false, gate: gate.to_owned(), candidates }
+        let rivals = candidates.iter().map(|candidate| WrittenCandidate { word: candidate.word.clone(), count: 1000, edits: candidate.edits.clone() }).collect();
+        Sample { half, locale: "ru_RU", operation: Operation::Deletion, word: word.to_owned(), weight, capital: false, gate: gate.to_owned(), candidates, rivals }
     }
 
     #[test]
@@ -647,7 +725,7 @@ mod tests {
         let heavy = policy.minimum_weight() + 100;
         let mut samples = vec![sample(1, "дом", heavy, "", vec![candidate("дом", heavy, Operation::Deletion)]), sample(1, "дома", heavy, "", vec![candidate("домой", heavy, Operation::Deletion)])];
         samples.push(Sample { locale: "en_US", operation: Operation::Substitution, ..sample(1, "house", heavy, "occurs", Vec::new()) });
-        let report = score(&samples, &policy, 1);
+        let report = score(&samples, &policy, 1, true);
         let deletions = &report[format!("ru_RU:{}", Operation::Deletion.as_str())];
         assert_eq!((deletions["right"].clone(), deletions["wrong"].clone()), (json!(1), json!(1)));
         assert_eq!((report["en_US"]["wrong_share_of_corrections"].clone(), report["en_US"]["real_word_typos"].clone()), (json!(0.0), json!(1)));
@@ -666,6 +744,10 @@ mod tests {
         samples.push(sample(0, "ничего", heavy, "", Vec::new()));
         samples.push(sample(0, "есть", heavy, "occurs", Vec::new()));
         samples.push(sample(1, "другое", heavy, "", Vec::new()));
+        // A right correction into a word written text counts too seldom is not taken.
+        let mut unwritten = sample(0, "редкое", heavy, "", vec![candidate("редкое", heavy, Operation::Deletion)]);
+        unwritten.rivals[0].count = 1;
+        samples.push(unwritten);
         let (policy, tried) = tune(&samples).expect("a feasible policy");
         assert_eq!(policy.candidate_min_count, CANDIDATE_MIN_COUNT);
         assert!((policy.posterior_ratio - 1.0).abs() < f64::EPSILON, "{}", policy.posterior_ratio);

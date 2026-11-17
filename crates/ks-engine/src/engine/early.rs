@@ -4,7 +4,7 @@ use super::logging::technical_event;
 use super::*;
 use ks_context::context_policy::{caret_lag, typed_short_of};
 use ks_context::prefix_model::{PrefixInput, PrefixSide};
-use ks_context::typo_correction::{corrected_keys, known_elsewhere};
+use ks_context::typo_correction::{corrected_keys, known_elsewhere, written_section};
 use ks_lang::early_switch::{early_switch_decision, EarlySwitchDecision, EarlySwitchPolicy, PrefixScorer};
 use serde_json::json;
 
@@ -493,12 +493,16 @@ impl EngineCore {
         let identifiers = self.context_policy.shared_identifiers();
         let protected = self.detector.protected_tokens.clone();
         let capital_allowed = observed && (before.is_empty() || before.chars().next_back().is_some_and(|last| SENTENCE_END_SIGNS.contains(last)));
-        let judgement = corrector.judge(&word, &self.model(group).locale, &reading_refs, capital_allowed, &|text| {
-            known_elsewhere(text, &lexicons, &terms, identifiers, &protected, &|lower| excluded.contains(lower))
-        });
+        let locale = self.model(group).locale.clone();
+        let section = written_section(&locale);
+        let judgement = corrector.judge(
+            &word, &locale, &reading_refs, capital_allowed,
+            &|text| known_elsewhere(text, &lexicons, &terms, identifiers, &protected, &|lower| excluded.contains(lower)),
+            &|form| section.map_or(0, |section| terms.term(section).count(form)),
+        );
         drop(lexicons);
         let reason_name = judgement.reason.as_str();
-        if matches!(reason_name, "no_candidate" | "rare" | "ambiguous" | "corrected") {
+        if matches!(reason_name, "no_candidate" | "rare" | "ambiguous" | "unwritten" | "contested" | "corrected") {
             // No list knows the word: left as typed, it counts towards the user's own (personal_word_settled).
             self.personal_pending.clone_from(&word);
         }
@@ -519,10 +523,14 @@ impl EngineCore {
         let letters = pystr::len(&word);
         let operation = choice.edit.operation.as_str();
         let count_order = judgement.count_order();
+        // The written list's count as an order of magnitude and its margin: numbers, never the words.
+        let written_order = judgement.written.map(|written| if written.count == 0 { -1 } else { written.count.to::<f64>().log10().floor().to::<i64>() });
+        let written_margin = judgement.written.and_then(|written| written.margin.is_finite().then(|| logged(written.margin)).flatten());
         let Some(strokes) = strokes else {
             technical_event!(
                 self.shared, "typo_correction_declined", "reason": reason, "letters": letters, "operation": operation,
-                "candidates": judgement.candidates, "count_order": count_order, "source_group": base.source_group, "target_group": group,
+                "candidates": judgement.candidates, "count_order": count_order, "written_order": written_order, "written_margin": written_margin,
+                "source_group": base.source_group, "target_group": group,
             );
             return Ok(None);
         };
@@ -531,6 +539,7 @@ impl EngineCore {
             self.shared, "typo_correction_planned", "position": choice.edit.position,
             "margin": if choice.margin.is_finite() { logged(choice.margin) } else { None },
             "letters": letters, "operation": operation, "candidates": judgement.candidates, "count_order": count_order,
+            "written_order": written_order, "written_margin": written_margin,
             "source_group": base.source_group, "target_group": group,
         );
         let converted = base.source_group != group;

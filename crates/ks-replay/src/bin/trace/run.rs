@@ -251,6 +251,10 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
                 model.remove("summary");
             }
         }
+        // The Python engine had no written list to confirm a typo correction with: its typo events say nothing of one.
+        if matches!(event_name(expected_line).as_str(), "typo_correction_planned" | "typo_correction_declined") {
+            right.as_object_mut().map(|object| (object.remove("written_order"), object.remove("written_margin")));
+        }
         // An exception's class is the Python's; the port has its own names for the same failure.
         if left["event"] == "history_write_failed" {
             left.as_object_mut().map(|object| object.remove("error"));
