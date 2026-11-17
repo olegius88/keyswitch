@@ -19,6 +19,24 @@ fn lengths(selected: Option<&SelectedText>, plan: &SelectionPlan) -> Map<String,
     fields
 }
 
+/// Whether a selection command refused for `reason` found no selection, or did not read it: KeySwitch paused, its own
+/// window, an excluded program or a password field, a backend or a terminal where the selection cannot be read, no caret,
+/// a clipboard another program holds. The other reasons are about a selection that is there.
+fn leaves_selection_unknown(reason: RefusalReason) -> bool {
+    matches!(
+        reason,
+        RefusalReason::Disabled
+            | RefusalReason::OwnWindow
+            | RefusalReason::ExcludedApplication
+            | RefusalReason::SensitiveField
+            | RefusalReason::Unsupported
+            | RefusalReason::NoSelection
+            | RefusalReason::Terminal
+            | RefusalReason::NoCaret
+            | RefusalReason::ClipboardBusy
+    )
+}
+
 impl EngineCore {
     // A selection hotkey: its command runs once every key is up, as a Pause conversion waits for them.
     //
@@ -85,6 +103,21 @@ impl EngineCore {
 
     /// Read the selection, change it and type the result over it; the log gets lengths, never the text.
     pub fn run_selection_command(&mut self, command: SelectionCommand) {
+        self.selection_command(command, false);
+    }
+
+    /// A double tap of the layout switch key with no word to convert: the selection is converted as the selection hotkey of
+    /// the layout converts it. With nothing selected, or where the selection cannot be read, it does what the conversion
+    /// hotkey does with nothing to convert.
+    pub(crate) fn convert_selection_or_switch(&mut self, trigger_keycode: i64) {
+        if !self.selection_command(SelectionCommand::Layout, true) {
+            self.switch_layout_only(trigger_keycode);
+        }
+    }
+
+    /// `run_selection_command`; with `or_else`, a refusal that found no selection or could not tell
+    /// (`leaves_selection_unknown`) is left to the caller, who does something else: false then.
+    fn selection_command(&mut self, command: SelectionCommand, or_else: bool) -> bool {
         let started = self.monotonic();
         let application = self.backend.active_application();
         let focus = self.backend.focused_window();
@@ -92,9 +125,16 @@ impl EngineCore {
             let mut fields = Map::new();
             fields.insert("reason".into(), json!(refusal.reason.as_str()));
             fields.insert("application".into(), json!(application));
+            let handed_back = or_else && leaves_selection_unknown(refusal.reason);
+            if or_else {
+                // Only a double tap hands a refusal back: the records of the selection hotkeys stay as they were.
+                fields.insert("handed_back".into(), json!(handed_back));
+            }
             self.log_selection(command, "refused", started, fields);
-            self.report_selection_outcome(refusal_message(refusal.reason));
-            return;
+            if !handed_back {
+                self.report_selection_outcome(refusal_message(refusal.reason));
+            }
+            return !handed_back;
         }
         let backend = self.backend.clone();
         let mut selected: Option<SelectedText> = None;
@@ -124,9 +164,15 @@ impl EngineCore {
                 let mut fields = lengths(selected.as_ref(), &plan);
                 fields.insert("reason".into(), json!(error.reason.as_str()));
                 fields.insert("application".into(), json!(application));
+                let handed_back = or_else && leaves_selection_unknown(error.reason);
+                if or_else {
+                    fields.insert("handed_back".into(), json!(handed_back));
+                }
                 self.log_selection(command, "refused", started, fields);
-                self.report_selection_outcome(refusal_message(error.reason));
-                return;
+                if !handed_back {
+                    self.report_selection_outcome(refusal_message(error.reason));
+                }
+                return !handed_back;
             }
             Err(SelectionError::Failed(error)) => {
                 // The type names the failure for the log; the message, which names the step, goes to the status line.
@@ -140,7 +186,7 @@ impl EngineCore {
                 self.log_selection(command, "failed", started, fields);
                 self.shared.update(Update { last_error: Some(error.to_string()), ..Update::default() });
                 self.report_selection_outcome("Ошибка замены выделения · проверьте текст в приложении".to_owned());
-                return;
+                return true;
             }
             Ok(()) => {}
         }
@@ -168,6 +214,7 @@ impl EngineCore {
             last_error: Some(String::new()),
             ..Update::default()
         });
+        true
     }
 
     /// A selection hotkey that could not do its work says why where the user is looking, not only on the status line.

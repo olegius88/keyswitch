@@ -259,4 +259,11 @@ pub trait InputBackend: Send + Sync {
     fn keep_window_inactive(&self, _window: i64) -> bool {
         false
     }
+
+    /// Whether the system itself answers both Shifts pressed together: an option of the keyboard settings that switches the
+    /// layout or turns Caps Lock on with them (XKB `grp:shifts_toggle`, `shift:both_capslock`). KeySwitch then leaves the
+    /// chord to it (`detection.both_shifts_toggle`). Windows and macOS have no such option.
+    fn system_takes_both_shifts(&self) -> bool {
+        false
+    }
 }

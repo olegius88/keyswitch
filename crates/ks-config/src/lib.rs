@@ -11,6 +11,7 @@ pub mod config;
 pub mod constants;
 pub mod history;
 pub mod indicator;
+pub mod installation;
 pub mod learning;
 pub mod log_privacy;
 pub mod logsetup;

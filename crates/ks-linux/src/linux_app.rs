@@ -258,6 +258,8 @@ pub fn main(arguments: &[String]) -> i32 {
         return crate::wayland_access::disable_command();
     }
     crate::platform::install();
+    // Before the log is opened: a new installation is told apart by an empty folder of the program.
+    ks_config::installation::note_start();
     let _ = logsetup::configure_logging(None);
     if parsed.diagnose {
         let (text, available) = diagnostics(&resource_dir());

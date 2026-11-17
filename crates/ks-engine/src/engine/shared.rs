@@ -2,7 +2,7 @@
 
 use super::logging::technical_event;
 use super::types::{Stroke, EngineSnapshot, CorrectionPlan, LearningPrompt, Hotkey, is_modifier_key, PROMPT_KEYS, Update};
-use super::layout_tap::{configured_convert_last_key, configured_layout_switch_key};
+use super::layout_tap::{both_shifts_toggle, configured_convert_last_key, configured_layout_switch_key};
 use crate::constants::{ENGINE_EVENT_QUEUE_MAX_SIZE, LEARNING_PROMPT_TIMEOUT_SECONDS, POINTER_KEY_NAME, WHEEL_KEY_NAME};
 use ks_backend::{FocusInfo, InputBackend, KeyDisposition, KeyEvent, KeyFilter, KeyListener};
 use ks_config::config::SettingsStore;
@@ -113,6 +113,7 @@ pub(super) type SelectionNoticeCallback = Arc<dyn Fn(&str) + Send + Sync>;
 pub(super) type LearningPromptCallback = Arc<dyn Fn(Option<&LearningPrompt>) + Send + Sync>;
 pub(super) type RuleRequestCallback = Arc<dyn Fn(&LearningPrompt) + Send + Sync>;
 pub(super) type KeptByChoiceCallback = Arc<dyn Fn() + Send + Sync>;
+pub(super) type AutoSwitchCallback = Arc<dyn Fn(bool) + Send + Sync>;
 
 /// What the Python's `_lock` guards. It is never held while calling a callback, the backend or the settings.
 struct Guarded {
@@ -125,6 +126,7 @@ struct Guarded {
     learning_prompt_callbacks: Vec<LearningPromptCallback>,
     rule_request_callbacks: Vec<RuleRequestCallback>,
     kept_by_choice_callbacks: Vec<KeptByChoiceCallback>,
+    auto_switch_callbacks: Vec<AutoSwitchCallback>,
 }
 
 pub struct Shared {
@@ -205,6 +207,7 @@ impl Shared {
                 learning_prompt_deadline: None,
                 learning_prompt_callbacks: Vec::new(),
                 kept_by_choice_callbacks: Vec::new(),
+                auto_switch_callbacks: Vec::new(),
                 rule_request_callbacks: Vec::new(),
             }),
             log_redactor: Mutex::new(ks_config::log_privacy::LogRedactor::new()),
@@ -239,7 +242,9 @@ impl Shared {
         let hotkeys = Arc::new(self.configured_hotkeys());
         *self.own_hotkeys.write().unwrap_or_else(PoisonError::into_inner) = hotkeys;
         self.injected_input.store(self.flag("detection.injected_input", false), Ordering::Relaxed);
-        let tap_key_set = configured_layout_switch_key(&self.settings).is_some() || configured_convert_last_key(&self.settings).is_some();
+        let tap_key_set = configured_layout_switch_key(&self.settings).is_some()
+            || configured_convert_last_key(&self.settings).is_some()
+            || both_shifts_toggle(&self.settings);
         self.layout_tap_enabled.store(tap_key_set, Ordering::Relaxed);
     }
 
@@ -437,7 +442,8 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
         }
     }
 
-    /// A turned wheel only ends a lone press of the layout switch key or the conversion key (`follow_layout_tap`). It is
+    /// A turned wheel only ends a lone press of the layout switch key or the conversion key, or both Shifts on their way to
+    /// their chord (`forget_taps`). It is
     /// queued only while such a key is set, once for a run of turns, never in place of a key, and it is no typing
     /// (`typed_events` counts what the hook saw during a correction, a wheel included would read as a key that went past
     /// it).
@@ -628,6 +634,16 @@ Value::Object(_)) => Hotkey::new(&other.to_string()),
 
     pub fn kept_by_choice_callbacks(&self) -> Vec<KeptByChoiceCallback> {
         locked(&self.guarded).kept_by_choice_callbacks.clone()
+    }
+
+    /// Told on the engine's thread when both Shifts turned the automatic switching off (false) or on (true): the
+    /// platforms say so at the caret, where the person looks.
+    pub fn subscribe_auto_switch(&self, callback: AutoSwitchCallback) {
+        locked(&self.guarded).auto_switch_callbacks.push(callback);
+    }
+
+    pub fn auto_switch_callbacks(&self) -> Vec<AutoSwitchCallback> {
+        locked(&self.guarded).auto_switch_callbacks.clone()
     }
 
     /// `self.learning_prompt`.

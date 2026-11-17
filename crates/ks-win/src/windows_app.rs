@@ -190,6 +190,8 @@ pub fn main(arguments: &[String]) -> i32 {
         Parsed::Run(parsed) => parsed,
     };
     install_platform();
+    // Before the log is opened: a new installation is told apart by an empty folder of the program.
+    ks_config::installation::note_start();
     let _ = logsetup::configure_logging(None);
     if parsed.diagnose {
         let (text, available) = diagnostics(&resource_dir());

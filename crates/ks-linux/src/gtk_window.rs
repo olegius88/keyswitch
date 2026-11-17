@@ -16,21 +16,27 @@ use gtk::{gdk, gio, glib, pango};
 use ks_backend::{BackendProbe, InputBackend};
 use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DETECTION_CONVERT_LAST_KEY};
+use ks_config::constants::{
+    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_FIELD_CATCH_UP, DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS,
+    DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS,
+};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::{LogStatus, log_directory, log_path, log_status, rotation_summary};
 use ks_context::constants::PREFIX_MAX_CHARACTERS;
 use ks_config::constants::HINTS_SETTING;
 use ks_ui::hints::{HintView, Place};
-use ks_ui::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE, hotkey_problem_text, settings_window_title};
+use ks_ui::windows_ui_model::{
+    BOTH_SHIFTS_TOGGLE_TITLE, DOUBLE_TAP_CONVERTS_TITLE, EARLY_SWITCH_TITLE, HINTS_SETTING_DESCRIPTION, HINTS_SETTING_TITLE,
+    both_shifts_toggle_subtitle, double_tap_converts_description, hotkey_problem_text, settings_window_title,
+};
 use ks_context::typo_correction::{
     CORRECT_TYPOS_ENGLISH_DESCRIPTION, CORRECT_TYPOS_ENGLISH_TITLE, CORRECT_TYPOS_TITLE, correct_typos_description,
 };
 use ks_engine::EngineSnapshot;
 use ks_engine::engine::{
-    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_TITLE, Hotkey, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE,
-    single_key_conflict,
+    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, Hotkey, LAYOUT_SWITCH_KEY_DESCRIPTION, LAYOUT_SWITCH_KEY_LABELS,
+    LAYOUT_SWITCH_KEY_TITLE, single_key_conflict,
 };
 use ks_engine::constants::{
     CONFIDENCE_SETTING_MAX, CONFIDENCE_SETTING_MIN, DEFAULT_EARLY_SWITCH_MIN_LENGTH, EARLY_SWITCH_MIN_LENGTH_SETTING_MAX,
@@ -1236,11 +1242,11 @@ impl Builder<'_> {
         view
     }
 
-    /// The list of a key tapped alone (`detection.layout_switch_key`, `detection.convert_last_key`): the keys the layout
-    /// switch key offers, and a key the other such setting has is refused (`choose_single_key`).
-    fn single_key_row(&self, path: &str, title: &str, subtitle: &str) -> adw::ComboRow {
-        let names: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(key, _)| *key).collect();
-        let labels: Vec<&str> = LAYOUT_SWITCH_KEY_LABELS.iter().map(|(_, label)| *label).collect();
+    /// The list of a key tapped alone (`detection.layout_switch_key`, `detection.convert_last_key`): the keys the setting
+    /// offers (`choices`), and a key the other such setting has is refused (`choose_single_key`).
+    fn single_key_row(&self, path: &str, title: &str, subtitle: &str, choices: &[(&str, &str)]) -> adw::ComboRow {
+        let names: Vec<&str> = choices.iter().map(|(key, _)| *key).collect();
+        let labels: Vec<&str> = choices.iter().map(|(_, label)| *label).collect();
         let current = setting_text(&self.services.settings, path, DEFAULT_LAYOUT_SWITCH_KEY);
         let row = adw::ComboRow::builder().title(title).subtitle(subtitle).model(&gtk::StringList::new(&labels)).build();
         row.set_selected(index_of(&names, &current, 0));
@@ -1530,12 +1536,18 @@ impl Builder<'_> {
     fn hotkeys(&mut self) {
         let page = self.pages.page("hotkeys", "Горячие клавиши", "Комбинации распознаются глобально. Нажмите Enter после редактирования поля.");
         let switching = group("Смена раскладки");
-        switching.add(&self.single_key_row("detection.layout_switch_key", LAYOUT_SWITCH_KEY_TITLE, LAYOUT_SWITCH_KEY_DESCRIPTION));
+        switching.add(&self.single_key_row("detection.layout_switch_key", LAYOUT_SWITCH_KEY_TITLE, LAYOUT_SWITCH_KEY_DESCRIPTION, &LAYOUT_SWITCH_KEY_LABELS));
+        switching.add(&self.switch_row(DETECTION_DOUBLE_TAP_CONVERTS.path(), DOUBLE_TAP_CONVERTS_TITLE, &double_tap_converts_description()));
+        // Where the keyboard settings of the system answer both Shifts themselves, the switch says so and is not offered.
+        let taken = crate::system_keys::both_shifts_taken();
+        let both = self.switch_row(DETECTION_BOTH_SHIFTS_TOGGLE.path(), BOTH_SHIFTS_TOGGLE_TITLE, &both_shifts_toggle_subtitle(taken));
+        both.set_sensitive(taken.is_none());
+        switching.add(&both);
         page.append(&switching);
         let commands = group("Команды");
         commands.add(&self.hotkey_row("hotkeys.toggle", "Пауза / продолжение", "Временно выключает автоматические исправления"));
         commands.add(&self.hotkey_row("hotkeys.convert_last", "Преобразовать последнее слово", "Меняет раскладку принудительно, без решения словаря"));
-        commands.add(&self.single_key_row(DETECTION_CONVERT_LAST_KEY.path(), CONVERT_LAST_KEY_TITLE, CONVERT_LAST_KEY_DESCRIPTION));
+        commands.add(&self.single_key_row(DETECTION_CONVERT_LAST_KEY.path(), CONVERT_LAST_KEY_TITLE, CONVERT_LAST_KEY_DESCRIPTION, &CONVERT_LAST_KEY_LABELS));
         commands.add(&self.hotkey_row(
             "hotkeys.undo",
             "Отменить исправление",

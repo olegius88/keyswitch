@@ -86,6 +86,8 @@ mod scenario {
     /// How often a layout not yet taken is asked for again.
     const LAYOUT_ASKED_AGAIN: u64 = 300;
     const PHASE_SETTLE: u64 = 300;
+    /// Two taps of the layout switch key further apart than a double tap (`LAYOUT_DOUBLE_TAP_SECONDS`), as two switches.
+    const TAPS_APART: u64 = 700;
     const WINDOW_OPENS: u64 = 1_000;
     const START_ATTEMPTS: u32 = 4;
     const PROBE_ATTEMPTS: u32 = 3;
@@ -799,7 +801,7 @@ mod scenario {
             if !editor.pump_until(STANDARD, |editor| editor.group() == wanted) {
                 return Err(format!("a tap of Left Shift left the layout {}, not {wanted}", editor.group()));
             }
-            editor.pump(PHASE_SETTLE);
+            editor.pump(TAPS_APART);
         }
         editor.send(&[shift(VK_RSHIFT, SCAN_RIGHT_SHIFT, true), shift(VK_RSHIFT, SCAN_RIGHT_SHIFT, false)])?;
         let letter = |pressed: bool| NativeInput { scan_code: SCAN_H, ..user(pressed) };
@@ -827,6 +829,35 @@ mod scenario {
         editor.pump(PHASE_SETTLE);
         editor.expect("руддщ", 1, STANDARD)?;
         println!("WINDOWS_CONVERT_KEY_E2E_OK");
+        Ok(())
+    }
+
+    /// The Shift keys of a new installation (`detection.double_tap_converts`, `detection.both_shifts_toggle`): two quick
+    /// taps of the layout switch key convert the word just typed as Pause does, and both Shifts pause the automatic
+    /// switching and let it go on.
+    fn shift_keys(editor: &Editor, root: &Path) -> Result<(), String> {
+        let enabled = |wanted: bool| SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted);
+        editor.pump(TAPS_APART);
+        editor.prepare(0)?;
+        editor.scans(&HELLO)?;
+        editor.expect("hello", 0, LONG)?;
+        let shift = |virtual_key: u32, scan_code: u32, pressed: bool| NativeInput { virtual_key, scan_code, ..user(pressed) };
+        let left = |pressed: bool| shift(VK_LSHIFT, SCAN_LEFT_SHIFT, pressed);
+        let right = |pressed: bool| shift(VK_RSHIFT, SCAN_RIGHT_SHIFT, pressed);
+        editor.send(&[left(true), left(false), left(true), left(false)])?;
+        editor.expect("руддщ", 1, LONG)?;
+        editor.pump(TAPS_APART);
+        for wanted in [false, true] {
+            editor.send(&[left(true), right(true), right(false), left(false)])?;
+            if !editor.pump_until(LONG, |_| enabled(wanted)) {
+                return Err(format!("both Shifts did not turn the automatic switching {}", if wanted { "on" } else { "off" }));
+            }
+            editor.pump(PHASE_SETTLE);
+        }
+        if editor.group() != 1 {
+            return Err(format!("both Shifts switched the layout to {}", editor.group()));
+        }
+        println!("WINDOWS_SHIFT_KEYS_E2E_OK");
         Ok(())
     }
 
@@ -1137,7 +1168,16 @@ mod scenario {
             tray_switches(&editor, child.id())?;
             let _ = child.kill();
             let _ = child.wait();
-            configure(&root, &[("detection.correct_on_pause", json!(false)), ("detection.correct_on_enter", json!(true)), ("detection.layout_switch_key", json!("Shift_L"))])?;
+            configure(
+                &root,
+                &[
+                    ("detection.correct_on_pause", json!(false)),
+                    ("detection.correct_on_enter", json!(true)),
+                    ("detection.layout_switch_key", json!("Shift_L")),
+                    ("detection.double_tap_converts", json!(true)),
+                    ("detection.both_shifts_toggle", json!(true)),
+                ],
+            )?;
             SettingsStore::new(Some(root.join("config/config.json"))).write(DETECTION_CONVERT_LAST_KEY, "Control_R".to_owned(), true).map_err(|error| format!("{error:?}"))?;
             let engine_before = engine_ready_line(&root);
             let restarted = Instant::now();
@@ -1164,6 +1204,7 @@ mod scenario {
             }
             layout_key(&editor)?;
             convert_key(&editor)?;
+            shift_keys(&editor, &root)?;
             function_key(&editor, &root)
         })();
         let _ = child.kill();

@@ -66,7 +66,7 @@ fn what_a_backend_answers_by_default() {
     assert!(backend.erases_any_length() && !backend.swallows_hotkeys() && !backend.supports_selection());
     assert_eq!(backend.take_unseen_input(), Ok(None));
     assert!(backend.take_input_delay().is_none() && backend.take_hook_gap().is_none() && backend.input_anchor().is_none());
-    assert!(!backend.restore_window(None) && !backend.keep_window_inactive(1));
+    assert!(!backend.restore_window(None) && !backend.keep_window_inactive(1) && !backend.system_takes_both_shifts());
     let refused = SelectionError::Refused(SelectionRefused::new(RefusalReason::Unsupported));
     assert_eq!(backend.read_selection("app", 1).unwrap_err(), refused);
     let selected = SelectedText { text: String::new(), source: String::new() };

@@ -1,7 +1,7 @@
 //! The hints: what sets each one off, where it shows, on which platforms, and what it says. Every name a text gives is
 //! the constant the settings window or the tray menu shows it by, and every hotkey is the one in the settings.
 
-use ks_config::constants::{HINTS_SETTING, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT, HOTKEY_SELECTION_TRANSLITERATE};
+use ks_config::constants::{EITHER_SHIFT_KEY, HINTS_SETTING, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT, HOTKEY_SELECTION_TRANSLITERATE};
 use ks_config::indicator::layout_label;
 use ks_context::typo_correction::CORRECT_TYPOS_TITLE;
 use ks_engine::CorrectionPlan;
@@ -12,7 +12,7 @@ use ks_updates::{RELEASE_PAGE_PREFIX, SemanticVersion};
 
 use crate::constants::{
     AUTOMATIC_CORRECTIONS_FOR_HISTORY_HINT, AUTOMATIC_CORRECTIONS_FOR_NOTIFICATIONS_HINT, AUTOMATIC_CORRECTIONS_FOR_PAUSE_HINT,
-    HINTS_INTRODUCED_VERSION, KEPT_BY_CHOICE_VERSION, LAYOUT_SWITCH_KEY_VERSION, MANUAL_CONVERSIONS_FOR_SELECTION_HINT,
+    HINTS_INTRODUCED_VERSION, KEPT_BY_CHOICE_VERSION, LAYOUT_SWITCH_KEY_VERSION, MANUAL_CONVERSIONS_FOR_SELECTION_HINT, SHIFT_KEYS_VERSION,
 };
 use crate::tray_model::{EXCLUSIONS_LABEL, HISTORY_LABEL, NOTIFICATIONS_LABEL, SOUND_LABEL};
 use crate::windows_ui_model::{EARLY_SWITCH_TITLE, HINTS_SETTING_TITLE, MAC_SYSTEM_PAGE_TITLE, PAGE_NAMES};
@@ -196,6 +196,17 @@ pub struct Hotkeys {
     pub selection_layout: String,
     pub selection_case: String,
     pub selection_transliterate: String,
+    pub tap: TapKeys,
+}
+
+/// The keys tapped alone, as the settings hold them: the layout switch key (`detection.layout_switch_key`), whether two
+/// taps of it convert the word, and whether both Shifts pause the automatic switching where the system leaves that chord
+/// to KeySwitch.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TapKeys {
+    pub switch: String,
+    pub double_tap: bool,
+    pub both_shifts: bool,
 }
 
 impl Hotkeys {
@@ -270,13 +281,13 @@ pub struct Hint {
 }
 
 impl Hint {
-    /// Its text, or None when a hotkey it names is cleared in the settings.
+    /// Its text, or None when a hotkey it names is cleared in the settings, or the keys it tells of are not set.
     #[must_use]
     pub fn text(&self, wording: &Wording<'_>) -> Option<String> {
         if self.hotkeys.iter().any(|name| pystr::strip(wording.hotkeys.get(*name)).is_empty()) {
             return None;
         }
-        Some((self.text)(wording))
+        Some((self.text)(wording)).filter(|text| !text.is_empty())
     }
 
     /// Whether it shows each time its event comes, until the user turns it off, instead of once.
@@ -406,6 +417,23 @@ fn first_start(wording: &Wording<'_>) -> String {
     )
 }
 
+/// The Shift keys of a new installation (`ks_config::installation`), as the settings have them now: nothing when either
+/// Shift does not switch the layout.
+fn shift_keys(wording: &Wording<'_>) -> String {
+    let keys = &wording.hotkeys.tap;
+    if keys.switch != EITHER_SHIFT_KEY {
+        return String::new();
+    }
+    let mut parts = vec!["Shift — сменить раскладку"];
+    if keys.double_tap {
+        parts.push("Shift дважды — перевести слово");
+    }
+    if keys.both_shifts {
+        parts.push("оба Shift — выключить автопереключение");
+    }
+    format!("{}. Изменить — на странице «{}».", parts.join(", "), wording.page(SettingsPage::Hotkeys))
+}
+
 fn first_correction_undo(wording: &Wording<'_>) -> String {
     format!(
         "Слово перепечатано в другой раскладке. Если это лишнее, {} вернёт его как набрано. Доступно {} после исправления.",
@@ -495,7 +523,18 @@ fn updated(wording: &Wording<'_>) -> String {
 // --------------------------------------------------------------------------------------------------------- catalogue
 
 /// The hints in the order they are shown when several are due at once.
-pub static CATALOGUE: [Hint; 14] = [
+pub static CATALOGUE: [Hint; 15] = [
+    Hint {
+        id: "shift_keys",
+        group: Group::Intro,
+        version: Some(SHIFT_KEYS_VERSION),
+        trigger: Trigger::FirstStart,
+        places: &[Place::Tray],
+        platforms: EVERY_PLATFORM,
+        opens: Some(Destination::Settings { page: SettingsPage::Hotkeys, setting: Some(LAYOUT_SWITCH_KEY_SETTING) }),
+        hotkeys: &[],
+        text: shift_keys,
+    },
     Hint {
         id: "first_start",
         group: Group::Intro,
@@ -668,6 +707,7 @@ mod tests {
     use serde_json::Value;
     use std::collections::HashSet;
 
+    /// The hotkeys shipped, with the keys a new installation taps.
     fn shipped(platform: Platform) -> Hotkeys {
         let defaults = default_settings(Some(if platform == Platform::MacOs { "darwin" } else { "linux" }));
         let key = |name: HotkeyName| defaults["hotkeys"][name.setting()].as_str().unwrap().to_owned();
@@ -677,6 +717,7 @@ mod tests {
             selection_layout: key(HotkeyName::SelectionLayout),
             selection_case: key(HotkeyName::SelectionCase),
             selection_transliterate: key(HotkeyName::SelectionTransliterate),
+            tap: TapKeys { switch: "Shift".to_owned(), double_tap: true, both_shifts: true },
         }
     }
 
@@ -759,6 +800,24 @@ mod tests {
         assert!(text_of("updated", Platform::Linux, &windows).contains(&format!("обновлён до {}.", version())));
         assert!(text_of("first_correction_undo", Platform::Linux, &windows).contains("Ctrl+Alt+Z вернёт его как набрано. Доступно 10 секунд"));
         assert!(text_of("kept_by_choice", Platform::Windows, &windows).ends_with("Перевести его — Pause."));
+        assert_eq!(
+            text_of("shift_keys", Platform::Linux, &windows),
+            format!("Shift — сменить раскладку, Shift дважды — перевести слово, оба Shift — выключить автопереключение. Изменить — на странице «{HOTKEYS_PAGE_TITLE}».")
+        );
+    }
+
+    #[test]
+    fn the_shift_keys_are_told_as_the_settings_have_them() {
+        let hint = CATALOGUE.iter().find(|hint| hint.id == "shift_keys").unwrap();
+        let text = |tap: TapKeys| hint.text(&Wording { platform: Platform::Windows, version: version(), hotkeys: &Hotkeys { tap, ..shipped(Platform::Windows) } });
+        let either = |double_tap: bool, both_shifts: bool| TapKeys { switch: "Shift".to_owned(), double_tap, both_shifts };
+        assert_eq!(text(either(false, false)).as_deref(), Some("Shift — сменить раскладку. Изменить — на странице «Горячие клавиши»."));
+        assert!(text(either(true, false)).is_some_and(|text| text.contains("Shift дважды") && !text.contains("оба Shift")));
+        assert!(text(either(false, true)).is_some_and(|text| !text.contains("Shift дважды") && text.contains("оба Shift")));
+        // Another key, or none: no hint of the Shift keys at all.
+        for switch in ["", "Shift_L", "Control_R"] {
+            assert_eq!(text(TapKeys { switch: switch.to_owned(), double_tap: true, both_shifts: true }), None, "{switch}");
+        }
     }
 
     #[test]
@@ -820,6 +879,7 @@ mod tests {
             selection_layout: "l".into(),
             selection_case: "k".into(),
             selection_transliterate: "t".into(),
+            tap: TapKeys::default(),
         };
         let mut seen = Vec::new();
         for name in HotkeyName::ALL {
@@ -850,7 +910,7 @@ mod tests {
     }
 
     fn hint(trigger: Trigger) -> Hint {
-        Hint { trigger, ..CATALOGUE[1] }
+        Hint { trigger, ..CATALOGUE[2] }
     }
 
     #[test]

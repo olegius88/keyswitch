@@ -78,6 +78,15 @@ pub struct HintView {
     index: usize,
 }
 
+impl HintView {
+    /// A notice that is no hint of the catalogue (`Hints::auto_switch`): shown each time its event comes, until
+    /// «Больше не показывать» turns it off, with the two buttons of a hint that repeats.
+    #[must_use]
+    pub fn notice(id: &'static str, place: Place, text: &str) -> HintView {
+        HintView { id, place, title: HINT_TITLE, text: text.to_owned(), ok: HINT_OK_LABEL, never: HINT_NEVER_AGAIN_LABEL, opens: None, index: usize::MAX }
+    }
+}
+
 /// What a platform does now.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step<A> {
@@ -443,13 +452,16 @@ impl<A: Clone> Scheduler<A> {
         if !self.room(moment) {
             return None;
         }
-        let chosen = (0..self.pending.len()).filter(|at| self.ready(&self.pending[*at], now)).min_by_key(|at| self.pending[*at].index)?;
-        let pending = self.pending.remove(chosen);
-        let view = self.view(pending.index, pending.place)?;
-        match pending.anchor {
-            Some(anchor) if pending.place == Place::Caret => Some(Step::Caret(view, anchor)),
-            _ => Some(Step::Tray(view)),
+        // A hint with nothing to say now (a hotkey it names cleared, keys it tells of not set) goes, and the next one is due.
+        while let Some(chosen) = (0..self.pending.len()).filter(|at| self.ready(&self.pending[*at], now)).min_by_key(|at| self.pending[*at].index) {
+            let pending = self.pending.remove(chosen);
+            let Some(view) = self.view(pending.index, pending.place) else { continue };
+            return match pending.anchor {
+                Some(anchor) if pending.place == Place::Caret => Some(Step::Caret(view, anchor)),
+                _ => Some(Step::Tray(view)),
+            };
         }
+        None
     }
 
     /// The platform drew `view`: it is seen, and the next one waits the quiet period.
@@ -488,13 +500,20 @@ impl<A: Clone> Scheduler<A> {
         self.pending.clear();
         true
     }
+
+    /// «Больше не показывать» of a notice that is no hint of the catalogue (`HintView::notice`): written down as a hint
+    /// turned off, and the other hints go on.
+    pub fn notice_turned_off(&mut self, id: &str, moment: &Moment) {
+        self.state.see(id, self.version, &moment.timestamp, How::Forever);
+        self.dirty = true;
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
-    use crate::hints::catalogue::{CATALOGUE, Destination, HotkeyName, LAYOUT_SWITCH_KEY_SETTING, MODE_EARLY, MODE_SYMBOLS, MODE_TYPO, MODE_UNDO};
+    use crate::hints::catalogue::{CATALOGUE, Destination, TapKeys, HotkeyName, LAYOUT_SWITCH_KEY_SETTING, MODE_EARLY, MODE_SYMBOLS, MODE_TYPO, MODE_UNDO};
     use crate::hints::store::Startup;
 
     type Anchor = (i32, i32);
@@ -525,6 +544,7 @@ mod tests {
             selection_layout: "Shift+Pause".into(),
             selection_case: "Alt+Pause".into(),
             selection_transliterate: "Alt+Scroll_Lock".into(),
+            tap: TapKeys::default(),
         }
     }
 
@@ -603,6 +623,7 @@ mod tests {
         // A new installation that already saw it hears nothing.
         let mut state = started(Startup::Fresh);
         state.see("first_start", current(), TODAY, How::Ok);
+        state.see("shift_keys", current(), TODAY, How::Ok);
         let mut again = with(state);
         again.engine_running(&at(0.0));
         assert!(!again.needs_tick());
@@ -955,7 +976,7 @@ mod tests {
             id,
             trigger: Trigger::SettingsPage,
             places: &[Place::Settings { page: SettingsPage::Overview, control: None }],
-            ..CATALOGUE[10]
+            ..CATALOGUE[11]
         };
         let catalogue = leak(vec![card("a"), card("b")]);
         let mut scheduler = Scheduler::<Anchor>::new(catalogue, Platform::Linux, current(), on(), started(Startup::Same), &at(0.0));
@@ -967,19 +988,19 @@ mod tests {
 
     #[test]
     fn odd_entries_of_a_catalogue_are_held_to_its_rules() {
-        let windows_only = Hint { id: "windows", platforms: &[Platform::Windows], ..CATALOGUE[1] };
+        let windows_only = Hint { id: "windows", platforms: &[Platform::Windows], ..CATALOGUE[2] };
         let in_the_window = Hint {
             id: "window",
             trigger: Trigger::Mode("boundary"),
             places: &[Place::Settings { page: SettingsPage::Overview, control: None }],
-            ..CATALOGUE[1]
+            ..CATALOGUE[2]
         };
         let named = Hint {
             id: "named",
             trigger: Trigger::SettingsPage,
             places: &[Place::Settings { page: SettingsPage::Overview, control: None }],
             hotkeys: &[HotkeyName::Undo],
-            ..CATALOGUE[1]
+            ..CATALOGUE[2]
         };
         let catalogue = leak(vec![windows_only, in_the_window, named]);
         let cleared = HintSettings { hotkeys: Hotkeys { undo: String::new(), ..hotkeys() }, ..on() };

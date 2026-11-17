@@ -8,6 +8,12 @@ use ks_config::learning::RuleAction;
 impl EngineCore {
     // Pause: convert what was typed since the last boundary, or switch.
     pub fn schedule_manual_conversion(&mut self, trigger_keycode: i64) {
+        self.schedule_conversion(trigger_keycode, false);
+    }
+
+    /// What Pause does; with nothing typed to convert, `selection` first converts the selected text, as the selection
+    /// hotkey of the layout does (`convert_selection_or_switch`): a double tap of the layout switch key.
+    pub(crate) fn schedule_conversion(&mut self, trigger_keycode: i64, selection: bool) {
         if self.pending.as_ref().is_some_and(|pending| !pending.automatic) && self.strokes.is_empty() && self.symbol_strokes.is_empty() {
             technical_event!(
                 self.shared, "manual_conversion_waiting", "reason": "previous_command_pending",
@@ -71,6 +77,9 @@ impl EngineCore {
             source = "last_committed";
             trailing.clone_from(&committed.trailing);
             kept_tail = committed.kept_tail;
+        } else if selection {
+            self.convert_selection_or_switch(trigger_keycode);
+            return;
         } else {
             self.switch_layout_only(trigger_keycode);
             return;

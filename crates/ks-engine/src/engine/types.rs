@@ -66,6 +66,40 @@ pub struct LayoutTap {
     pub action: TapAction,
 }
 
+/// What the person's choice of layout was before a tap of the layout switch key booked its own (`book_layout_tap`), so
+/// that a second tap making it a double tap can take the first one back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManualLayout {
+    pub group: Option<i64>,
+    pub observed_at: Option<f64>,
+    pub source: String,
+    pub word: bool,
+}
+
+/// A tap of the layout switch key that switched the layout, while a second tap may still make it a double tap
+/// (`detection.double_tap_converts`): until any other key, a click or a turned wheel, or `LAYOUT_DOUBLE_TAP_SECONDS`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SwitchTapped {
+    /// `monotonic()` at its press.
+    pub pressed_at: f64,
+    /// The layout before it, and the choice of layout the engine had booked before it.
+    pub group: i64,
+    pub manual: ManualLayout,
+}
+
+/// Both Shifts on their way to a chord (`detection.both_shifts_toggle`): the first went down with nothing else held, the
+/// other went down while it was held, and nothing else came between.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShiftChord {
+    pub first: u32,
+    /// The other Shift, once it went down.
+    pub second: Option<u32>,
+    /// `monotonic()` at the first press.
+    pub pressed_at: f64,
+    /// The layout at the first press: a system that switches the layout on both Shifts has changed it by the end.
+    pub group: i64,
+}
+
 /// What the focus probe found: another window, or one whose layout is moot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FocusChange {

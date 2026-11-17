@@ -1,7 +1,7 @@
 //! The values the engine uses, each once, as in the Python's `constants` folder.
 
 pub use ks_backend::constants::{HOOK_GAP_MS, INPUT_DELAY_LATE_MS, INPUT_DELAY_SLOW_CALLBACK_MS, INPUT_DELAY_UNSTAMPED_MS, POINTER_KEY_NAME, WHEEL_KEY_NAME};
-pub use ks_config::constants::{CONVERT_LAST_KEYS, DEFAULT_CONVERT_LAST_KEY, DEFAULT_LAYOUT_SWITCH_KEY, LAYOUT_SWITCH_KEYS};
+pub use ks_config::constants::{CONVERT_LAST_KEYS, DEFAULT_CONVERT_LAST_KEY, DEFAULT_LAYOUT_SWITCH_KEY, EITHER_SHIFT_KEY, LAYOUT_SWITCH_KEYS, SHIFT_KEYS};
 pub use ks_context::constants::{
     CONTEXT_ACTION_FEATURE_VERSION, CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS, KEPT_CONTEXT_WORD_MAX_CHARACTERS,
     PLANNED_CONTEXT_WORD_MAX_CHARACTERS, PREFIX_MAX_CHARACTERS,
@@ -89,6 +89,12 @@ pub const LATE_STROKE_GRACE_SECONDS: f64 = 0.5;
 /// something else: a click, a selection, a key the person thought better of. The window of a double press of the
 /// conversion hotkey (`DOUBLE_CONVERT_PRESS_WINDOW_SECONDS`) is as long: a quick press takes a person well under it.
 pub const LAYOUT_TAP_MAX_SECONDS: f64 = 0.5;
+/// Two taps of the layout switch key are a double tap (`detection.double_tap_converts`) when the second goes down at most
+/// this long after the first did, as two presses of the conversion hotkey are a double press.
+pub const LAYOUT_DOUBLE_TAP_SECONDS: f64 = DOUBLE_CONVERT_PRESS_WINDOW_SECONDS;
+/// Both Shifts are a chord (`detection.both_shifts_toggle`) when the last of them comes up at most this long after the
+/// first went down: the two keys of the chord are a tap of both, as quick as a tap of one.
+pub const BOTH_SHIFTS_MAX_SECONDS: f64 = LAYOUT_TAP_MAX_SECONDS;
 pub const LEARNING_PROMPT_TIMEOUT_SECONDS: f64 = 8.0;
 pub const MANUAL_RELEASE_TIMEOUT_SECONDS: f64 = 3.0;
 pub const PAUSE_CORRECTION_AGREEMENT_SECONDS: f64 = 1.5;

@@ -109,6 +109,8 @@ pub fn main(arguments: &[String]) -> i32 {
 #[cfg_attr(coverage_nightly, coverage(off))] // The whole program: the live test `packaging/e2e-mac.command` starts it.
 fn run(hidden: bool, wants_diagnose: bool, no_engine: bool) -> i32 {
     crate::desktop_app::install_platform();
+    // Before the log is opened and the lock of the only copy taken: a new installation is told apart by an empty folder.
+    ks_config::installation::note_start();
     let _ = ks_config::logsetup::configure_logging(None);
     if wants_diagnose {
         return diagnose();

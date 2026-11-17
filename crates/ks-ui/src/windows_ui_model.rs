@@ -6,7 +6,7 @@ use ks_cast::To as _;
 use std::fmt;
 
 use ks_config::app_quirks::MENTION_HEADS;
-use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, HINTS_SETTING, HOTKEYS_CONVERT_LAST};
+use ks_config::constants::{DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS, HINTS_SETTING, HOTKEYS_CONVERT_LAST};
 use ks_config::history::HistoryEntry;
 use ks_config::learning::LearnedRule;
 use ks_config::logsetup::LogStatus;
@@ -28,6 +28,7 @@ use ks_text::pystr;
 use ks_text::russian_text::{HOURS, SECONDS, quantity};
 use serde_json::{Map, Value, json};
 
+use crate::tray_model::AUTO_SWITCH_LABEL;
 use crate::constants::{
     CONFIDENCE_SETTING_STEP, CONVERT_HOTKEY_NAME, HISTORY_LIMIT_SETTING_MAX, HISTORY_LIMIT_SETTING_MIN, HISTORY_LIMIT_SETTING_STEP,
     NUMBER_DISPLAY_DECIMAL_PLACES, PAUSE_DELAY_SETTING_STEP_SECONDS, UPDATE_CHECK_INTERVAL_MS,
@@ -88,6 +89,44 @@ pub const HOTKEY_SETTINGS_PREFIX: &str = "hotkeys.";
 pub const HINTS_SETTING_TITLE: &str = "Показывать подсказки о возможностях";
 pub const HINTS_SETTING_DESCRIPTION: &str =
     "Короткие пояснения у курсора и у значка: что умеет программа и что нового в выпуске. Каждое показывается один раз";
+/// What every settings window says of `detection.double_tap_converts` and `detection.both_shifts_toggle`, on the hotkeys
+/// page right after the layout switch key.
+pub const DOUBLE_TAP_CONVERTS_TITLE: &str = "Двойное нажатие переводит слово";
+pub const BOTH_SHIFTS_TOGGLE_TITLE: &str = "Оба Shift выключают автопереключение";
+/// What the GTK window says of `detection.both_shifts_toggle` where the keyboard settings of the system give both Shifts
+/// to something of their own: `BOTH_SHIFTS_TAKEN_PLACE` stands for what they do there.
+pub const BOTH_SHIFTS_TAKEN_MESSAGE: &str =
+    "Недоступно: в настройках клавиатуры системы оба Shift вместе {what}. KeySwitch оставляет это сочетание системе";
+pub const BOTH_SHIFTS_TAKEN_PLACE: &str = "{what}";
+
+/// The description of `detection.double_tap_converts`.
+#[must_use]
+pub fn double_tap_converts_description() -> String {
+    format!(
+        "Два быстрых нажатия клавиши из настройки «{LAYOUT_SWITCH_KEY_TITLE}» делают то же, что «Преобразовать последнее \
+         слово» ({CONVERT_HOTKEY_NAME}): переводят последнее слово или возвращают только что исправленное. Если слова нет, \
+         а текст выделен, — то же, что «{}». Раскладка, переключённая первым нажатием, при этом возвращается",
+        SELECTION_HOTKEY_TITLES[0].1
+    )
+}
+
+/// The description of `detection.both_shifts_toggle`.
+#[must_use]
+pub fn both_shifts_toggle_description() -> String {
+    format!(
+        "Левый и правый Shift, нажатые вместе без других клавиш, выключают или включают автоматическое переключение, как \
+         пункт «{AUTO_SWITCH_LABEL}» в меню значка; у курсора появляется короткая подсказка. Если система сама что-то делает \
+         по обоим Shift, KeySwitch это сочетание не трогает"
+    )
+}
+
+/// What a settings window says under `detection.both_shifts_toggle`: what the setting does, or, where the system answers
+/// both Shifts itself (`taken` says how), why it is not offered.
+#[must_use]
+pub fn both_shifts_toggle_subtitle(taken: Option<&str>) -> String {
+    taken.map_or_else(both_shifts_toggle_description, |what| BOTH_SHIFTS_TAKEN_MESSAGE.replace(BOTH_SHIFTS_TAKEN_PLACE, what))
+}
+
 /// What both settings windows say of `detection.field_catch_up`.
 pub const FIELD_CATCH_UP_TITLE: &str = "Ждать отстающее поле";
 pub const FIELD_CATCH_UP_DESCRIPTION: &str = "Браузеры и редакторы на Electron показывают набранное с задержкой. Сколько ждать, \
@@ -350,6 +389,8 @@ pub fn hotkey_settings() -> Vec<SettingSpec> {
             spec("detection.layout_switch_key", LAYOUT_SWITCH_KEY_TITLE, &format!("{LAYOUT_SWITCH_KEY_DESCRIPTION}."), Choice),
             &LAYOUT_SWITCH_KEY_LABELS,
         ),
+        spec(DETECTION_DOUBLE_TAP_CONVERTS.path(), DOUBLE_TAP_CONVERTS_TITLE, &format!("{}.", double_tap_converts_description()), Bool),
+        spec(DETECTION_BOTH_SHIFTS_TOGGLE.path(), BOTH_SHIFTS_TOGGLE_TITLE, &format!("{}.", both_shifts_toggle_description()), Bool),
         spec("hotkeys.toggle", "Включить или приостановить", "Глобальная пауза автоматического переключения.", Text),
         spec(
             "hotkeys.convert_last",
@@ -999,7 +1040,7 @@ mod tests {
                 count += 1;
             }
         }
-        assert_eq!(count, 18 + 1 + 6 + 8 + 11 + 2 + 1 + 1);
+        assert_eq!(count, 18 + 1 + 6 + 10 + 11 + 2 + 1 + 1);
     }
 
     #[test]
@@ -1019,14 +1060,27 @@ mod tests {
         assert!(find(&hotkeys, "hotkeys.undo").description.ends_with("Доступно 10 секунд после исправления."));
         assert!(find(&update_settings(), "updates.check_automatically").description.ends_with("раз в 6 часов."));
         assert!(find(&autocorrection_settings(), "detection.early_switch_min_length").description.contains("значение 3 действует"));
-        assert_eq!(hotkeys.len(), 8);
+        assert_eq!(hotkeys.len(), 10);
         let tap = find(&hotkeys, "detection.layout_switch_key");
         assert_eq!((tap.kind, control_text(tap, Some(&json!(""))), control_text(tap, Some(&json!("Shift_L")))), (Choice, "Выключено".to_owned(), "Левый Shift".to_owned()));
-        assert_eq!(choice_value(tap, "Правый Ctrl"), "Control_R");
-        // The conversion key offers the same keys, right after the conversion hotkey.
+        assert_eq!((choice_value(tap, "Правый Ctrl"), choice_value(tap, "Любой Shift")), ("Control_R".to_owned(), "Shift".to_owned()));
+        // The conversion key offers the same keys but either Shift, right after the conversion hotkey.
         let convert = find(&hotkeys, "detection.convert_last_key");
-        assert_eq!((convert.kind, &convert.choices, convert.title.as_str()), (Choice, &tap.choices, "Преобразовать последнее слово одной клавишей"));
+        let either: Vec<(String, String)> = tap.choices.iter().filter(|(key, _)| key != "Shift").cloned().collect();
+        assert_eq!((convert.kind, &convert.choices, convert.title.as_str()), (Choice, &either, "Преобразовать последнее слово одной клавишей"));
+        // The double tap and both Shifts come right after the layout switch key, as switches.
         let place = |path: &str| hotkeys.iter().position(|spec| spec.path == path).unwrap();
+        assert_eq!((place("detection.double_tap_converts"), place("detection.both_shifts_toggle")), (1, 2));
+        let double = find(&hotkeys, "detection.double_tap_converts");
+        assert_eq!((double.kind, double.title.as_str()), (Bool, "Двойное нажатие переводит слово"));
+        assert!(double.description.contains(&format!("«{LAYOUT_SWITCH_KEY_TITLE}»")) && double.description.contains("«Сменить раскладку выделенного текста»"), "{}", double.description);
+        let both = find(&hotkeys, "detection.both_shifts_toggle");
+        assert!(both.kind == Bool && both.description.contains("пункт «Автопереключение» в меню значка"), "{}", both.description);
+        assert_eq!(both_shifts_toggle_subtitle(None), both_shifts_toggle_description());
+        assert_eq!(
+            both_shifts_toggle_subtitle(Some("переключают раскладку")),
+            "Недоступно: в настройках клавиатуры системы оба Shift вместе переключают раскладку. KeySwitch оставляет это сочетание системе"
+        );
         assert_eq!(place("detection.convert_last_key"), place("hotkeys.convert_last") + 1);
         assert!(convert.description.starts_with("Нажатие и отпускание выбранной клавиши") && convert.description.ends_with("с удалённого компьютера."));
         // The texts name the conversion hotkey of this system: Pause has no key on a Mac.

@@ -1026,6 +1026,11 @@ impl InputBackend for X11Backend {
         true
     }
 
+    /// The XKB options of the desktop (`system_keys`).
+    fn system_takes_both_shifts(&self) -> bool {
+        crate::system_keys::both_shifts_taken().is_some()
+    }
+
     /// The text selected in the focused field, read through AT-SPI.
     fn read_selection(&self, application: &str, window: i64) -> Result<SelectedText, SelectionError> {
         self.shared.read_selection(application, window, self.process_for_window())
