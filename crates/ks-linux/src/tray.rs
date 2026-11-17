@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use ks_config::indicator::{alternate_layout_action_label, alternate_layout_group, layout_icon_name, layout_label, normalize_indicator_style};
@@ -435,14 +436,25 @@ impl Menu {
 pub struct StatusNotifierItem {
     connection: Connection,
     shared: Arc<Shared>,
+    /// Set by `close`: the panel's watcher is no longer told of the item.
+    closed: Arc<AtomicBool>,
+    /// Why the first registration failed (no panel had started yet): the item registers when one does.
+    waiting: Option<String>,
 }
 
 fn describe(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
+/// Tells the panel's watcher of the item.
+fn register(connection: &Connection) -> Result<(), String> {
+    connection.call_method(Some(WATCHER_NAME), WATCHER_PATH, Some(WATCHER_NAME), "RegisterStatusNotifierItem", &(OBJECT_PATH,)).map(|_| ()).map_err(describe)
+}
+
 impl StatusNotifierItem {
-    /// Serves the item and its menu and registers the item with the panel's watcher; an error says what is missing.
+    /// Serves the item and its menu and registers the item with the panel's watcher; an error says what is missing. A
+    /// panel that is not there yet is no error: a program started with the session can be up before the panel, and the
+    /// item registers as soon as a watcher takes its name, and again whenever the panel starts again (`waiting`).
     pub fn new(on_action: ActionHandler, icon_theme_path: &Path) -> Result<StatusNotifierItem, String> {
         let shared = Arc::new(Shared {
             item: Mutex::new(ItemState {
@@ -465,10 +477,33 @@ impl StatusNotifierItem {
             .and_then(Builder::build)
             .map_err(describe)?;
         *locked(&holder) = Some(connection.clone());
-        connection
-            .call_method(Some(WATCHER_NAME), WATCHER_PATH, Some(WATCHER_NAME), "RegisterStatusNotifierItem", &(OBJECT_PATH,))
+        // Listening before the first registration: a watcher that comes between the two is not missed.
+        let changes = zbus::blocking::fdo::DBusProxy::new(&connection)
+            .and_then(|bus| bus.receive_name_owner_changed_with_args(&[(0, WATCHER_NAME)]))
             .map_err(describe)?;
-        Ok(StatusNotifierItem { connection, shared })
+        let closed = Arc::new(AtomicBool::new(false));
+        let (watching, stop) = (connection.clone(), closed.clone());
+        std::thread::Builder::new()
+            .name("keyswitch-tray-watcher".to_owned())
+            .spawn(move || {
+                for change in changes {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if change.args().is_ok_and(|args| args.new_owner().is_some()) {
+                        let _ = register(&watching);
+                    }
+                }
+            })
+            .map_err(describe)?;
+        let waiting = register(&connection).err();
+        Ok(StatusNotifierItem { connection, shared, closed, waiting })
+    }
+
+    /// Why the item is not on a panel yet, when no watcher answered its first registration.
+    #[must_use]
+    pub fn waiting(&self) -> Option<&str> {
+        self.waiting.as_deref()
     }
 
     fn emit<B>(&self, path: &str, interface: &str, name: &str, body: &B)
@@ -593,6 +628,7 @@ impl StatusNotifierItem {
 
     /// Takes the item and the menu off the bus.
     pub fn close(&self) {
+        self.closed.store(true, Ordering::Relaxed);
         let server = self.connection.object_server();
         let _ = server.remove::<Menu, _>(MENU_PATH);
         let _ = server.remove::<Item, _>(OBJECT_PATH);
