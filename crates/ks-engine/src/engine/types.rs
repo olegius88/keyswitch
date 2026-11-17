@@ -121,6 +121,9 @@ pub struct CorrectionPlan {
     // of the word with one letter's Shift changed (fix_double_capitals), and undo types these back.
     // Empty when the plan replaces `strokes` themselves, as every conversion does.
     pub replaced: Strokes,
+    // The last strokes of `strokes` that are the text typed after the word an undo puts back (undo_across_words): typed
+    // again as they were, in the layout they were typed in, they leave that text as it stood. 0 for every other plan.
+    pub typed_after: usize,
 }
 
 impl CorrectionPlan {
@@ -151,6 +154,7 @@ impl CorrectionPlan {
             picked_tail: 0,
             replaced_strokes: Vec::new(),
             replaced: Vec::new(),
+            typed_after: 0,
         }
     }
 

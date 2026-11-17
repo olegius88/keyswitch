@@ -76,7 +76,8 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
   [Which keys switch the layout](#which-keys-switch-the-layout));
 - manual conversion with a lone tap of a modifier: another of these keys can do
   what `Pause` does (see the same section);
-- undo of the last correction for 10 seconds with `Ctrl+Alt+Z`;
+- undo of the last correction for 10 seconds with `Ctrl+Alt+Z`, also once the
+  next words are typed after it: the text after the corrected word stays;
 - global pause with `Ctrl+Alt+P`;
 - application exclusions selected from the active window, the installed
   application catalog, a Windows `.exe` picker or entered manually, plus word

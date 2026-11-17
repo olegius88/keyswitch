@@ -541,6 +541,7 @@ impl EngineCore {
             self.learning_prompt_after = None;
             self.pending_trigger_keycode = i64::from(boundary.keycode);
         }
+        self.settle_erased_typo(&strokes);
         self.strokes = Vec::new();
         self.insertion = None;
         self.source_group = -1;

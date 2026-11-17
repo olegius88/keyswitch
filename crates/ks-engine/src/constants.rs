@@ -94,6 +94,16 @@ pub const MANUAL_RELEASE_TIMEOUT_SECONDS: f64 = 3.0;
 pub const PAUSE_CORRECTION_AGREEMENT_SECONDS: f64 = 1.5;
 pub const STALE_PRESS_SECONDS: f64 = 3.0;
 pub const UNDO_AVAILABLE_WINDOW_SECONDS: f64 = 10.0;
+/// The most keys the undo hotkey types again after the word it puts back (`undo_across_words`): the signs and the boundary
+/// after the word and what was typed since, three or four words. Every one of them is deleted and typed again while the
+/// keyboard is held, and on X11, where nothing holds it, typed over whatever comes meanwhile.
+pub const UNDO_REACH_MAX_KEYS: usize = 24;
+/// The signs, besides letters, digits and spaces, the undo hotkey types again after the word it puts back: those an editor
+/// leaves as typed when they stand alone. Brackets and quotes are paired by editors, and `--` or `...` turned into a dash
+/// or an ellipsis, so text holding them is not known by its keys.
+pub const UNDO_REACH_SIGNS: &str = ".,!?:;-";
+/// The mode of the plan of a typo correction (`typo_plan`), which Pause, the undo and the count of what follows ask about.
+pub const TYPO_PLAN_MODE: &str = "typo";
 pub const FIELD_READER_RETRY_DELAYS_SECONDS: [f64; 3] = [5.0, 15.0, 60.0];
 pub const TYPO_ENGLISH_LOCALE: &str = "en_US";
 pub const MILLISECONDS_PER_SECOND: f64 = 1000.0;

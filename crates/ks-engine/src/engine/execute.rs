@@ -123,6 +123,17 @@ impl EngineCore {
         "other_text"
     }
 
+    /// Whether the field shows before the caret the text `plan` replaces, as far as it can be read: a plan of a field that
+    /// was never read is not checked. The undo hotkey asks it before it reaches across words (`undo_across_words`): an undo
+    /// refused as it is typed would leave the word in progress untracked, where the hotkey should do what it did before.
+    pub(crate) fn field_shows(&self, plan: &CorrectionPlan) -> bool {
+        if plan.context_field.is_empty() {
+            return true;
+        }
+        let field = self.context_policy.reader.as_ref().and_then(|reader| reader.read(&plan.application, self.focus_or_zero()));
+        Self::field_refusal(plan, field.as_ref(), &plan.original, &self.typed_ahead(&plan.strokes)).is_empty()
+    }
+
     /// How long a correction may wait for its field (`detection.field_catch_up`); a value not offered is the default.
     fn field_catch_up_seconds(&self) -> f64 {
         let mut value = self.text_setting("detection.field_catch_up", DEFAULT_FIELD_CATCH_UP);
@@ -695,9 +706,16 @@ impl EngineCore {
             // A typo correction typed other keys than the user's: its undo typed those back (undo_of), and the word is
             // the user's own from now on (personal_words). Not before the undo lands: one given up (a modifier still
             // coming up, another window) leaves the correction on screen, and the word would stay uncorrected after.
-            let word = text_for_group(&plan.strokes, plan.source_group);
+            // The text typed after the word that the undo typed again (undo_across_words) is no part of it.
+            let word = text_for_group(&plan.strokes[..plan.strokes.len() - plan.typed_after], plan.source_group);
             self.personal.add(&word);
             technical_event!(self.shared, "personal_word_added", "reason": "correction_undone", "letters": pystr::len(&word));
+        }
+        if plan.typed_after == 0 && matches!(plan.mode, "mention_shown" | "mention_hidden" | "early" | "late_stroke" | "early_undo") {
+            // These change letters already typed after the last correction's text, and no correction is remembered for
+            // them: the keys typed since no longer say what stands there. Their number stays, and so does the count of
+            // characters after a typo correction.
+            self.typed_after_correction = None;
         }
         if plan.mode == "mention_shown" || plan.mode == "mention_hidden" {
             // Only the head changed; the word being typed goes on as it was.
@@ -772,15 +790,23 @@ impl EngineCore {
                 plan.confidence, &plan.application,
             )
         }));
-        // A sign plan typed no key in another layout: Pause has nothing of it to convert back.
-        self.last_committed_stale = !context_reset_reason.is_empty() || plan.mode == "sign";
+        // A sign plan typed no key in another layout: Pause has nothing of it to convert back. An undo that typed the text
+        // after its word again (undo_across_words) put back a word that other text follows: neither Pause nor undo reach it.
+        self.last_committed_stale = !context_reset_reason.is_empty() || plan.mode == "sign" || plan.typed_after != 0;
         let deadline = self.monotonic() + CONTEXT_TTL;
         let window = self.focus_or_zero();
         self.provisional = (plan.revisit.is_some() && plan.boundary.is_some() && context_reset_reason.is_empty())
             .then(|| ProvisionalWord { plan: plan.clone(), window, deadline });
         self.paused_conversion = (plan.revisit.is_some() && plan.boundary.is_none() && context_reset_reason.is_empty())
             .then(|| ProvisionalWord { plan: plan.clone(), window, deadline });
-        if plan.boundary.is_none() && plan.trailing.is_empty() && !plan.sign_replayed && context_reset_reason.is_empty() && any_alpha(&plan.replacement) {
+        // An undo that typed the text after its word again leaves the word in progress as it was: the last keys it typed.
+        if plan.boundary.is_none()
+            && plan.trailing.is_empty()
+            && !plan.sign_replayed
+            && plan.typed_after == 0
+            && context_reset_reason.is_empty()
+            && any_alpha(&plan.replacement)
+        {
             // Idle/manual correction did not end the word. Keep its physical
             // prefix so continued typing and Backspace still refer to the
             // whole token instead of a detached suffix.
@@ -855,7 +881,8 @@ impl EngineCore {
             source_group: source,
             late: &late,
             trailing: &trailing,
-            kept_tail: 0,
+            // The undo of a typo correction with the text after it typed again has both (undo_across_words).
+            kept_tail: plan.kept_tail,
             erased: None,
             mode: plan.mode,
         };
@@ -865,8 +892,6 @@ impl EngineCore {
                 return Err(BackendError::Failed("Бэкенд не умеет стирать другое число символов; замена отменена".to_owned()));
             }
             injection.erased = Some(plan.replaced_strokes.len());
-        } else if plan.kept_tail != 0 {
-            injection.kept_tail = plan.kept_tail;
         }
         self.backend.inject_correction(injection)
     }

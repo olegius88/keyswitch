@@ -189,6 +189,10 @@ impl EngineCore {
         self.learning_prompt_after = None;
         self.manual_release_deadline = 0.0;
         self.last_committed_stale = true;
+        // Last: finishing an early switch above remembers a correction, and with it a fresh start of what follows it. The
+        // place of a typo correction erased into is left too: the next word is typed somewhere else, or after an Enter.
+        self.forget_text_after_correction();
+        self.typo_erased = None;
         self.shared.update(Update { current_word: Some(String::new()), last_action: action.map(str::to_owned), ..Update::default() });
     }
 

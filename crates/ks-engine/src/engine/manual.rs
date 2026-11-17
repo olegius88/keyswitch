@@ -25,6 +25,12 @@ impl EngineCore {
             self.schedule_undo(trigger_keycode);
             return;
         }
+        if let Some((plan, _)) = self.undo_past_spaces().filter(|_| self.last_correction.as_ref().is_some_and(|previous| previous.mode == TYPO_PLAN_MODE)) {
+            // So it does past the spaces typed after it, as the undo hotkey does (undo_past_spaces): Pause reaches the
+            // word past them, and converted, the corrected word only turned into letters of the other layout.
+            self.queue_undo(plan, trigger_keycode);
+            return;
+        }
         let mut mode = "manual";
         let mut trailing: Strokes = Vec::new();
         // The keys at the end of the last correction that stay in the layout they were typed in (`picked_tail`).
@@ -187,6 +193,47 @@ impl EngineCore {
         self.last_correction_time = self.monotonic();
         // maybe_correct_after_pause ends no word: its plans alone carry no boundary key.
         self.pause_agreement_open = plan.automatic && plan.boundary.is_none() && (plan.mode == "pause" || plan.mode == "context_phrase");
+        // What is typed from now on stands after this correction's text, and the count of characters after a typo
+        // correction starts at the signs and the boundary it typed after its word.
+        self.typed_after_correction = plan.automatic.then(Vec::new);
+        self.after_typo = (plan.automatic && plan.mode == TYPO_PLAN_MODE).then(|| plan.trailing.len() + usize::from(plan.boundary.is_some()));
+    }
+
+    /// A key that types text, as the engine takes it: it stands after the last correction's text. A key of no character
+    /// (Pause, a function key) types none.
+    pub fn note_text_key(&mut self, event: &Stroke) {
+        if event.character.is_empty() {
+            return;
+        }
+        if let Some(after) = self.after_typo.as_mut() {
+            *after += 1;
+        }
+        if let Some(typed) = self.typed_after_correction.as_mut() {
+            typed.push(event.clone());
+        }
+    }
+
+    /// Backspace: the text after the last correction is no longer known key by key, and the count after a typo correction
+    /// goes one down; at none the key erases a letter of the corrected word, which is then the user's to finish.
+    pub fn note_backspace(&mut self) {
+        self.typed_after_correction = None;
+        match self.after_typo {
+            Some(0) => {
+                self.after_typo = None;
+                // The count starts with a typo correction and ends with the next correction (remember_correction).
+                let previous = self.last_correction.as_ref().expect("the count is of the last correction, a typo correction");
+                self.typo_erased = Some(text_for_group(&previous.replaced_strokes, previous.target_group));
+                technical_event!(self.shared, "typo_correction_erased", "letters": previous.replaced_strokes.len());
+            }
+            Some(after) => self.after_typo = Some(after - 1),
+            None => {}
+        }
+    }
+
+    /// The text after the last correction is no longer known: a key the engine does not follow, a caret move or the like.
+    pub fn forget_text_after_correction(&mut self) {
+        self.typed_after_correction = None;
+        self.after_typo = None;
     }
 
     /// Whether ``plan``, the reversal of the last correction, asks for that correction instead.
@@ -510,15 +557,95 @@ impl EngineCore {
     /// evidence and cannot change. What the hotkey does is the product's, so the hotkey comes here, and
     /// everything other than the spaces is left to `schedule_undo`.
     pub fn schedule_undo_hotkey(&mut self, trigger_keycode: i64) {
-        let Some((plan, spaces)) = self.undo_past_spaces() else {
+        if let Some((plan, spaces)) = self.undo_past_spaces() {
+            technical_event!(
+                self.shared, "undo_past_spaces", "spaces": spaces, "application": plan.application,
+                "application_excluded": self.application_excluded(&plan.application),
+            );
+            self.queue_undo(plan, trigger_keycode);
+            return;
+        }
+        let Some(plan) = self.undo_across_words().filter(|plan| self.field_shows(plan)) else {
             self.schedule_undo(trigger_keycode);
             return;
         };
+        self.personal_word_settled(false);
         technical_event!(
-            self.shared, "undo_past_spaces", "spaces": spaces, "application": plan.application,
+            self.shared, "undo_across_words", "mode": self.last_correction.as_ref().map_or("", |previous| previous.mode),
+            "characters": plan.typed_after, "application": plan.application,
             "application_excluded": self.application_excluded(&plan.application),
         );
         self.queue_undo(plan, trigger_keycode);
+    }
+
+    /// The undo of the last automatic correction together with the text typed after it, typed again as it stands.
+    ///
+    /// A wrong correction is often seen only once the next word is under way, and then nothing could take it back but
+    /// erasing all of it. The engine knows the text after the correction while every key since was text it took
+    /// (`typed_after_correction`): no Backspace, caret move, click, shortcut, Enter, Tab, other window or other
+    /// correction. The undo deletes back to the corrected word, types it as it was typed, and types the keys after it
+    /// again in the layout the text was typed in (the plan's `kept_tail`), where the layout stays, as it was before.
+    ///
+    /// It reaches only where typing the keys again surely gives the same text: `UNDO_REACH_MAX_KEYS` keys at most, within
+    /// `UNDO_AVAILABLE_WINDOW_SECONDS` of the correction, as the undo past spaces; each key a letter, a digit, a space or
+    /// one of `UNDO_REACH_SIGNS` that types its character in that layout, and no two spaces or two signs in a row, which
+    /// editors and systems turn into something else (`. ` for two spaces on macOS, a dash for `--`, an ellipsis for
+    /// `...`; a bracket or a quote is paired). The word in progress is the last keys of that text, and stays the word in
+    /// progress. With the field readable, the text before the caret is checked when the hotkey is pressed
+    /// (`field_shows`) and again as the undo is typed, as for any correction of a field read (`context_field`). Anything
+    /// else is left to `schedule_undo`.
+    pub fn undo_across_words(&self) -> Option<PlanRef> {
+        let previous = self.last_correction.as_ref()?;
+        let after = self.typed_after_correction.as_ref()?;
+        let boundary = previous.boundary.as_ref()?;
+        let group = previous.target_group;
+        // A plan waiting for its keys to come up is left to `schedule_undo`: an early switch of the word in progress, which
+        // the undo hotkey takes back before it lands. Enter, Tab, an early switch, a shown mention and a key not typed
+        // again end the record of what follows the correction before they could stand in the way here.
+        if !previous.automatic
+            || after.is_empty()
+            || self.pending.is_some()
+            || self.monotonic() - self.last_correction_time > UNDO_AVAILABLE_WINDOW_SECONDS
+            || self.shared.current_group() != group
+            || !after.ends_with(&self.strokes)
+        {
+            return None;
+        }
+        let again: Strokes = previous.trailing.iter().chain(std::iter::once(boundary)).chain(after.iter()).cloned().collect();
+        let kind = |key: &Stroke| match key.character.chars().next() {
+            Some(' ') => Some(true),
+            Some(sign) if UNDO_REACH_SIGNS.contains(sign) => Some(false),
+            _ => None,
+        };
+        if again.len() > UNDO_REACH_MAX_KEYS
+            || !again.iter().all(|key| Self::types_back(key, group))
+            || again.windows(2).any(|pair| kind(&pair[0]).is_some() && kind(&pair[0]) == kind(&pair[1]))
+        {
+            return None;
+        }
+        let text: String = again.iter().map(|key| key.character.as_str()).collect();
+        let undo = Self::undo_of(previous, None, Vec::new());
+        Some(undo.replaced_with(|plan| {
+            plan.strokes.extend(again.iter().cloned());
+            // A typo correction's undo erases the corrected word by its own keys (`replaced_strokes`), the keys after it too.
+            if !plan.replaced_strokes.is_empty() {
+                plan.replaced_strokes.extend(again.iter().cloned());
+            }
+            plan.kept_tail += again.len();
+            plan.typed_after = again.len();
+            plan.original.push_str(&text);
+            plan.replacement.push_str(&text);
+            plan.context_field.clone_from(&previous.context_field);
+        }))
+    }
+
+    /// Whether `key`, typed again in `group` as the user pressed it, types the character it typed: a letter, a digit, a
+    /// space or one of `UNDO_REACH_SIGNS`, of a layout where it is that character. A key with a modifier or one that is no
+    /// simple character never gets here: it ends the record (`handle_key`).
+    fn types_back(key: &KeyEvent, group: i64) -> bool {
+        let mut characters = key.character.chars();
+        matches!((characters.next(), characters.next()), (Some(only), None) if only.is_alphanumeric() || only == ' ' || UNDO_REACH_SIGNS.contains(only))
+            && key.character_for(group.to::<i32>()) == key.character
     }
 
     /// The undo of the last correction together with the spaces typed after it, and how many there are.

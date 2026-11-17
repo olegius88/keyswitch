@@ -190,6 +190,8 @@ struct DeskState {
     verbose: bool,
     injections: usize,
     typo_corrections: usize,
+    /// Undos that typed the text after their word again (`undo_across_words`).
+    undone_across: usize,
     deferred_actions: usize,
     dropped_actions: usize,
     held_keys: usize,
@@ -510,6 +512,7 @@ impl Desk {
                 verbose,
                 injections: 0,
                 typo_corrections: 0,
+                undone_across: 0,
                 deferred_actions: 0,
                 dropped_actions: 0,
                 held_keys: 0,
@@ -689,6 +692,9 @@ impl InputBackend for Desk {
         }
         if changed != 0 {
             state.typo_corrections += 1;
+        }
+        if matches!(injection.mode, "undo") && kept_tail != 0 {
+            state.undone_across += 1;
         }
         let cells: Vec<Cell> = typed.iter().flat_map(|(characters, origin)| characters.chars().map(|character| Cell { character, origin: Some(*origin) })).collect();
         let caret = state.caret;
@@ -917,6 +923,15 @@ fn script(dice: &mut Dice) -> Vec<Act> {
                 }
                 19 => typist.acts.push(Act::Lag(dice.below(4))),
                 20 => typist.acts.push(Act::Fail),
+                21..=22 => {
+                    // The undo hotkey once the next word is begun: a correction seen wrong a word later.
+                    let joint = *dice.of(JOINTS);
+                    typist.text(dice, joint, language);
+                    let next = *dice.of(if language == 1 { RUSSIAN } else { ENGLISH });
+                    let begun: String = next.chars().take(1 + dice.below(3)).collect();
+                    typist.text(dice, &begun, language);
+                    typist.chord(dice, 'z');
+                }
                 _ => {}
             }
             if position + 1 < words {
@@ -993,6 +1008,7 @@ struct Outcome {
     violations: Vec<String>,
     injections: usize,
     typo_corrections: usize,
+    undone_across: usize,
     deferred: usize,
     dropped: usize,
     rushed: usize,
@@ -1148,6 +1164,7 @@ fn finish(bundle: &mut Bundle, core: EngineCore, desk: &Desk, violations: Vec<St
         violations,
         injections: state.injections,
         typo_corrections: state.typo_corrections,
+        undone_across: state.undone_across,
         deferred: state.deferred_actions,
         dropped: state.dropped_actions,
         rushed: state.rushed_keys,
@@ -1166,6 +1183,7 @@ fn walks(mode: Walk, name: &str) {
         let outcome = walk(&mut bundle, seed, mode, false);
         total.injections += outcome.injections;
         total.typo_corrections += outcome.typo_corrections;
+        total.undone_across += outcome.undone_across;
         total.deferred += outcome.deferred;
         total.dropped += outcome.dropped;
         total.rushed += outcome.rushed;
@@ -1181,8 +1199,8 @@ fn walks(mode: Walk, name: &str) {
     }
     bundle.clean();
     println!(
-        "{name}: {WALKS} walks, {} corrections ({} of typos), {} Enters and Tabs kept back ({} not passed on), {} keys pressed while a correction was typed",
-        total.injections, total.typo_corrections, total.deferred, total.dropped, total.rushed
+        "{name}: {WALKS} walks, {} corrections ({} of typos, {} undos across later words), {} Enters and Tabs kept back ({} not passed on), {} keys pressed while a correction was typed",
+        total.injections, total.typo_corrections, total.undone_across, total.deferred, total.dropped, total.rushed
     );
     println!("{name}: the first walks with an Enter or Tab not passed on: {dropped_at:?}");
     for (kind, (seed, example, count)) in &failures {

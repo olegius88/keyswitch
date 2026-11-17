@@ -97,7 +97,8 @@ impl EngineCore {
             return Ok(());
         }
         if self.shared.input_suspended() {
-            // The rule window is open: what is typed there is a rule, not text.
+            // The rule window is open: what is typed there is a rule, not text, and the text is left where it was.
+            self.forget_text_after_correction();
             if event.pressed && (!self.strokes.is_empty() || !self.symbol_strokes.is_empty()) {
                 self.clear_word(None, "rule_editor_open");
             }
@@ -278,6 +279,8 @@ impl EngineCore {
             return Ok(());
         }
         if let Some(selection_hotkey) = self.selection_hotkey(&event) {
+            // The selected text is replaced: what stands after the last correction is no longer known.
+            self.forget_text_after_correction();
             self.schedule_selection_command(selection_hotkey);
             return Ok(());
         }
@@ -286,6 +289,7 @@ impl EngineCore {
             return Ok(());
         }
         if event.key_name == "BackSpace" {
+            self.note_backspace();
             if self.strokes.is_empty() {
                 self.personal_word_settled(false);
             }
@@ -371,6 +375,8 @@ impl EngineCore {
             return Ok(());
         }
         if is_action_boundary_key(&event.key_name) {
+            // Enter and Tab may send the text or move to another field: no undo reaches across them.
+            self.forget_text_after_correction();
             if event.deferred {
                 self.deferred_action = Some(event.clone());
                 self.action_deadline = self.monotonic() + ACTION_TIMEOUT_SECONDS;
@@ -402,6 +408,7 @@ impl EngineCore {
             return Ok(());
         }
         if self.shared.sensitive_context_window().is_some() {
+            self.forget_text_after_correction();
             return Ok(());
         }
         if self.owed_late_letter() {
@@ -412,6 +419,9 @@ impl EngineCore {
             return Ok(());
         }
         if self.untracked_token {
+            // The key types text all the same, though no word of the engine holds it.
+            self.note_text_key(&event);
+            self.typed_after_correction = None;
             if Self::is_boundary(&event) {
                 self.untracked_token = false;
             }
@@ -434,6 +444,7 @@ impl EngineCore {
             self.untracked_token = !Self::is_boundary(&event);
             return Ok(());
         }
+        self.note_text_key(&event);
         if !self.strokes.is_empty() && (WORD_JOINERS.contains(&event.character.as_str()) || matches!(event.character.as_str(), "_" | "@" | "/" | "\\" | "=")) {
             self.strokes.push(event.clone());
             self.mark_word_activity();

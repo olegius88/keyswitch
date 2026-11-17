@@ -473,6 +473,15 @@ impl EngineCore {
         }
         let word = text_for_group(keys, group);
         self.personal_pending = String::new();
+        if self.typo_erased.is_some() {
+            // The user erased into the typo correction made here and types the word themselves: correcting it again
+            // put the same wrong word back each time (`мржно`), or changed a letter the user had not touched (`можнг`).
+            technical_event!(
+                self.shared, "typo_correction_declined", "reason": "erased_correction", "letters": pystr::len(&word),
+                "source_group": base.source_group, "target_group": group,
+            );
+            return Ok(None);
+        }
         if self.personal.contains(&word) || (self.flag("detection.learning", true) && self.learning.keeps(group, &word)) {
             // The word is the user's own (personal_words), or a rule of theirs keeps it as it is.
             return Ok(None);
@@ -557,6 +566,20 @@ impl EngineCore {
                 plan.confidence = 1.0 / (1.0 + (-margin).exp());
             }
         })))
+    }
+
+    /// A word was committed where the user erased into a typo correction (`typo_erased`): the place is theirs no more, and
+    /// the word is their own from now on if it is the word as they typed it before the correction, read in any layout (a
+    /// word converted and misspelt, `yhjvfkmyj`, may be typed again in either). Wherever the commit goes, it comes here.
+    pub fn settle_erased_typo(&mut self, keys: &[Stroke]) {
+        let Some(typed) = self.typo_erased.take() else {
+            return;
+        };
+        let wanted = pystr::casefold(&typed);
+        if (0..self.models.len()).any(|group| pystr::casefold(&text_for_group(keys, group.to::<i64>())) == wanted) {
+            self.personal.add(&typed);
+            technical_event!(self.shared, "personal_word_added", "reason": "typed_again_after_erasing", "letters": pystr::len(&typed));
+        }
     }
 
     /// The word judged at its boundary (`typo_plan`) was left as typed, or the user went back to it.
