@@ -1183,6 +1183,9 @@ pub struct DevchatRequest<'a> {
     pub ledger: &'a Path,
     pub sequences_ledger: &'a Path,
     pub workers: usize,
+    /// Only whether the test can be read: every condition of the read but the passed Tatoeba test, which comes after it,
+    /// is checked as the read checks it, and nothing is claimed, typed or written (`promote`, before any sealed byte).
+    pub check_only: bool,
 }
 
 fn private_record(path: &Path, value: &Value, exclusive: bool) -> Result<(), String> {
@@ -1306,7 +1309,7 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
         if recorded["runtime"] != pins || !same_models(&recorded["pairs"]) {
             return Err("the runtime or the pairs differ from the candidate's development result".to_owned());
         }
-        let passed = ledger_records(request.sequences_ledger, ".access.json")?.iter().any(|(path, identity)| {
+        let passed = request.check_only || ledger_records(request.sequences_ledger, ".access.json")?.iter().any(|(path, identity)| {
             let outcome = PathBuf::from(path.to_string_lossy().replace(".access.json", ".outcome.json"));
             identity["artifact_sha256"].as_str() == Some(candidate.as_str())
                 && crate::corpus::read_json(&outcome).is_ok_and(|report| report["split"] == json!("test") && report["promotion_passed"] == json!(true))
@@ -1343,6 +1346,9 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
     let chosen: Vec<Member> = mixed.into_iter().chain(russian).collect();
     if split == "test" && mixed_count < test_count {
         return Err("the test holds fewer fresh messages than a read takes; a new batch is needed and no test was read".to_owned());
+    }
+    if request.check_only {
+        return Ok(json!({"split": split, "ready": true, "fresh_mixed": mixed_count}));
     }
     let membership_messages: BTreeSet<&str> = chosen.iter().map(|member| member.text.as_str()).collect();
     let membership_questions: BTreeSet<&str> = chosen.iter().map(|member| member.question.as_str()).collect();

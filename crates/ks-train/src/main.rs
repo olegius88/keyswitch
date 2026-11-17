@@ -480,6 +480,7 @@ fn typing_command(arguments: &[String]) -> i32 {
                 ledger: &ledger,
                 sequences_ledger: &sequences,
                 workers: jobs,
+                check_only: false,
             });
             match read {
                 Ok(report) => {

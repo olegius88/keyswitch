@@ -164,10 +164,27 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
         }
         let _ = Command::new("git").current_dir(root).args(["worktree", "remove", "--force"]).arg(&scratch).status();
     }
-    let development = request.devchat_ledger.join(format!("{}.dev.json", crate::corpus::checksum(&request.candidate.join(CONTEXT_ARTIFACT))?));
-    let held = read_json(&development).is_ok_and(|record| record["floors"].as_object().is_some_and(|floors| !floors.is_empty() && floors.values().all(|value| value == &Value::Bool(true))));
-    if !held {
-        failures.push("no developer-chat development result of the candidate holds both floors (ks-train devchat --split dev)".to_owned());
+    // Every condition under which the developer-chat test is read, checked by the read itself before any byte of either
+    // sealed test: the development result, its floors, its runtime and pairs, the pinned messages, enough fresh ones.
+    let (artifact, released, baseline) = (request.candidate.join(CONTEXT_ARTIFACT), root.join(INSTALLED_CONTEXT), root.join("model/context_v3/baseline-context-v1.json"));
+    let resource_dir = root.join("resources");
+    let output = request.report.with_file_name("devchat-test.json");
+    let check = DevchatRequest {
+        root,
+        resource_dir: &resource_dir,
+        split: "test",
+        directory: request.devchat_directory,
+        candidate: &artifact,
+        released: &released,
+        baseline: &baseline,
+        output: &output,
+        ledger: request.devchat_ledger,
+        sequences_ledger: request.ledger,
+        workers: request.jobs,
+        check_only: true,
+    };
+    if let Err(error) = devchat(&check) {
+        failures.push(format!("the developer-chat test could not be read: {error}"));
     }
     Ok(failures)
 }
@@ -237,7 +254,7 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let released = root.join(INSTALLED_CONTEXT);
     let baseline = root.join("model/context_v3/baseline-context-v1.json");
     let output = request.report.with_file_name("devchat-test.json");
-    let result = devchat(&DevchatRequest { root, resource_dir: &resource_dir, split: "test", directory: request.devchat_directory, candidate: &artifact, released: &released, baseline: &baseline, output: &output, ledger: request.devchat_ledger, sequences_ledger: request.ledger, workers: request.jobs })?;
+    let result = devchat(&DevchatRequest { root, resource_dir: &resource_dir, split: "test", directory: request.devchat_directory, candidate: &artifact, released: &released, baseline: &baseline, output: &output, ledger: request.devchat_ledger, sequences_ledger: request.ledger, workers: request.jobs, check_only: false })?;
     if !result["floors"].as_object().is_some_and(|floors| floors.values().all(|value| value == &Value::Bool(true))) {
         println!("the sealed developer-chat test did not pass; nothing is installed");
         return Ok(1);

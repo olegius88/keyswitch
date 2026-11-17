@@ -34,6 +34,7 @@ fn messages_the_engine_fails_on_count_as_errors() {
         ledger: &ledger,
         sequences_ledger: &folder.join("sequences"),
         workers: 1,
+        check_only: false,
     })
     .expect("a result");
     assert_eq!(result["floors"]["every_message_typed"], json!(false), "{result}");

@@ -241,6 +241,15 @@ fn chat(name: &str, test_count: u64) -> Chat {
 }
 
 fn run_chat(chat: &Chat, split: &str, output: &Path, candidate: &Path, baseline: &Path) -> Result<Value, String> {
+    read_chat(chat, split, output, candidate, baseline, false)
+}
+
+/// Whether the test can be read, as `promote` asks before any sealed byte.
+fn check_chat(chat: &Chat, candidate: &Path, baseline: &Path) -> Result<Value, String> {
+    read_chat(chat, "test", &chat.folder.join("unwritten.json"), candidate, baseline, true)
+}
+
+fn read_chat(chat: &Chat, split: &str, output: &Path, candidate: &Path, baseline: &Path, check_only: bool) -> Result<Value, String> {
     let resources = chat.tree.join("resources");
     devchat(&DevchatRequest {
         root: &chat.tree,
@@ -254,6 +263,7 @@ fn run_chat(chat: &Chat, split: &str, output: &Path, candidate: &Path, baseline:
         ledger: &chat.ledger,
         sequences_ledger: &chat.sequences,
         workers: 2,
+        check_only,
     })
 }
 
@@ -295,11 +305,19 @@ fn a_chat_test_is_read_after_a_development_result_that_holds() {
     other_runtime["runtime"] = json!({});
     std::fs::write(&development, serde_json::to_vec(&other_runtime).expect("json")).expect("a record");
     refused("differ from the candidate's development", &run.candidate, &run.baseline);
+    // `promote` asks the same before any sealed byte.
+    assert!(check_chat(&run, &run.candidate, &run.baseline).expect_err("another runtime").contains("differ from the candidate's development"));
     let mut other_pairs = recorded.clone();
     other_pairs["pairs"]["baseline"]["sha256"] = json!("0");
     std::fs::write(&development, serde_json::to_vec(&other_pairs).expect("json")).expect("a record");
     refused("differ from the candidate's development", &run.candidate, &run.baseline);
     std::fs::write(&development, &holds).expect("a record");
+    // Ready, though no Tatoeba test was read yet: that one comes after the check. Nothing is claimed or written.
+    let claimed = |ledger: &Path| std::fs::read_dir(ledger).expect("the ledger").flatten().filter(|entry| entry.path().to_string_lossy().ends_with(".access.json")).count();
+    let before = claimed(&run.ledger);
+    let ready = check_chat(&run, &run.candidate, &run.baseline).expect("ready");
+    assert_eq!((ready["ready"].clone(), claimed(&run.ledger)), (json!(true), before));
+    assert!(ready["fresh_mixed"].as_i64().is_some_and(|fresh| fresh > 0) && !run.folder.join("unwritten.json").exists());
     // No Tatoeba test passed: none at all, one that failed, one of another model.
     refused("passed no Tatoeba test", &run.candidate, &run.baseline);
     passed_sequences(&run, &run.candidate, false);
@@ -340,6 +358,7 @@ fn a_chat_test_of_too_few_messages_or_with_other_files_reads_nothing() {
     passed_sequences(&run, &run.candidate, true);
     let said = run_chat(&run, "test", &output, &run.candidate, &run.baseline).expect_err("too few");
     assert!(said.contains("fewer fresh messages"), "{said}");
+    assert!(check_chat(&run, &run.candidate, &run.baseline).expect_err("too few").contains("fewer fresh messages"));
     // Files that are not those the tree pins.
     std::fs::write(run.directory.join("devchat-dev.messages.jsonl.gz"), gz(&["{\"text\": \"другой\"}".to_owned()])).expect("a file");
     let said = run_chat(&run, "dev", &output, &run.candidate, &run.baseline).expect_err("other files");

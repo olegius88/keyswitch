@@ -80,6 +80,7 @@ fn run_candidate(chat: &Chat, split: &str, candidate: &Path) -> Result<Value, St
         ledger: &chat.ledger,
         sequences_ledger: &chat.sequences,
         workers: 2,
+        check_only: false,
     })
 }
 
