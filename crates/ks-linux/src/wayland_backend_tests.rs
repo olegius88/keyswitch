@@ -304,6 +304,7 @@ fn focus_window_and_group_helpers_follow_the_compositor() {
     assert_eq!(backend.focused_window(), None);
     assert!(backend.restore_window(Some(WINDOW)) && !backend.restore_window(None) && !backend.restore_window(Some(0)));
     assert!(backend.swallows_hotkeys() && backend.supports_selection());
+    assert_eq!(backend.system_takes_both_shifts(), crate::system_keys::both_shifts_taken().is_some());
     assert_eq!(backend.current_group().unwrap(), 0);
     backend.switch_group(1).unwrap();
     assert_eq!(api.st().switch_requests, vec![RU]);

@@ -1111,6 +1111,7 @@ fn a_connection_is_opened_once_and_a_start_uses_it() {
     backend.open().expect("open");
     backend.open().expect("already open");
     assert!(backend.supports_selection());
+    assert_eq!(backend.system_takes_both_shifts(), crate::system_keys::both_shifts_taken().is_some());
     fake.with(|state| state.block_record = true);
     *lock(&backend.shared.context) = 5;
     let starts = thread::scope(|scope| {

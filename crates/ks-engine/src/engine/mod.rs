@@ -134,6 +134,11 @@ pub struct EngineCore {
     /// A lone press of the layout switch key or the conversion key, until it comes up or anything else happens
     /// (`layout_tap`).
     pub layout_tap: Option<LayoutTap>,
+    /// A tap of the layout switch key that switched the layout, while a second one may make it a double tap
+    /// (`layout_tap`).
+    pub switch_tapped: Option<SwitchTapped>,
+    /// Both Shifts on their way to the chord that pauses the automatic switching (`layout_tap`).
+    pub shift_chord: Option<ShiftChord>,
     pub symbol_strokes: Strokes,
     pub mention_shown: Option<Stroke>,
     pub last_key_character: String,
@@ -311,6 +316,8 @@ impl EngineCore {
             pressed_since: Vec::new(),
             modifier_keycodes: HashSet::new(),
             layout_tap: None,
+            switch_tapped: None,
+            shift_chord: None,
             symbol_strokes: Vec::new(),
             mention_shown: None,
             last_key_character: String::new(),

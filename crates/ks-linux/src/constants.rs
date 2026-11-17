@@ -64,3 +64,10 @@ pub const ATSPI_ROLE_PASSWORD_TEXT: u32 = 40;
 pub const APP_ID: &str = "io.github.olegius88.KeySwitch";
 pub const APP_NAME: &str = "KeySwitch";
 pub const BACKEND_LABEL: &str = "X11 RECORD + XTEST";
+
+/// Where the XKB options of the desktop are read (`system_keys_native`): the root window property of the X server, at most
+/// this many 32-bit words of it (the five names of the rules, well under a kilobyte), and GNOME's settings.
+pub const XKB_RULES_NAMES_ATOM: &[u8] = b"_XKB_RULES_NAMES";
+pub const XKB_RULES_NAMES_MAX_WORDS: u32 = 1024;
+pub const GNOME_INPUT_SOURCES_SCHEMA: &str = "org.gnome.desktop.input-sources";
+pub const GNOME_XKB_OPTIONS_KEY: &str = "xkb-options";

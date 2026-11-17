@@ -317,7 +317,8 @@ fn startup(application: &adw::Application, hidden: bool, no_engine: bool) {
     let settings = Arc::new(SettingsStore::new(None));
     // Before anything writes a file of the user's: a new installation would read as an update.
     let hints_origin = Instant::now();
-    let hints = Hints::start(settings.clone(), &ks_config::history::data_dir(), RUNNING_PLATFORM, &Moment::now(hints_origin, 0));
+    let mut hints = Hints::start(settings.clone(), &ks_config::history::data_dir(), RUNNING_PLATFORM, &Moment::now(hints_origin, 0));
+    hints.system_takes_both_shifts(crate::system_keys::both_shifts_taken().is_some());
     logsetup::follow_settings(&settings, None);
     let history = Arc::new(HistoryStore::new(
         None,

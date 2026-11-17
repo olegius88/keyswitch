@@ -135,19 +135,48 @@ pub const HOTKEY_SELECTION_TRANSLITERATE: &str = "selection_transliterate";
 /// switching the layout. Alt is not offered (a lone Alt opens the menu bar of a Windows program), nor is Caps Lock (it
 /// would also toggle capitals).
 pub const DEFAULT_LAYOUT_SWITCH_KEY: &str = "";
-pub const LAYOUT_SWITCH_KEYS: [&str; 4] = ["Shift_L", "Shift_R", "Control_L", "Control_R"];
+/// `detection.layout_switch_key` naming either Shift: the left one and the right one each switch the layout.
+pub const EITHER_SHIFT_KEY: &str = "Shift";
+/// The two keys `EITHER_SHIFT_KEY` stands for.
+pub const SHIFT_KEYS: [&str; 2] = ["Shift_L", "Shift_R"];
+/// The keys a lone tap of which can be chosen: the two Shifts and the two Ctrls, named as every backend names them.
+pub const SINGLE_TAP_KEYS: [&str; 4] = [SHIFT_KEYS[0], SHIFT_KEYS[1], "Control_L", "Control_R"];
+pub const LAYOUT_SWITCH_KEYS: [&str; 5] = [EITHER_SHIFT_KEY, SINGLE_TAP_KEYS[0], SINGLE_TAP_KEYS[1], SINGLE_TAP_KEYS[2], SINGLE_TAP_KEYS[3]];
 /// `detection.convert_last_key`: the modifier that does what the conversion hotkey (`hotkeys.convert_last`) does when it is
-/// pressed and released alone, from the keys `detection.layout_switch_key` offers, or empty for none, the default. One key
-/// is never both: the settings windows refuse it, and the engine leaves a file that names one key twice to the layout
-/// switch key.
+/// pressed and released alone, from the four keys of `SINGLE_TAP_KEYS`, or empty for none, the default. One key is never
+/// both: the settings windows refuse it, and the engine leaves a file that names one key twice (or a Shift where the layout
+/// switch key is either Shift) to the layout switch key.
 pub const DEFAULT_CONVERT_LAST_KEY: &str = "";
-pub const CONVERT_LAST_KEYS: [&str; 4] = LAYOUT_SWITCH_KEYS;
+pub const CONVERT_LAST_KEYS: [&str; 4] = SINGLE_TAP_KEYS;
+/// `detection.double_tap_converts`: two taps of the layout switch key in quick succession do what the conversion hotkey
+/// does, or what the selection hotkey of the layout does when text is selected; the layout the first tap switched is taken
+/// back first. Off by default, so that an update changes nothing; a new installation turns it on
+/// (`NEW_INSTALLATION_SETTINGS`).
+pub const DEFAULT_DOUBLE_TAP_CONVERTS: bool = false;
+/// `detection.both_shifts_toggle`: both Shifts pressed together and released with no other key turn the automatic
+/// switching off or on, as the hotkey `hotkeys.toggle` does, unless the system itself does something with that chord. Off
+/// by default; a new installation turns it on.
+pub const DEFAULT_BOTH_SHIFTS_TOGGLE: bool = false;
 /// `general.hints`: the one-time hints about what the program can do (`ks_ui::hints`). A settings file written before
 /// it existed gains it from the defaults, as the selection hotkeys do.
 pub const HINTS_SETTING: &str = "general.hints";
 /// Settings the Python program never had. Each default leaves the engine as the Python's was, so the traces of the
 /// Python's engine hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
-pub const SETTINGS_SINCE_PYTHON: [&str; 3] = [DETECTION_LAYOUT_SWITCH_KEY.path(), DETECTION_CONVERT_LAST_KEY.path(), HINTS_SETTING];
+pub const SETTINGS_SINCE_PYTHON: [&str; 5] = [
+    DETECTION_LAYOUT_SWITCH_KEY.path(),
+    DETECTION_CONVERT_LAST_KEY.path(),
+    DETECTION_DOUBLE_TAP_CONVERTS.path(),
+    DETECTION_BOTH_SHIFTS_TOGGLE.path(),
+    HINTS_SETTING,
+];
+/// What a new installation of KeySwitch sets over the shipped defaults, on its first start
+/// (`installation::give_new_installation_keys`): a lone tap of either Shift switches the layout, two taps convert the
+/// word, both Shifts pause. The defaults themselves stay as they were, so that an update, with or without a settings
+/// file, changes nothing; and the values are written into the new installation's settings file, so that a later change of
+/// the defaults does not move them either.
+pub const NEW_INSTALLATION_LAYOUT_SWITCH_KEY: &str = EITHER_SHIFT_KEY;
+pub const NEW_INSTALLATION_DOUBLE_TAP_CONVERTS: bool = true;
+pub const NEW_INSTALLATION_BOTH_SHIFTS_TOGGLE: bool = true;
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
 pub const DEFAULT_SELECTION_LAYOUT_HOTKEY: &str = "Shift+Pause";
@@ -199,6 +228,8 @@ macro_rules! for_each_setting {
             DETECTION_RESPECT_MANUAL_LAYOUT, DetectionRespectManualLayout, bool, "detection.respect_manual_layout";
             DETECTION_LAYOUT_SWITCH_KEY, DetectionLayoutSwitchKey, String, "detection.layout_switch_key";
             DETECTION_CONVERT_LAST_KEY, DetectionConvertLastKey, String, "detection.convert_last_key";
+            DETECTION_DOUBLE_TAP_CONVERTS, DetectionDoubleTapConverts, bool, "detection.double_tap_converts";
+            DETECTION_BOTH_SHIFTS_TOGGLE, DetectionBothShiftsToggle, bool, "detection.both_shifts_toggle";
             DETECTION_FIX_DOUBLE_CAPITALS, DetectionFixDoubleCapitals, bool, "detection.fix_double_capitals";
             DETECTION_AGGRESSIVE, DetectionAggressive, bool, "detection.aggressive";
             DETECTION_CONTEXT_AWARE, DetectionContextAware, bool, "detection.context_aware";
@@ -239,7 +270,7 @@ pub use shipped::DEFAULT_SETTINGS;
 mod shipped {
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "the shipped settings are the literal JSON of the file they seed")]
 use super::{
-    DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_CONVERT_LAST_KEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
+    DEFAULT_BOTH_SHIFTS_TOGGLE, DEFAULT_DOUBLE_TAP_CONVERTS, DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_CONVERT_LAST_KEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
     DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SELECTION_CASE_HOTKEY,
     DEFAULT_SELECTION_LAYOUT_HOTKEY, DEFAULT_SELECTION_TRANSLITERATE_HOTKEY, HOTKEY_CONVERT_LAST, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT,
     HOTKEY_SELECTION_TRANSLITERATE, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
@@ -280,6 +311,8 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
             "respect_manual_layout": true,
             "layout_switch_key": DEFAULT_LAYOUT_SWITCH_KEY,
             "convert_last_key": DEFAULT_CONVERT_LAST_KEY,
+            "double_tap_converts": DEFAULT_DOUBLE_TAP_CONVERTS,
+            "both_shifts_toggle": DEFAULT_BOTH_SHIFTS_TOGGLE,
             // A word kept in its layout and typed with two capitals at its start (`ПРивет`, `HEllo`) gets
             // its second letter lowercase when the lexicon knows the word so written (engine fix_double_capitals).
             "fix_double_capitals": true,

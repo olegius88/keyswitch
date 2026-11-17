@@ -54,3 +54,10 @@ pub const HINTS_INTRODUCED_VERSION: &str = "0.71.0";
 pub const LAYOUT_SWITCH_KEY_VERSION: &str = "0.70.0";
 /// The release that tells of a word left as typed for a layout picked by hand.
 pub const KEPT_BY_CHOICE_VERSION: &str = "0.74.0";
+/// The release that gives a new installation the Shift keys, and tells it of them in its first hint.
+pub const SHIFT_KEYS_VERSION: &str = "0.74.0";
+/// What the notice at the caret says when both Shifts turned the automatic switching off or on (the words of the tray
+/// menu's item), and how long it stays.
+pub const AUTO_SWITCH_OFF_NOTICE: &str = "Автопереключение выключено";
+pub const AUTO_SWITCH_ON_NOTICE: &str = "Автопереключение включено";
+pub const AUTO_SWITCH_NOTICE_SECONDS: f64 = 2.0;

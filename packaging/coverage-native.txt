@@ -4,6 +4,7 @@ crates/ks-hunspell/src/lib.rs
 crates/ks-linux/src/atspi_bus.rs
 crates/ks-linux/src/cinnamon_native.rs
 crates/ks-linux/src/platform.rs
+crates/ks-linux/src/system_keys_native.rs
 crates/ks-linux/src/wayland_access.rs
 crates/ks-linux/src/wayland_native.rs
 crates/ks-linux/src/x11_native.rs

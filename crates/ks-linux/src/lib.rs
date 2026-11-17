@@ -16,6 +16,8 @@ pub mod atspi_context;
 pub mod atspi_caret;
 pub use ks_hunspell as spellcheck;
 pub mod system;
+pub mod system_keys;
+pub mod system_keys_native;
 pub mod wayland_desktop;
 pub mod wayland_constants;
 pub mod wayland_access;

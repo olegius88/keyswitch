@@ -19,7 +19,7 @@ use gtk::gdk;
 use ks_engine::rule_editor::RuleDraft;
 use ks_config::history::{HistoryEntry, HistoryStore};
 use ks_config::learning::{LearnedRule, LearningStore, RuleAction, RuleMatch};
-use ks_engine::engine::{CONVERT_LAST_KEY_TITLE, EngineSnapshot, LAYOUT_SWITCH_KEY_LABELS, LearningPrompt};
+use ks_engine::engine::{CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, EngineSnapshot, LAYOUT_SWITCH_KEY_LABELS, LearningPrompt};
 use ks_linux::gtk_hint::{HintCalls, HintClicked, HintDriver, HintScreen};
 use ks_linux::gtk_model::{HOTKEY_PROBLEM_CSS_CLASS, HINT_ACTION_NEVER, HINT_ACTION_OPEN, HINT_PLACE_ATTEMPTS, HINT_PLACE_RETRY_MS, HINT_WINDOW_TITLE};
 use ks_linux::gtk_prompt::PromptAnchor;
@@ -27,8 +27,8 @@ use ks_linux::gtk_window::{MainWindow, ModelInfo};
 use ks_linux::tray::TrayAction;
 use ks_ui::hints::catalogue::LAYOUT_SWITCH_KEY_TITLE;
 use ks_ui::hints::{Click, CorrectionInfo, EngineInput, HINT_OK_LABEL, HintPresenter, HintView, Hints, Moment, Opens, Place, RUNNING_PLATFORM, SettingsPage};
-use ks_ui::windows_ui_model::HINTS_SETTING_TITLE;
-use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, DETECTION_LAYOUT_SWITCH_KEY, HINTS_SETTING};
+use ks_ui::windows_ui_model::{BOTH_SHIFTS_TOGGLE_TITLE, DOUBLE_TAP_CONVERTS_TITLE, HINTS_SETTING_TITLE};
+use ks_config::constants::{DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_CONVERT_LAST_KEY, DETECTION_DOUBLE_TAP_CONVERTS, DETECTION_LAYOUT_SWITCH_KEY, HINTS_SETTING};
 use ks_config::config::SettingsStore;
 use ks_updates::{UpdatePhase, UpdateSnapshot};
 use serde_json::json;
@@ -698,7 +698,9 @@ fn hint_cards() -> Result<(), String> {
 }
 
 /// The lists of a key tapped alone on the page of the hotkeys: a key the other list has is not stored, the row says why
-/// under its title and goes back to the key stored; a free key is stored, and the row says its own words again.
+/// under its title and goes back to the key stored; a free key is stored, and the row says its own words again. Either
+/// Shift takes both Shifts from the conversion key. The switches of the double tap and of both Shifts store their settings,
+/// and the one of both Shifts is offered where the system leaves both Shifts alone.
 fn single_keys() -> Result<(), String> {
     let root = gtk_app::with_app_window().ok_or("the window did not open")?;
     let mut application = None;
@@ -711,28 +713,52 @@ fn single_keys() -> Result<(), String> {
     let list = |title: &str| found.iter().filter_map(|widget| widget.downcast_ref::<adw::ComboRow>()).find(|row| row.title() == title).cloned();
     let layout = list(LAYOUT_SWITCH_KEY_TITLE).ok_or("no list of the layout switch key")?;
     let convert = list(CONVERT_LAST_KEY_TITLE).ok_or("no list of the conversion key")?;
-    let place = |key: &str| LAYOUT_SWITCH_KEY_LABELS.iter().position(|(name, _)| *name == key).map_or(gtk::INVALID_LIST_POSITION, |place| u32::try_from(place).unwrap());
+    let place_in = |labels: &[(&str, &str)], key: &str| labels.iter().position(|(name, _)| *name == key).map_or(gtk::INVALID_LIST_POSITION, |place| u32::try_from(place).unwrap());
+    let place = |key: &str| place_in(&LAYOUT_SWITCH_KEY_LABELS, key);
+    let place_converting = |key: &str| place_in(&CONVERT_LAST_KEY_LABELS, key);
     let stored = || (settings.read(DETECTION_LAYOUT_SWITCH_KEY).unwrap_or_default(), settings.read(DETECTION_CONVERT_LAST_KEY).unwrap_or_default());
     let own_words = convert.subtitle().map(|text| text.to_string());
     layout.set_selected(place("Shift_L"));
-    convert.set_selected(place("Shift_L"));
+    convert.set_selected(place_converting("Shift_L"));
     pump(50);
     let said = convert.subtitle().map_or_default(|text| text.to_string());
-    if stored() != ("Shift_L".to_owned(), String::new()) || convert.selected() != place("") || !said.starts_with("Левый Shift уже выбран") {
+    if stored() != ("Shift_L".to_owned(), String::new()) || convert.selected() != place_converting("") || !said.starts_with("Левый Shift уже выбран") {
         return Err(format!("the conversion key took the layout switch key: stored {:?}, shown {}, said {said:?}", stored(), convert.selected()));
     }
-    convert.set_selected(place("Control_L"));
+    convert.set_selected(place_converting("Control_L"));
     layout.set_selected(place("Control_L"));
     pump(50);
     let said = layout.subtitle().map_or_default(|text| text.to_string());
     if stored() != ("Shift_L".to_owned(), "Control_L".to_owned()) || convert.subtitle().map(|text| text.to_string()) != own_words || !said.starts_with("Левый Ctrl уже выбран") {
         return Err(format!("the conversion key was not stored, or the layout switch key took it: stored {:?}, said {said:?}", stored()));
     }
-    convert.set_selected(place(""));
+    // Either Shift: both Shifts are the layout switch key's, and the conversion key may not take the right one.
+    layout.set_selected(place("Shift"));
+    convert.set_selected(place_converting("Shift_R"));
+    pump(50);
+    let said = convert.subtitle().map_or_default(|text| text.to_string());
+    if stored() != ("Shift".to_owned(), "Control_L".to_owned()) || !said.starts_with("Любой Shift уже выбран") {
+        return Err(format!("either Shift: stored {:?}, said {said:?}", stored()));
+    }
+    convert.set_selected(place_converting(""));
     layout.set_selected(place(""));
     pump(50);
     if stored() != (String::new(), String::new()) || layout.has_css_class(HOTKEY_PROBLEM_CSS_CLASS) {
         return Err(format!("the keys were not turned off: stored {:?}", stored()));
+    }
+    let switch = |title: &str| found.iter().filter_map(|widget| widget.downcast_ref::<adw::SwitchRow>()).find(|row| row.title() == title).cloned();
+    let double = switch(DOUBLE_TAP_CONVERTS_TITLE).ok_or("no switch of the double tap")?;
+    let both = switch(BOTH_SHIFTS_TOGGLE_TITLE).ok_or("no switch of both Shifts")?;
+    for on in [true, false] {
+        double.set_active(on);
+        both.set_active(on);
+        pump(50);
+        if (settings.read(DETECTION_DOUBLE_TAP_CONVERTS), settings.read(DETECTION_BOTH_SHIFTS_TOGGLE)) != (Some(on), Some(on)) {
+            return Err(format!("the switches of the Shift keys did not store {on}"));
+        }
+    }
+    if both.is_sensitive() != ks_linux::system_keys::both_shifts_taken().is_none() {
+        return Err("the switch of both Shifts is offered where the system takes them, or not where it leaves them".to_owned());
     }
     Ok(())
 }

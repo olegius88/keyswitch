@@ -2,8 +2,10 @@
 //! rules, the file and the setting are kept here.
 //!
 //! A platform, on its main thread:
-//! - makes [`Hints::start`] right after its settings store, before anything writes a user file, so that a new
-//!   installation is not taken for an update;
+//! - calls `ks_config::installation::note_start` first thing, before the log is opened, and makes [`Hints::start`]
+//!   right after its settings store, before anything writes a user file, so that a new installation is not taken for an
+//!   update; a new installation gets its Shift keys there (`ks_config::installation::give_new_installation_keys`);
+//! - says once whether the system takes both Shifts for itself ([`Hints::system_takes_both_shifts`]), where it can;
 //! - subscribes with [`subscribe`] once the engine is built (`EngineLoader::when_built`), and hands each
 //!   [`EngineInput`] it posts to [`Hints::engine_input`];
 //! - calls [`Hints::settings_changed`] when a setting changes, [`Hints::settings_opened`] when its settings window
@@ -14,7 +16,11 @@
 //! The presenter's methods never call back into [`Hints`]: a click arrives later, from the platform's event loop.
 
 use ks_config::config::SettingsStore;
-use ks_config::constants::HINTS_SETTING;
+use ks_config::constants::{
+    DEFAULT_BOTH_SHIFTS_TOGGLE, DEFAULT_DOUBLE_TAP_CONVERTS, DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_DOUBLE_TAP_CONVERTS, DETECTION_LAYOUT_SWITCH_KEY,
+    HINTS_SETTING,
+};
+use ks_config::installation::{earlier_files_noted, give_new_installation_keys};
 use ks_config::logsetup::{self, VERSION};
 use ks_engine::{CorrectionPlan, EngineSnapshot, LearningPrompt, Shared};
 use ks_updates::SemanticVersion;
@@ -23,12 +29,18 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::catalogue::{CATALOGUE, CorrectionInfo, Hint, HotkeyName, Hotkeys, Opens, Place, Platform, SettingsPage};
+use super::catalogue::{CATALOGUE, CorrectionInfo, Hint, HotkeyName, Hotkeys, Opens, Place, Platform, SettingsPage, TapKeys};
 use super::schedule::{HintSettings, HintView, Moment, Scheduler, Step};
 use super::store::{HintState, HintStore, How, Loaded, Startup, startup_kind, user_files};
+use crate::constants::{AUTO_SWITCH_NOTICE_SECONDS, AUTO_SWITCH_OFF_NOTICE, AUTO_SWITCH_ON_NOTICE};
 use crate::windows_ui_model::truthy;
 
 const LOGGER: &str = "keyswitch.hints";
+
+/// The notice that both Shifts turned the automatic switching off or on: no hint of the catalogue. It shows each time, at
+/// the caret (near the icon when there is none), also with the hints turned off, for `AUTO_SWITCH_NOTICE_SECONDS`, until
+/// its «Больше не показывать».
+pub const AUTO_SWITCH_NOTICE_ID: &str = "auto_switch";
 
 /// What draws the hints of a platform. None of these takes the focus or a key from the field typed in.
 pub trait HintPresenter<A> {
@@ -63,6 +75,8 @@ pub enum EngineInput<A> {
     Prompt { shown: bool },
     /// A word left as typed only because its layout was picked by hand, where the model would have converted it.
     KeptByChoice { anchor: Option<A> },
+    /// Both Shifts turned the automatic switching off or on.
+    AutoSwitch { enabled: bool, anchor: Option<A> },
 }
 
 /// The engine's subscriptions the hints need, made once the engine is built. On the engine's thread the caret is looked
@@ -82,7 +96,10 @@ pub fn subscribe<A: Send + 'static>(
         deliver(EngineInput::Correction { correction: CorrectionInfo::of(plan), anchor: found });
     }));
     let deliver = post.clone();
-    shared.subscribe_kept_by_choice(Arc::new(move || deliver(EngineInput::KeptByChoice { anchor: anchor() })));
+    let find = anchor.clone();
+    shared.subscribe_kept_by_choice(Arc::new(move || deliver(EngineInput::KeptByChoice { anchor: find() })));
+    let deliver = post.clone();
+    shared.subscribe_auto_switch(Arc::new(move |enabled: bool| deliver(EngineInput::AutoSwitch { enabled, anchor: anchor() })));
     shared.subscribe_learning_prompts(Arc::new(move |prompt: Option<&LearningPrompt>| post(EngineInput::Prompt { shown: prompt.is_some() })));
 }
 
@@ -108,6 +125,11 @@ impl HintSettings {
                 selection_layout: hotkey(settings, HotkeyName::SelectionLayout),
                 selection_case: hotkey(settings, HotkeyName::SelectionCase),
                 selection_transliterate: hotkey(settings, HotkeyName::SelectionTransliterate),
+                tap: TapKeys {
+                    switch: settings.read(DETECTION_LAYOUT_SWITCH_KEY).unwrap_or_default(),
+                    double_tap: settings.read(DETECTION_DOUBLE_TAP_CONVERTS).unwrap_or(DEFAULT_DOUBLE_TAP_CONVERTS),
+                    both_shifts: settings.read(DETECTION_BOTH_SHIFTS_TOGGLE).unwrap_or(DEFAULT_BOTH_SHIFTS_TOGGLE),
+                },
             },
         }
     }
@@ -134,13 +156,19 @@ pub struct Hints<A> {
     settings: Arc<SettingsStore>,
     wants_anchor: Arc<AtomicBool>,
     startup: Startup,
+    /// Whether the system answers both Shifts itself: then no hint names them.
+    both_shifts_taken: bool,
+    /// When the notice of both Shifts goes, while it shows.
+    notice_until: Option<f64>,
 }
 
 impl<A: Clone> Hints<A> {
-    /// The hints of the catalogue, kept in `hints.json` of `data_dir`.
+    /// The hints of the catalogue, kept in `hints.json` of `data_dir`. What the program found in its folders at its very
+    /// start (`ks_config::installation::note_start`) counts too: the log it has written since is no file of an earlier
+    /// start.
     #[must_use]
     pub fn start(settings: Arc<SettingsStore>, data_dir: &Path, platform: Platform, moment: &Moment) -> Hints<A> {
-        Hints::with_catalogue(&CATALOGUE, settings, data_dir, platform, running_version(), moment)
+        Hints::begin(&CATALOGUE, settings, data_dir, platform, running_version(), moment, earlier_files_noted().unwrap_or(false))
     }
 
     /// The same over any catalogue and version, for tests.
@@ -149,20 +177,51 @@ impl<A: Clone> Hints<A> {
         catalogue: &'static [Hint], settings: Arc<SettingsStore>, data_dir: &Path, platform: Platform, version: SemanticVersion,
         moment: &Moment,
     ) -> Hints<A> {
+        Hints::begin(catalogue, settings, data_dir, platform, version, moment, false)
+    }
+
+    /// A new installation, the first start of which is told apart here, gets the Shift keys before its settings are read.
+    fn begin(
+        catalogue: &'static [Hint], settings: Arc<SettingsStore>, data_dir: &Path, platform: Platform, version: SemanticVersion,
+        moment: &Moment, noted: bool,
+    ) -> Hints<A> {
         let store = HintStore::in_folder(data_dir);
         // A file of the hints that cannot be read was still left by a version that had them.
-        let older_files = store.path.exists() || user_files(&settings.path, data_dir).iter().any(|path| path.exists());
+        let older_files = noted || store.path.exists() || user_files(&settings.path, data_dir).iter().any(|path| path.exists());
         let (mut state, recorded) = match store.load() {
             Loaded::Read(state) => (state, true),
             Loaded::Missing | Loaded::SetAside(_) => (HintState::default(), false),
         };
         let startup = startup_kind(version, recorded.then_some(&state), older_files);
+        if startup == Startup::Fresh {
+            match give_new_installation_keys(&settings) {
+                Ok(()) => logsetup::info(LOGGER, "new installation: the Shift keys are on"),
+                // The keys hold for this run; the next start is no new installation and keeps the defaults.
+                Err(error) => logsetup::warning(LOGGER, &format!("Не удалось сохранить настройки новой установки в {}: {error}", settings.path.display())),
+            }
+        }
         state.begin(startup, version, &moment.timestamp);
         let scheduler = Scheduler::new(catalogue, platform, version, HintSettings::read(&settings), state, moment);
-        let mut hints = Hints { scheduler, store, settings, wants_anchor: Arc::new(AtomicBool::new(false)), startup };
+        let mut hints =
+            Hints { scheduler, store, settings, wants_anchor: Arc::new(AtomicBool::new(false)), startup, both_shifts_taken: false, notice_until: None };
         hints.write();
         hints.sync();
         hints
+    }
+
+    /// The settings the hints follow, with both Shifts left out where the system takes them.
+    fn read_settings(&self) -> HintSettings {
+        let mut read = HintSettings::read(&self.settings);
+        read.hotkeys.tap.both_shifts &= !self.both_shifts_taken;
+        read
+    }
+
+    /// Whether the system answers both Shifts itself (`InputBackend::system_takes_both_shifts`): the hints then do not
+    /// name them.
+    pub fn system_takes_both_shifts(&mut self, taken: bool) {
+        self.both_shifts_taken = taken;
+        // The hints stay on: nothing is taken down.
+        let _ = self.scheduler.set_settings(self.read_settings());
     }
 
     /// What kind of start this was.
@@ -184,7 +243,7 @@ impl<A: Clone> Hints<A> {
 
     #[must_use]
     pub fn needs_tick(&self) -> bool {
-        self.scheduler.needs_tick()
+        self.scheduler.needs_tick() || self.notice_until.is_some()
     }
 
     fn write(&self) {
@@ -252,18 +311,40 @@ impl<A: Clone> Hints<A> {
                 self.scheduler.kept_by_choice(anchor, moment);
                 None
             }
+            EngineInput::AutoSwitch { enabled, anchor } => {
+                self.auto_switch(presenter, enabled, anchor.as_ref(), moment);
+                None
+            }
         };
         self.settle(presenter, step, moment);
     }
 
+    /// Both Shifts turned the automatic switching off or on: a short notice says so at the caret, or near the icon where no
+    /// caret was found, unless it was turned off with its «Больше не показывать».
+    fn auto_switch(&mut self, presenter: &mut dyn HintPresenter<A>, enabled: bool, anchor: Option<&A>, moment: &Moment) {
+        if self.scheduler.state().how(AUTO_SWITCH_NOTICE_ID).as_deref() == Some(How::Forever.name()) {
+            return;
+        }
+        let text = if enabled { AUTO_SWITCH_ON_NOTICE } else { AUTO_SWITCH_OFF_NOTICE };
+        let shown = match anchor {
+            Some(anchor) => presenter.show_caret(&HintView::notice(AUTO_SWITCH_NOTICE_ID, Place::Caret, text), anchor),
+            None => presenter.show_tray(&HintView::notice(AUTO_SWITCH_NOTICE_ID, Place::Tray, text)),
+        };
+        self.notice_until = shown.then_some(moment.seconds + AUTO_SWITCH_NOTICE_SECONDS);
+    }
+
     /// Called every `HINT_TICK_INTERVAL_MS` while `needs_tick`.
     pub fn tick(&mut self, presenter: &mut dyn HintPresenter<A>, moment: &Moment) {
+        if self.notice_until.is_some_and(|until| moment.seconds >= until) {
+            self.notice_until = None;
+            presenter.hide(AUTO_SWITCH_NOTICE_ID);
+        }
         self.settle(presenter, None, moment);
     }
 
     /// A setting changed: the hints read theirs again.
     pub fn settings_changed(&mut self, presenter: &mut dyn HintPresenter<A>, moment: &Moment) {
-        let step = self.scheduler.set_settings(HintSettings::read(&self.settings));
+        let step = self.scheduler.set_settings(self.read_settings());
         self.settle(presenter, step, moment);
     }
 
@@ -292,6 +373,14 @@ impl<A: Clone> Hints<A> {
             Click::Text => How::Click,
         };
         presenter.hide(id);
+        if id == AUTO_SWITCH_NOTICE_ID {
+            self.notice_until = None;
+            if click == Click::Never {
+                self.scheduler.notice_turned_off(id, moment);
+            }
+            self.settle(presenter, None, moment);
+            return;
+        }
         if click == Click::Text
             && let Some(opens) = self.scheduler.opens_of(id)
         {
@@ -397,12 +486,135 @@ mod tests {
         assert!(!hints.needs_tick());
         hints.engine_input(&mut screen, EngineInput::Snapshot { running: true }, &at(1.0));
         assert!(hints.needs_tick());
+        // The keys of a new installation first, then where the program is.
         hints.tick(&mut screen, &at(6.0));
-        assert_eq!(screen.log, ["tray first_start"]);
-        hints.clicked(&mut screen, "first_start", Click::Closed, &at(7.0));
-        assert_eq!(screen.log, ["tray first_start", "hide first_start"]);
+        assert_eq!(screen.log, ["tray shift_keys"]);
+        hints.clicked(&mut screen, "shift_keys", Click::Closed, &at(7.0));
+        hints.tick(&mut screen, &at(700.0));
+        assert_eq!(screen.log, ["tray shift_keys", "hide shift_keys", "tray first_start"]);
+        hints.clicked(&mut screen, "first_start", Click::Closed, &at(701.0));
+        assert_eq!(screen.log.last().unwrap(), "hide first_start");
         assert_eq!(hints.state().how("first_start").as_deref(), Some("ok"));
         assert!(file(&setup).contains(r#""how":"ok""#), "{}", file(&setup));
+    }
+
+    /// The settings of the keys tapped alone, as they read from `settings`.
+    fn tap_keys(settings: &SettingsStore) -> (String, bool, bool) {
+        let read = HintSettings::read(settings).hotkeys.tap;
+        (read.switch, read.double_tap, read.both_shifts)
+    }
+
+    const EARLIER_SETTINGS: &str = r#"{"schema_version": 8, "detection": {"layout_switch_key": "", "convert_last_key": "", "minimum_length": 3}}"#;
+
+    #[test]
+    fn a_new_installation_gets_the_shift_keys_and_one_that_ran_before_keeps_its_settings() {
+        // Nothing in the folders: the keys are on, and written into the settings file.
+        let fresh = setup("keys-fresh");
+        assert_eq!(hints(&fresh).startup(), Startup::Fresh);
+        assert_eq!(tap_keys(&fresh.settings), ("Shift".to_owned(), true, true));
+        let written = SettingsStore::new(Some(fresh.settings.path.clone()));
+        assert_eq!(tap_keys(&written), ("Shift".to_owned(), true, true));
+        // A folder of 0.73.0 with its settings file: an update, and the file stays as it was.
+        let with_file = setup("keys-0-73-file");
+        std::fs::write(&with_file.settings.path, EARLIER_SETTINGS).unwrap();
+        std::fs::create_dir_all(&with_file.data).unwrap();
+        std::fs::write(with_file.data.join("hints.json"), r#"{"last_run_version": "0.73.0"}"#).unwrap();
+        with_file.settings.load();
+        let later = |setup: &Setup| Hints::<Anchor>::with_catalogue(&CATALOGUE, setup.settings.clone(), &setup.data, Platform::Linux, version("0.74.0"), &at(0.0));
+        assert_eq!(later(&with_file).startup(), Startup::Updated { from: Some(version("0.73.0")) });
+        assert_eq!(tap_keys(&with_file.settings), (String::new(), false, false));
+        assert_eq!(std::fs::read_to_string(&with_file.settings.path).unwrap(), EARLIER_SETTINGS);
+        // A folder of 0.73.0 whose user never changed a setting: no settings file, and none is written.
+        let without_file = setup("keys-0-73-none");
+        std::fs::create_dir_all(&without_file.data).unwrap();
+        std::fs::write(without_file.data.join("hints.json"), r#"{"last_run_version": "0.73.0"}"#).unwrap();
+        assert_eq!(later(&without_file).startup(), Startup::Updated { from: Some(version("0.73.0")) });
+        assert_eq!(tap_keys(&without_file.settings), (String::new(), false, false));
+        assert!(!without_file.settings.path.exists());
+        // A version before the hints that left only its log (0.66, 0.70): the start found it, so no new installation.
+        let only_log = setup("keys-log");
+        let mut started = Hints::<Anchor>::begin(&CATALOGUE, only_log.settings.clone(), &only_log.data, Platform::Linux, version("0.74.0"), &at(0.0), true);
+        assert_eq!(started.startup(), Startup::Updated { from: None });
+        assert_eq!(tap_keys(&only_log.settings), (String::new(), false, false));
+        assert!(!only_log.settings.path.exists());
+        // An installation without the keys hears nothing of them.
+        let mut screen = Screen::new(true);
+        started.engine_input(&mut screen, EngineInput::Snapshot { running: true }, &at(1.0));
+        started.tick(&mut screen, &at(10.0));
+        assert!(screen.log.is_empty(), "{:?}", screen.log);
+    }
+
+    #[test]
+    fn both_shifts_the_system_takes_are_not_named() {
+        let setup = setup("keys-taken");
+        let mut hints = hints(&setup);
+        assert!(hints.scheduler.settings().hotkeys.tap.both_shifts);
+        hints.system_takes_both_shifts(true);
+        assert!(!hints.scheduler.settings().hotkeys.tap.both_shifts);
+        let mut screen = Screen::new(true);
+        hints.settings_changed(&mut screen, &at(1.0));
+        assert!(!hints.scheduler.settings().hotkeys.tap.both_shifts);
+        hints.system_takes_both_shifts(false);
+        assert!(hints.scheduler.settings().hotkeys.tap.both_shifts);
+    }
+
+    #[test]
+    fn both_shifts_are_told_at_the_caret_for_a_moment() {
+        let setup = setup("notice");
+        let mut hints = hints(&setup);
+        // Shown with the hints turned off too: it reports what the keys did.
+        setup.settings.set(HINTS_SETTING, Value::Bool(false), true).unwrap();
+        let mut screen = Screen::new(true);
+        hints.settings_changed(&mut screen, &at(0.0));
+        hints.engine_input(&mut screen, EngineInput::AutoSwitch { enabled: false, anchor: Some(AT) }, &at(1.0));
+        assert_eq!(screen.log, ["caret auto_switch at (100, 200)"]);
+        assert!(hints.needs_tick());
+        hints.tick(&mut screen, &at(2.0));
+        assert_eq!(screen.log.len(), 1);
+        hints.tick(&mut screen, &at(3.0));
+        assert_eq!(screen.log, ["caret auto_switch at (100, 200)", "hide auto_switch"]);
+        assert!(!hints.needs_tick());
+        // No caret found: near the icon. «Понятно» takes it down.
+        hints.engine_input(&mut screen, EngineInput::AutoSwitch { enabled: true, anchor: None }, &at(4.0));
+        assert_eq!(screen.log.last().unwrap(), "tray auto_switch");
+        hints.clicked(&mut screen, AUTO_SWITCH_NOTICE_ID, Click::Ok, &at(4.5));
+        assert_eq!((screen.log.last().unwrap().as_str(), hints.needs_tick()), ("hide auto_switch", false));
+        // A presenter that could not draw it: nothing to take down.
+        let mut blind = Screen::new(false);
+        hints.engine_input(&mut blind, EngineInput::AutoSwitch { enabled: true, anchor: Some(AT) }, &at(5.0));
+        assert!(!hints.needs_tick());
+        // «Больше не показывать» turns this notice off, and only it.
+        hints.engine_input(&mut screen, EngineInput::AutoSwitch { enabled: false, anchor: Some(AT) }, &at(6.0));
+        hints.clicked(&mut screen, AUTO_SWITCH_NOTICE_ID, Click::Never, &at(6.5));
+        assert_eq!(hints.state().how(AUTO_SWITCH_NOTICE_ID).as_deref(), Some("forever"));
+        assert!(file(&setup).contains(AUTO_SWITCH_NOTICE_ID));
+        let shown = screen.log.len();
+        hints.engine_input(&mut screen, EngineInput::AutoSwitch { enabled: true, anchor: Some(AT) }, &at(7.0));
+        assert_eq!(screen.log.len(), shown);
+        assert_eq!(setup.settings.get(HINTS_SETTING), Some(Value::Bool(false)));
+    }
+
+    #[test]
+    fn the_notice_says_off_or_on() {
+        struct Texts(Vec<String>);
+        impl HintPresenter<Anchor> for Texts {
+            fn show_caret(&mut self, view: &HintView, _anchor: &Anchor) -> bool {
+                self.0.push(format!("{} | {} | {}", view.text, view.ok, view.never));
+                true
+            }
+            fn show_tray(&mut self, view: &HintView) -> bool {
+                self.0.push(view.text.clone());
+                true
+            }
+            fn hide(&mut self, _id: &str) {}
+            fn open(&mut self, _opens: &Opens) {}
+        }
+        let setup = setup("notice-texts");
+        let mut hints = hints(&setup);
+        let mut texts = Texts(Vec::new());
+        hints.engine_input(&mut texts, EngineInput::AutoSwitch { enabled: false, anchor: Some(AT) }, &at(1.0));
+        hints.engine_input(&mut texts, EngineInput::AutoSwitch { enabled: true, anchor: None }, &at(2.0));
+        assert_eq!(texts.0, ["Автопереключение выключено | Понятно | Больше не показывать", "Автопереключение включено"]);
     }
 
     #[test]
@@ -521,9 +733,11 @@ mod tests {
         let mut screen = Screen::new(true);
         hints.engine_input(&mut screen, EngineInput::Snapshot { running: true }, &at(0.0));
         hints.tick(&mut screen, &at(5.0));
-        hints.clicked(&mut screen, "first_start", Click::Never, &at(6.0));
+        // The keys of the new installation hold in memory, so the hint of them shows.
+        assert_eq!(screen.log, ["tray shift_keys"]);
+        hints.clicked(&mut screen, "shift_keys", Click::Never, &at(6.0));
         assert_eq!(settings.get(HINTS_SETTING), Some(Value::Bool(false)));
-        assert_eq!(hints.state().how("first_start").as_deref(), Some("forever"));
+        assert_eq!(hints.state().how("shift_keys").as_deref(), Some("forever"));
     }
 
     #[test]
@@ -594,6 +808,9 @@ mod tests {
         for callback in shared.kept_by_choice_callbacks() {
             callback();
         }
+        for callback in shared.auto_switch_callbacks() {
+            callback(false);
+        }
         shared.show_learning_prompt(LearningPrompt {
             source_group: 0,
             target_group: 1,
@@ -611,6 +828,7 @@ mod tests {
                 EngineInput::Correction { correction: LAYOUT, anchor: Some(AT) },
                 EngineInput::Correction { correction: LAYOUT, anchor: None },
                 EngineInput::KeptByChoice { anchor: Some(AT) },
+                EngineInput::AutoSwitch { enabled: false, anchor: Some(AT) },
                 EngineInput::Prompt { shown: true },
             ]
         );

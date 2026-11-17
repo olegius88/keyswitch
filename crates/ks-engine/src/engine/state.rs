@@ -280,7 +280,7 @@ impl EngineCore {
     /// The unfinished word and the last committed one stay in the old window.
     fn focus_changed(&mut self, previous: i64, window: i64) {
         self.own_layout_ignored = false;
-        self.layout_tap = None;
+        self.forget_taps();
         self.shared.set_sensitive_context_window(None);
         self.shared.set_front_excluded(false);
         self.convert_press_at = 0.0;

@@ -15,7 +15,7 @@ use std::time::Instant;
 use gtk::prelude::*;
 use ks_backend::InputBackend;
 use ks_config::config::SettingsStore;
-use ks_config::constants::DETECTION_CONVERT_LAST_KEY;
+use ks_config::constants::{DETECTION_CONVERT_LAST_KEY, ENABLED};
 use ks_config::history::HistoryStore;
 use ks_config::learning::LearningStore;
 use ks_engine::rule_editor::{RuleDraft, build_rule, draft_from_prompt};
@@ -344,6 +344,59 @@ fn scenario(folder: &std::path::Path) -> Result<(), String> {
         }
         convert_key("")?;
         println!("CONVERT_KEY_TAP_E2E_OK");
+        // The Shift keys of a new installation: either Shift switches the layout, two quick taps convert the word as Pause
+        // does (the layout ends where Pause leaves it), both Shifts together pause the automatic switching and resume it.
+        set("detection.layout_switch_key", json!("Shift"))?;
+        set("detection.double_tap_converts", json!(true))?;
+        set("detection.both_shifts_toggle", json!(true))?;
+        prepare(0, "")?;
+        settle(INTER_CASE);
+        typer.tap_keysym(SHIFT_R_KEYSYM)?;
+        settle(SETTLE);
+        if group() != 1 {
+            return Err(format!("either Shift: group={}", group()));
+        }
+        prepare(0, "ghbdtn")?;
+        settle(INTER_CASE);
+        typer.tap_keysym(SHIFT_L_KEYSYM)?;
+        settle(DOUBLE_TAP_GAP);
+        typer.tap_keysym(SHIFT_L_KEYSYM)?;
+        settle(SETTLE);
+        if (entry.text().as_str(), group()) != ("привет", 1) {
+            return Err(format!("double Shift: text={:?} group={}", entry.text().as_str(), group()));
+        }
+        let both = |enabled: bool| -> Result<(), String> {
+            typer.hold_keysym(SHIFT_L_KEYSYM, true)?;
+            typer.hold_keysym(SHIFT_R_KEYSYM, true)?;
+            typer.hold_keysym(SHIFT_R_KEYSYM, false)?;
+            typer.hold_keysym(SHIFT_L_KEYSYM, false)?;
+            settle(SETTLE);
+            if settings.read(ENABLED) == Some(enabled) { Ok(()) } else { Err(format!("both Shifts: enabled={:?}, wanted {enabled}", settings.read(ENABLED))) }
+        };
+        both(false)?;
+        both(true)?;
+        // A system that switches the layout on both Shifts itself (XKB `grp:shifts_toggle`) keeps that chord: the layout
+        // switches, the automatic switching stays on, and the settings window would say why.
+        let options = |option: &str| -> Result<(), String> {
+            let status = std::process::Command::new("setxkbmap").args(["-layout", "us,ru", "-option", "", "-option", option]).status().map_err(|error| error.to_string())?;
+            settle(SETTLE);
+            if status.success() { Ok(()) } else { Err(format!("setxkbmap {option}: {status}")) }
+        };
+        options("grp:shifts_toggle")?;
+        if !backend.system_takes_both_shifts() || ks_linux::system_keys::both_shifts_taken() != Some("переключают раскладку") {
+            return Err("the option of the system was not read".to_owned());
+        }
+        prepare(0, "")?;
+        settle(INTER_CASE);
+        both(true)?;
+        let switched = group();
+        options("")?;
+        if switched != 1 || backend.system_takes_both_shifts() {
+            return Err(format!("both Shifts of the system: group={switched}"));
+        }
+        set("detection.double_tap_converts", json!(false))?;
+        set("detection.both_shifts_toggle", json!(false))?;
+        println!("SHIFT_KEYS_E2E_OK");
         let names = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.ListNames", &[])?;
         if names.contains("org.freedesktop.portal.Desktop") || names.contains("org.freedesktop.portal.Documents") {
             return Err("GUI tests unexpectedly activated a desktop or document portal".to_owned());

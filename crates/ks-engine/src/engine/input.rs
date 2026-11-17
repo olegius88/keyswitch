@@ -8,6 +8,21 @@ use crate::unicode_category::category;
 use serde_json::json;
 
 impl EngineCore {
+    /// The toggle hotkey, and both Shifts together: the automatic switching is turned off or on, in the settings the tray
+    /// menu shows. Says which.
+    pub(crate) fn toggle_enabled(&mut self) -> EngineResult<bool> {
+        let enabled = !self.flag("enabled", true);
+        SETTING_FROM_CORE.set(true);
+        let saved = self.settings.set("enabled", json!(enabled), true);
+        SETTING_FROM_CORE.set(false);
+        if saved.is_ok() {
+            self.settings_changed("enabled", &json!(enabled));
+        }
+        saved.map_err(|error| EngineError(error.to_string()))?;
+        self.clear_word(Some(if enabled { "Автокоррекция включена" } else { "Автокоррекция на паузе" }), "engine_toggled");
+        Ok(enabled)
+    }
+
     // Let go of the text when keys may have passed the Windows hook; say whether they may have.
     //
     // Under CPU load the hook's thread waited 1.5 to 3.8 s for the processor (VM, 28.10.2026), and Windows
@@ -19,7 +34,7 @@ impl EngineCore {
         let Some(gap) = self.backend.take_hook_gap() else {
             return false;
         };
-        self.layout_tap = None;
+        self.forget_taps();
         technical_event!(self.shared, "hook_gap", "late_ms": gap.late_ms, "callback_ms": gap.callback_ms, "threshold_ms": HOOK_GAP_MS);
         self.clear_word(Some("Клавиши прошли мимо KeySwitch"), "hook_gap");
         self.untracked_token = true;
@@ -57,8 +72,8 @@ impl EngineCore {
         let mut event = event;
         if event.key_name == WHEEL_KEY_NAME {
             // Ctrl+wheel zooms and Shift+wheel scrolls sideways: the modifier was held for that, not tapped. The wheel
-            // moves no caret, and it reaches the engine only while a layout switch key is set (Shared::enqueue).
-            self.layout_tap = None;
+            // moves no caret, and it reaches the engine only while a key tapped alone or both Shifts are set (Shared::enqueue).
+            self.forget_taps();
             return Ok(());
         }
         if event.pressed && !is_modifier_key(&event.key_name) && !event.deferred {
@@ -70,7 +85,7 @@ impl EngineCore {
         }
         self.expire_manual_correction();
         if self.shared.input_overflow.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            self.layout_tap = None;
+            self.forget_taps();
             self.complete_deferred_action(false, "input_overflow");
             self.clear_word(Some("Очередь ввода переполнена"), "input_overflow");
             self.untracked_token = true;
@@ -221,6 +236,7 @@ impl EngineCore {
             }
             self.maybe_execute_pending(&event)?;
             self.track_layout_tap(&event, repeat)?;
+            self.track_shift_chord(&event, repeat)?;
             return Ok(());
         }
         if event.pressed && !event.synthetic {
@@ -241,15 +257,7 @@ impl EngineCore {
             self.convert_press_at = 0.0;
         }
         if self.matches_hotkey("toggle", &event) {
-            let enabled = !self.flag("enabled", true);
-            SETTING_FROM_CORE.set(true);
-            let saved = self.settings.set("enabled", json!(enabled), true);
-            SETTING_FROM_CORE.set(false);
-            if saved.is_ok() {
-                self.settings_changed("enabled", &json!(enabled));
-            }
-            saved.map_err(|error| EngineError(error.to_string()))?;
-            self.clear_word(Some(if enabled { "Автокоррекция включена" } else { "Автокоррекция на паузе" }), "engine_toggled");
+            self.toggle_enabled()?;
             return Ok(());
         }
         if elsewhere {

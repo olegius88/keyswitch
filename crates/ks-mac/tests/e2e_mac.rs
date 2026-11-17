@@ -872,6 +872,35 @@ mod scenario {
         Ok(())
     }
 
+    /// The Shift keys of a new installation (`detection.double_tap_converts`, `detection.both_shifts_toggle`): two quick
+    /// taps of the layout switch key convert the word just typed, as Control+Option+K does, and both Shifts pause the
+    /// automatic switching and let it go on.
+    fn shift_keys(driver: &Driver, root: &Path) -> Result<(), String> {
+        // Longer than a double tap after the taps of the phases before.
+        std::thread::sleep(Duration::from_millis(700));
+        driver.put_text("")?;
+        driver.select(0)?;
+        driver.type_keys("the hello", false)?;
+        let typed = driver.value();
+        for _ in 0..2 {
+            driver.key(SHIFT, true)?;
+            driver.key(SHIFT, false)?;
+        }
+        let converted = driver.wait_change(&typed);
+        driver.check("a double tap of the layout switch key", (converted.as_str(), driver.group()) == ("the руддщ", 1), &format!("{typed:?} became {converted:?}"));
+        std::thread::sleep(Duration::from_millis(700));
+        let enabled = |wanted: bool| wait_for(CHANGE_DEADLINE, || (SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted)).then_some(())).is_some();
+        for wanted in [false, true] {
+            driver.key(SHIFT, true)?;
+            driver.key(RIGHT_SHIFT, true)?;
+            driver.key(RIGHT_SHIFT, false)?;
+            driver.key(SHIFT, false)?;
+            let changed = enabled(wanted);
+            driver.check("both Shifts", changed && driver.group() == 1, &format!("wanted {wanted}, group {}", driver.group()));
+        }
+        Ok(())
+    }
+
     /// A function key is a hotkey by its name: F13 pauses the program here, and F13 again lets it go on.
     fn function_key(driver: &Driver, root: &Path) -> Result<(), String> {
         let enabled = |wanted: bool| wait_for(CHANGE_DEADLINE, || (SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted)).then_some(())).is_some();
@@ -891,7 +920,7 @@ mod scenario {
         // Seen before: the first correction of this run brings the hint at the caret, and a start of this version no news.
         seed_hints(&root.join("data"), &format!(r#"{{"last_run_version": "{VERSION}"}}"#))?;
         let settings = SettingsStore::new(Some(root.join("config/config.json")));
-        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L"))] {
+        for (path, value) in [("general.autostart", json!(false)), ("updates.check_automatically", json!(false)), ("diagnostics.technical_logging", json!(true)), ("detection.early_switch", json!(false)), ("detection.layout_switch_key", json!("Shift_L")), ("detection.double_tap_converts", json!(true)), ("detection.both_shifts_toggle", json!(true))] {
             settings.set(path, value, true).map_err(|error| format!("{error:?}"))?;
         }
         // The pause hotkey is a function key (`function_key`).
@@ -917,6 +946,7 @@ mod scenario {
             conversion(&driver)?;
             layout_key(&driver)?;
             convert_key(&driver)?;
+            shift_keys(&driver, &root)?;
             function_key(&driver, &root)?;
             driver.release_modifiers()?;
             let _ = child.kill();

@@ -90,6 +90,7 @@ struct EditorState {
     release_fails: bool,
     stall: Duration,
     unconfirmed: bool,
+    both_shifts_taken: bool,
 }
 
 /// A correction the editor received: where it happened and what it did (`TracedEditor.corrections`).
@@ -119,7 +120,7 @@ impl Backend {
     #[must_use]
     pub fn new(application: &str, group: i32, text: Vec<char>) -> Backend {
         let caret = text.len();
-        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, key_window: None, release_fails: false, stall: Duration::ZERO, unconfirmed: false }) }
+        Backend { state: Mutex::new(EditorState { text, caret, group, window: 1, application: application.to_owned(), enter: None, delivered: None, corrections: Vec::new(), serial: 0, failing: false, panicking: false, swallows: SWALLOWS.load(Ordering::Relaxed), selection: None, own: false, key_window: None, release_fails: false, stall: Duration::ZERO, unconfirmed: false, both_shifts_taken: false }) }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, EditorState> {
@@ -206,6 +207,16 @@ impl Backend {
     /// The next layout switches stay asked for and unconfirmed, as in a window slow to take them: the layout does not change.
     pub fn set_unconfirmed(&self, unconfirmed: bool) {
         self.lock().unconfirmed = unconfirmed;
+    }
+
+    /// The text selected in the window, as the last selection command left it.
+    pub fn selection(&self) -> Option<String> {
+        self.lock().selection.clone()
+    }
+
+    /// The keyboard settings of the system answer both Shifts themselves (`InputBackend::system_takes_both_shifts`).
+    pub fn set_both_shifts_taken(&self, taken: bool) {
+        self.lock().both_shifts_taken = taken;
     }
 
     /// `text[start:stop]`.
@@ -338,6 +349,10 @@ impl InputBackend for Backend {
 
     fn supports_selection(&self) -> bool {
         true
+    }
+
+    fn system_takes_both_shifts(&self) -> bool {
+        self.lock().both_shifts_taken
     }
 
     fn read_selection(&self, _application: &str, _window: i64) -> Result<SelectedText, SelectionError> {

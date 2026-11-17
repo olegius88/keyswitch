@@ -1279,6 +1279,11 @@ impl InputBackend for WaylandBackend {
         true
     }
 
+    /// The XKB options of the desktop (`system_keys`).
+    fn system_takes_both_shifts(&self) -> bool {
+        crate::system_keys::both_shifts_taken().is_some()
+    }
+
     /// The text selected in the focused field, through AT-SPI; never in a field the compositor says is a password field (GNOME
     /// Shell draws its own prompts, which AT-SPI does not read).
     fn read_selection(&self, application: &str, window: i64) -> Result<SelectedText, SelectionError> {
