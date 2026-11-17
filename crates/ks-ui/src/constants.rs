@@ -55,13 +55,13 @@ pub const LAYOUT_SWITCH_KEY_VERSION: &str = "0.70.0";
 /// The release that tells of a word left as typed for a layout picked by hand.
 pub const KEPT_BY_CHOICE_VERSION: &str = "0.74.0";
 /// The release that gives a new installation the Shift keys, and tells it of them in its first hint.
-pub const SHIFT_KEYS_VERSION: &str = "0.74.0";
+pub const SHIFT_KEYS_VERSION: &str = "0.75.0";
 /// What the notice at the caret says when both Shifts turned the automatic switching off or on (the words of the tray
 /// menu's item), and how long it stays.
 pub const AUTO_SWITCH_OFF_NOTICE: &str = "Автопереключение выключено";
 pub const AUTO_SWITCH_ON_NOTICE: &str = "Автопереключение включено";
 pub const AUTO_SWITCH_NOTICE_SECONDS: f64 = 2.0;
 /// The release that remembers a word erased and typed again after a change of layout, and says so.
-pub const REMEMBERED_WORD_VERSION: &str = "0.74.0";
+pub const REMEMBERED_WORD_VERSION: &str = "0.75.0";
 /// The longest word the notice of a remembered word names whole; a longer one is cut short with an ellipsis.
 pub const REMEMBERED_WORD_SHOWN_MAX_CHARACTERS: usize = 24;

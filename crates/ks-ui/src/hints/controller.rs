@@ -535,26 +535,26 @@ mod tests {
         assert_eq!(tap_keys(&fresh.settings), ("Shift".to_owned(), true, true));
         let written = SettingsStore::new(Some(fresh.settings.path.clone()));
         assert_eq!(tap_keys(&written), ("Shift".to_owned(), true, true));
-        // A folder of 0.73.0 with its settings file: an update, and the file stays as it was.
-        let with_file = setup("keys-0-73-file");
+        // A folder of 0.74.0 with its settings file: an update, and the file stays as it was.
+        let with_file = setup("keys-0-74-file");
         std::fs::write(&with_file.settings.path, EARLIER_SETTINGS).unwrap();
         std::fs::create_dir_all(&with_file.data).unwrap();
-        std::fs::write(with_file.data.join("hints.json"), r#"{"last_run_version": "0.73.0"}"#).unwrap();
+        std::fs::write(with_file.data.join("hints.json"), r#"{"last_run_version": "0.74.0"}"#).unwrap();
         with_file.settings.load();
-        let later = |setup: &Setup| Hints::<Anchor>::with_catalogue(&CATALOGUE, setup.settings.clone(), &setup.data, Platform::Linux, version("0.74.0"), &at(0.0));
-        assert_eq!(later(&with_file).startup(), Startup::Updated { from: Some(version("0.73.0")) });
+        let later = |setup: &Setup| Hints::<Anchor>::with_catalogue(&CATALOGUE, setup.settings.clone(), &setup.data, Platform::Linux, version("0.75.0"), &at(0.0));
+        assert_eq!(later(&with_file).startup(), Startup::Updated { from: Some(version("0.74.0")) });
         assert_eq!(tap_keys(&with_file.settings), (String::new(), false, false));
         assert_eq!(std::fs::read_to_string(&with_file.settings.path).unwrap(), EARLIER_SETTINGS);
-        // A folder of 0.73.0 whose user never changed a setting: no settings file, and none is written.
-        let without_file = setup("keys-0-73-none");
+        // A folder of 0.74.0 whose user never changed a setting: no settings file, and none is written.
+        let without_file = setup("keys-0-74-none");
         std::fs::create_dir_all(&without_file.data).unwrap();
-        std::fs::write(without_file.data.join("hints.json"), r#"{"last_run_version": "0.73.0"}"#).unwrap();
-        assert_eq!(later(&without_file).startup(), Startup::Updated { from: Some(version("0.73.0")) });
+        std::fs::write(without_file.data.join("hints.json"), r#"{"last_run_version": "0.74.0"}"#).unwrap();
+        assert_eq!(later(&without_file).startup(), Startup::Updated { from: Some(version("0.74.0")) });
         assert_eq!(tap_keys(&without_file.settings), (String::new(), false, false));
         assert!(!without_file.settings.path.exists());
         // A version before the hints that left only its log (0.66, 0.70): the start found it, so no new installation.
         let only_log = setup("keys-log");
-        let mut started = Hints::<Anchor>::begin(&CATALOGUE, only_log.settings.clone(), &only_log.data, Platform::Linux, version("0.74.0"), &at(0.0), true);
+        let mut started = Hints::<Anchor>::begin(&CATALOGUE, only_log.settings.clone(), &only_log.data, Platform::Linux, version("0.75.0"), &at(0.0), true);
         assert_eq!(started.startup(), Startup::Updated { from: None });
         assert_eq!(tap_keys(&only_log.settings), (String::new(), false, false));
         assert!(!only_log.settings.path.exists());
