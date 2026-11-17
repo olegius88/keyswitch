@@ -31,9 +31,13 @@ use std::sync::Arc;
 
 /// The splits of the word corpus. It has no test split: the pair's sealed test is the holdout freeze of the base corpus.
 pub const WORD_SPLITS: [&str; 3] = ["train", "development", "calibration"];
+/// The split of a corpus of schema three that no fit reads: the words engine acceptance samples are made of.
+pub const ACCEPTANCE_SPLIT: &str = "acceptance";
 /// The `kind` of a word corpus's config and receipt.
 pub const WORD_CORPUS_KIND: &str = "prefix-words";
-const WORD_CORPUS_SCHEMA: u32 = 2;
+/// Schema two: the corpus as first drawn. Schema three adds the hard words by their first keys, the `low_keys` class, the
+/// acceptance split and a calibration cell of each direction.
+const WORD_CORPUS_SCHEMAS: [u32; 2] = [2, 3];
 const HELD_OUT_FILE: &str = "held-out.json.gz";
 const RECEIPT_FILE: &str = "corpus.json";
 const CONFIG_FILE: &str = "config.json";
@@ -52,6 +56,12 @@ const LAYOUT_LETTER_SIGNS: &str = ",.;'[]<>:\"{}`~";
 /// The shortest prefix the orthotactic reading of a Russian word's keys is weighed at, as schema three buckets it.
 const ENGLISH_KEYS_MIN_CHARACTERS: usize = 3;
 const COMMENT_OPENING: &str = "// ";
+/// The training split of the base corpus, its Russian locale in the Tatoeba snapshot, the treebank whose address tokens are
+/// cut into parts, and the tag of a name.
+const BASE_TRAINING_SPLIT: &str = "train";
+const TATOEBA_RUSSIAN: &str = "rus";
+const ADDRESS_TREEBANK: &str = "UD_English-EWT";
+const NAME_TAG: &str = "PROPN";
 
 /// What a word is, which decides whether it is also typed in the other layout and how it is counted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -67,6 +77,9 @@ pub enum Class {
     Unknown,
     /// A Russian word whose keys the English orthotactic model reads better than the Russian one at some short prefix.
     EnglishKeys,
+    /// A word, not a name, whose first keys its own layout's orthotactic channel reads worse than most words of its
+    /// language: loanwords, rare stems (`config.low_keys`).
+    LowKeys,
     /// A Latin technical token of five letters or more that is no English word of the corpus.
     Term,
     /// The same of three or four letters.
@@ -82,7 +95,7 @@ impl Class {
     #[must_use]
     pub fn paired(self) -> bool {
         match self {
-            Class::Frequent | Class::Rare | Class::Name | Class::Unknown | Class::EnglishKeys => true,
+            Class::Frequent | Class::Rare | Class::Name | Class::Unknown | Class::EnglishKeys | Class::LowKeys => true,
             Class::Term | Class::ShortTerm | Class::SignLed | Class::Address => false,
         }
     }
@@ -95,6 +108,7 @@ impl Class {
             Class::Name => "name",
             Class::Unknown => "unknown",
             Class::EnglishKeys => "english_keys",
+            Class::LowKeys => "low_keys",
             Class::Term => "term",
             Class::ShortTerm => "short_term",
             Class::SignLed => "sign_led",
@@ -106,7 +120,7 @@ impl Class {
     #[must_use]
     pub fn hard(self, group: i64) -> bool {
         match self {
-            Class::SignLed | Class::ShortTerm | Class::EnglishKeys => true,
+            Class::SignLed | Class::ShortTerm | Class::EnglishKeys | Class::LowKeys => true,
             Class::Name => group == 0,
             Class::Frequent | Class::Rare | Class::Unknown | Class::Term | Class::Address => false,
         }
@@ -157,6 +171,15 @@ impl Quotas {
     }
 }
 
+/// Which words are hard by their first keys: those whose first `characters` keys their own layout's orthotactic channel
+/// gives the lowest mean log-probability, the lowest `per_mille` of the words (names included) of their language.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LowKeysRule {
+    pub characters: usize,
+    pub per_mille: u64,
+}
+
 /// `model/prefix_v3/config.json`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -182,6 +205,29 @@ pub struct WordConfig {
     pub minimum_calibration_hard_negatives: usize,
     pub quotas: BTreeMap<String, Quotas>,
     pub evidence_scope: String,
+    /// Schema three: the hard words by their first keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_keys: Option<LowKeysRule>,
+    /// Schema three: the thousandths of the families the acceptance split takes, after development and calibration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_per_mille: Option<u64>,
+    /// Schema three: the fewest words typed as meant, and of them hard ones, calibration holds in each direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_calibration_words_per_direction: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_calibration_hard_words_per_direction: Option<usize>,
+}
+
+impl WordConfig {
+    /// The splits this config writes.
+    #[must_use]
+    pub fn splits(&self) -> Vec<&'static str> {
+        let mut splits = WORD_SPLITS.to_vec();
+        if self.acceptance_per_mille.is_some_and(|share| share > 0) {
+            splits.push(ACCEPTANCE_SPLIT);
+        }
+        splits
+    }
 }
 
 /// A row of the corpus: one word in one situation.
@@ -198,6 +244,15 @@ pub struct WordRow {
     pub situation: Situation,
     pub source: String,
     pub text: String,
+    /// Typed as meant, its first keys read most easily as the other layout: a hard class, or a word whose first keys its
+    /// own layout's orthotactic channel reads badly. Written only when true, as a corpus of schema two has no such field.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hard: bool,
+}
+
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde hands a skipped field by reference")]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// The held-out development samples, by the aliases of their focus words.
@@ -243,8 +298,13 @@ pub struct SplitCounts {
     pub convert_words: usize,
     /// Distinct texts typed as meant: every word.
     pub keep_words: usize,
-    /// Of those, the hard ones (`Class::hard`).
+    /// Of those, the hard ones (`Class::hard`, or by the first keys).
     pub hard_keep_words: usize,
+    /// Schema three: the words typed as meant and the hard ones, by the layout group they are typed in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_words_by_group: Option<[usize; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hard_keep_words_by_group: Option<[usize; 2]>,
 }
 
 /// `corpus.json`: what the corpus was made of and what it holds.
@@ -265,6 +325,9 @@ pub struct WordReceipt {
     pub labels: String,
     pub situations: String,
     pub scope: String,
+    /// Schema three: the mean log-probability, per language, at or under which a word's first keys make it hard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_keys_cut_nats: Option<BTreeMap<String, f64>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -286,6 +349,8 @@ pub struct Candidate {
     pub class: Class,
     pub source: String,
     pub natural: Option<String>,
+    /// Typed as meant, its first keys read most easily as the other layout (`WordRow::hard`).
+    pub hard: bool,
 }
 
 /// A row of the base corpus, the fields read here.
@@ -455,7 +520,7 @@ fn base_rows(base: &Path) -> Result<(Vec<BaseRow>, String, String), String> {
     let mut rows = Vec::new();
     for line in read_gzip_lines(&path)? {
         let row: BaseRow = ks_text::json::loads(&line).map_err(|error| format!("a base row: {error}"))?;
-        if row.split != "train" {
+        if row.split != BASE_TRAINING_SPLIT {
             return Err("a base training split holds a row of another split".to_owned());
         }
         rows.push(row);
@@ -467,7 +532,7 @@ fn pools(root: &Path, config: &WordConfig, base: &[BaseRow]) -> Result<Pools, St
     let mut tatoeba: BTreeMap<(String, i64), i64> = BTreeMap::new();
     let mut phrases: [Vec<String>; 2] = [Vec::new(), Vec::new()];
     for phrase in load_phrases(root)? {
-        let group = i64::from(phrase.locale == "rus");
+        let group = i64::from(phrase.locale == TATOEBA_RUSSIAN);
         phrases[group.to::<usize>()].push(phrase.text.clone());
         let characters: Vec<char> = phrase.text.chars().collect();
         for (_, found) in word_matches(&characters) {
@@ -491,14 +556,14 @@ fn pools(root: &Path, config: &WordConfig, base: &[BaseRow]) -> Result<Pools, St
         if !row.source.starts_with("UD_") {
             continue;
         }
-        if row.source == "UD_English-EWT" && is_address(&row.original) {
+        if row.source == ADDRESS_TREEBANK && is_address(&row.original) {
             addresses.push((row.original.clone(), row.before.clone(), row.source.clone()));
             continue;
         }
         if !in_bounds(config, &row.original) {
             continue;
         }
-        if row.upos == "PROPN" {
+        if row.upos == NAME_TAG {
             if let Some(found) = name_form(&row.original).filter(|(form, _)| *form == row.original) {
                 names.entry(found).or_insert_with(|| row.source.clone());
             }
@@ -525,11 +590,13 @@ fn pools(root: &Path, config: &WordConfig, base: &[BaseRow]) -> Result<Pools, St
     Ok(Pools { tatoeba, phrases, treebank_words, names, terms, addresses })
 }
 
-/// The class of a paired lower-case word: Russian words that read like English first, then the frequent ones, then by
-/// whether the onboard lexicon knows the form.
-fn word_class(word: &str, group: i64, frequent: &BTreeSet<(String, i64)>, known: bool, english_like: bool) -> Class {
+/// The class of a paired lower-case word: Russian words that read like English first, then words whose first keys their
+/// own layout reads badly, then the frequent ones, then by whether the onboard lexicon knows the form.
+fn word_class(word: &str, group: i64, frequent: &BTreeSet<(String, i64)>, known: bool, english_like: bool, low_keys: bool) -> Class {
     if group == 1 && english_like {
         Class::EnglishKeys
+    } else if low_keys {
+        Class::LowKeys
     } else if frequent.contains(&(word.to_owned(), group)) {
         Class::Frequent
     } else if known {
@@ -539,11 +606,60 @@ fn word_class(word: &str, group: i64, frequent: &BTreeSet<(String, i64)>, known:
     }
 }
 
+/// The keys of the US layout a word is typed with.
+fn keys_of(text: &str, group: i64) -> String {
+    pystr::casefold(&if group == 1 { crate::physical::pair().translate(text, "ru", "us").expect("the pair of layouts") } else { text.to_owned() })
+}
+
+/// The mean log-probability its own layout's orthotactic channel gives the first `characters` keys of a word typed as
+/// meant; none for a word without keys.
+#[must_use]
+pub fn own_keys_mean(ortho: &OrthoModel, text: &str, group: i64, characters: usize) -> Option<f64> {
+    let channel = if group == 1 { &ortho.channels.ru } else { &ortho.channels.en };
+    let conditionals: Vec<f64> = prefix_conditionals(channel, &keys_of(text, group)).into_iter().take(characters).collect();
+    (!conditionals.is_empty()).then(|| ks_lang::pysum::py_sum(conditionals.iter().copied()) / conditionals.len().to::<f64>())
+}
+
+/// The mean at the rule's thousandth from the bottom among these means: a word at or under it is hard by its first keys.
+#[must_use]
+pub fn low_keys_cut(means: &mut [f64], per_mille: u64) -> Option<f64> {
+    means.sort_by(f64::total_cmp);
+    let place = (means.len().to::<u64>() * per_mille / PER_MILLE).to::<usize>();
+    means.get(place.min(means.len().saturating_sub(1))).copied()
+}
+
+/// Which words are hard by their first keys: the cut of each language, over its names and words, and the test.
+struct LowKeys<'a> {
+    ortho: &'a OrthoModel,
+    rule: Option<LowKeysRule>,
+    cuts: [Option<f64>; 2],
+}
+
+impl LowKeys<'_> {
+    fn is_low(&self, text: &str, group: i64) -> bool {
+        let (Some(rule), Some(cut)) = (self.rule, self.cuts[usize::from(group == 1)]) else {
+            return false;
+        };
+        own_keys_mean(self.ortho, text, group, rule.characters).is_some_and(|mean| mean <= cut)
+    }
+}
+
 /// Every candidate once, held-out words left out. Names come first, then words, then tokens typed only as meant; a
 /// term that is a word of the corpus stays a word.
-fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pools: &Pools, held_out: &HashSet<String>) -> Result<Vec<Candidate>, String> {
+fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pools: &Pools, held_out: &HashSet<String>) -> Result<(Vec<Candidate>, [Option<f64>; 2]), String> {
     let models = reference_models(root, resources, false)?;
     let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?;
+    let mut low = LowKeys { ortho: &ortho, rule: config.low_keys, cuts: [None, None] };
+    if let Some(rule) = config.low_keys {
+        let mut means: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+        let named = pools.names.keys().map(|(text, group)| (text.as_str(), *group));
+        for (text, group) in named.chain(pools.tatoeba.keys().chain(pools.treebank_words.keys()).map(|(text, group)| (text.as_str(), *group))) {
+            if let Some(mean) = own_keys_mean(&ortho, text, group, rule.characters) {
+                means[usize::from(group == 1)].push(mean);
+            }
+        }
+        low.cuts = means.map(|mut found| low_keys_cut(&mut found, rule.per_mille));
+    }
     let mut by_count: Vec<(&(String, i64), &i64)> = pools.tatoeba.iter().collect();
     by_count.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
     let mut frequent: BTreeSet<(String, i64)> = BTreeSet::new();
@@ -568,7 +684,7 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
         }
     };
     for ((name, group), source) in &pools.names {
-        add(Candidate { text: name.clone(), group: *group, class: Class::Name, source: source.clone(), natural: None }, &mut chosen);
+        add(Candidate { text: name.clone(), group: *group, class: Class::Name, source: source.clone(), natural: None, hard: Class::Name.hard(*group) || low.is_low(name, *group) }, &mut chosen);
     }
     let mut words: BTreeMap<(String, i64), String> = pools.tatoeba.keys().map(|key| (key.clone(), TATOEBA_SNAPSHOT.to_owned())).collect();
     for (key, source) in &pools.treebank_words {
@@ -581,15 +697,15 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
             let (english, russian) = (prefix_conditionals(&ortho.channels.en, &keys), prefix_conditionals(&ortho.channels.ru, &keys));
             english_margin(&english, &russian, config.english_keys_maximum_characters).is_some_and(|margin| margin >= config.english_keys_minimum_nats)
         };
-        let class = word_class(word, *group, &frequent, known, english_like);
-        add(Candidate { text: word.clone(), group: *group, class, source: source.clone(), natural: None }, &mut chosen);
+        let class = word_class(word, *group, &frequent, known, english_like, low.is_low(word, *group));
+        add(Candidate { text: word.clone(), group: *group, class, source: source.clone(), natural: None, hard: class.hard(*group) }, &mut chosen);
     }
     let english: Vec<Candidate> = chosen.values().filter(|candidate| candidate.group == 0).cloned().collect();
     for word in english {
         let leader = leaders[(draw(&format!("{}:sign:{}", config.namespace, word.text)) % leaders.len().to::<u64>()).to::<usize>()];
         let text = format!("{leader}{}", word.text);
         if in_bounds(config, &text) {
-            add(Candidate { text, group: 0, class: Class::SignLed, source: word.source.clone(), natural: None }, &mut chosen);
+            add(Candidate { text, group: 0, class: Class::SignLed, source: word.source.clone(), natural: None, hard: true }, &mut chosen);
         }
     }
     let known_words: BTreeSet<String> = chosen.values().filter(|candidate| candidate.class.paired()).map(|candidate| pystr::casefold(&candidate.text)).collect();
@@ -601,26 +717,31 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
             continue;
         }
         let class = if term.chars().count() <= 4 { Class::ShortTerm } else { Class::Term };
-        add(Candidate { text: term.clone(), group: 0, class, source: source.clone(), natural: None }, &mut chosen);
+        add(Candidate { text: term.clone(), group: 0, class, source: source.clone(), natural: None, hard: class.hard(0) || low.is_low(term, 0) }, &mut chosen);
     }
     for (token, before, source) in &pools.addresses {
         for (part, inside) in address_parts(token) {
             if in_bounds(config, &part) {
-                add(Candidate { text: part, group: 0, class: Class::Address, source: source.clone(), natural: Some(format!("{before}{inside}")) }, &mut chosen);
+                let hard = low.is_low(&part, 0);
+                add(Candidate { text: part, group: 0, class: Class::Address, source: source.clone(), natural: Some(format!("{before}{inside}")), hard }, &mut chosen);
             }
         }
     }
-    Ok(chosen.into_values().collect())
+    Ok((chosen.into_values().collect(), low.cuts))
 }
 
-/// The split of a physical family: development and calibration take their thousandths by hash, training the rest.
+/// The split of a physical family: development, calibration and acceptance take their thousandths by hash, training the
+/// rest.
 #[must_use]
 pub fn split_of(config: &WordConfig, family: &str) -> &'static str {
     let bucket = draw(&format!("{}:split:{family}", config.namespace)) % PER_MILLE;
+    let calibration = config.development_per_mille + config.calibration_per_mille;
     if bucket < config.development_per_mille {
         "development"
-    } else if bucket < config.development_per_mille + config.calibration_per_mille {
+    } else if bucket < calibration {
         "calibration"
+    } else if bucket < calibration + config.acceptance_per_mille.unwrap_or(0) {
+        ACCEPTANCE_SPLIT
     } else {
         "train"
     }
@@ -667,7 +788,7 @@ fn rows(config: &WordConfig, pools: &Pools, candidates: &[Candidate]) -> Result<
         let split = split_of(config, &family(&candidate.text, candidate.group));
         grouped.entry((split, candidate.group, candidate.class)).or_default().push(candidate);
     }
-    let mut result: BTreeMap<&'static str, Vec<WordRow>> = WORD_SPLITS.iter().map(|split| (*split, Vec::new())).collect();
+    let mut result: BTreeMap<&'static str, Vec<WordRow>> = config.splits().into_iter().map(|split| (split, Vec::new())).collect();
     for ((split, group, class), mut members) in grouped {
         let quota = config.quotas.get(split).ok_or_else(|| format!("no quotas for {split}"))?.of(group, class);
         members.sort_by_cached_key(|candidate| (draw(&format!("{}:select:{}:{}", config.namespace, class.as_str(), candidate.text)), candidate.text.clone()));
@@ -683,6 +804,8 @@ fn rows(config: &WordConfig, pools: &Pools, candidates: &[Candidate]) -> Result<
                     situation,
                     source: candidate.source.clone(),
                     text: candidate.text.clone(),
+                    // A corpus of schema two has no hard words by their first keys and writes none.
+                    hard: config.low_keys.is_some() && candidate.hard,
                 });
             }
         }
@@ -696,17 +819,25 @@ fn rows(config: &WordConfig, pools: &Pools, candidates: &[Candidate]) -> Result<
 /// What a split holds.
 #[must_use]
 pub fn split_counts(rows: &[WordRow]) -> SplitCounts {
-    let mut words: BTreeMap<(String, i64), (Class, bool)> = BTreeMap::new();
+    let mut words: BTreeMap<(String, i64), (Class, bool, bool)> = BTreeMap::new();
     let families: BTreeSet<&str> = rows.iter().map(|row| row.family.as_str()).collect();
     for row in rows {
-        words.insert((row.text.clone(), row.group), (row.class, row.paired));
+        words.insert((row.text.clone(), row.group), (row.class, row.paired, row.hard));
     }
     let mut counts = SplitCounts { rows: rows.len(), words: words.len(), families: families.len(), ..SplitCounts::default() };
-    for ((_, group), (class, paired)) in &words {
+    let (mut by_group, mut hard_by_group) = ([0_usize; 2], [0_usize; 2]);
+    for ((_, group), (class, paired, hard)) in &words {
         *counts.words_by_class.entry(format!("{}:{}", if *group == 0 { "en" } else { "ru" }, class.as_str())).or_insert(0) += 1;
         counts.convert_words += usize::from(*paired);
         counts.keep_words += 1;
-        counts.hard_keep_words += usize::from(class.hard(*group));
+        let hard = class.hard(*group) || *hard;
+        counts.hard_keep_words += usize::from(hard);
+        by_group[usize::from(*group == 1)] += 1;
+        hard_by_group[usize::from(*group == 1)] += usize::from(hard);
+    }
+    // Rows of schema three say which words are hard by their first keys: the cells of each direction are counted then.
+    if rows.iter().any(|row| row.hard) {
+        (counts.keep_words_by_group, counts.hard_keep_words_by_group) = (Some(by_group), Some(hard_by_group));
     }
     counts
 }
@@ -715,14 +846,19 @@ pub fn split_counts(rows: &[WordRow]) -> SplitCounts {
 pub fn held_out_of(samples: &[PathBuf]) -> Result<HeldOut, String> {
     let (mut words, mut aliases, mut files) = (BTreeSet::new(), BTreeSet::new(), Vec::new());
     for path in samples {
-        let lines = read_gzip_lines(path)?;
-        for line in &lines {
-            let row: SampleRow = ks_text::json::loads(line).map_err(|error| format!("{}: {error}", path.display()))?;
-            if words.insert(pystr::casefold(&row.original)) {
-                aliases.extend(expanded_aliases(&row.original).into_iter().map(|alias| alias.get(..HELD_OUT_ALIAS_HEX_DIGITS).unwrap_or_default().to_owned()));
+        // A sample is the rows of a development corpus, or a list of words, one a line.
+        let originals: Vec<String> = if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("txt")) {
+            let text = std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+            text.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_owned).collect()
+        } else {
+            read_gzip_lines(path)?.iter().map(|line| ks_text::json::loads::<SampleRow>(line).map(|row| row.original).map_err(|error| format!("{}: {error}", path.display()))).collect::<Result<_, _>>()?
+        };
+        for original in &originals {
+            if words.insert(pystr::casefold(original)) {
+                aliases.extend(expanded_aliases(original).into_iter().map(|alias| alias.get(..HELD_OUT_ALIAS_HEX_DIGITS).unwrap_or_default().to_owned()));
             }
         }
-        files.push(HeldOutFile { sha256: checksum(path)?, rows: lines.len() });
+        files.push(HeldOutFile { sha256: checksum(path)?, rows: originals.len() });
     }
     files.sort_by(|left, right| left.sha256.cmp(&right.sha256));
     Ok(HeldOut {
@@ -745,6 +881,22 @@ fn gunzip(path: &Path) -> Result<Vec<u8>, String> {
     Ok(raw)
 }
 
+/// A calibration smaller than the config asks for is no corpus: its words typed as meant and the hard ones, in all and in
+/// each direction.
+fn calibration_holds(config: &WordConfig, calibration: &SplitCounts) -> Result<(), String> {
+    if calibration.keep_words < config.minimum_calibration_negatives || calibration.hard_keep_words < config.minimum_calibration_hard_negatives {
+        return Err(format!("calibration holds {} negative words, {} hard: the config asks for {} and {}", calibration.keep_words, calibration.hard_keep_words, config.minimum_calibration_negatives, config.minimum_calibration_hard_negatives));
+    }
+    let (words, hard) = (config.minimum_calibration_words_per_direction.unwrap_or(0), config.minimum_calibration_hard_words_per_direction.unwrap_or(0));
+    let (by_group, hard_by_group) = (calibration.keep_words_by_group.unwrap_or_default(), calibration.hard_keep_words_by_group.unwrap_or_default());
+    for group in 0..2 {
+        if by_group[group] < words || hard_by_group[group] < hard {
+            return Err(format!("calibration typed in layout group {group} holds {} words, {} hard: the config asks for {words} and {hard}", by_group[group], hard_by_group[group]));
+        }
+    }
+    Ok(())
+}
+
 /// What a freeze or a verification needs.
 pub struct WordCorpusRequest<'a> {
     pub root: &'a Path,
@@ -758,13 +910,17 @@ pub struct WordCorpusRequest<'a> {
 
 /// The bytes of a generation: each split's content and the receipt, from the held-out aliases it is given.
 fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &HeldOut, held_out_bytes: &[u8]) -> Result<(BTreeMap<&'static str, Vec<u8>>, Vec<u8>, BTreeMap<String, SplitCounts>), String> {
-    if config.schema_version != WORD_CORPUS_SCHEMA || config.kind != WORD_CORPUS_KIND {
+    if !WORD_CORPUS_SCHEMAS.contains(&config.schema_version) || config.kind != WORD_CORPUS_KIND {
         return Err("not a word corpus config".to_owned());
+    }
+    let three = config.schema_version == WORD_CORPUS_SCHEMAS[1];
+    if three != (config.low_keys.is_some() && config.acceptance_per_mille.is_some()) {
+        return Err("a word corpus of schema three, and only one, names its hard words by their first keys and its acceptance split".to_owned());
     }
     let (base, namespace, base_digest) = base_rows(request.base)?;
     let pools = pools(request.root, config, &base)?;
     let aliases: HashSet<String> = held_out.aliases.iter().cloned().collect();
-    let candidates = candidates(request.root, request.resources, config, &pools, &aliases)?;
+    let (candidates, cuts) = candidates(request.root, request.resources, config, &pools, &aliases)?;
     let rows = rows(config, &pools, &candidates)?;
     let mut families: BTreeMap<String, usize> = BTreeMap::new();
     let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
@@ -791,10 +947,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
         row_counts.insert((*split).to_owned(), split_count.rows);
         counts.insert((*split).to_owned(), split_count);
     }
-    let calibration = counts.get("calibration").cloned().unwrap_or_default();
-    if calibration.keep_words < config.minimum_calibration_negatives || calibration.hard_keep_words < config.minimum_calibration_hard_negatives {
-        return Err(format!("calibration holds {} negative words, {} hard: the config asks for {} and {}", calibration.keep_words, calibration.hard_keep_words, config.minimum_calibration_negatives, config.minimum_calibration_hard_negatives));
-    }
+    calibration_holds(config, &counts.get("calibration").cloned().unwrap_or_default())?;
     let tree_file = |name: &str| checksum(&request.root.join(name));
     let ud = crate::base_corpus::BASE_PINS.iter().map(|(name, commit)| format!("{name}@{commit}")).collect::<Vec<_>>().join(", ");
     let sources = vec![
@@ -807,7 +960,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
         SourceRecord { name: "resources/models/ortho_v1.json".to_owned(), pin: "this tree".to_owned(), license: "the project's".to_owned(), sha256: tree_file("resources/models/ortho_v1.json")?, gives: "which Russian words read like English by their keys".to_owned() },
     ];
     let receipt = WordReceipt {
-        schema_version: WORD_CORPUS_SCHEMA,
+        schema_version: config.schema_version,
         kind: WORD_CORPUS_KIND.to_owned(),
         config_sha256: checksum(request.config)?,
         generator_sha256: tree_file(GENERATOR)?,
@@ -821,6 +974,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
         labels: "made by the trainer from each row: a paired word typed as meant is kept at every length; typed in the other layout it converts from the recipe's number of letters, and waits before it, while the typed prefix continues a word of the typed layout's lexicon or a known term; every other row is kept".to_owned(),
         situations: "each word in three of four situations drawn by hash (an empty field of unknown role, Russian text, English text, a code comment); an address part in its own sentence and two of the four; one application for every row".to_owned(),
         scope: config.evidence_scope.clone(),
+        low_keys_cut_nats: three.then(|| ["en", "ru"].iter().zip(cuts).filter_map(|(language, cut)| Some(((*language).to_owned(), cut?))).collect()),
     };
     let receipt_bytes = (ks_text::json::dumps(&receipt, &readable()) + "\n").into_bytes();
     Ok((content, receipt_bytes, counts))
@@ -835,7 +989,7 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
         let held_out: HeldOut = ks_text::json::loads(gunzip(&directory.join(HELD_OUT_FILE))?).map_err(|error| format!("{HELD_OUT_FILE}: {error}"))?;
         let (content, receipt, counts) = generation(request, &config, &held_out, &held_out_bytes)?;
         let mut differences = 0;
-        for split in WORD_SPLITS {
+        for split in config.splits() {
             let same = gunzip(&directory.join(format!("{split}.jsonl.gz")))? == content[split];
             println!("{split}: {}", if same { "same" } else { "DIFFERS" });
             differences += usize::from(!same);
@@ -848,7 +1002,7 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
     if request.hold_out.is_empty() {
         return Err("a freeze names the development samples to leave out (--hold-out)".to_owned());
     }
-    for name in WORD_SPLITS.iter().map(|split| format!("{split}.jsonl.gz")).chain([RECEIPT_FILE.to_owned(), HELD_OUT_FILE.to_owned()]) {
+    for name in config.splits().iter().map(|split| format!("{split}.jsonl.gz")).chain([RECEIPT_FILE.to_owned(), HELD_OUT_FILE.to_owned()]) {
         if output.join(&name).exists() {
             return Err("refusing to overwrite a frozen word corpus".to_owned());
         }
@@ -858,7 +1012,7 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
     let (content, receipt, counts) = generation(request, &config, &held_out, &held_out_bytes)?;
     std::fs::create_dir_all(output).map_err(|error| error.to_string())?;
     std::fs::write(output.join(HELD_OUT_FILE), &held_out_bytes).map_err(|error| error.to_string())?;
-    for split in WORD_SPLITS {
+    for split in config.splits() {
         std::fs::write(output.join(format!("{split}.jsonl.gz")), gzip(&content[split])?).map_err(|error| error.to_string())?;
     }
     if !output.join(CONFIG_FILE).exists() {
@@ -870,7 +1024,7 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
 
 /// A frozen split of a word corpus, its checksum checked against the receipt.
 pub fn read_split(directory: &Path, split: &str) -> Result<Vec<WordRow>, String> {
-    if !WORD_SPLITS.contains(&split) {
+    if !WORD_SPLITS.contains(&split) && split != ACCEPTANCE_SPLIT {
         return Err("a word corpus has no such split".to_owned());
     }
     /// What a reader of the splits needs of the receipt: the checksum of each.
@@ -903,7 +1057,7 @@ mod tests {
 
     fn config() -> WordConfig {
         WordConfig {
-            schema_version: WORD_CORPUS_SCHEMA,
+            schema_version: WORD_CORPUS_SCHEMAS[0],
             kind: WORD_CORPUS_KIND.to_owned(),
             directory: "model/prefix_v3".to_owned(),
             namespace: "test".to_owned(),
@@ -920,6 +1074,10 @@ mod tests {
             minimum_calibration_hard_negatives: 0,
             quotas: BTreeMap::new(),
             evidence_scope: String::new(),
+            low_keys: None,
+            acceptance_per_mille: None,
+            minimum_calibration_words_per_direction: None,
+            minimum_calibration_hard_words_per_direction: None,
         }
     }
 
@@ -954,20 +1112,22 @@ mod tests {
     #[test]
     fn a_word_is_classed_by_its_reading_its_frequency_and_the_lexicon() {
         let frequent: BTreeSet<(String, i64)> = [("дом".to_owned(), 1)].into_iter().collect();
-        assert_eq!(word_class("дом", 1, &frequent, true, true), Class::EnglishKeys);
-        assert_eq!(word_class("дом", 1, &frequent, true, false), Class::Frequent);
-        assert_eq!(word_class("house", 0, &frequent, true, true), Class::Rare);
-        assert_eq!(word_class("xyzzy", 0, &frequent, false, false), Class::Unknown);
+        assert_eq!(word_class("дом", 1, &frequent, true, true, true), Class::EnglishKeys);
+        assert_eq!(word_class("дом", 1, &frequent, true, false, true), Class::LowKeys);
+        assert_eq!(word_class("дом", 1, &frequent, true, false, false), Class::Frequent);
+        assert_eq!(word_class("house", 0, &frequent, true, true, false), Class::Rare);
+        assert_eq!(word_class("xyzzy", 0, &frequent, false, false, false), Class::Unknown);
+        assert!(Class::LowKeys.hard(0) && Class::LowKeys.hard(1) && Class::LowKeys.paired());
         assert!(Class::Name.hard(0) && !Class::Name.hard(1) && Class::SignLed.hard(1) && !Class::Term.hard(0) && !Class::Address.hard(0));
         assert!(Class::EnglishKeys.paired() && !Class::Address.paired());
-        for class in [Class::Frequent, Class::Rare, Class::Name, Class::Unknown, Class::EnglishKeys, Class::Term, Class::ShortTerm, Class::SignLed, Class::Address] {
+        for class in [Class::Frequent, Class::Rare, Class::Name, Class::Unknown, Class::EnglishKeys, Class::LowKeys, Class::Term, Class::ShortTerm, Class::SignLed, Class::Address] {
             assert_eq!(ks_text::json::dumps(&class, &compact()), format!("\"{}\"", class.as_str()));
         }
     }
 
     #[test]
     fn a_word_takes_three_situations_and_an_address_part_its_own_sentence_and_two() {
-        let word = Candidate { text: "kaplan".to_owned(), group: 0, class: Class::Name, source: "s".to_owned(), natural: None };
+        let word = Candidate { text: "kaplan".to_owned(), group: 0, class: Class::Name, source: "s".to_owned(), natural: None, hard: true };
         let situations = situations_of(&config(), &word);
         assert_eq!(situations.len(), 3);
         assert!(!situations.contains(&Situation::Natural));
@@ -985,7 +1145,7 @@ mod tests {
 
     #[test]
     fn a_split_holds_its_words_once_and_counts_the_hard_ones() {
-        let row = |text: &str, group: i64, class: Class, situation: Situation| WordRow { before: String::new(), class, family: family(text, group), group, paired: class.paired(), role: situation.role().to_owned(), situation, source: "s".to_owned(), text: text.to_owned() };
+        let row = |text: &str, group: i64, class: Class, situation: Situation| WordRow { before: String::new(), class, family: family(text, group), group, paired: class.paired(), role: situation.role().to_owned(), situation, source: "s".to_owned(), text: text.to_owned(), hard: false };
         let rows = [row("kaplan", 0, Class::Name, Situation::Empty), row("kaplan", 0, Class::Name, Situation::Comment), row("<kaplan", 0, Class::SignLed, Situation::Empty), row("дом", 1, Class::Frequent, Situation::Empty)];
         let counts = split_counts(&rows);
         assert_eq!((counts.rows, counts.words, counts.families, counts.convert_words, counts.keep_words, counts.hard_keep_words), (4, 3, 3, 2, 3, 2));
@@ -993,5 +1153,57 @@ mod tests {
         let shares = config();
         let splits: BTreeSet<&str> = (0..200).map(|index| split_of(&shares, &format!("f{index}"))).collect();
         assert_eq!(splits.len(), 3);
+        assert_eq!(shares.splits(), WORD_SPLITS);
+        let with_acceptance = WordConfig { acceptance_per_mille: Some(100), ..config() };
+        let splits: BTreeSet<&str> = (0..200).map(|index| split_of(&with_acceptance, &format!("f{index}"))).collect();
+        assert_eq!((splits.len(), with_acceptance.splits().last().copied()), (4, Some(ACCEPTANCE_SPLIT)));
+        // A row hard by its first keys makes the split count each direction's cell.
+        let hard = WordRow { hard: true, ..row("погода", 1, Class::LowKeys, Situation::Empty) };
+        let counts = split_counts(&[hard, row("house", 0, Class::Rare, Situation::Empty), row("<house", 0, Class::SignLed, Situation::Empty)]);
+        assert_eq!((counts.keep_words_by_group, counts.hard_keep_words_by_group, counts.hard_keep_words), (Some([2, 1]), Some([1, 1]), 2));
+        assert_eq!(split_counts(&rows).keep_words_by_group, None);
+    }
+
+    #[test]
+    fn a_word_is_hard_by_its_first_keys_when_its_own_channel_reads_them_among_the_worst() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let resources = Resources::new(root.join("resources"));
+        let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).expect("the orthotactic model");
+        let mean = |text: &str, group: i64| own_keys_mean(&ortho, text, group, 4).expect("keys");
+        // A loanword and a name start worse for their own channel than a common word.
+        assert!(mean("офсет", 1) < mean("погода", 1) && mean("Кыргыз", 1) < mean("погода", 1));
+        assert!(mean("cntk", 0) < mean("house", 0));
+        assert_eq!(own_keys_mean(&ortho, "", 0, 4), None);
+        assert_eq!(low_keys_cut(&mut [3.0, -1.0, -5.0, 0.0], 250), Some(-1.0));
+        assert_eq!(low_keys_cut(&mut [3.0, -1.0], 1000), Some(3.0));
+        assert_eq!(low_keys_cut(&mut [], 250), None);
+        let low = LowKeys { ortho: &ortho, rule: Some(LowKeysRule { characters: 4, per_mille: 200 }), cuts: [Some(mean("cntk", 0)), Some(mean("офсет", 1))] };
+        assert!(low.is_low("cntk", 0) && !low.is_low("house", 0) && low.is_low("офсет", 1) && !low.is_low("погода", 1));
+        assert!(!LowKeys { rule: None, ..low }.is_low("cntk", 0));
+        assert!(!LowKeys { cuts: [None, None], ..low }.is_low("cntk", 0));
+    }
+
+    #[test]
+    fn a_list_of_words_is_held_out_as_the_rows_of_a_sample_are() {
+        let folder = std::env::temp_dir().join(format!("ks-train-held-out-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        let list = folder.join("words.txt");
+        std::fs::write(&list, "гупшуп\n\n  тыгыдык \n").expect("a list");
+        let held = held_out_of(&[list]).expect("the held-out words");
+        assert_eq!((held.words, held.files[0].rows), (2, 2));
+        assert!(held.aliases.len() >= 2);
+        assert!(held_out_of(&[folder.join("missing.txt")]).is_err());
+    }
+
+    #[test]
+    fn a_calibration_holds_its_words_in_all_and_in_each_direction() {
+        let cells = SplitCounts { keep_words: 10, hard_keep_words: 4, keep_words_by_group: Some([6, 4]), hard_keep_words_by_group: Some([3, 1]), ..SplitCounts::default() };
+        let asking = |all: usize, words: Option<usize>, hard: Option<usize>| WordConfig { minimum_calibration_negatives: all, minimum_calibration_words_per_direction: words, minimum_calibration_hard_words_per_direction: hard, ..config() };
+        assert!(calibration_holds(&asking(10, Some(4), Some(1)), &cells).is_ok());
+        assert!(calibration_holds(&asking(11, None, None), &cells).unwrap_err().contains("10 negative words, 4 hard"));
+        assert!(calibration_holds(&asking(0, Some(5), None), &cells).unwrap_err().contains("layout group 1 holds 4 words, 1 hard: the config asks for 5 and 0"));
+        assert!(calibration_holds(&asking(0, None, Some(2)), &cells).unwrap_err().contains("layout group 1 holds 4 words, 1 hard"));
+        // A split of schema two counts no direction: a config of schema two asks for none.
+        assert!(calibration_holds(&asking(0, None, None), &SplitCounts::default()).is_ok());
     }
 }

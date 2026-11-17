@@ -8,12 +8,15 @@
 use ks_cast::To as _;
 use crate::constants::{
     CURRENT_PREFIX_FEATURE_VERSION, MAX_PREFIX_CHARACTER_NGRAM_ORDER, MAX_PREFIX_MODEL_BYTES, ORTHO_PREFIX_FEATURE_VERSION, PREFIX_CHARACTER_FEATURE_WEIGHT_CAP,
-    PREFIX_MAX_CHARACTERS, PREFIX_ORTHO_LENGTH_BUCKETS, PREFIX_ORTHO_MAX_STEPS, PREFIX_ORTHO_MEAN_BOUND_NATS, PREFIX_ORTHO_STEP_NATS, PREFIX_ORTHO_SUM_BOUND_NATS,
+    MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_HEAD_MAX_LENGTH_BUCKET, PREFIX_HEAD_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, PREFIX_ORTHO_ABSOLUTE_MAX_STEPS,
+    PREFIX_ORTHO_ABSOLUTE_STEP_NATS, PREFIX_ORTHO_BOTH_MAX_STEPS, PREFIX_ORTHO_BOTH_STEP_NATS, PREFIX_ORTHO_LENGTH_BUCKETS, PREFIX_ORTHO_MAX_STEPS,
+    PREFIX_TAIL_MAX_LENGTH_BUCKET, PREFIX_TERM_COUNT_LOG_DIVISOR, TERMS_PREFIX_FEATURE_VERSION, PREFIX_ORTHO_MEAN_BOUND_NATS, PREFIX_ORTHO_STEP_NATS, PREFIX_ORTHO_SUM_BOUND_NATS,
     PREFIX_ORTHO_WORST_BOUND_NATS,
 };
-use crate::context_model::ContextPrediction;
+use crate::context_model::{first_greatest, ContextAction, ContextPrediction, ACTIONS};
 use crate::flat_table::load_artifact;
 use crate::prefix_model::{actions_match, features, finish_load, weight_spec, PrefixInput, PrefixModel, PrefixSide, ARTIFACT_FILE, PREFIX_FEATURE_VERSION};
+use crate::prefix_terms::{PrefixTerms, TermEvidence};
 use ks_lang::LoadError;
 use ks_lang::ortho_model::{BOS, Channel, OrthoModel};
 use ks_text::pystr;
@@ -28,11 +31,28 @@ pub fn features_for_version(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], fea
     features_with_ortho(item, sides, feature_version, None)
 }
 
+/// What a schema beyond the second reads besides the lexicons: the orthotactic models (schema three) and the term lists
+/// (schema four).
+#[derive(Clone, Copy, Default)]
+pub struct PrefixReaders<'a> {
+    pub ortho: Option<&'a OrthoModel>,
+    pub terms: Option<&'a PrefixTerms>,
+}
+
 /// The features of any schema; schema three reads the keys with the orthotactic models and refuses without them.
 pub fn features_with_ortho(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], feature_version: i64, ortho: Option<&OrthoModel>) -> Result<indexmap::IndexMap<String, f64>, LoadError> {
-    if feature_version == ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() {
-        let ortho = ortho.ok_or_else(|| LoadError::value("prefix schema three needs the orthotactic model"))?;
-        return Ok(schema_three(item, sides, ortho));
+    features_with_readers(item, sides, feature_version, PrefixReaders { ortho, terms: None })
+}
+
+/// The features of any schema, with what schemas three and four read; each refuses without its readers.
+pub fn features_with_readers(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], feature_version: i64, readers: PrefixReaders<'_>) -> Result<indexmap::IndexMap<String, f64>, LoadError> {
+    if feature_version == ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() || feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>() {
+        let ortho = readers.ortho.ok_or_else(|| LoadError::value("prefix schemas three and four need the orthotactic model"))?;
+        if feature_version == ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() {
+            return Ok(schema_three(item, sides, ortho));
+        }
+        let terms = readers.terms.ok_or_else(|| LoadError::value("prefix schema four needs the term lists"))?;
+        return Ok(schema_four(item, sides, ortho, terms));
     }
     if feature_version != 1 && feature_version != CURRENT_PREFIX_FEATURE_VERSION.to::<i64>() {
         return Err(LoadError::value("unsupported prefix features"));
@@ -125,10 +145,91 @@ fn schema_three(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoMo
     result
 }
 
+/// The step of a mean log-probability per key, counted down from zero and bounded.
+fn absolute_step(mean: f64, step: f64, maximum: i64) -> i64 {
+    (-mean / step).floor().clamp(0.0, maximum.to::<f64>()).to::<i64>()
+}
+
+/// What the term lists say of a reading, as features under a name: the term it is and the terms it begins, each list
+/// apart, a count as its logarithm.
+fn term_features(result: &mut indexmap::IndexMap<String, f64>, name: &str, kind: &str, evidence: Option<TermEvidence>) {
+    let Some(evidence) = evidence else {
+        return;
+    };
+    result.insert(format!("term:{name}:{kind}"), 1.0);
+    if evidence.count > 0 {
+        result.insert(format!("term:{name}:{kind}:count"), (evidence.count.to::<f64>().ln_1p() / PREFIX_TERM_COUNT_LOG_DIVISOR).min(1.0));
+    }
+    if evidence.identifier {
+        result.insert(format!("term:{name}:{kind}:identifier"), 1.0);
+    }
+    if evidence.protected {
+        result.insert(format!("term:{name}:{kind}:protected"), 1.0);
+    }
+}
+
+/// Schema four: schema three, and three readings it lacks. The term lists the program loads, for each reading of the
+/// keys, with how often Russian technical text writes a term: `cntk` is a term of the table where `стел…` is a word.
+/// Each reading's own score by its own language's channel, apart and together: a compound token or a random
+/// abbreviation (`vgcfgb`, `мпсапи`) reads badly both ways, where a word typed in the wrong layout reads well the other
+/// way. And the longest whole word or term the typed keys start with, with what follows it: `verify|csrf`, `git|rfgrep`.
+fn schema_four(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoModel, terms: &PrefixTerms) -> indexmap::IndexMap<String, f64> {
+    let mut result = schema_three(item, sides, ortho);
+    let other_group = 1 - item.source_group;
+    for (name, text, group) in [("typed", &item.original, item.source_group), ("other", &item.alternative, other_group)] {
+        let found = terms.lookup(text, group);
+        term_features(&mut result, name, "exact", found.exact);
+        term_features(&mut result, name, "begins", found.begins);
+    }
+    let keys = pystr::casefold(&ks_text::normalize::nfc(if item.source_group == 0 { &item.original } else { &item.alternative }));
+    let (typed_channel, other_channel) = if item.source_group == 0 { (&ortho.channels.en, &ortho.channels.ru) } else { (&ortho.channels.ru, &ortho.channels.en) };
+    let (typed, other) = (prefix_conditionals(typed_channel, &keys), prefix_conditionals(other_channel, &keys));
+    if !typed.is_empty() {
+        let count = typed.len();
+        let bucket = PREFIX_ORTHO_LENGTH_BUCKETS.iter().rev().find(|bound| count >= **bound).copied().unwrap_or(PREFIX_ORTHO_LENGTH_BUCKETS[0]);
+        let mean = |values: &[f64]| ks_lang::pysum::py_sum(values.iter().copied()) / count.to::<f64>();
+        let (typed_mean, other_mean) = (mean(&typed), mean(&other));
+        result.insert("ortho:typed_mean".to_owned(), bounded(typed_mean, PREFIX_ORTHO_MEAN_BOUND_NATS));
+        result.insert("ortho:other_mean".to_owned(), bounded(other_mean, PREFIX_ORTHO_MEAN_BOUND_NATS));
+        result.insert(format!("ortho:typed_step:{bucket}:{}", absolute_step(typed_mean, PREFIX_ORTHO_ABSOLUTE_STEP_NATS, PREFIX_ORTHO_ABSOLUTE_MAX_STEPS)), 1.0);
+        result.insert(format!("ortho:other_step:{bucket}:{}", absolute_step(other_mean, PREFIX_ORTHO_ABSOLUTE_STEP_NATS, PREFIX_ORTHO_ABSOLUTE_MAX_STEPS)), 1.0);
+        let both = |mean: f64| absolute_step(mean, PREFIX_ORTHO_BOTH_STEP_NATS, PREFIX_ORTHO_BOTH_MAX_STEPS);
+        result.insert(format!("ortho:both:{}:{}", both(typed_mean), both(other_mean)), 1.0);
+    }
+    // The longest whole word of the typed layout's lexicon, or term, the typed keys begin with, shorter than the keys.
+    let typed_text = pystr::casefold(&item.original);
+    let letters: Vec<char> = typed_text.chars().collect();
+    let side = sides[usize::from(item.source_group == 1)];
+    let head = (PREFIX_HEAD_MIN_CHARACTERS..letters.len()).rev().find_map(|length| {
+        let head: String = letters[..length].iter().collect();
+        if side.model.frequencies.contains(&head) {
+            Some(("word", length))
+        } else {
+            terms.lookup(&head, item.source_group).exact.map(|_| ("term", length))
+        }
+    });
+    if let Some((kind, length)) = head {
+        let tail: String = letters[length..].iter().collect();
+        result.insert(format!("head:{kind}:{}", length.min(PREFIX_HEAD_MAX_LENGTH_BUCKET)), 1.0);
+        result.insert(format!("head:tail:{}", (letters.len() - length).min(PREFIX_TAIL_MAX_LENGTH_BUCKET)), 1.0);
+        if side.index.completions(&tail).completions > 0 {
+            result.insert("head:tail_continues".to_owned(), 1.0);
+        }
+        let found = terms.lookup(&tail, item.source_group);
+        if found.exact.is_some() || found.begins.is_some() {
+            result.insert("head:tail_term".to_owned(), 1.0);
+        }
+    }
+    result
+}
+
 /// A prefix model that carries the feature schema its weights were fitted on.
 pub struct VersionedPrefixModel {
     pub model: PrefixModel,
     pub feature_version: i64,
+    /// The threshold of each direction of typing, by the layout group of the keys (`conversion_thresholds`), when the
+    /// artifact has them; the scalar `conversion_threshold` is then the larger of the two.
+    pub thresholds: Option<[f64; 2]>,
 }
 
 impl VersionedPrefixModel {
@@ -143,13 +244,41 @@ impl VersionedPrefixModel {
 
     /// The prediction with the orthotactic models at hand, which schema three reads.
     pub fn predict_with(&self, item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: Option<&OrthoModel>) -> Result<ContextPrediction, LoadError> {
-        Ok(self.model.predict_features(&features_with_ortho(item, sides, self.feature_version, ortho)?))
+        self.predict_with_readers(item, sides, PrefixReaders { ortho, terms: None })
+    }
+
+    /// The prediction with what schemas three and four read. A model with a threshold for each direction converts at the
+    /// threshold of the direction the keys were typed in.
+    pub fn predict_with_readers(&self, item: &PrefixInput, sides: [&PrefixSide<'_>; 2], readers: PrefixReaders<'_>) -> Result<ContextPrediction, LoadError> {
+        let mut prediction = self.model.predict_features(&features_with_readers(item, sides, self.feature_version, readers)?);
+        if self.thresholds.is_some() && ACTIONS[first_greatest(&prediction.probabilities)] == ContextAction::Convert {
+            prediction.action = if prediction.probability >= self.threshold_for(item.source_group) { ContextAction::Convert } else { ContextAction::Wait };
+        }
+        Ok(prediction)
+    }
+
+    /// The thresholds of the two directions; a model with one threshold has it in both.
+    #[must_use]
+    pub fn thresholds(&self) -> [f64; 2] {
+        self.thresholds.unwrap_or([self.model.conversion_threshold; 2])
+    }
+
+    /// The threshold a prefix typed in this layout group converts at.
+    #[must_use]
+    pub fn threshold_for(&self, source_group: i64) -> f64 {
+        self.thresholds()[usize::from(source_group == 1)]
     }
 
     /// Whether the schema reads the keys with the orthotactic models, so the model answers only beside them.
     #[must_use]
     pub fn needs_ortho(&self) -> bool {
-        self.feature_version == ORTHO_PREFIX_FEATURE_VERSION.to::<i64>()
+        self.feature_version == ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() || self.needs_terms()
+    }
+
+    /// Whether the schema reads the term lists, so the model answers only beside them.
+    #[must_use]
+    pub fn needs_terms(&self) -> bool {
+        self.feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()
     }
 
     pub fn load(path: &Path) -> Result<VersionedPrefixModel, LoadError> {
@@ -157,7 +286,10 @@ impl VersionedPrefixModel {
         let unsupported = || LoadError::value("unsupported prefix model");
         let artifact = artifact.ok_or_else(unsupported)?;
         let payload = &artifact.payload;
-        let feature_version = payload.get("feature_version").and_then(Value::as_i64).filter(|&found| [PREFIX_FEATURE_VERSION, CURRENT_PREFIX_FEATURE_VERSION, ORTHO_PREFIX_FEATURE_VERSION].iter().any(|known| found == known.to::<i64>()));
+        let feature_version = payload
+            .get("feature_version")
+            .and_then(Value::as_i64)
+            .filter(|&found| [PREFIX_FEATURE_VERSION, CURRENT_PREFIX_FEATURE_VERSION, ORTHO_PREFIX_FEATURE_VERSION, TERMS_PREFIX_FEATURE_VERSION].iter().any(|known| found == known.to::<i64>()));
         let (true, Some(feature_version)) = (payload.get("kind").and_then(Value::as_str) == Some("keyswitch.prefix-policy") && actions_match(payload), feature_version) else {
             return Err(unsupported());
         };
@@ -170,14 +302,29 @@ impl VersionedPrefixModel {
         if declared != Some(feature_version) {
             return Err(LoadError::value("inconsistent prefix features"));
         }
+        let thresholds = direction_thresholds(payload.get("conversion_thresholds"))?;
         let loaded = finish_load(artifact, feature_version, &format!("prefix-v{feature_version}-"))?;
-        Ok(VersionedPrefixModel { model: loaded.model, feature_version: loaded.feature_version })
+        if thresholds.is_some_and(|both| both[0].max(both[1]).total_cmp(&loaded.model.conversion_threshold).is_ne()) {
+            return Err(LoadError::value("inconsistent prefix thresholds"));
+        }
+        Ok(VersionedPrefixModel { model: loaded.model, feature_version: loaded.feature_version, thresholds })
     }
 
     /// `VersionedPrefixModel.default()`: the installed prefix artifact in whichever schema it was accepted, or none.
     #[must_use]
     pub fn default_model(models_dir: &Path) -> Option<VersionedPrefixModel> {
         VersionedPrefixModel::load(&models_dir.join(ARTIFACT_FILE)).ok()
+    }
+}
+
+/// `conversion_thresholds`, when the artifact has them: two numbers, each a threshold the scalar one may be.
+fn direction_thresholds<'a, D: serde::Deserializer<'a>>(found: Option<D>) -> Result<Option<[f64; 2]>, LoadError> {
+    let Some(found) = found else {
+        return Ok(None);
+    };
+    match <[f64; 2] as serde::Deserialize>::deserialize(found) {
+        Ok(both) if both.iter().all(|value| (MIN_PREFIX_CONVERSION_THRESHOLD..=1.0).contains(value)) => Ok(Some(both)),
+        _ => Err(LoadError::value("unsafe prefix threshold")),
     }
 }
 

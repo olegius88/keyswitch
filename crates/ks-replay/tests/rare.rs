@@ -1528,3 +1528,44 @@ fn a_reading_the_replay_types_is_booked_as_the_engines_unless_the_user_made_it()
     bundle.give_back(session);
     bundle.clean();
 }
+
+/// A model of schema four whose only weight is the bias: it converts at 0.987, between its threshold for keys typed in
+/// Latin and its threshold for keys typed in Cyrillic.
+fn schema_four_model() -> ks_context::VersionedPrefixModel {
+    let weights = ks_context::flat_table::WeightTable::from_entries(vec![("bias", [0.0, 5.43, 0.0, 0.0])]);
+    let model = ks_context::prefix_model::PrefixModel { weights, version: "prefix-v4-000000000000".to_owned(), conversion_threshold: 0.99 };
+    ks_context::VersionedPrefixModel { model, feature_version: 4, thresholds: Some([0.985, 0.99]) }
+}
+
+#[test]
+fn a_prefix_model_of_schema_four_reads_the_term_lists_built_once_and_each_direction_its_threshold() {
+    let mut bundle = Bundle::load(None);
+    bundle.set_prefix_model(Some(Arc::new(schema_four_model())));
+    let mut session = session(&mut bundle);
+    let core = &mut session.core;
+    let terms = core.prefix_terms().expect("the term lists");
+    assert!(terms.len()[0] > 1000 && terms.len()[1] > 100, "{:?}", terms.len());
+    assert!(Arc::ptr_eq(&terms, &core.prefix_terms().expect("the same lists")));
+    let baseline = |original: &str, replacement: &str, source: i64| EarlySwitchDecision {
+        should_switch: false,
+        source_group: source,
+        target_group: 1 - source,
+        original: original.to_owned(),
+        replacement: replacement.to_owned(),
+        reason: String::new(),
+        source_evidence: None,
+        target_evidence: None,
+    };
+    let shown = field("", "");
+    let (latin, confidence) = core.decide_prefix(baseline("ghbdtn", "привет", 0), Some(&shown)).expect("no failure");
+    assert!(latin.should_switch && (confidence - 0.987).abs() < 0.001, "{latin:?}");
+    let (cyrillic, _) = core.decide_prefix(baseline("руддщ", "hello", 1), Some(&shown)).expect("no failure");
+    assert!(!cyrillic.should_switch && cyrillic.reason.contains("wait"), "{cyrillic:?}");
+    // Without the orthotactic models the schema does not answer.
+    let ortho = core.context_policy.ortho.take();
+    let (unanswered, _) = core.decide_prefix(baseline("ghbdtn", "привет", 0), Some(&shown)).expect("no failure");
+    assert_eq!(unanswered.reason, "prefix_model_unavailable");
+    core.context_policy.ortho = ortho;
+    bundle.give_back(session);
+    bundle.clean();
+}

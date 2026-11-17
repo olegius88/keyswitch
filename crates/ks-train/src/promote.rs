@@ -222,7 +222,7 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let root = request.root;
     let resource_dir = root.join("resources");
     let (artifact, seal, prefix, prefix_seal) = (request.candidate.join(CONTEXT_ARTIFACT), request.candidate.join(CONTEXT_SEAL), request.prefix_candidate.join(PREFIX_ARTIFACT), request.prefix_candidate.join(PREFIX_SEAL));
-    let evaluation = EvaluationRequest { root, resource_dir: &resource_dir, artifact: &artifact, seal: &seal, prefix: &prefix, prefix_seal: &prefix_seal, corpus: request.corpus, split: "test", output: request.report, ledger: request.ledger, jobs: request.jobs, unsealed: false };
+    let evaluation = EvaluationRequest { root, resource_dir: &resource_dir, artifact: &artifact, seal: &seal, prefix: &prefix, prefix_seal: &prefix_seal, corpus: request.corpus, split: "test", output: request.report, ledger: request.ledger, jobs: request.jobs, unsealed: false, cache: None };
     let report = if request.report.exists() { typed::<Report, _>(&read_json(request.report)?)? } else { evaluate(&evaluation)? };
     if !report.promotion_passed {
         println!("the sealed test did not pass; nothing is installed");

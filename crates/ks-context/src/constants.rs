@@ -607,6 +607,29 @@ pub const PREFIX_ORTHO_MAX_STEPS: i64 = 8;
 // Length buckets of the orthotactic evidence: a key count at or above the last one shares its bucket.
 pub const PREFIX_ORTHO_LENGTH_BUCKETS: [usize; 4] = [3, 4, 5, 6];
 
+// Schema four: schema three, the term lists the program loads, each reading's own orthotactic score and a whole word at
+// the start of the typed keys (crates/ks-context/src/prefix_schema.rs, prefix_terms.rs).
+pub const TERMS_PREFIX_FEATURE_VERSION: usize = 4;
+
+// The fewest letters of a reading the term lists are asked about: shorter ones begin too many terms to say anything.
+pub const PREFIX_TERM_MIN_CHARACTERS: usize = 3;
+
+// A term table count goes in as ln(1 + count) over this: the largest counts, some tens of thousands, come near one.
+pub const PREFIX_TERM_COUNT_LOG_DIVISOR: f64 = 10.0;
+
+// Each reading's mean log-probability per key by its own language's channel, in steps of this many nats down from zero, at
+// most this many steps; and the two readings together, in coarser steps.
+pub const PREFIX_ORTHO_ABSOLUTE_STEP_NATS: f64 = 1.0;
+pub const PREFIX_ORTHO_ABSOLUTE_MAX_STEPS: i64 = 8;
+pub const PREFIX_ORTHO_BOTH_STEP_NATS: f64 = 2.0;
+pub const PREFIX_ORTHO_BOTH_MAX_STEPS: i64 = 3;
+
+// A whole word or term at the start of the typed keys: from this many letters, its length counted up to the next bound, and
+// the length of the keys after it up to the last.
+pub const PREFIX_HEAD_MIN_CHARACTERS: usize = 3;
+pub const PREFIX_HEAD_MAX_LENGTH_BUCKET: usize = 6;
+pub const PREFIX_TAIL_MAX_LENGTH_BUCKET: usize = 4;
+
 // Lowest conversion threshold a prefix model artifact may carry.
 pub const MIN_PREFIX_CONVERSION_THRESHOLD: f64 = 0.985;
 

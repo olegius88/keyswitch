@@ -1,6 +1,8 @@
 //! `ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]`
-//! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--jobs N]`
-//! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--jobs N]`
+//! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--jobs N]`
+//! `ks-train prefix-report --fit <folder> --output <file>`
+//! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|calibration|--words <file> [--minimum-characters N] [--frames-cache <folder>] --output <file> [--jobs N]`
+//! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
 //! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
 //! `ks-train mixed --tree <root> --messages <file> --count N --output <file> [--model <file>] [--kinds k,k] [--seed S] [--russian-share R] [--typo-rate R] [--prefix-rate R --code <file>] [--edit] [--jobs N]`
@@ -52,7 +54,15 @@ fn main() {
         let output = PathBuf::from(option(&arguments, "--output").expect("--output is required"));
         let resource_dir = tree.join("resources");
         let jobs = option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number"));
-        let request = ks_train::prefix::PrefixRequest { root: &tree, resource_dir: &resource_dir, recipe: &recipe, output: &output, jobs, reuse_installed: arguments.iter().any(|argument| argument == "--reuse-installed") };
+        let request = ks_train::prefix::PrefixRequest {
+            root: &tree,
+            resource_dir: &resource_dir,
+            recipe: &recipe,
+            output: &output,
+            jobs,
+            reuse_installed: arguments.iter().any(|argument| argument == "--reuse-installed"),
+            frames_cache: option(&arguments, "--frames-cache").map(Path::new),
+        };
         match ks_train::prefix::fit(&request) {
             Ok(seal) => {
                 println!("{} calibration passed: {}", seal["model_version"].as_str().unwrap_or(""), seal["calibration_passed"]);
@@ -63,6 +73,41 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+    if arguments.first().map(String::as_str) == Some("prefix-report") {
+        let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
+        if let Err(error) = ks_train::prefix::report_command(&required("--fit"), &required("--output")) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if arguments.first().map(String::as_str) == Some("prefix-probe") {
+        let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
+        let (tree, model, recipe, output) = (required("--tree"), required("--model"), required("--recipe"), required("--output"));
+        let resource_dir = tree.join("resources");
+        let listed = option(&arguments, "--words").map(PathBuf::from);
+        let words = match (&listed, option(&arguments, "--split")) {
+            (Some(path), None) => ks_train::prefix::ProbeWords::List(path),
+            (None, Some(split)) => ks_train::prefix::ProbeWords::Split(split),
+            _ => panic!("one of --split and --words is required"),
+        };
+        let request = ks_train::prefix::ProbeRequest {
+            root: &tree,
+            resource_dir: &resource_dir,
+            model: &model,
+            recipe: &recipe,
+            words,
+            minimum_characters: option(&arguments, "--minimum-characters").map(|value| value.parse().expect("--minimum-characters is a number")),
+            output: &output,
+            jobs: option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number")),
+            frames_cache: option(&arguments, "--frames-cache").map(Path::new),
+        };
+        if let Err(error) = ks_train::prefix::probe(&request) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
     }
     if arguments.first().map(String::as_str) == Some("evaluate") {
         let required = |name: &str| option(&arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
@@ -83,6 +128,7 @@ fn main() {
             ledger: &ledger,
             jobs: option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number")),
             unsealed: arguments.iter().any(|argument| argument == "--unsealed"),
+            cache: option(&arguments, "--cache").map(Path::new),
         };
         match ks_train::evaluate::evaluate(&request) {
             Ok(report) => {

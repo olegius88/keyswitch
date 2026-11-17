@@ -489,3 +489,59 @@ fn a_model_with_the_common_reading_head_reads_the_short_token_table_before_the_f
     std::fs::remove_file(without.join("context-short-frequency.json")).expect("the short-token table removed");
     assert_eq!(ContextModel::load_artifact(&path, &without).err().expect("refused").name, "FileNotFoundError");
 }
+
+/// A schema-two artifact whose only weight is the bias, as text, with `conversion_thresholds` written as given (none
+/// when empty).
+fn direction_artifact(bias: [f64; 4], thresholds: &str, scalar: f64) -> PathBuf {
+    #[derive(serde::Serialize)]
+    struct Artifact {
+        kind: &'static str,
+        actions: [&'static str; 4],
+        feature_version: i64,
+        prefix_feature_version: i64,
+        weights: BTreeMap<&'static str, [f64; 4]>,
+        weights_sha256: String,
+        version: String,
+        conversion_threshold: f64,
+    }
+    let weights: BTreeMap<&'static str, [f64; 4]> = [("bias", bias)].into_iter().collect();
+    let sum = digest(&weights);
+    let version = format!("prefix-v2-{}", sum.get(..12).expect("a hash"));
+    let artifact = Artifact { kind: "keyswitch.prefix-policy", actions: ["keep", "convert", "wait", "suggest"], feature_version: 2, prefix_feature_version: 2, weights, weights_sha256: sum, version, conversion_threshold: scalar };
+    let text = ks_text::json::dumps(&artifact, &ks_text::JsonOptions::default());
+    let text = if thresholds.is_empty() { text } else { text.replacen('{', &format!("{{\"conversion_thresholds\": {thresholds}, "), 1) };
+    written(text.as_bytes())
+}
+
+#[test]
+fn a_prefix_model_with_a_threshold_for_each_direction_converts_at_the_threshold_of_the_keys_typed() {
+    use ks_context::context_model::ContextAction;
+    use ks_context::prefix_model::{PrefixInput, PrefixSide};
+    use ks_lang::Resources;
+    // e^5.43 / (e^5.43 + 3): a conversion at 0.987, between the two thresholds.
+    let between = [0.0, 5.43, 0.0, 0.0];
+    let model = VersionedPrefixModel::load(&direction_artifact(between, "[0.985, 0.99]", 0.99)).expect("a model");
+    assert_eq!((model.thresholds(), model.threshold_for(0), model.threshold_for(1)), ([0.985, 0.99], 0.985, 0.99));
+    let resources = Resources::new(models().parent().expect("the resources"));
+    let (ru, en) = (resources.engine_language_model("ru_RU").expect("ru"), resources.engine_language_model("en_US").expect("en"));
+    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
+    let item = |source_group: i64| {
+        let (original, alternative) = if source_group == 0 { ("ghbd", "прив") } else { ("руды", "hello") };
+        PrefixInput { original: original.to_owned(), alternative: alternative.to_owned(), source_group, field: ks_backend::FieldContext::new("firefox", "1") }
+    };
+    let latin = model.predict_with(&item(0), sides, None).expect("a prediction");
+    assert!(latin.action == ContextAction::Convert && (latin.probability - 0.987).abs() < 0.001, "{latin:?}");
+    assert_eq!(model.predict_with(&item(1), sides, None).expect("a prediction").action, ContextAction::Wait);
+    // A model that would keep keeps in either direction; one without thresholds has its one threshold in both.
+    let keeping = VersionedPrefixModel::load(&direction_artifact([5.43, 0.0, 0.0, 0.0], "[0.985, 0.99]", 0.99)).expect("a model");
+    assert_eq!(keeping.predict_with(&item(0), sides, None).expect("a prediction").action, ContextAction::Keep);
+    let single = VersionedPrefixModel::load(&direction_artifact(between, "", 0.99)).expect("a model");
+    assert_eq!((single.thresholds, single.thresholds()), (None, [0.99, 0.99]));
+    assert_eq!(single.predict_with(&item(0), sides, None).expect("a prediction").action, ContextAction::Wait);
+    let refusal = |thresholds: &str, scalar: f64| VersionedPrefixModel::load(&direction_artifact(between, thresholds, scalar)).err().map(|error| error.message);
+    for unsafe_thresholds in ["[0.5, 0.99]", "[0.99, 1.5]", "[0.99]", "[0.99, 0.99, 0.99]", "\"x\"", "[0.99, \"x\"]", "null"] {
+        assert_eq!(refusal(unsafe_thresholds, 0.99).as_deref(), Some("unsafe prefix threshold"), "{unsafe_thresholds}");
+    }
+    assert_eq!(refusal("[0.985, 0.985]", 0.99).as_deref(), Some("inconsistent prefix thresholds"));
+}

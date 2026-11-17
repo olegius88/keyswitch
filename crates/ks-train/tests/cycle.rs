@@ -148,6 +148,7 @@ fn request<'a>(fitted: &'a Fitted, resources: &'a Path, split: &'a str, output: 
         ledger,
         jobs: 1,
         unsealed: false,
+        cache: None,
     }
 }
 
@@ -238,6 +239,15 @@ fn a_prefix_seal_that_does_not_hold_is_refused_before_the_test() {
     refuses("prefix-threshold", "identity differs", &|seal| {
         passing(seal);
         seal["threshold"] = json!(0.123);
+    });
+    // A seal that names a threshold for each direction of a model that has one threshold, or names them in another shape.
+    refuses("prefix-directions", "thresholds differ from seal", &|seal| {
+        passing(seal);
+        seal.as_object_mut().expect("a seal is an object").insert("thresholds".to_owned(), vec![0.985, 0.99].into());
+    });
+    refuses("prefix-directions-shape", "thresholds of the prefix seal", &|seal| {
+        passing(seal);
+        seal.as_object_mut().expect("a seal is an object").insert("thresholds".to_owned(), "two".into());
     });
     let broken = fitted.folder.join("broken-prefix.json");
     std::fs::write(&broken, b"{}").expect("a file");

@@ -6,12 +6,17 @@ use crate::corpus::{CALIBRATION, DEVELOPMENT, FITTING_SPLITS, TRAIN, checksum, r
 use crate::fit::{provenance, readable};
 use crate::kernel::{self, Packed};
 use crate::physical::{hex, pair};
+use crate::prefix_cache::FramesCache;
 use crate::tools::{Lexicons, Options, reference_models};
 use crate::{ACTIONS, DETERMINISTIC_ROUNDING_DECIMALS, FEATURE_MASS_TOLERANCE, LOG_LOSS_PROBABILITY_FLOOR, PROBABILITY_SUM_TOLERANCE};
+use flate2::Compression;
 use flate2::read::MultiGzDecoder;
+use flate2::write::GzEncoder;
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::prefix_model::{PrefixInput, PrefixModel, PrefixSide};
-use ks_context::prefix_schema::features_with_ortho;
+use ks_context::constants::TERMS_PREFIX_FEATURE_VERSION;
+use ks_context::prefix_schema::{PrefixReaders, features_with_readers};
+use ks_context::prefix_terms::PrefixTerms;
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_context::flat_table::WeightTable;
 use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
@@ -20,7 +25,7 @@ use ks_text::{JsonOptions, fsum, json_dumps, py_round_ndigits, pystr};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::BufRead;
+use std::io::{BufRead, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -55,6 +60,9 @@ pub struct ParentWord {
     pub paired: bool,
     /// In its own situation only; otherwise in the nine situations of the prefix-v1 curriculum.
     pub own_context: bool,
+    /// Typed as meant, its first keys are the ones a reading of keys most easily takes for the other layout (the word
+    /// corpus's `hard`); a calibration cell counts these apart.
+    pub hard: bool,
 }
 
 /// How a recipe labels the frames and which of them it measures. Without the recipe's keys, the rules every sealed recipe
@@ -70,11 +78,14 @@ pub struct FrameRules {
     pub engine_support: bool,
     /// The fewest letters a measured prefix has.
     pub minimum_characters: usize,
+    /// The thousandths of the training families whose frames read no term list (`closed_family`), so that a token
+    /// missing from the lists is not taken for a word of the other layout.
+    pub closed_term_families_per_mille: Option<u64>,
 }
 
 impl Default for FrameRules {
     fn default() -> Self {
-        FrameRules { convert_from: PREFIX_V2_SHORT_PREFIX_CHARACTERS, terms: None, engine_support: false, minimum_characters: PREFIX_MIN_CHARACTERS }
+        FrameRules { convert_from: PREFIX_V2_SHORT_PREFIX_CHARACTERS, terms: None, engine_support: false, minimum_characters: PREFIX_MIN_CHARACTERS, closed_term_families_per_mille: None }
     }
 }
 
@@ -144,6 +155,10 @@ pub enum EpochSelection {
     Frontier,
     /// The least development loss among the epochs with a zero-false frontier.
     DevelopmentLoss,
+    /// Each direction's threshold the first of the grid its calibration allows (`direction_threshold`), and the epoch
+    /// that, at those thresholds, switches the most development words typed in the other layout by the switch key, then
+    /// at the lowest mean key (`KeySelection`); patience watches the same measure.
+    SwitchKey,
 }
 
 /// How the importance of a split's frames is scaled.
@@ -168,6 +183,12 @@ pub struct RecipeOptions {
     pub support: Option<Support>,
     pub early_stop_patience: Option<usize>,
     pub epoch_selection: Option<EpochSelection>,
+    /// The fewest words typed as meant a direction's calibration cell holds, and of them hard ones: a fit on fewer is
+    /// refused.
+    pub minimum_calibration_words_per_direction: Option<usize>,
+    pub minimum_calibration_hard_words_per_direction: Option<usize>,
+    /// Schema four: the thousandths of the training families whose frames read no term list.
+    pub closed_term_families_per_mille: Option<u64>,
 }
 
 impl RecipeOptions {
@@ -193,7 +214,27 @@ pub fn frame_rules(options: &RecipeOptions, resource_dir: &Path) -> Result<Frame
         rules.terms = Some(Arc::new(known_terms(resource_dir)?));
     }
     rules.engine_support = options.support == Some(Support::Engine);
+    rules.closed_term_families_per_mille = options.closed_term_families_per_mille;
     Ok(rules)
+}
+
+/// The namespace of the draw that closes the term lists to a family's frames.
+const CLOSED_TERMS_NAMESPACE: &str = "keyswitch:prefix-v4:closed-terms";
+
+/// Whether a training family's frames are made without the term lists: these thousandths of the families, by hash.
+#[must_use]
+pub fn closed_family(family: &str, per_mille: u64) -> bool {
+    crate::prefix_words::draw(&format!("{CLOSED_TERMS_NAMESPACE}:{family}")) % 1000 < per_mille
+}
+
+/// The term lists a schema-four model reads, as the engine builds them: the identifier lexicon, the protected tokens and
+/// the term table, without the tokens whose keys read as a word of the other layout's lexicon.
+pub fn prefix_terms_of(resource_dir: &Path, models: &Lexicons) -> Result<PrefixTerms, String> {
+    let identifiers = ks_lang::identifier_lexicon::IdentifierLexicon::load(&resource_dir.join("identifiers.json")).map_err(|error| format!("the identifier lexicon: {}", error.name))?;
+    let protected = ks_lang::detector::ProtectedTokens::load(resource_dir);
+    let tables = ks_context::context_model::TermTables::load(&resource_dir.join("models")).map_err(|error| format!("the term table: {}", error.name))?;
+    let known = |word: &str, group: i64| models[usize::from(group == 1)].frequencies.contains(word);
+    Ok(PrefixTerms::build(identifiers.identifiers.iter(), protected.iter(), tables.term("latin"), tables.term("cyrillic"), known))
 }
 
 /// The parents of a word corpus's split: each row a word in its own situation, typed in the other layout too when paired.
@@ -216,6 +257,7 @@ pub fn load_word_parents(directory: &Path, split: &str) -> Result<Vec<ParentWord
                 role: role_named(&row.role)?,
                 paired: row.paired,
                 own_context: true,
+                hard: row.hard || row.class.hard(row.group),
             })
         })
         .collect()
@@ -282,6 +324,7 @@ pub fn load_parents(directory: &Path, split: &str, max_families: i64, max_words_
             role: role_named(row.get("role").and_then(Value::as_str).unwrap_or("unknown"))?,
             paired: category == "correct",
             own_context: SAFETY_CATEGORIES.contains(&category),
+            hard: false,
         };
         if !seen.insert(parent.identifier.clone()) {
             return Err("duplicate old prefix parent identifier".to_owned());
@@ -406,6 +449,9 @@ pub struct PrefixFrame {
     pub sample_weight: f64,
     pub supported: bool,
     pub pair: u32,
+    /// The layout group the keys were typed in: the direction of a switch.
+    pub source: u8,
+    pub hard: bool,
     pub features: Vec<(u32, f64)>,
 }
 
@@ -430,7 +476,7 @@ struct ParentFrames {
 }
 
 /// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller.
-fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, rules: &FrameRules) -> ParentFrames {
+fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, readers: PrefixReaders<'_>, rules: &FrameRules) -> ParentFrames {
     let variants = contexts_of(parent);
     let states: &[bool] = if parent.paired { &[false, true] } else { &[false] };
     let parent_length = pystr::len(&parent.original);
@@ -471,7 +517,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
                     field.before.clone_from(&context.before);
                     field.role = context.role;
                     let item = PrefixInput { original: original.clone(), alternative: alternate.clone(), source_group: source, field };
-                    let values = features_with_ortho(&item, [&sides[0], &sides[1]], feature_version, ortho).expect("the schema of the recipe");
+                    let values = features_with_readers(&item, [&sides[0], &sides[1]], feature_version, readers).expect("the schema of the recipe");
                     let features = values
                         .into_iter()
                         .map(|(name, value)| {
@@ -497,6 +543,8 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
                         sample_weight: weight,
                         supported,
                         pair: pair_number,
+                        source: source.to::<u8>(),
+                        hard: parent.hard,
                         features,
                     });
                 }
@@ -506,8 +554,10 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
     out
 }
 
-/// `generate_frames`: paired snapshots with unit total sampling mass per physical family, by `jobs` threads.
-fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, ortho: Option<&OrthoModel>, rules: &FrameRules, jobs: usize) -> SplitFrames {
+/// `generate_frames`: paired snapshots with unit total sampling mass per physical family, by `jobs` threads. The families
+/// `closed` names read no term list.
+fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, readers: PrefixReaders<'_>, closed: Option<u64>, rules: &FrameRules, jobs: usize) -> SplitFrames {
+    let no_terms = PrefixTerms::default();
     let mut family_counts: BTreeMap<&str, u64> = BTreeMap::new();
     for parent in parents {
         *family_counts.entry(&parent.family).or_insert(0) += 1;
@@ -526,7 +576,9 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
                     let index = next.fetch_add(1, Ordering::Relaxed);
                     let Some(parent) = parents.get(index) else { break };
                     let class = class_number[class_name(parent).as_str()];
-                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], class, models, indexes, maximum_prefix_length, feature_version, ortho, rules);
+                    let shut = closed.is_some_and(|per_mille| closed_family(&parent.family, per_mille));
+                    let readers = if shut { PrefixReaders { terms: readers.terms.map(|_| &no_terms), ..readers } } else { readers };
+                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], class, models, indexes, maximum_prefix_length, feature_version, readers, rules);
                     done.lock().expect("a worker finished")[index] = Some(built);
                 }
             });
@@ -632,6 +684,9 @@ struct Sequence {
     desired: bool,
     full_length: u32,
     class: u16,
+    /// The layout group of the keys: the threshold of this direction decides its conversions.
+    source: u8,
+    hard: bool,
     candidates: Vec<(u32, f64)>,
 }
 
@@ -660,6 +715,8 @@ fn sequence_scores(split: &SplitFrames, probabilities: &[f64]) -> Vec<Sequence> 
         value.desired = frame.desired;
         value.full_length = frame.full_length;
         value.class = frame.class;
+        value.source = frame.source;
+        value.hard = frame.hard;
         if frame.supported && best_action(scores) == CONVERT_LABEL {
             value.candidates.push((frame.length, scores[CONVERT_LABEL]));
         }
@@ -700,8 +757,8 @@ fn metrics_value(metrics: &[Metrics; 2]) -> Value {
     json!({PROFILES[0]: metrics[0].value(), PROFILES[1]: metrics[1].value()})
 }
 
-/// A class of parents at one threshold, both profiles together.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
+/// A class of parents at its thresholds, both profiles together.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClassMetrics {
     pub sequences: i64,
     pub desired: i64,
@@ -713,39 +770,107 @@ pub struct ClassMetrics {
     pub first_conversion_length: BTreeMap<u32, i64>,
 }
 
-/// What a word corpus's fit writes beside its seal (`classes.json`): where it stopped, and each class on development and
-/// calibration at the chosen threshold and on calibration at every threshold of the grid.
-#[derive(serde::Serialize)]
-struct ClassReport<'a> {
-    model_version: &'a str,
-    threshold: f64,
-    epoch: i64,
-    stopped_after_epoch: Option<i64>,
-    development: BTreeMap<String, ClassMetrics>,
-    calibration: BTreeMap<String, ClassMetrics>,
-    calibration_by_threshold: BTreeMap<String, BTreeMap<String, ClassMetrics>>,
-    /// The texts typed as meant that each threshold would convert on calibration, with their class.
-    calibration_false: BTreeMap<String, Vec<String>>,
+/// The key a measure of earliness counts a switch by: the first key the engine asks the prefix model about.
+pub const SWITCH_KEY: u32 = 4;
+
+/// One direction of typing (the layout group of the keys) at one threshold, in one profile or both together.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DirectionMetrics {
+    /// Sequences typed in the other layout.
+    pub desired: i64,
+    pub converted: i64,
+    pub converted_before_end: i64,
+    /// Of those typed in the other layout, the ones whose first switch came by `SWITCH_KEY`.
+    pub switched_by_key: i64,
+    /// The keys of the first switches added up; a word never switched counts its boundary, one key after its last letter.
+    pub key_sum: i64,
+    /// Sequences typed as meant, and of those the ones converted.
+    pub kept: i64,
+    #[serde(rename = "false")]
+    pub false_conversions: i64,
 }
 
-/// The distinct texts of the kept sequences a threshold converts, each after its class: what holds a threshold up.
-fn false_texts(scores: &[Sequence], threshold: f64, frames: &SplitFrames) -> Vec<String> {
+impl DirectionMetrics {
+    fn add(&mut self, value: &Sequence, first: Option<u32>) {
+        if value.desired {
+            self.desired += 1;
+            self.converted += i64::from(first.is_some());
+            self.converted_before_end += i64::from(first.is_some_and(|length| length < value.full_length));
+            self.switched_by_key += i64::from(first.is_some_and(|length| length <= SWITCH_KEY));
+            self.key_sum += i64::from(first.unwrap_or(value.full_length + 1));
+        } else {
+            self.kept += 1;
+            self.false_conversions += i64::from(first.is_some());
+        }
+    }
+
+    fn merged(self, other: DirectionMetrics) -> DirectionMetrics {
+        DirectionMetrics {
+            desired: self.desired + other.desired,
+            converted: self.converted + other.converted,
+            converted_before_end: self.converted_before_end + other.converted_before_end,
+            switched_by_key: self.switched_by_key + other.switched_by_key,
+            key_sum: self.key_sum + other.key_sum,
+            kept: self.kept + other.kept,
+            false_conversions: self.false_conversions + other.false_conversions,
+        }
+    }
+
+    /// The share of the words typed in the other layout switched by `SWITCH_KEY`; none of an empty cell.
+    #[must_use]
+    pub fn share_by_key(&self) -> f64 {
+        if self.desired == 0 { 0.0 } else { self.switched_by_key.to::<f64>() / self.desired.to::<f64>() }
+    }
+
+    /// The mean key of the first switch of the words typed in the other layout.
+    #[must_use]
+    pub fn mean_key(&self) -> f64 {
+        if self.desired == 0 { 0.0 } else { self.key_sum.to::<f64>() / self.desired.to::<f64>() }
+    }
+
+    fn early_recall(&self) -> f64 {
+        if self.desired == 0 { 0.0 } else { self.converted_before_end.to::<f64>() / self.desired.to::<f64>() }
+    }
+}
+
+/// The first conversion of a sequence at the threshold of its direction.
+fn first_conversion(value: &Sequence, thresholds: [f64; 2]) -> Option<u32> {
+    let threshold = thresholds[usize::from(value.source.min(1))];
+    value.candidates.iter().filter(|candidate| candidate.1 >= threshold).map(|candidate| candidate.0).min()
+}
+
+/// Each profile's and direction's metrics at the thresholds of the two directions: `[profile][direction]`.
+fn direction_metrics(scores: &[Sequence], thresholds: [f64; 2]) -> [[DirectionMetrics; 2]; 2] {
+    let mut result = [[DirectionMetrics::default(); 2]; 2];
+    for value in scores {
+        result[usize::from(value.profile.min(1))][usize::from(value.source.min(1))].add(value, first_conversion(value, thresholds));
+    }
+    result
+}
+
+/// Each direction, both profiles together.
+fn pooled(metrics: &[[DirectionMetrics; 2]; 2]) -> [DirectionMetrics; 2] {
+    [metrics[0][0].merged(metrics[1][0]), metrics[0][1].merged(metrics[1][1])]
+}
+
+/// The distinct texts of the kept sequences the thresholds convert, each after its class: what holds a threshold up.
+fn false_texts(scores: &[Sequence], thresholds: [f64; 2], classes: &[String], typed: &[Option<String>]) -> Vec<String> {
     let found: BTreeSet<String> = scores
         .iter()
-        .zip(&frames.typed)
-        .filter(|(value, _)| !value.desired && value.candidates.iter().any(|candidate| candidate.1 >= threshold))
-        .map(|(value, text)| format!("{}: {text}", frames.classes[usize::from(value.class)]))
+        .zip(typed)
+        .filter(|(value, _)| !value.desired && first_conversion(value, thresholds).is_some())
+        .filter_map(|(value, text)| text.as_ref().map(|text| format!("{}: {text}", classes[usize::from(value.class)])))
         .collect();
     found.into_iter().collect()
 }
 
 /// The metrics of each class of parents, both profiles together, and the length of the first conversion of each
 /// sequence typed in the other layout.
-fn class_metrics(scores: &[Sequence], threshold: f64, classes: &[String]) -> BTreeMap<String, ClassMetrics> {
+fn class_metrics(scores: &[Sequence], thresholds: [f64; 2], classes: &[String]) -> BTreeMap<String, ClassMetrics> {
     let mut by_class: BTreeMap<String, ClassMetrics> = BTreeMap::new();
     for value in scores {
         let counts = by_class.entry(classes[usize::from(value.class)].clone()).or_default();
-        let first = value.candidates.iter().filter(|candidate| candidate.1 >= threshold).map(|candidate| candidate.0).min();
+        let first = first_conversion(value, thresholds);
         counts.sequences += 1;
         counts.desired += i64::from(value.desired);
         counts.converted += i64::from(value.desired && first.is_some());
@@ -756,6 +881,153 @@ fn class_metrics(scores: &[Sequence], threshold: f64, classes: &[String]) -> BTr
         }
     }
     by_class
+}
+
+/// The file beside the seal that keeps a fit's development and calibration scores.
+pub const SCORES_FILE: &str = "scores.json.gz";
+
+/// A sequence as a fit keeps it beside its seal: what every report of the fit is made from, without a refit.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedSequence {
+    pub profile: u8,
+    pub desired: bool,
+    pub source: u8,
+    pub hard: bool,
+    pub full_length: u32,
+    pub class: u16,
+    /// The supported prefixes the model would convert, by length, with the probability of converting.
+    pub candidates: Vec<(u32, f64)>,
+    /// The text typed: development only; calibration keeps numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+/// One split's sequences and the names of their classes.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedSplit {
+    pub classes: Vec<String>,
+    pub sequences: Vec<SavedSequence>,
+}
+
+impl SavedSplit {
+    fn of(scores: &[Sequence], frames: &SplitFrames, texts: bool) -> SavedSplit {
+        let sequences = scores
+            .iter()
+            .zip(&frames.typed)
+            .map(|(value, typed)| SavedSequence {
+                profile: value.profile,
+                desired: value.desired,
+                source: value.source,
+                hard: value.hard,
+                full_length: value.full_length,
+                class: value.class,
+                candidates: value.candidates.clone(),
+                text: texts.then(|| typed.clone()),
+            })
+            .collect();
+        SavedSplit { classes: frames.classes.clone(), sequences }
+    }
+
+    fn scores(&self) -> Vec<Sequence> {
+        self.sequences
+            .iter()
+            .map(|saved| Sequence { profile: saved.profile, desired: saved.desired, full_length: saved.full_length, class: saved.class, source: saved.source, hard: saved.hard, candidates: saved.candidates.clone() })
+            .collect()
+    }
+
+    fn texts(&self) -> Vec<Option<String>> {
+        self.sequences.iter().map(|saved| saved.text.clone()).collect()
+    }
+}
+
+/// `scores.json.gz` beside the seal of a fit that reports its classes: each sequence of development and calibration
+/// with the chosen epoch's probabilities. `prefix-report` makes the class report from it again.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedScores {
+    pub model_version: String,
+    pub epoch: i64,
+    pub stopped_after_epoch: Option<i64>,
+    /// The thresholds of the two directions, by the layout group of the keys.
+    pub thresholds: [f64; 2],
+    pub grid: Vec<f64>,
+    pub development: SavedSplit,
+    pub calibration: SavedSplit,
+}
+
+/// Both directions at one threshold of the grid, both profiles together.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ThresholdRow {
+    pub development: [DirectionMetrics; 2],
+    pub calibration: [DirectionMetrics; 2],
+}
+
+/// What a fit that reports its classes writes beside its seal (`classes.json`): where it stopped; each class on
+/// development and calibration at the chosen thresholds and on calibration at every threshold of the grid; each
+/// direction at every threshold; and the development texts typed as meant that each threshold converts. Calibration is
+/// reported in numbers only: a threshold is chosen on it.
+#[derive(serde::Serialize)]
+pub struct ClassReport {
+    model_version: String,
+    thresholds: [f64; 2],
+    epoch: i64,
+    stopped_after_epoch: Option<i64>,
+    development: BTreeMap<String, ClassMetrics>,
+    calibration: BTreeMap<String, ClassMetrics>,
+    calibration_by_threshold: BTreeMap<String, BTreeMap<String, ClassMetrics>>,
+    by_threshold: BTreeMap<String, ThresholdRow>,
+    development_false: BTreeMap<String, Vec<String>>,
+}
+
+impl ClassReport {
+    /// The report of saved scores.
+    #[must_use]
+    pub fn of(saved: &SavedScores) -> ClassReport {
+        let (development, calibration) = (saved.development.scores(), saved.calibration.scores());
+        let texts = saved.development.texts();
+        let both = |threshold: f64| [threshold, threshold];
+        ClassReport {
+            model_version: saved.model_version.clone(),
+            thresholds: saved.thresholds,
+            epoch: saved.epoch,
+            stopped_after_epoch: saved.stopped_after_epoch,
+            development: class_metrics(&development, saved.thresholds, &saved.development.classes),
+            calibration: class_metrics(&calibration, saved.thresholds, &saved.calibration.classes),
+            calibration_by_threshold: saved.grid.iter().map(|threshold| (threshold.to_string(), class_metrics(&calibration, both(*threshold), &saved.calibration.classes))).collect(),
+            by_threshold: saved
+                .grid
+                .iter()
+                .map(|threshold| (threshold.to_string(), ThresholdRow { development: pooled(&direction_metrics(&development, both(*threshold))), calibration: pooled(&direction_metrics(&calibration, both(*threshold))) }))
+                .collect(),
+            development_false: saved.grid.iter().map(|threshold| (threshold.to_string(), false_texts(&development, both(*threshold), &saved.development.classes, &texts))).collect(),
+        }
+    }
+
+    /// The report as the fit writes it.
+    #[must_use]
+    pub fn bytes(&self) -> Vec<u8> {
+        let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
+        (ks_text::json::dumps(self, &options) + "\n").into_bytes()
+    }
+}
+
+/// The saved scores of a fit folder.
+pub fn read_saved_scores(folder: &Path) -> Result<SavedScores, String> {
+    let path = folder.join(SCORES_FILE);
+    let file = std::fs::File::open(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let text = std::io::read_to_string(MultiGzDecoder::new(file)).map_err(|error| format!("{}: {error}", path.display()))?;
+    ks_text::json::loads(text).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+fn saved_bytes(saved: &SavedScores) -> Result<Vec<u8>, String> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&crate::artifact::canonical_of(saved)).map_err(|error| error.to_string())?;
+    encoder.finish().map_err(|error| error.to_string())
+}
+
+/// `prefix-report --fit <folder> --output <file>`: the class report of a fit, made again from its saved scores.
+pub fn report_command(fit_folder: &Path, output: &Path) -> Result<(), String> {
+    let saved = read_saved_scores(fit_folder)?;
+    std::fs::write(output, ClassReport::of(&saved).bytes()).map_err(|error| format!("{}: {error}", output.display()))
 }
 
 /// Whether a fit with this patience stops after this epoch: neither the chosen frontier nor the development loss has
@@ -845,6 +1117,91 @@ fn calibration_passed(metrics: &[Metrics; 2], minimum_recall: f64) -> bool {
     metrics.iter().all(|counts| counts.desired != 0 && counts.sequences != counts.desired && counts.false_conversions == 0 && counts.converted_before_end.to::<f64>() / counts.desired.to::<f64>() >= minimum_recall)
 }
 
+/// The threshold a direction's calibration allows: the first of the grid at which, in both profiles, no sequence typed
+/// as meant in that direction converts and enough of those typed in the other layout convert before their end. None
+/// when no threshold passes or a profile lacks either kind of sequence.
+fn direction_threshold(scores: &[Sequence], grid: &[f64], direction: usize, minimum_recall: f64) -> Option<f64> {
+    if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
+        return None;
+    }
+    let mut sorted = grid.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    sorted.dedup();
+    sorted.into_iter().find(|threshold| {
+        let metrics = direction_metrics(scores, [*threshold, *threshold]);
+        metrics.iter().all(|profile| {
+            let cell = &profile[direction];
+            cell.desired != 0 && cell.kept != 0 && cell.false_conversions == 0 && cell.early_recall() >= minimum_recall
+        })
+    })
+}
+
+/// The thresholds both directions' calibration allows, or none when one of them allows none.
+fn direction_thresholds(scores: &[Sequence], grid: &[f64], minimum_recall: f64) -> Option<[f64; 2]> {
+    Some([direction_threshold(scores, grid, 0, minimum_recall)?, direction_threshold(scores, grid, 1, minimum_recall)?])
+}
+
+/// An epoch as the switch key ranks it: at the thresholds its calibration allows, the share of the development words
+/// typed in the other layout switched by `SWITCH_KEY`, summed over the two directions, then the mean switch key.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct KeySelection {
+    pub thresholds: [f64; 2],
+    /// The two directions' shares of words switched by the switch key, added: each direction weighs the same.
+    pub share_by_key: f64,
+    /// The mean switch key over every development word typed in the other layout.
+    pub mean_key: f64,
+    pub loss: f64,
+    /// Each profile and direction, `[profile][direction]`.
+    pub development: [[DirectionMetrics; 2]; 2],
+    pub calibration: [[DirectionMetrics; 2]; 2],
+}
+
+impl KeySelection {
+    /// The epoch's measure, or none when its calibration allows no threshold in a direction.
+    fn of(development: &[Sequence], calibration: &[Sequence], grid: &[f64], minimum_recall: f64, loss: f64) -> Option<KeySelection> {
+        let thresholds = direction_thresholds(calibration, grid, minimum_recall)?;
+        let measured = direction_metrics(development, thresholds);
+        let both = pooled(&measured);
+        let all = both[0].merged(both[1]);
+        Some(KeySelection {
+            thresholds,
+            share_by_key: both[0].share_by_key() + both[1].share_by_key(),
+            mean_key: all.mean_key(),
+            loss,
+            development: measured,
+            calibration: direction_metrics(calibration, thresholds),
+        })
+    }
+
+    /// Whether this epoch replaces the chosen one: more words switched by the switch key, or as many and a lower mean
+    /// key. An equal one leaves the earlier epoch chosen.
+    fn better_than(&self, known: &KeySelection) -> bool {
+        self.share_by_key.total_cmp(&known.share_by_key).then_with(|| known.mean_key.total_cmp(&self.mean_key)).is_gt()
+    }
+}
+
+/// The words of a calibration typed as meant, by direction: distinct words, and of them the hard ones.
+fn calibration_cells(parents: &[ParentWord]) -> [(usize, usize); 2] {
+    let mut words: [BTreeMap<&str, bool>; 2] = [BTreeMap::new(), BTreeMap::new()];
+    for parent in parents {
+        let hard = words[usize::from(parent.group == 1)].entry(&parent.original).or_insert(false);
+        *hard = *hard || parent.hard;
+    }
+    words.map(|cell| (cell.len(), cell.values().filter(|hard| **hard).count()))
+}
+
+/// A recipe that names the size of a direction's calibration cell is not fitted on a smaller one.
+fn check_calibration_cells(parents: &[ParentWord], options: &RecipeOptions) -> Result<[(usize, usize); 2], String> {
+    let cells = calibration_cells(parents);
+    let (words, hard) = (options.minimum_calibration_words_per_direction.unwrap_or(0), options.minimum_calibration_hard_words_per_direction.unwrap_or(0));
+    for (direction, (found, found_hard)) in cells.iter().enumerate() {
+        if *found < words || *found_hard < hard {
+            return Err(format!("calibration typed in layout group {direction} holds {found} words, {found_hard} hard: the recipe asks for {words} and {hard}"));
+        }
+    }
+    Ok(cells)
+}
+
 /// The inputs of a fit; what a seal pins.
 fn prefix_provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, String>, String> {
     let mut result = provenance(root, recipe_path)?;
@@ -880,14 +1237,25 @@ pub struct PrefixRequest<'a> {
     pub output: &'a Path,
     pub jobs: usize,
     pub reuse_installed: bool,
+    /// A folder of frames kept by what they read (`FramesCache`).
+    pub frames_cache: Option<&'a Path>,
 }
 
 /// `reuse_installed`: the installed candidate and its seal as the output of a fit, when the seal pins this tree's inputs.
 fn reuse_installed(request: &PrefixRequest<'_>) -> Result<Option<Value>, String> {
     let seal = read_json(&request.root.join("model/prefix_v2/candidate-seal.json"))?;
     let artifact = request.resource_dir.join("models/prefix_policy_v1.json");
-    let pinned = serde_json::to_value(prefix_provenance(request.root, request.recipe)?).map_err(|error| error.to_string())?;
-    if seal.get("provenance") != Some(&pinned) || seal.get("candidate_sha256") != Some(&Value::String(checksum(&artifact)?)) || seal.get("calibration_passed").and_then(Value::as_bool) != Some(true) {
+    /// What decides whether the installed candidate is this tree's: the inputs its seal pins, its checksum, its calibration.
+    #[derive(serde::Deserialize)]
+    struct Installed {
+        provenance: Option<BTreeMap<String, String>>,
+        candidate_sha256: Option<String>,
+        calibration_passed: Option<bool>,
+    }
+    let Ok(installed) = crate::artifact::typed::<Installed, _>(&seal) else {
+        return Ok(None);
+    };
+    if installed.provenance != Some(prefix_provenance(request.root, request.recipe)?) || installed.candidate_sha256 != Some(checksum(&artifact)?) || installed.calibration_passed != Some(true) {
         return Ok(None);
     }
     std::fs::create_dir_all(request.output).map_err(|error| error.to_string())?;
@@ -896,6 +1264,135 @@ fn reuse_installed(request: &PrefixRequest<'_>) -> Result<Option<Value>, String>
     copy(&request.root.join("model/prefix_v2/candidate-seal.json"), "seal.json")?;
     copy(request.recipe, "recipe.json")?;
     Ok(Some(seal))
+}
+
+/// What makes the frames of a split: the lexicons of both profiles, the orthotactic models when the schema reads them,
+/// the recipe's rules, and the cache the frames may be kept in.
+struct FrameMaker {
+    portable: Lexicons,
+    spelling: Lexicons,
+    indexes: Indexes,
+    ortho: Option<OrthoModel>,
+    terms: Option<PrefixTerms>,
+    rules: FrameRules,
+    feature_version: i64,
+    maximum_prefix_length: usize,
+    jobs: usize,
+    cache: Option<FramesCache>,
+}
+
+impl FrameMaker {
+    fn new(root: &Path, resource_dir: &Path, feature_version: i64, maximum_prefix_length: usize, rules: FrameRules, jobs: usize, cache: Option<&Path>) -> Result<FrameMaker, String> {
+        let resources: Arc<Resources> = Resources::with_speller(resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
+        let portable = reference_models(root, &resources, false)?;
+        let spelling = reference_models(root, &resources, true)?;
+        let indexes = indexes_of(&portable, &spelling);
+        // Schemas three and four read the keys with the packaged orthotactic models, as the engine does; four the term
+        // lists as well.
+        let terms = (feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()).then(|| prefix_terms_of(resource_dir, &portable)).transpose()?;
+        let ortho = if feature_version == ks_context::constants::ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() || terms.is_some() {
+            Some(OrthoModel::load(&artifact_path(resource_dir), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?)
+        } else {
+            None
+        };
+        let cache = cache.map(|folder| FramesCache::open(folder, root, resource_dir)).transpose()?;
+        Ok(FrameMaker { portable, spelling, indexes, ortho, terms, rules, feature_version, maximum_prefix_length, jobs, cache })
+    }
+
+    /// What the frames read besides their parents, worded for the frames cache.
+    fn settings(&self, closed: Option<u64>) -> String {
+        let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
+        format!(
+            "features {}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}",
+            self.feature_version, self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support
+        )
+    }
+
+    /// The frames of a split's parents, read back from the cache when it holds them. Only training closes the term lists
+    /// to some families: development and calibration read them as the engine does.
+    fn frames(&self, split: &str, parents: &[ParentWord]) -> Result<SplitFrames, String> {
+        let closed = self.rules.closed_term_families_per_mille.filter(|_| split == TRAIN);
+        let readers = PrefixReaders { ortho: self.ortho.as_ref(), terms: self.terms.as_ref() };
+        let build = || generate_frames(parents, [&self.portable, &self.spelling], &self.indexes, self.maximum_prefix_length, self.feature_version, readers, closed, &self.rules, self.jobs);
+        let Some(cache) = &self.cache else {
+            return Ok(build());
+        };
+        let key = cache.key(&self.settings(closed), parents);
+        if let Some(found) = cache.read(&key) {
+            println!("{split}: frames read from the cache");
+            return Ok(found);
+        }
+        let built = build();
+        cache.write(&key, &built)?;
+        Ok(built)
+    }
+}
+
+/// The probabilities the installed runtime gives each frame of a split: its own features and softmax.
+fn runtime_probabilities(model: &PrefixModel, frames: &SplitFrames) -> Vec<f64> {
+    let mut probabilities = Vec::with_capacity(frames.frames.len() * ACTIONS);
+    for frame in &frames.frames {
+        let values: indexmap_like::Map = frame.features.iter().map(|(id, value)| (frames.names[(*id).to::<usize>()].clone(), *value)).collect();
+        probabilities.extend_from_slice(&model.predict_features(&values).probabilities);
+    }
+    probabilities
+}
+
+/// Each profile's directions, as a seal names them.
+#[derive(serde::Serialize)]
+struct ProfileDirections {
+    portable: [DirectionMetrics; 2],
+    reference_hunspell: [DirectionMetrics; 2],
+}
+
+impl ProfileDirections {
+    fn of(metrics: [[DirectionMetrics; 2]; 2]) -> ProfileDirections {
+        ProfileDirections { portable: metrics[0], reference_hunspell: metrics[1] }
+    }
+}
+
+/// A direction's calibration cell: its words typed as meant and the hard ones.
+#[derive(serde::Serialize)]
+struct CalibrationCell {
+    words: usize,
+    hard: usize,
+}
+
+/// What a fit by the switch key adds to its seal.
+#[derive(serde::Serialize)]
+struct DirectionSeal {
+    thresholds: [f64; 2],
+    calibration_cells: [CalibrationCell; 2],
+    development: ProfileDirections,
+    calibration: ProfileDirections,
+}
+
+/// What it adds to its artifact: the threshold of each direction.
+#[derive(serde::Serialize)]
+struct DirectionArtifact {
+    conversion_thresholds: [f64; 2],
+}
+
+/// The fields of a record added to a tree that is an object.
+fn merged<T: serde::Serialize>(tree: &mut Value, fields: &T) -> Result<(), String> {
+    match (tree.as_object_mut(), serde_json::to_value(fields).map_err(|error| error.to_string())?) {
+        (Some(found), Value::Object(added)) => {
+            found.extend(added);
+            Ok(())
+        }
+        _ => Err("fields merged into a tree that is no object, or that are none".to_owned()),
+    }
+}
+
+/// The numbers of a recipe a fit and a probe read.
+#[derive(serde::Deserialize)]
+struct RecipeNumbers {
+    thresholds: Vec<f64>,
+    maximum_prefix_length: usize,
+    #[serde(default)]
+    maximum_families: BTreeMap<String, i64>,
+    #[serde(default)]
+    maximum_words_per_family: i64,
 }
 
 /// `fit`: an explicit candidate fit, preserving all existing model directories.
@@ -909,6 +1406,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             return Ok(seal);
         }
     let cfg = read_json(request.recipe)?;
+    let numbers: RecipeNumbers = crate::artifact::typed(&cfg).map_err(|error| format!("{}: {error}", request.recipe.display()))?;
     let feature_version = cfg.int("runtime_feature_version");
     // A recipe that names a corpus reads that word corpus whole; one that does not reads its share of prefix-v1.
     let options = RecipeOptions::of(request.recipe)?;
@@ -921,12 +1419,17 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     std::fs::create_dir_all(output).map_err(|error| error.to_string())?;
     let mut parents: HashMap<&str, Vec<ParentWord>> = HashMap::new();
     for split in FITTING_SPLITS {
-        let loaded = if words { load_word_parents(&directory, split)? } else { load_parents(&directory, split, cfg["maximum_families"].int(split), cfg.int("maximum_words_per_family"))? };
+        let loaded = if words {
+            load_word_parents(&directory, split)?
+        } else {
+            load_parents(&directory, split, numbers.maximum_families.get(split).copied().unwrap_or_default(), numbers.maximum_words_per_family)?
+        };
         parents.insert(split, loaded);
     }
     let rules = frame_rules(&options, request.resource_dir)?;
     let patience = options.early_stop_patience;
-    let by_loss = options.epoch_selection == Some(EpochSelection::DevelopmentLoss);
+    let selection_rule = options.epoch_selection.unwrap_or(EpochSelection::Frontier);
+    let (by_loss, by_key) = (selection_rule == EpochSelection::DevelopmentLoss, selection_rule == EpochSelection::SwitchKey);
     let family_sets: Vec<BTreeSet<&str>> = FITTING_SPLITS.iter().map(|split| parents[split].iter().map(|row| row.family.as_str()).collect()).collect();
     for left in 0..family_sets.len() {
         for right in left + 1..family_sets.len() {
@@ -935,40 +1438,35 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             }
         }
     }
-    let resources: Arc<Resources> = Resources::with_speller(request.resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
-    let portable = reference_models(request.root, &resources, false)?;
-    let spelling = reference_models(request.root, &resources, true)?;
-    let indexes = indexes_of(&portable, &spelling);
-    let maximum_prefix_length = cfg.int("maximum_prefix_length").to::<usize>();
-    // Schema three reads the keys with the packaged orthotactic models, as the engine does.
-    let ortho = if feature_version == ks_context::constants::ORTHO_PREFIX_FEATURE_VERSION.to::<i64>() {
-        Some(OrthoModel::load(&artifact_path(request.resource_dir), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?)
-    } else {
-        None
-    };
-    let frames_of = |split: &str| generate_frames(&parents[split], [&portable, &spelling], &indexes, maximum_prefix_length, feature_version, ortho.as_ref(), &rules, request.jobs);
-    let train_frames = frames_of(TRAIN);
+    let cells = check_calibration_cells(&parents[CALIBRATION], &options)?;
+    let maker = FrameMaker::new(request.root, request.resource_dir, feature_version, numbers.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
+    let train_frames = maker.frames(TRAIN, &parents[TRAIN])?;
     println!("train: {} frames", train_frames.frames.len());
     let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());
     if names.is_empty() {
         return Err("no prefix features survive the family-mass cutoff".to_owned());
     }
-    let train = packed_rows(&train_frames, &names, &cfg, options.importance_normalization == Some(ImportanceNormalization::MeanOne));
-    let development_frames = frames_of(DEVELOPMENT);
-    let development = packed_rows(&development_frames, &names, &cfg, options.importance_normalization == Some(ImportanceNormalization::MeanOne));
+    let mean_one = options.importance_normalization == Some(ImportanceNormalization::MeanOne);
+    let train = packed_rows(&train_frames, &names, &cfg, mean_one);
+    let development_frames = maker.frames(DEVELOPMENT, &parents[DEVELOPMENT])?;
+    let development = packed_rows(&development_frames, &names, &cfg, mean_one);
     // A feature survived, so a TRAIN frame holds it.
     assert!(train.rows() != 0, "TRAIN frames under the surviving features");
     if development.rows() == 0 {
         return Err("empty training or development split".to_owned());
     }
+    // The switch key chooses each epoch's thresholds on calibration, so its frames are made before the epochs.
+    let calibration_frames = maker.frames(CALIBRATION, &parents[CALIBRATION])?;
+    let calibration = by_key.then(|| packed_rows(&calibration_frames, &names, &cfg, mean_one));
     let mut weights = vec![0.0; names.len() * ACTIONS];
     let mut accumulator = vec![1.0; names.len() * ACTIONS];
     let mut best = weights.clone();
     let mut selected_epoch = 0;
-    let mut selected: Option<Selection> = None;
+    let (mut selected, mut key_selected): (Option<Selection>, Option<KeySelection>) = (None, None);
     let mut history = Vec::new();
     let denominator = fsum(&development.importance).expect("finite importance");
-    let thresholds: Vec<f64> = cfg["thresholds"].as_array().ok_or("thresholds")?.iter().filter_map(Value::as_f64).collect();
+    let thresholds = numbers.thresholds;
+    let minimum_recall = cfg.float("minimum_early_recall");
     let learning_rate = cfg.float("learning_rate");
     let (mut best_loss, mut best_loss_epoch, mut stopped) = (f64::INFINITY, 0, None);
     for epoch in 0..cfg.int("epochs") {
@@ -978,24 +1476,49 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         let terms: Vec<f64> = (0..development.rows()).map(|index| -development.importance[index] * probabilities[index * ACTIONS + usize::from(development.labels[index])].max(LOG_LOSS_PROBABILITY_FLOOR).ln()).collect();
         let loss = fsum(&terms).expect("finite losses") / denominator;
         assert!(loss.is_finite(), "prefix optimisation diverged");
-        let candidate = assess(&sequence_scores(&development_frames, &probabilities), &thresholds, loss);
-        if let Some(found) = &candidate
-            && selected.as_ref().is_none_or(|known| chosen_over(found, known, by_loss)) {
-                best.clone_from(&rounded);
-                selected = Some(found.clone());
-                selected_epoch = epoch + 1;
+        let development_scores = sequence_scores(&development_frames, &probabilities);
+        let (record, improved) = if let Some(calibration) = &calibration {
+            let calibration_scores = sequence_scores(&calibration_frames, &kernel::predict(calibration, &rounded));
+            let candidate = KeySelection::of(&development_scores, &calibration_scores, &thresholds, minimum_recall, loss);
+            let improved = candidate.as_ref().is_some_and(|found| key_selected.as_ref().is_none_or(|known| found.better_than(known)));
+            println!("prefix-v2 epoch {}: development loss {loss:.9}, switched by key {SWITCH_KEY} {:?}", epoch + 1, candidate.as_ref().map(|found| found.share_by_key));
+            let record = serde_json::to_value(&candidate).map_err(|error| error.to_string())?;
+            if improved {
+                key_selected = candidate;
             }
+            (record, improved)
+        } else {
+            let candidate = assess(&development_scores, &thresholds, loss);
+            let improved = candidate.as_ref().is_some_and(|found| selected.as_ref().is_none_or(|known| chosen_over(found, known, by_loss)));
+            println!("prefix-v2 epoch {}: development loss {loss:.9}, early recall {:?}", epoch + 1, candidate.as_ref().map(|found| found.minimum_recall));
+            let record = candidate.as_ref().map_or_default(Selection::value);
+            if improved {
+                selected = candidate;
+            }
+            (record, improved)
+        };
+        if improved {
+            best.clone_from(&rounded);
+            selected_epoch = epoch + 1;
+        }
         if loss < best_loss {
             (best_loss, best_loss_epoch) = (loss, epoch + 1);
         }
-        history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": candidate.as_ref().map_or(Value::Null, Selection::value)}));
-        println!("prefix-v2 epoch {}: development loss {loss:.9}, early recall {:?}", epoch + 1, candidate.as_ref().map(|found| found.minimum_recall));
-        if patience_spent((epoch + 1).to::<usize>(), selected_epoch.to::<usize>(), best_loss_epoch.to::<usize>(), patience) {
+        history.push(json!({"epoch": epoch + 1, "development_loss": loss, "selection": record}));
+        // The switch key's patience watches its own measure, not the loss.
+        let watched_loss_epoch = if by_key { selected_epoch } else { best_loss_epoch };
+        if patience_spent((epoch + 1).to::<usize>(), selected_epoch.to::<usize>(), watched_loss_epoch.to::<usize>(), patience) {
             stopped = Some(epoch + 1);
             break;
         }
     }
-    let selected = selected.ok_or("no zero-false development epoch frontier")?;
+    let (selection_loss, selection_value) = if by_key {
+        let chosen = key_selected.ok_or("no epoch whose calibration allows a threshold in both directions")?;
+        (chosen.loss, serde_json::to_value(&chosen).map_err(|error| error.to_string())?)
+    } else {
+        let chosen = selected.ok_or("no zero-false development epoch frontier")?;
+        (chosen.loss, chosen.value())
+    };
     let row_of = |index: usize| best[index * ACTIONS..(index + 1) * ACTIONS].to_vec();
     let table: Map<String, Value> = names.iter().enumerate().map(|(index, name)| (name.clone(), json!(row_of(index)))).collect();
     let learned = Value::Object(table);
@@ -1011,18 +1534,22 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         })
         .collect();
     let model = PrefixModel { weights: WeightTable::from_entries(entries), version: version.clone(), conversion_threshold: 1.0 };
-    let calibration_frames = frames_of(CALIBRATION);
-    let mut probabilities = Vec::with_capacity(calibration_frames.frames.len() * ACTIONS);
-    for frame in &calibration_frames.frames {
-        // The runtime's own softmax: what the installed candidate answers.
-        let values: indexmap_like::Map = frame.features.iter().map(|(id, value)| (calibration_frames.names[(*id).to::<usize>()].clone(), *value)).collect();
-        probabilities.extend_from_slice(&model.predict_features(&values).probabilities);
-    }
-    let scores = sequence_scores(&calibration_frames, &probabilities);
-    let (threshold, passed) = calibrated_threshold(&scores, &thresholds, cfg.float("minimum_early_recall"));
+    // The runtime's own softmax: what the installed candidate answers.
+    let scores = sequence_scores(&calibration_frames, &runtime_probabilities(&model, &calibration_frames));
+    let (per_direction, passed) = if by_key {
+        direction_thresholds(&scores, &thresholds, minimum_recall).map_or(([1.0, 1.0], false), |found| (found, true))
+    } else {
+        let (threshold, passed) = calibrated_threshold(&scores, &thresholds, minimum_recall);
+        ([threshold, threshold], passed)
+    };
+    let threshold = per_direction[0].max(per_direction[1]);
     let actions: Vec<&str> = ks_context::context_model::ACTIONS.iter().map(|action| action.as_str()).collect();
-    let payload = json!({"kind": "keyswitch.prefix-policy", "feature_version": feature_version, "prefix_feature_version": feature_version, "actions": actions,
+    let mut payload = json!({"kind": "keyswitch.prefix-policy", "feature_version": feature_version, "prefix_feature_version": feature_version, "actions": actions,
         "version": version, "conversion_threshold": threshold, "weights_sha256": weight_digest, "weights": learned});
+    if by_key {
+        // Each direction's own threshold; a reader that knows only the scalar takes the larger, stricter one.
+        merged(&mut payload, &DirectionArtifact { conversion_thresholds: per_direction })?;
+    }
     let raw = crate::artifact::canonical(&payload);
     let mut budgets = Map::new();
     let mut pair_counts = Map::new();
@@ -1046,13 +1573,22 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     }
     let selected_parents: Map<String, Value> = FITTING_SPLITS.iter().map(|split| ((*split).to_owned(), json!(parents[split].iter().map(|row| row.identifier.as_str()).collect::<Vec<_>>()))).collect();
     let final_development = sequence_scores(&development_frames, &kernel::predict(&development, &best));
-    let seal = json!({
+    let mut seal = json!({
         "schema_version": 1, "candidate_sha256": hex(&Sha256::digest(&raw)), "provenance": frozen, "recipe": cfg, "model_version": version, "features": names.len(),
-        "epoch": selected_epoch, "development_loss": selected.loss, "threshold": threshold, "epoch_selection": selected.value(), "epoch_history": history,
+        "epoch": selected_epoch, "development_loss": selection_loss, "threshold": threshold, "epoch_selection": selection_value, "epoch_history": history,
         "training_rows": train.rows(), "development_rows": development.rows(), "family_budgets": budgets, "pair_counts": pair_counts, "selected_parents": selected_parents,
         "development": metrics_value(&sequence_metrics(&final_development, threshold)), "calibration": metrics_value(&sequence_metrics(&scores, threshold)), "calibration_passed": passed,
         "promotion_accepted": false, "independent_test_evaluated": false, "scope": cfg["scope"],
     });
+    if by_key {
+        let fields = DirectionSeal {
+            thresholds: per_direction,
+            calibration_cells: cells.map(|(words, hard)| CalibrationCell { words, hard }),
+            development: ProfileDirections::of(direction_metrics(&final_development, per_direction)),
+            calibration: ProfileDirections::of(direction_metrics(&scores, per_direction)),
+        };
+        merged(&mut seal, &fields)?;
+    }
     prefix_inputs_unchanged(request.root, request.recipe, &frozen)?;
     let write = |name: &str, bytes: &[u8]| std::fs::write(output.join(name), bytes).map_err(|error| error.to_string());
     write("prefix-candidate.json", &raw)?;
@@ -1060,22 +1596,126 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     write("seal.json", &readable(&seal))?;
     // What a word corpus's fit adds, beside the seal: a sealed prefix-v1 recipe's outputs stay as they were.
     if options.reports_classes() {
-        let report = ClassReport {
-            model_version: &version,
-            threshold,
+        let saved = SavedScores {
+            model_version: version,
             epoch: selected_epoch,
             stopped_after_epoch: stopped,
-            development: class_metrics(&final_development, threshold, &development_frames.classes),
-            calibration: class_metrics(&scores, threshold, &calibration_frames.classes),
-            // What each threshold of the grid would do on calibration, class by class: which kept words a lower one converts.
-            calibration_by_threshold: thresholds.iter().map(|candidate| (candidate.to_string(), class_metrics(&scores, *candidate, &calibration_frames.classes))).collect(),
-            calibration_false: thresholds.iter().map(|candidate| (candidate.to_string(), false_texts(&scores, *candidate, &calibration_frames))).collect(),
+            thresholds: per_direction,
+            grid: thresholds,
+            development: SavedSplit::of(&final_development, &development_frames, true),
+            calibration: SavedSplit::of(&scores, &calibration_frames, false),
         };
-        let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
-        write("classes.json", (ks_text::json::dumps(&report, &options) + "\n").as_bytes())?;
+        write(SCORES_FILE, &saved_bytes(&saved)?)?;
+        write("classes.json", &ClassReport::of(&saved).bytes())?;
     }
     write("recipe.json", &std::fs::read(request.recipe).map_err(|error| error.to_string())?)?;
     Ok(seal)
+}
+
+/// What `prefix-probe` measures a prefix model on: a split of the recipe's corpus, or words of a list, each typed
+/// alone in an empty field as meant and in the other layout.
+pub enum ProbeWords<'a> {
+    Split(&'a str),
+    List(&'a Path),
+}
+
+pub struct ProbeRequest<'a> {
+    pub root: &'a Path,
+    pub resource_dir: &'a Path,
+    pub model: &'a Path,
+    pub recipe: &'a Path,
+    pub words: ProbeWords<'a>,
+    /// The fewest letters of a prefix the model is asked about, when not the recipe's.
+    pub minimum_characters: Option<usize>,
+    pub output: &'a Path,
+    pub jobs: usize,
+    pub frames_cache: Option<&'a Path>,
+}
+
+/// What `prefix-probe` writes: each direction at the model's thresholds and at every threshold of the grid, each class,
+/// and the texts typed as meant that the model's thresholds convert (none for calibration).
+#[derive(serde::Serialize)]
+pub struct ProbeReport {
+    model_version: String,
+    thresholds: [f64; 2],
+    minimum_characters: usize,
+    words: usize,
+    /// `[profile][direction]` at the model's thresholds.
+    at_model: [[DirectionMetrics; 2]; 2],
+    /// Both profiles together, each direction, at every threshold of the grid.
+    by_threshold: BTreeMap<String, [DirectionMetrics; 2]>,
+    by_class: BTreeMap<String, ClassMetrics>,
+    false_texts: Vec<String>,
+}
+
+/// The parents of a list of words, one a line: each typed alone in an empty field, as meant and in the other layout.
+fn listed_parents(path: &Path) -> Result<Vec<ParentWord>, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let mut parents = Vec::new();
+    for word in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let group = match word.chars().find(|character| character.is_alphabetic()).and_then(crate::evaluate::script_group) {
+            Some(group) => group,
+            None => return Err(format!("{}: {word} opens with a letter of neither layout", path.display())),
+        };
+        parents.push(ParentWord {
+            original: word.to_owned(),
+            group,
+            family: crate::prefix_corpus::family(word, group),
+            before: String::new(),
+            identifier: format!("words:{}", parents.len()),
+            category: "word".to_owned(),
+            application: WORD_CORPUS_APPLICATION.to_owned(),
+            role: FieldRole::Unknown,
+            paired: true,
+            own_context: true,
+            hard: false,
+        });
+    }
+    Ok(parents)
+}
+
+/// `prefix-probe`: a prefix model measured without the engine, as a fit measures its development and calibration.
+pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
+    let cfg: RecipeNumbers = ks_text::json::loads(std::fs::read(request.recipe).map_err(|error| format!("{}: {error}", request.recipe.display()))?).map_err(|error| format!("{}: {error}", request.recipe.display()))?;
+    let options = RecipeOptions::of(request.recipe)?;
+    let loaded = ks_context::prefix_schema::VersionedPrefixModel::load(request.model).map_err(|error| format!("{}: {}", request.model.display(), error.name))?;
+    let (parents, texts) = match request.words {
+        ProbeWords::List(path) => (listed_parents(path)?, true),
+        ProbeWords::Split(split) => {
+            let directory = request.root.join(options.corpus.as_deref().unwrap_or("model/prefix_v1"));
+            let parents = if options.corpus.is_some() {
+                load_word_parents(&directory, split)?
+            } else {
+                load_parents(&directory, split, cfg.maximum_families.get(split).copied().unwrap_or_default(), cfg.maximum_words_per_family)?
+            };
+            // Calibration is reported in numbers only: a threshold is chosen on it.
+            (parents, split != CALIBRATION)
+        }
+    };
+    let mut rules = frame_rules(&options, request.resource_dir)?;
+    if let Some(minimum) = request.minimum_characters {
+        rules.minimum_characters = minimum;
+    }
+    let minimum_characters = rules.minimum_characters;
+    let maker = FrameMaker::new(request.root, request.resource_dir, loaded.feature_version, cfg.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
+    let frames = maker.frames("probe", &parents)?;
+    let scores = sequence_scores(&frames, &runtime_probabilities(&loaded.model, &frames));
+    let thresholds = loaded.thresholds();
+    let grid = cfg.thresholds;
+    let typed: Vec<Option<String>> = frames.typed.iter().map(|text| texts.then(|| text.clone())).collect();
+    let report = ProbeReport {
+        model_version: loaded.version().to_owned(),
+        thresholds,
+        minimum_characters,
+        words: parents.len(),
+        at_model: direction_metrics(&scores, thresholds),
+        by_threshold: grid.iter().map(|threshold| (threshold.to_string(), pooled(&direction_metrics(&scores, [*threshold, *threshold])))).collect(),
+        by_class: class_metrics(&scores, thresholds, &frames.classes),
+        false_texts: false_texts(&scores, thresholds, &frames.classes, &typed),
+    };
+    let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
+    std::fs::write(request.output, ks_text::json::dumps(&report, &options) + "\n").map_err(|error| format!("{}: {error}", request.output.display()))?;
+    Ok(report)
 }
 
 mod indexmap_like {
@@ -1088,7 +1728,7 @@ mod tests {
     use super::*;
 
     fn sequence(profile: u8, desired: bool, candidates: &[(u32, f64)]) -> Sequence {
-        Sequence { profile, desired, full_length: 6, class: 0, candidates: candidates.to_vec() }
+        Sequence { profile, desired, full_length: 6, class: 0, source: 0, hard: false, candidates: candidates.to_vec() }
     }
 
     #[test]
@@ -1136,13 +1776,15 @@ mod tests {
     fn the_class_metrics_count_each_class_and_where_its_first_conversion_came() {
         let classes = vec!["name:0".to_owned(), "rare:1".to_owned()];
         let scores = [Sequence { class: 1, ..sequence(0, true, &[(4, 0.99), (5, 0.999)]) }, sequence(1, false, &[(5, 0.999)]), Sequence { class: 1, ..sequence(0, true, &[]) }];
-        let value = class_metrics(&scores, 0.99, &classes);
+        let value = class_metrics(&scores, [0.99, 0.99], &classes);
         let rare = &value["rare:1"];
         assert_eq!((rare.desired, rare.converted_before_end, rare.first_conversion_length.clone()), (2, 1, [(0, 1), (4, 1)].into_iter().collect()));
         assert_eq!(value["name:0"].false_conversions, 1);
-        let frames = SplitFrames { frames: Vec::new(), names: Vec::new(), families: Vec::new(), pairs: 0, classes: classes.clone(), typed: vec!["ghbdtn".to_owned(), "kaplan".to_owned(), "ghbd".to_owned()] };
-        assert_eq!(false_texts(&scores, 0.99, &frames), ["name:0: kaplan"]);
-        assert!(false_texts(&scores, 0.9999, &frames).is_empty());
+        let typed = [Some("ghbdtn".to_owned()), Some("kaplan".to_owned()), Some("ghbd".to_owned())];
+        assert_eq!(false_texts(&scores, [0.99, 0.99], &classes, &typed), ["name:0: kaplan"]);
+        assert!(false_texts(&scores, [0.9999, 0.9999], &classes, &typed).is_empty());
+        // A text not kept (calibration's) is not named.
+        assert!(false_texts(&scores, [0.99, 0.99], &classes, &[None, None, None]).is_empty());
         assert_eq!(ks_text::json::dumps(&value["name:0"], &JsonOptions::default()), r#"{"sequences": 1, "desired": 0, "converted": 0, "converted_before_end": 0, "false": 1, "first_conversion_length": {}}"#);
     }
 
@@ -1202,5 +1844,136 @@ mod tests {
         prefix_inputs_unchanged(&root, &recipe, &frozen).unwrap();
         write("model/prefix_v1/development.jsonl.gz", "other");
         assert!(prefix_inputs_unchanged(&root, &recipe, &frozen).unwrap_err().contains("inputs changed"));
+    }
+
+    /// A sequence typed in a direction: desired ones convert at the lengths given.
+    fn typed(profile: u8, source: u8, desired: bool, candidates: &[(u32, f64)]) -> Sequence {
+        Sequence { source, ..sequence(profile, desired, candidates) }
+    }
+
+    #[test]
+    fn a_direction_counts_the_key_of_each_first_switch_and_the_boundary_of_a_word_never_switched() {
+        let scores = [typed(0, 1, true, &[(4, 0.99)]), typed(0, 1, true, &[(5, 0.999)]), typed(0, 1, true, &[]), typed(0, 1, false, &[(6, 0.999)]), typed(1, 0, true, &[(4, 0.9999)])];
+        let metrics = direction_metrics(&scores, [0.995, 0.99]);
+        let cyrillic = metrics[0][1];
+        // Keys 4, 5 and the boundary 7 of a six-letter word.
+        assert_eq!((cyrillic.desired, cyrillic.converted, cyrillic.converted_before_end, cyrillic.switched_by_key, cyrillic.key_sum), (3, 2, 2, 1, 16));
+        assert_eq!((cyrillic.kept, cyrillic.false_conversions), (1, 1));
+        assert!((cyrillic.share_by_key() - 1.0 / 3.0).abs() < 1e-12 && (cyrillic.mean_key() - 16.0 / 3.0).abs() < 1e-12);
+        assert_eq!(metrics[1][0].switched_by_key, 1);
+        // The other direction's threshold does not apply: at 0.99999 for the Latin keys the last word is not switched.
+        assert_eq!(direction_metrics(&scores, [0.99999, 0.99])[1][0].switched_by_key, 0);
+        let both = pooled(&metrics);
+        assert_eq!((both[0].desired, both[1].desired), (1, 3));
+        let empty = DirectionMetrics::default();
+        assert_eq!((empty.share_by_key(), empty.mean_key(), empty.early_recall()), (0.0, 0.0, 0.0));
+        assert_eq!(ks_text::json::dumps(&empty, &JsonOptions::default()), r#"{"desired": 0, "converted": 0, "converted_before_end": 0, "switched_by_key": 0, "key_sum": 0, "kept": 0, "false": 0}"#);
+    }
+
+    /// Calibration of both profiles: in each direction a word to convert (at 4 keys from 0.99) and a word to keep, which
+    /// the Latin direction converts at 0.995 and below and the Cyrillic direction never.
+    fn calibration() -> Vec<Sequence> {
+        (0..2).flat_map(|profile| [typed(profile, 0, true, &[(4, 0.999)]), typed(profile, 0, false, &[(5, 0.995)]), typed(profile, 1, true, &[(4, 0.99)]), typed(profile, 1, false, &[])]).collect()
+    }
+
+    #[test]
+    fn each_direction_takes_the_first_threshold_its_own_calibration_allows() {
+        let grid = [0.999, 0.985, 0.99, 0.995, 0.999];
+        assert_eq!(direction_thresholds(&calibration(), &grid, 0.7), Some([0.999, 0.985]));
+        // Too much recall asked of the Cyrillic direction at no threshold: it is converted at 0.99 only.
+        assert_eq!(direction_threshold(&calibration(), &[0.995, 0.999], 1, 0.7), None);
+        assert!(direction_thresholds(&calibration(), &[0.995, 0.999], 0.7).is_none());
+        // A recall floor below the program's is no rule.
+        assert_eq!(direction_threshold(&calibration(), &grid, 1, 0.5), None);
+        // A direction without words to keep in a profile has no threshold.
+        let lacking: Vec<Sequence> = calibration().into_iter().filter(|value| value.desired || value.source == 0 || value.profile == 0).collect();
+        assert_eq!(direction_threshold(&lacking, &grid, 1, 0.7), None);
+    }
+
+    #[test]
+    fn an_epoch_is_chosen_by_the_words_it_switches_by_the_switch_key_then_by_the_mean_key() {
+        let development = |key: u32| -> Vec<Sequence> { (0..2).flat_map(|profile| [typed(profile, 0, true, &[(key, 0.999)]), typed(profile, 1, true, &[(5, 0.99)])]).collect() };
+        let grid = [0.985, 0.99, 0.995, 0.999];
+        let early = KeySelection::of(&development(4), &calibration(), &grid, 0.7, 0.2).expect("thresholds in both directions");
+        assert_eq!(early.thresholds, [0.999, 0.985]);
+        assert!((early.share_by_key - 1.0).abs() < 1e-12 && (early.mean_key - 4.5).abs() < 1e-12);
+        let late = KeySelection::of(&development(5), &calibration(), &grid, 0.7, 0.1).expect("thresholds");
+        assert!(early.better_than(&late) && !late.better_than(&early));
+        // The same share: the lower mean key wins, and an equal one leaves the earlier epoch.
+        let sooner = KeySelection { mean_key: 4.0, ..early.clone() };
+        assert!(sooner.better_than(&early) && !early.better_than(&sooner) && !early.better_than(&early.clone()));
+        assert!(KeySelection::of(&development(4), &calibration(), &[0.9999], 0.7, 0.2).is_none());
+        assert_eq!(early.calibration[1][1].kept, 1);
+    }
+
+    #[test]
+    fn a_calibration_cell_counts_distinct_words_typed_as_meant_by_direction_and_its_hard_ones() {
+        let parent = |original: &str, group: i64, hard: bool| ParentWord {
+            original: original.to_owned(),
+            group,
+            family: String::new(),
+            before: String::new(),
+            identifier: original.to_owned(),
+            category: "rare".to_owned(),
+            application: String::new(),
+            role: FieldRole::Unknown,
+            paired: true,
+            own_context: true,
+            hard,
+        };
+        let parents = [parent("cntk", 0, true), parent("cntk", 0, false), parent("house", 0, false), parent("офсет", 1, true)];
+        assert_eq!(calibration_cells(&parents), [(2, 1), (1, 1)]);
+        let options = |words: usize, hard: usize| RecipeOptions { minimum_calibration_words_per_direction: Some(words), minimum_calibration_hard_words_per_direction: Some(hard), ..RecipeOptions::default() };
+        assert_eq!(check_calibration_cells(&parents, &options(1, 1)), Ok([(2, 1), (1, 1)]));
+        assert!(check_calibration_cells(&parents, &options(2, 1)).unwrap_err().contains("layout group 1 holds 1 words, 1 hard"));
+        assert!(check_calibration_cells(&parents, &options(1, 2)).unwrap_err().contains("layout group 0 holds 2 words, 1 hard"));
+        assert!(check_calibration_cells(&[], &RecipeOptions::default()).is_ok());
+    }
+
+    #[test]
+    fn the_class_report_is_made_again_from_the_saved_scores_of_a_fit() {
+        let frames = SplitFrames {
+            frames: Vec::new(),
+            names: Vec::new(),
+            families: Vec::new(),
+            pairs: 0,
+            classes: vec!["rare:0".to_owned()],
+            typed: ["ghbdtn", "cntk", "ghbd", "house", "ghbdtn", "cntk", "ghbd", "house"].map(str::to_owned).to_vec(),
+        };
+        let saved = SavedScores {
+            model_version: "prefix-v3-0".to_owned(),
+            epoch: 3,
+            stopped_after_epoch: Some(5),
+            thresholds: [0.999, 0.985],
+            grid: vec![0.985, 0.999],
+            development: SavedSplit::of(&calibration(), &frames, true),
+            calibration: SavedSplit::of(&calibration(), &frames, false),
+        };
+        assert!(saved.calibration.sequences.iter().all(|item| item.text.is_none()));
+        let bytes = saved_bytes(&saved).expect("bytes");
+        let folder = std::env::temp_dir().join(format!("ks-train-saved-scores-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).expect("a folder");
+        std::fs::write(folder.join(SCORES_FILE), bytes).expect("a file");
+        assert_eq!(read_saved_scores(&folder), Ok(saved.clone()));
+        let output = folder.join("classes.json");
+        report_command(&folder, &output).expect("a report");
+        assert_eq!(std::fs::read(&output).expect("the report"), ClassReport::of(&saved).bytes());
+        let report: Value = serde_json::from_slice(&ClassReport::of(&saved).bytes()).expect("json");
+        // At 0.985 the Latin direction converts `cntk` (the word kept in that direction) in both profiles.
+        assert_eq!(report["development_false"]["0.985"], json!(["rare:0: cntk"]));
+        assert_eq!(report["by_threshold"]["0.985"]["calibration"][0]["false"], json!(2));
+        assert_eq!(report["calibration"]["rare:0"]["false"], json!(0));
+        assert!(read_saved_scores(&folder.join("missing")).is_err());
+        std::fs::write(folder.join(SCORES_FILE), b"not gzip").expect("a file");
+        assert!(read_saved_scores(&folder).is_err());
+    }
+
+    #[test]
+    fn fields_are_merged_only_into_an_object_and_only_from_a_record() {
+        let mut tree = json!({"a": 1});
+        merged(&mut tree, &CalibrationCell { words: 2, hard: 1 }).expect("merged");
+        assert_eq!(tree, json!({"a": 1, "words": 2, "hard": 1}));
+        assert!(merged(&mut tree, &5).is_err());
+        assert!(merged(&mut json!([1]), &CalibrationCell { words: 2, hard: 1 }).is_err());
     }
 }
