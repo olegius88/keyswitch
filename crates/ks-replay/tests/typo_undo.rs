@@ -112,6 +112,28 @@ fn a_typo_correction_erased_with_backspace_is_not_made_again_on_the_word_typed_t
     bundle.clean();
 }
 
+/// The person saw their own slip and pressed Backspace at once, as the correction of that slip came: those Backspaces were
+/// meant for the text as typed, sooner than anyone reads the corrected word. Reaching that word they leave it to be
+/// corrected as any word. A correction read and then erased is the person's, as above.
+#[test]
+fn backspaces_begun_before_the_correction_could_be_read_leave_the_word_to_be_corrected() {
+    let mut bundle = Bundle::load(None);
+    let mut session = russian(&mut bundle);
+    type_text(&mut session, "мржно ");
+    assert_eq!(shown(&session), "он можно ", "the slip is corrected at the space");
+    erase(&mut session, "можно ".chars().count());
+    type_text(&mut session, "мржно ");
+    session.idle(1.0);
+    assert_eq!(shown(&session), "он можно ", "erased before the correction could be read, the word is corrected again");
+    assert!(!session.core.personal.contains("мржно"), "and is no word of the person's own");
+    erase(&mut session, "можно ".chars().count());
+    type_text(&mut session, "мржно ");
+    session.idle(1.0);
+    assert_eq!(shown(&session), "он мржно ", "erased once read, the correction is not made again");
+    bundle.give_back(session);
+    bundle.clean();
+}
+
 /// The person erased only the last letter of the corrected word and typed another one: the letter the correction changed
 /// earlier in the word stayed, and correcting the word again changed it back with no one seeing why. A word the person is
 /// editing after its typo correction is theirs to finish; the next word is corrected as any other.

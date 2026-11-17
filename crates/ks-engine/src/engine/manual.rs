@@ -197,6 +197,7 @@ impl EngineCore {
         // correction starts at the signs and the boundary it typed after its word.
         self.typed_after_correction = plan.automatic.then(Vec::new);
         self.after_typo = (plan.automatic && plan.mode == TYPO_PLAN_MODE).then(|| plan.trailing.len() + usize::from(plan.boundary.is_some()));
+        self.typo_erase_unseen = false;
     }
 
     /// A key that types text, as the engine takes it: it stands after the last correction's text. A key of no character
@@ -205,6 +206,7 @@ impl EngineCore {
         if event.character.is_empty() {
             return;
         }
+        self.typo_erase_unseen = false;
         if let Some(after) = self.after_typo.as_mut() {
             *after += 1;
         }
@@ -214,16 +216,25 @@ impl EngineCore {
     }
 
     /// Backspace: the text after the last correction is no longer known key by key, and the count after a typo correction
-    /// goes one down; at none the key erases a letter of the corrected word, which is then the user's to finish.
+    /// goes one down; at none the key erases a letter of the corrected word, which is then the user's to finish, unless
+    /// the Backspaces began before the user could see the correction (`typo_erase_unseen`).
     pub fn note_backspace(&mut self) {
         self.typed_after_correction = None;
+        if self.after_typo.is_some() && self.monotonic() - self.last_correction_time < TYPO_ERASE_UNSEEN_SECONDS {
+            self.typo_erase_unseen = true;
+        }
         match self.after_typo {
             Some(0) => {
                 self.after_typo = None;
                 // The count starts with a typo correction and ends with the next correction (remember_correction).
                 let previous = self.last_correction.as_ref().expect("the count is of the last correction, a typo correction");
+                let letters = previous.replaced_strokes.len();
+                if self.typo_erase_unseen {
+                    technical_event!(self.shared, "typo_correction_erased_unseen", "letters": letters);
+                    return;
+                }
                 self.typo_erased = Some(text_for_group(&previous.replaced_strokes, previous.target_group));
-                technical_event!(self.shared, "typo_correction_erased", "letters": previous.replaced_strokes.len());
+                technical_event!(self.shared, "typo_correction_erased", "letters": letters);
             }
             Some(after) => self.after_typo = Some(after - 1),
             None => {}
