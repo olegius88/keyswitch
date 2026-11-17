@@ -14,8 +14,9 @@ use ks_config::constants::{
     NEW_INSTALLATION_BOTH_SHIFTS_TOGGLE, NEW_INSTALLATION_DOUBLE_TAP_CONVERTS, NEW_INSTALLATION_LAYOUT_SWITCH_KEY, SELECTION_COMMAND_MAX_CHARACTERS,
 };
 use ks_config::installation::give_new_installation_keys;
-use ks_engine::constants::{BOTH_SHIFTS_MAX_SECONDS, LAYOUT_DOUBLE_TAP_SECONDS};
-use ks_engine::engine::{EngineSnapshot, Shared, TapAction, single_key_conflict};
+use ks_config::learning::RuleAction;
+use ks_engine::constants::{BOTH_SHIFTS_MAX_SECONDS, LAYOUT_DOUBLE_TAP_SECONDS, STALE_PRESS_SECONDS};
+use ks_engine::engine::{EngineSnapshot, LearningPrompt, Shared, TapAction, single_key_conflict};
 use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 use serde_json::json;
 
@@ -469,5 +470,45 @@ fn a_double_tap_with_the_window_gone_is_recovered_from() {
     assert_eq!(text(&gone), "ghbdtn");
     assert!(!gone.core.shared.snapshot().last_error.is_empty());
     bundle.give_back(gone);
+    bundle.clean();
+}
+
+#[test]
+fn a_double_tap_answers_an_offered_rule_as_another_key_does() {
+    let mut bundle = Bundle::load(None);
+    let mut offered = session(&mut bundle);
+    type_keys(&mut offered, "ghbdtn");
+    offered.core.shared.show_learning_prompt(LearningPrompt {
+        source_group: 0,
+        target_group: 1,
+        original: "hello".to_owned(),
+        replacement: "руддщ".to_owned(),
+        application: "firefox".to_owned(),
+        action: RuleAction::Convert,
+    });
+    double_tap(&mut offered, "Shift_L", "Shift_L", 0.1);
+    assert_eq!((text(&offered), offered.core.shared.learning_prompt()), ("привет".to_owned(), None));
+    bundle.give_back(offered);
+    bundle.clean();
+}
+
+#[test]
+fn a_shift_pressed_again_after_its_release_was_lost_is_no_chord() {
+    let mut bundle = Bundle::load(None);
+    let mut lost = session(&mut bundle);
+    let told: Arc<Mutex<Vec<bool>>> = Arc::default();
+    let sink = told.clone();
+    lost.core.shared.subscribe_auto_switch(Arc::new(move |enabled| sink.lock().unwrap().push(enabled)));
+    down(&mut lost, "Shift_L");
+    // The release never came; the engine forgets the press as it forgets any stale one, and the key goes down again.
+    lost.advance(STALE_PRESS_SECONDS + 1.0);
+    let now = lost.core.monotonic();
+    lost.core.prune_stale_presses(now, STALE_PRESS_SECONDS, None);
+    lost.core.modifier_keycodes.clear();
+    down(&mut lost, "Shift_L");
+    up(&mut lost, "Shift_L");
+    lost.idle(0.05);
+    assert_eq!((lost.core.settings.read(ENABLED), told.lock().unwrap().clone()), (Some(true), Vec::new()));
+    close(&mut bundle, lost);
     bundle.clean();
 }

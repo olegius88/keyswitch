@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn kde_keeps_its_options_under_layout() {
-        let text = "[Layout]\nLayoutList=us,ru\nOptions=grp:alt_shift_toggle, shift:both_capslock\nResetOldOptions=true\n";
+        let text = "[Layout]\nLayoutList=us,ru\n# a line of no key\nOptions=grp:alt_shift_toggle, shift:both_capslock\nResetOldOptions=true\n";
         assert_eq!(kxkbrc_options(text), ["grp:alt_shift_toggle", "shift:both_capslock"]);
         // An Options key of another group, or none at all.
         assert!(kxkbrc_options("[Other]\nOptions=grp:shifts_toggle\n[Layout]\nUse=true\n").is_empty());
