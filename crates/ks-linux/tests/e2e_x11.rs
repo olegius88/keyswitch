@@ -474,9 +474,13 @@ fn hint_over_the_field(stand: &HintStand<'_>, name: &str, driver_slot: &RefCell<
     *driver_slot.borrow_mut() = Some(driver.clone());
     let outcome = (|| -> Result<(), String> {
         let focused = stand.typer.input_focus()?;
+        // An empty field and a word no rule of the phases above converts (not `hello`): a word a rule or the model would
+        // convert is kept by the layout chosen by hand, and that brings the hint saying why (`kept_by_choice`) before this one.
+        stand.typer.clear_field()?;
+        settle(SETTLE);
         // A layout chosen by hand protects the next word: that word stays as typed, and only the one after it is corrected.
         stand.backend.switch_group(0).map_err(|error| format!("{error:?}"))?;
-        stand.typer.type_keys("hello ")?;
+        stand.typer.type_keys("table ")?;
         settle(SETTLE);
         stand.typer.clear_field()?;
         stand.typer.type_keys("ghbdtn ")?;
