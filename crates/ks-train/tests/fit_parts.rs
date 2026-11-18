@@ -7,6 +7,7 @@ use ks_context::context_model::ContextAction;
 use ks_lang::Resources;
 use ks_lang::detector::{IntentClassifier, LanguageDetector, LanguageScorer};
 use ks_train::evidence::frame_evidence;
+use ks_train::corpus::{LOCK_PIN, checksum, pinned_digest};
 use ks_train::fit::provenance;
 use ks_train::historical::{build_corpus, historical_curriculum};
 use ks_train::kernel::{FeatureMass, Packed};
@@ -76,10 +77,11 @@ fn a_seal_pins_the_sources_and_models_a_fit_reads_and_nothing_else() {
     }
     write(&root.join("recipe.json"), "{}");
     let pins = provenance(&root, &root.join("recipe.json")).expect("the pins");
-    for name in ["crates/ks-train/src/lib.rs", "crates/ks-train/src/inner/part.rs", "crates/ks-lang/src/table.toml", "Cargo.lock", "resources/models/boundary.json", "recipe.json"] {
+    for name in ["crates/ks-train/src/lib.rs", "crates/ks-train/src/inner/part.rs", "crates/ks-lang/src/table.toml", LOCK_PIN, "resources/models/boundary.json", "recipe.json"] {
         assert!(pins.contains_key(name), "{name}: {pins:?}");
     }
-    for name in ["crates/ks-lang/src/notes.txt", "crates/ks-lang/src/README", "resources/models/context_policy_v1.json", "resources/models/prefix_policy_v1.json", "resources/models/inner", "resources/models/inner/model.json"] {
+    // The lock file is pinned without the workspace's versions, under a name of its own.
+    for name in ["Cargo.lock", "crates/ks-lang/src/notes.txt", "crates/ks-lang/src/README", "resources/models/context_policy_v1.json", "resources/models/prefix_policy_v1.json", "resources/models/inner", "resources/models/inner/model.json"] {
         assert!(!pins.contains_key(name), "{name}: {pins:?}");
     }
     assert_eq!(pins.len(), CRATES.len() + 2 + 1 + 1 + PINNED.len() + 1);
@@ -164,4 +166,23 @@ fn the_evidence_of_a_frame_drops_what_training_drops_for_some_families() {
     assert!(dropped.contains(&true) && dropped.contains(&false), "{dropped:?}");
     assert!(!frame_evidence(&tools, &frame("unknown-0:0", "rjvgbkznjh", 0, ""), "development", detector, None).term_counts_dropped);
     assert!(!frame_evidence(&tools, &frame("unknown-0:0", "rjv", 0, ""), "train", detector, None).term_counts_dropped);
+}
+
+#[test]
+fn the_lock_file_is_pinned_without_the_workspace_versions() {
+    let root = scratch("lock-pin");
+    let lock = |own: &str, other: &str| {
+        format!("version = 4\n\n[[package]]\nname = \"ks-text\"\nversion = \"{own}\"\ndependencies = [\n \"serde\",\n]\n\n[[package]]\nname = \"serde\"\nversion = \"{other}\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum = \"00\"\n")
+    };
+    write(&root.join("Cargo.lock"), &lock("0.73.0", "1.0.1"));
+    let first = pinned_digest(&root, LOCK_PIN).expect("a digest");
+    // A release raises the workspace's version: the pin holds. Another version of a dependency does not.
+    write(&root.join("Cargo.lock"), &lock("0.74.0", "1.0.1"));
+    assert_eq!(pinned_digest(&root, LOCK_PIN).expect("a digest"), first);
+    write(&root.join("Cargo.lock"), &lock("0.74.0", "1.0.2"));
+    assert_ne!(pinned_digest(&root, LOCK_PIN).expect("a digest"), first);
+    // Any other name is the bytes of its file; a tree without the lock file has no pin of it.
+    assert_eq!(pinned_digest(&root, "Cargo.lock").expect("a digest"), checksum(&root.join("Cargo.lock")).expect("a digest"));
+    std::fs::remove_file(root.join("Cargo.lock")).expect("removed");
+    assert!(pinned_digest(&root, LOCK_PIN).is_err());
 }

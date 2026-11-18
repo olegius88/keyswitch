@@ -109,8 +109,9 @@ fn the_boundary_evidence_of_the_repository_holds_and_each_change_of_it_stops_the
     boundary_refuses("boundary-regression", "engine comparisons missing", |root| std::fs::write(own(root, "model/boundary_v1/engine-regression.json"), b"{}").expect("a file"));
 }
 
-/// A pair the Python trainer sealed pins sources the tree no longer has: its receipt names no `Cargo.lock`, and only its
-/// numbers and evidence are checked.
+/// A pair the Python trainer sealed pins sources the tree no longer has: its receipt names no lock file, and only its
+/// numbers and evidence are checked. So is one whose seal pinned the lock file whole, with the workspace's version in it
+/// (the pair of corpus v88, the installed one).
 #[test]
 fn a_pair_sealed_by_the_python_trainer_has_its_evidence_checked() {
     let root = linked("receipt-of-the-python-trainer");
@@ -123,6 +124,6 @@ fn a_pair_sealed_by_the_python_trainer_has_its_evidence_checked() {
 #[test]
 fn a_pair_sealed_by_this_trainer_has_its_sources_checked_too() {
     let root = linked("receipt-of-this-trainer");
-    edit(&root, "model/context_v3/release-receipt.json", |receipt| receipt["provenance"]["Cargo.lock"] = json!("0"));
+    edit(&root, "model/context_v3/release-receipt.json", |receipt| receipt["provenance"][ks_train::corpus::LOCK_PIN] = json!("0"));
     assert!(gates::run(&root).is_err());
 }

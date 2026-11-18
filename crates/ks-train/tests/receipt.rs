@@ -400,12 +400,12 @@ fn the_sources_a_receipt_names_are_those_of_the_tree() {
     };
     refused("invalid object: provenance", &|value| value["provenance"] = json!(1));
     refused("missing required provenance", &|value| {
-        value["provenance"].as_object_mut().unwrap().remove("Cargo.lock");
+        value["provenance"].as_object_mut().unwrap().remove(ks_train::corpus::LOCK_PIN);
     });
     for path in ["../x", "/x", ".x"] {
         refused("nonpublic provenance", &|value| value["provenance"][path] = json!("0"));
     }
-    refused("provenance mismatch", &|value| value["provenance"]["Cargo.lock"] = json!("0"));
+    refused("provenance mismatch", &|value| value["provenance"][ks_train::corpus::LOCK_PIN] = json!("0"));
     refused("No such file", &|value| value["provenance"]["gone"] = json!("0"));
     refused("prefix baseline mismatch", &|value| value["prefix_baseline_sha256"] = json!("0".repeat(64)));
     refused("recipe or gate policy", &|value| value["recipe_sha256"] = json!("0".repeat(64)));
