@@ -36,6 +36,8 @@ const CANDIDATE_NAME: &str = "candidate";
 const CALIBRATION_COMPARISON: &str = "calibration-comparison.json";
 /// The floors the release receipt holds the sealed test to: more rows restored than the frozen baseline pair, by a mode.
 const RECEIPT_MIN_RESTORATION_MARGIN: [(&str, i64); 2] = [("default", 0), ("early_off", 1)];
+/// The floors the program's quality test holds the installed pair's receipt to.
+const QUALITY_FLOORS: &str = "crates/ks-train/tests/data/quality_floors.json";
 const RECEIPT_MIN_RESTORED_SHARE: f64 = 0.97;
 
 pub struct PromoteRequest<'a> {
@@ -132,6 +134,9 @@ fn preflight(request: &PromoteRequest<'_>) -> Result<Vec<String>, String> {
     if let Err(error) = validate_prefix_seal(root, &request.prefix_candidate.join(PREFIX_ARTIFACT), &request.prefix_candidate.join(PREFIX_SEAL), true) {
         failures.push(format!("prefix seal: {error}"));
     }
+    if let Err(error) = damage_floors(root) {
+        failures.push(format!("the quality floors could not be read: {error}"));
+    }
     match calibration(request) {
         Ok(short) => failures.extend(short.iter().map(|profile| format!("the calibration nets less than the installed pair's in the {profile} profile: the quality ratchet would refuse the install"))),
         Err(error) => failures.push(format!("the calibration could not be compared with the installed pair's: {error}")),
@@ -222,6 +227,49 @@ fn restoration_shortfall(report: &Report) -> Result<Vec<String>, String> {
     Ok(failures)
 }
 
+/// The floors of the program's quality test (`QUALITY_FLOORS`) on what the sealed test may show spoiled; the rest of the
+/// file is for other tests. The installed pair is held to them once installed, so a candidate past one is no pair to install.
+#[derive(Deserialize)]
+struct DamageFloors {
+    #[serde(rename = "RECEIPT_MAX_CORRUPTIONS")]
+    corruptions: i64,
+    /// What the next pair may spoil, where the installed one was let through with more than that: the candidate is held
+    /// to it, the installed pair to `corruptions`.
+    #[serde(rename = "RECEIPT_MAX_CORRUPTIONS_NEXT_PAIR", default)]
+    next_corruptions: Option<i64>,
+    #[serde(rename = "RECEIPT_MAX_EXECUTION_ERRORS")]
+    execution_errors: i64,
+    #[serde(rename = "RECEIPT_MAX_LENGTH_MISMATCHES")]
+    length_mismatches: i64,
+    #[serde(rename = "RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES")]
+    correction_layout_mismatches: i64,
+}
+
+fn damage_floors(root: &Path) -> Result<DamageFloors, String> {
+    typed::<DamageFloors, _>(&read_json(&root.join(QUALITY_FLOORS))?).map_err(|error| format!("{QUALITY_FLOORS}: {error}"))
+}
+
+/// `damage_shortfall`: where the sealed test shows the candidate spoiling more than the quality floors allow, by default and
+/// with the early switch off, as the program's quality test reads the receipt after the install.
+fn damage_shortfall(report: &Report, floors: &DamageFloors) -> Vec<String> {
+    let mut failures = Vec::new();
+    for (name, profile) in report.profiles.iter().flat_map(Profiles::each) {
+        for (mode, candidate) in [("default", &profile.counts.candidate), ("early_off", &profile.early_off.counts.candidate)] {
+            for (what, count, floor) in [
+                ("correct rows spoiled", candidate.correct_text_corruptions, floors.next_corruptions.unwrap_or(floors.corruptions)),
+                ("execution errors", candidate.execution_errors, floors.execution_errors),
+                ("length mismatches", candidate.length_mismatches, floors.length_mismatches),
+                ("correction layout mismatches", candidate.correction_layout_mismatches, floors.correction_layout_mismatches),
+            ] {
+                if count > floor {
+                    failures.push(format!("{name}/{mode}: {count} {what}, the quality floor allows {floor}"));
+                }
+            }
+        }
+    }
+    failures
+}
+
 /// `promote`: the checks, the sealed test (once), the install and the receipt.
 pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let failures = preflight(request)?;
@@ -248,6 +296,11 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let shortfall = restoration_shortfall(&report)?;
     if !shortfall.is_empty() {
         println!("the sealed test leaves the candidate short of the release receipt's restoration floors ({}); nothing is installed and the developer-chat test is not read", shortfall.join("; "));
+        return Ok(1);
+    }
+    let damage = damage_shortfall(&report, &damage_floors(root)?);
+    if !damage.is_empty() {
+        println!("the sealed test shows the candidate past the quality floors ({}); nothing is installed and the developer-chat test is not read", damage.join("; "));
         return Ok(1);
     }
     // The developer-chat test, while the released pair is still the installed one it is compared with.
@@ -359,5 +412,30 @@ mod tests {
         let mut without = report(counts(6, 6), counts(6, 6));
         without.profiles.as_mut().expect("the profiles").reference_hunspell.first = None;
         assert!(restoration_shortfall(&without).expect_err("no first plans").starts_with("reference_hunspell: the report holds no first plans"));
+        // The damage the quality floors allow, by default and with the early switch off.
+        let mut floors = DamageFloors { corruptions: 1, next_corruptions: None, execution_errors: 0, length_mismatches: 0, correction_layout_mismatches: 0 };
+        let mut spoiled = report(counts(6, 6), counts(6, 6));
+        assert!(damage_shortfall(&spoiled, &floors).is_empty());
+        let portable = &mut spoiled.profiles.as_mut().expect("the profiles").portable;
+        portable.counts.candidate.correct_text_corruptions = 2;
+        portable.counts.candidate.length_mismatches = 1;
+        portable.early_off.counts.candidate.execution_errors = 1;
+        portable.early_off.counts.candidate.correction_layout_mismatches = 1;
+        assert_eq!(damage_shortfall(&spoiled, &floors), [
+            "portable/default: 2 correct rows spoiled, the quality floor allows 1",
+            "portable/default: 1 length mismatches, the quality floor allows 0",
+            "portable/early_off: 1 execution errors, the quality floor allows 0",
+            "portable/early_off: 1 correction layout mismatches, the quality floor allows 0",
+        ]);
+        // A floor for the next pair holds the candidate where the installed pair was let through with more.
+        floors.next_corruptions = Some(2);
+        assert_eq!(damage_shortfall(&spoiled, &floors).len(), 3);
+        // The tree's own floors are read; a file that is not the floors is refused.
+        assert!(damage_floors(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).is_ok());
+        let folder = std::env::temp_dir().join(format!("ks-floors-{}", std::process::id()));
+        std::fs::create_dir_all(folder.join("crates/ks-train/tests/data")).expect("a folder");
+        std::fs::write(folder.join(QUALITY_FLOORS), "{}").expect("a file");
+        assert!(damage_floors(&folder).is_err_and(|error| error.starts_with(QUALITY_FLOORS)));
+        std::fs::remove_dir_all(&folder).expect("cleaned");
     }
 }
