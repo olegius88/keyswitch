@@ -103,6 +103,10 @@ fn a_trace_runs_alone_with_many_or_as_a_worker() {
     let answer = trace().arg(&one).output().expect("it runs");
     let result: Value = serde_json::from_slice(&answer.stdout).expect("json");
     assert!(result["status"].is_string(), "{result}");
+    // In the workspace itself, with the pair the program ships: the trace is replayed and answered all the same.
+    let shipped = Command::new(env!("CARGO_BIN_EXE_ks-trace")).env_remove("KS_REPLAY_TREE").arg(&one).output().expect("it runs");
+    let result: Value = serde_json::from_slice(&shipped.stdout).expect("json");
+    assert!(result["status"].is_string(), "{result}");
     assert!(trace().arg(&one).arg("--verbose").output().expect("it runs").status.code().is_some());
     // Some of them, with a report.
     let folder = scratch();
