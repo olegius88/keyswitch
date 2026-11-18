@@ -643,15 +643,10 @@ impl EngineCore {
         // The keys held back while the word was replaced are typed again after it, in order, and reach
         // the engine after this line like any typed key: the text before them is still the context.
         // Cleared, it took `нажимаю на` from the `b` after an early-switched `Pause`, and the letter
-        // stayed `b`. Only input that came through unheld (a click) leaves the text unknown.
-        let unheld_input = held > 0 && typed_events - typed_before != held;
-        let mut context_reset_reason = if !late.is_empty() {
-            "late_input"
-        } else if unheld_input {
-            "held_text_or_unknown"
-        } else {
-            ""
-        };
+        // stayed `b`. What went past the hook meanwhile is no text: the key-up of a key held back and
+        // let go once the keyboard was free (taken for a click, it took `для ipv6` from the `b` typed
+        // during that correction), and a click, which clears the text itself when the engine takes it.
+        let mut context_reset_reason = if late.is_empty() { "" } else { "late_input" };
         if (replayed_only_releases || held == 0) && self.context_policy.stream.withdraw(&rolled) && context_reset_reason == "late_input" {
             // The late keys come back typed again and are observed then: the text before them
             // stays the context of the next word. Cleared, it left the word after `nats` with
