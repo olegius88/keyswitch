@@ -12,12 +12,14 @@ use ks_config::indicator::{alternate_layout_action_label, alternate_layout_group
 use ks_ui::tray_model::{
     ABOUT_LABEL, AUTO_SWITCH_LABEL, EXCLUSIONS_LABEL, HISTORY_LABEL, NOTIFICATIONS_LABEL, QUIT_LABEL, SETTINGS_LABEL, SOUND_LABEL,
 };
+use ks_config::logsetup;
 use serde_json::Value as Json;
 use zbus::blocking::Connection;
 use zbus::blocking::connection::Builder;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
 
+const LOGGER: &str = "keyswitch.tray";
 pub const ITEM_INTERFACE: &str = "org.kde.StatusNotifierItem";
 pub const MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 pub const OBJECT_PATH: &str = "/StatusNotifierItem";
@@ -497,6 +499,10 @@ impl StatusNotifierItem {
             })
             .map_err(describe)?;
         let waiting = register(&connection).err();
+        if let Some(reason) = &waiting {
+            // At the start of a session the panel may come up after the program: the icon appears with it.
+            logsetup::warning(LOGGER, &format!("Панель со значками ещё не запущена, значок появится вместе с ней: {reason}"));
+        }
         Ok(StatusNotifierItem { connection, shared, closed, waiting })
     }
 
