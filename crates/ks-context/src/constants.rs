@@ -149,8 +149,13 @@ pub const START_DELTA_BANDS: i64 = 6;
 // reading and the reading as typed in bands of FEEL_GAP_BAND_WIDTH up to FEEL_GAP_BANDS either way, and the typed
 // reading alone in bands of FEEL_TYPED_BAND_WIDTH up to FEEL_TYPED_BANDS; no letters and no copy of the shared features.
 // On the class's words of the training documents typed both ways, a gap above 1.5 was a conversion in all 825 cases and
-// one below -1.5 a word typed as meant in all 840; 6 lay between (of the 1 959 made-up words, 132).
+// one below -1.5 a word typed as meant in all 840; 6 lay between (of the 1 959 made-up words, 132). The head reads only a
+// gap of FEEL_DECISIVE_GAP or more either way: fitted with a bias and the typed fit alone, read in the middle too, it
+// kept 15 made-up English words typed in the Russian layout (`frupz`, gap 0.9) and `afrit` (gap 1.8) that the frozen model
+// converted (development round 1, cycle v89).
 pub const FEEL_FEATURE_PREFIX: &str = "feel|";
+
+pub const FEEL_DECISIVE_GAP: f64 = 1.5;
 
 pub const FEEL_GAP_BAND_WIDTH: f64 = 1.5;
 

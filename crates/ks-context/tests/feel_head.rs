@@ -63,19 +63,23 @@ fn the_class_is_an_unknown_word_alone_with_both_readings_scored() {
 }
 
 #[test]
-fn the_head_reads_the_gap_a_key_and_the_typed_fit_by_direction() {
+fn the_head_reads_a_decisive_gap_a_key_with_the_typed_fit_by_direction() {
     let tables = tables();
     // The other reading fits its language 4.1 better a key: the band of 3 to 4.5; the typed one -8.2, the band of -10 to -8.
     let features = head(&evidence("uegieg", "гупшуп", "", (Some(-8.2), Some(-4.1))), &tables);
-    assert_eq!(features, BTreeSet::from(["bias:direction:0".to_owned(), "gap:2:direction:0".to_owned(), "typed:-5:direction:0".to_owned(), "gap:2:typed:-5:direction:0".to_owned()]));
+    assert_eq!(features, BTreeSet::from(["gap:2:direction:0".to_owned(), "gap:2:typed:-5:direction:0".to_owned()]));
     // Typed as meant in the Russian layout: the gap goes the other way, and the direction is the other one.
     let features = head(&evidence("гупшуп", "uegieg", "", (Some(-4.1), Some(-8.2))), &tables);
-    assert!(features.contains("gap:-3:direction:1") && features.contains("typed:-3:direction:1"), "{features:?}");
+    assert_eq!(features, BTreeSet::from(["gap:-3:direction:1".to_owned(), "gap:-3:typed:-3:direction:1".to_owned()]));
     // The bands stop at their bounds either way.
     let features = head(&evidence("uegieg", "гупшуп", "", (Some(-40.0), Some(-1.0))), &tables);
-    assert!(features.contains("gap:4:direction:0") && features.contains("typed:-6:direction:0"), "{features:?}");
+    assert!(features.contains("gap:4:typed:-6:direction:0"), "{features:?}");
     let features = head(&evidence("uegieg", "гупшуп", "", (Some(-1.0), Some(-40.0))), &tables);
-    assert!(features.contains("gap:-4:direction:0") && features.contains("typed:-1:direction:0"), "{features:?}");
+    assert!(features.contains("gap:-4:typed:-1:direction:0"), "{features:?}");
+    // Readings that fit their languages about as well, either way of the line: nothing for the head, the frozen model's.
+    for (typed, other) in [(-5.0, -4.0), (-4.0, -5.0), (-6.0, -4.6)] {
+        assert!(head(&evidence("frupz", "акгзя", "", (Some(typed), Some(other))), &tables).is_empty(), "{typed} {other}");
+    }
     // Outside the class the head reads nothing, and the start head still answers the word.
     let mut known = evidence("uegieg", "гупшуп", "", (Some(-8.2), Some(-4.1)));
     known.target_known = true;
