@@ -62,8 +62,13 @@ fn hex_of(value: f64) -> String {
     format!("{sign}0x{lead}.{mantissa:013x}p{power:+}")
 }
 
+/// A yes or no of a frame, as `json.dumps` writes it.
+fn flag(value: bool) -> Value {
+    Value::Bool(value)
+}
+
 fn field_list(field: &FieldContext) -> Vec<Value> {
-    vec![json!(field.application), json!(field.field_id), json!(field.before), json!(field.after), json!(field.role.as_str()), json!(field.selection), json!(field.sensitive), json!(field.source)]
+    vec![json!(field.application), json!(field.field_id), json!(field.before), json!(field.after), json!(field.role.as_str()), flag(field.selection), flag(field.sensitive), json!(field.source)]
 }
 
 fn row_line(row: &ActionRow) -> String {
@@ -71,7 +76,7 @@ fn row_line(row: &ActionRow) -> String {
     items.extend(field_list(&row.field));
     items.extend([
         json!(row.trigger), json!(row.literal_tail), json!(row.action.as_str()), json!(row.category), json!(row.boundary_text), json!(hex_of(row.sample_weight)),
-        json!(row.after_origin.as_str()), json!(row.parent_family), json!(row.revisit), json!(row.before_origin.as_str()),
+        json!(row.after_origin.as_str()), json!(row.parent_family), flag(row.revisit), json!(row.before_origin.as_str()),
     ]);
     dumped(&Value::Array(items))
 }
@@ -84,10 +89,10 @@ fn evidence_list(item: &ContextEvidence) -> Vec<Value> {
     let mut items = vec![json!(item.original), json!(item.alternative), json!(item.source_group)];
     items.extend(field_list(&item.field));
     items.extend([
-        json!(item.trigger), json!(item.baseline_convert), json!(item.source_known), json!(item.target_known), json!(hex_of(item.score_delta)), optional_hex(item.model_probability),
+        json!(item.trigger), flag(item.baseline_convert), flag(item.source_known), flag(item.target_known), json!(hex_of(item.score_delta)), optional_hex(item.model_probability),
         optional_hex(item.model_threshold), json!(item.literal_tail), optional_hex(item.ortho_score), optional_hex(item.ortho_threshold), json!(item.boundary_text),
-        json!(item.after_origin.as_str()), json!(item.before_origin.as_str()), json!(item.source_identifier), json!(item.target_identifier), json!(item.source_near_identifier), json!(item.source_typo), json!(item.target_typo),
-        json!(item.source_opening), json!(item.target_opening), json!(item.inside), json!(item.term_counts_dropped), optional_hex(item.ortho_typed_mean),
+        json!(item.after_origin.as_str()), json!(item.before_origin.as_str()), flag(item.source_identifier), flag(item.target_identifier), flag(item.source_near_identifier), flag(item.source_typo), flag(item.target_typo),
+        flag(item.source_opening), flag(item.target_opening), flag(item.inside), flag(item.term_counts_dropped), optional_hex(item.ortho_typed_mean),
         optional_hex(item.ortho_other_mean),
     ]);
     items

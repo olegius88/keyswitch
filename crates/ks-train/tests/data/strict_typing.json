@@ -689,7 +689,7 @@
      "value_tokens": 3
     },
     "src/stages.rs": {
-     "value_tokens": 56
+     "value_tokens": 44
     },
     "src/tools.rs": {
      "literal_compares": 1,
@@ -899,7 +899,7 @@
    },
    "literal_compares": 255,
    "string_key_index": 2817,
-   "value_tokens": 3735
+   "value_tokens": 3723
   },
   "ks-ui": {
    "expect_roots": 1,
