@@ -173,6 +173,11 @@ struct DeskState {
     lost_late: Vec<KeyEvent>,
     /// Keys the person presses or lets go of while a correction is typed, before its letters have come back.
     during_correction: Vec<Raw>,
+    /// Keys the person lets go of once the hook has let the keyboard go after a correction, before the engine is done
+    /// with it: they pass the hook at once.
+    after_correction: Vec<Raw>,
+    /// The person clicks while a correction is typed: the keyboard hook does not keep a click back.
+    click_during_correction: bool,
     /// Asking for the program in front stops whoever asks, as an error nobody foresaw does.
     panicking: bool,
     /// The same in the middle of a correction: the hook holds the keys by then.
@@ -500,6 +505,8 @@ impl Desk {
                 late_lost: false,
                 lost_late: Vec::new(),
                 during_correction: Vec::new(),
+                after_correction: Vec::new(),
+                click_during_correction: false,
                 panicking: false,
                 panicking_correction: false,
                 failing_actions: false,
@@ -571,7 +578,12 @@ impl InputBackend for Desk {
     }
 
     fn release_input(&self) -> Result<i32, BackendError> {
-        Ok(self.lock().release_held())
+        let mut state = self.lock();
+        let count = state.release_held();
+        for raw in std::mem::take(&mut state.after_correction) {
+            state.hook(raw, false);
+        }
+        Ok(count)
     }
 
     fn complete_action(&self, deliver: bool) -> Result<i32, BackendError> {
@@ -715,6 +727,12 @@ impl InputBackend for Desk {
         // there).
         for raw in std::mem::take(&mut state.during_correction) {
             state.hook(raw, false);
+        }
+        if std::mem::take(&mut state.click_during_correction) {
+            let click = KeyEvent { pressed: true, key_name: "Pointer".to_owned(), characters: vec![String::new(), String::new()], group: state.group, timestamp: state.stamp(), ..KeyEvent::default() };
+            if let Some(listener) = state.listener.clone() {
+                listener(click);
+            }
         }
         let before = state.dice.one_in(2);
         if before {
@@ -1883,6 +1901,42 @@ fn a_lone_letter_left_as_typed_is_corrected_with_the_word_after_it() {
         drain(&mut scene.core);
         scene.idle(1.0);
         assert_eq!(scene.shown(), "я сегодня |", "the hook keeps keys back: {holds}");
+        scene.ends_clean(&mut bundle);
+    }
+}
+
+/// A key pressed while a correction is typed is kept back and typed again after it, and let go once the hook has let the
+/// keyboard go, before the engine is done with the correction: that key-up went past the hook, and is no text. Taken for
+/// a click, it cleared what the engine knew of the text, and the letter pressed then was decided with nothing before it:
+/// `шзм6` was `ipv6` and the `и` after it stayed `b`. A click while a correction is typed clears the text before it, when
+/// the engine takes it.
+#[test]
+fn a_key_let_go_after_its_correction_leaves_the_text_before_the_next_word() {
+    let mut bundle = Bundle::load(None);
+    let letter = key_for('и', 1).expect("a key of the keyboard").keycode;
+    for click in [false, true] {
+        let mut scene = Scene::new(&mut bundle, true, false);
+        scene.text("сервер работает для ", 1);
+        scene.idle(1.0);
+        scene.text("ipv6", 0);
+        {
+            let mut state = scene.desk.lock();
+            state.during_correction.push(Raw { pressed: true, keycode: letter, name: "" });
+            state.after_correction.push(Raw { pressed: false, keycode: letter, name: "" });
+            state.click_during_correction = click;
+        }
+        scene.text(" ", 0);
+        assert_eq!(scene.shown(), "сервер работает для ipv6 b|", "a click: {click}");
+        let before = scene.core.context_policy.stream.text.clone();
+        if click {
+            assert_eq!(before, "b", "a click leaves only what was typed after it");
+            scene.ends_clean(&mut bundle);
+            continue;
+        }
+        assert!(before.ends_with("для ipv6 b"), "{before:?}");
+        scene.text(" socks5 ", 0);
+        scene.idle(1.0);
+        assert_eq!(scene.shown(), "сервер работает для ipv6 и socks5 |");
         scene.ends_clean(&mut bundle);
     }
 }
