@@ -6,6 +6,8 @@ use ks_backend::{FieldContext, FieldRole};
 use ks_context::constants::{FEEL_FEATURE_PREFIX, START_FEATURE_PREFIX};
 use ks_context::context_action_features::{extract_action_features, feel_question};
 use ks_context::context_model::{ContextEvidence, TermTables};
+use ks_context::context_policy::one_edit_from_identifier;
+use ks_lang::identifier_lexicon::IdentifierLexicon;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -47,13 +49,14 @@ fn the_class_is_an_unknown_word_alone_with_both_readings_scored() {
     assert_eq!(feel_question(&evidence("ufc", "гас", "", means)), None);
     assert_eq!(feel_question(&evidence("[kt,", "хлеб", "", means)), None);
     // A reading a lexicon or the identifier index knows.
-    for known in 0..4 {
+    for known in 0..5 {
         let mut item = evidence("uegieg", "гупшуп", "", means);
         match known {
             0 => item.source_known = true,
             1 => item.target_known = true,
             2 => item.source_identifier = true,
-            _ => item.target_identifier = true,
+            3 => item.target_identifier = true,
+            _ => item.source_near_identifier = true,
         }
         assert_eq!(feel_question(&item), None, "{known}");
     }
@@ -86,4 +89,18 @@ fn the_head_reads_a_decisive_gap_a_key_with_the_typed_fit_by_direction() {
     assert!(head(&known, &tables).is_empty());
     let features = extract_action_features(&known, &tables).expect("features");
     assert!(features.keys().any(|name| name.starts_with(START_FEATURE_PREFIX)));
+}
+
+#[test]
+fn a_command_mistyped_by_one_edit_is_near_an_identifier() {
+    let path = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/identifiers.json"));
+    let lexicon = IdentifierLexicon::load(&path).expect("the shipped identifier index");
+    // `gitkeys` with a letter more, a letter less, a letter replaced and two letters swapped, in any case.
+    for typo in ["gitkeyys", "gitkys", "gitkeus", "gitkyes", "GitKeyys"] {
+        assert!(one_edit_from_identifier(typo, &lexicon), "{typo}");
+    }
+    // The identifier itself, a word too short to tell, Cyrillic letters, signs, and a word far from every identifier.
+    for other in ["gitkeys", "gitk", "гиткейс", "git-keys", "qqqqqqqzx"] {
+        assert!(!one_edit_from_identifier(other, &lexicon), "{other}");
+    }
 }

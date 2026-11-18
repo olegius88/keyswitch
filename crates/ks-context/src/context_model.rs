@@ -142,6 +142,9 @@ pub struct ContextEvidence {
     pub before_origin: BeforeOrigin,
     pub source_identifier: bool,
     pub target_identifier: bool,
+    /// Whether the token as typed is a Latin word one edit from an identifier of the index and no identifier itself
+    /// (`one_edit_from_identifier`): a command mistyped, which stays as typed.
+    pub source_near_identifier: bool,
     /// Whether the reading is no word itself but one typo away from one (`one_typo_from_word`).
     pub source_typo: bool,
     pub target_typo: bool,
@@ -184,6 +187,7 @@ impl ContextEvidence {
             before_origin: BeforeOrigin::Field,
             source_identifier: false,
             target_identifier: false,
+            source_near_identifier: false,
             source_typo: false,
             target_typo: false,
             source_opening: false,

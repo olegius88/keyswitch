@@ -2,7 +2,7 @@
 
 use ks_cast::To as _;
 use crate::constants::{
-    FIELD_CARET_LAG_MAX_CHARACTERS, FIELD_PENDING_MAX_CHARACTERS, MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, RUSSIAN_SLANG_MIN_TERM_BUCKET,
+    CONTEXT_TYPO_MIN_CHARACTERS, FIELD_CARET_LAG_MAX_CHARACTERS, FIELD_PENDING_MAX_CHARACTERS, MINIMUM_SHAPED_TOKEN_CHARACTERS, QUOTED_WORD_CLOSING_SIGNS, RUSSIAN_SLANG_MIN_TERM_BUCKET,
     WORD_QUOTES,
 };
 use crate::context_action_features::{
@@ -288,6 +288,46 @@ impl Default for EvidenceOptions<'_> {
     }
 }
 
+/// What the orthotactic model says of a token, as the evidence carries it: its total, its threshold, and the mean
+/// log-probability a key of the reading the total judged, as typed and in the other layout (the end counted as a key).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OrthoJudgement {
+    pub total: f64,
+    pub threshold: f64,
+    pub means: (f64, f64),
+}
+
+/// `OrthoJudgement` of `original` typed in layout `source_group` (0 or 1) with `alternative` its other reading, after
+/// `before`; `None` when the model does not score it.
+#[must_use]
+pub fn ortho_judgement(ortho: &OrthoModel, original: &str, alternative: &str, source_group: i64, before: &str) -> Option<OrthoJudgement> {
+    if source_group != 0 && source_group != 1 {
+        return None;
+    }
+    let script = if source_group == 0 { "en" } else { "ru" };
+    let keys = if source_group == 0 { original } else { alternative };
+    let scored = ortho.score(&OrthoEvidence { keys, shape: shape_of(original, pystr::strip(before).is_empty()), source_script: script }, None);
+    let positions = (pystr::len(&scored.reading) + 1).to::<f64>();
+    scored.supported.then(|| OrthoJudgement { total: scored.total, threshold: *ortho.thresholds.get(script), means: (scored.source_logprob / positions, scored.target_logprob / positions) })
+}
+
+/// Whether a token of Latin letters, `CONTEXT_TYPO_MIN_CHARACTERS` or more, is no identifier of the index itself but one
+/// edit from one: a letter more, a letter less, a letter replaced or two letters swapped (`gitkeyys` and `gitkys` for
+/// `gitkeys`, `cdfhlfx` for `cdfhflx`).
+#[must_use]
+pub fn one_edit_from_identifier(token: &str, lexicon: &IdentifierLexicon) -> bool {
+    let word: Vec<char> = token.chars().map(|letter| letter.to_ascii_lowercase()).collect();
+    if word.len() < CONTEXT_TYPO_MIN_CHARACTERS || !word.iter().all(char::is_ascii_lowercase) || lexicon.contains(token) {
+        return false;
+    }
+    let known = |candidate: &[char]| lexicon.contains(&candidate.iter().collect::<String>());
+    let inserted = (0..=word.len()).any(|place| ('a'..='z').any(|letter| known(&[&word[..place], &[letter], &word[place..]].concat())));
+    let removed = (0..word.len()).any(|place| known(&[&word[..place], &word[place + 1..]].concat()));
+    let replaced = (0..word.len()).any(|place| ('a'..='z').any(|letter| known(&[&word[..place], &[letter], &word[place + 1..]].concat())));
+    let swapped = (1..word.len()).any(|place| known(&[&word[..place - 1], &[word[place], word[place - 1]], &word[place + 1..]].concat()));
+    inserted || removed || replaced || swapped
+}
+
 /// Build the same lexical and optional orthotactic evidence for any caller. `shared` is the packaged identifier lexicon
 /// the engine, the trainer and the evaluator share (`shared_identifiers()`), used when `identifiers` is not given.
 pub fn evidence_for_decision(
@@ -298,24 +338,12 @@ pub fn evidence_for_decision(
     let target = detector.model_for(target_group)?.score(alternative);
     let lexicon = options.identifiers.or(shared);
     let source_identifier = lexicon.is_some_and(|lexicon| lexicon.contains(&baseline.original));
+    // Asked of a first word only, the feel head's class: the index is searched a few hundred times for it.
+    let first = crate::context_action_features::start_question(&baseline.original, alternative, &field.before, &field.after);
+    let source_near_identifier = first && lexicon.is_some_and(|lexicon| one_edit_from_identifier(&baseline.original, lexicon));
     let target_identifier = lexicon.is_some_and(|lexicon| lexicon.contains(alternative));
-    let mut ortho_score = None;
-    let mut ortho_threshold = None;
-    let mut ortho_means = None;
-    if let Some(ortho) = options.ortho
-        && (baseline.source_group == 0 || baseline.source_group == 1)
-    {
-        let script = if baseline.source_group == 0 { "en" } else { "ru" };
-        let keys = if baseline.source_group == 0 { baseline.original.as_str() } else { alternative };
-        let shape = shape_of(&baseline.original, pystr::strip(&field.before).is_empty());
-        let scored = ortho.score(&OrthoEvidence { keys, shape, source_script: script }, None);
-        if scored.supported {
-            ortho_score = Some(scored.total);
-            ortho_threshold = Some(*ortho.thresholds.get(script));
-            let positions = (pystr::len(&scored.reading) + 1).to::<f64>();
-            ortho_means = Some((scored.source_logprob / positions, scored.target_logprob / positions));
-        }
-    }
+    let judged = options.ortho.and_then(|ortho| ortho_judgement(ortho, &baseline.original, alternative, baseline.source_group, &field.before));
+    let (ortho_score, ortho_threshold, ortho_means) = judged.map_or((None, None, None), |found| (Some(found.total), Some(found.threshold), Some(found.means)));
     let mut evidence = ContextEvidence::new(&baseline.original, alternative, baseline.source_group, field.clone());
     evidence.trigger = trigger.to_string();
     evidence.baseline_convert = baseline.should_convert;
@@ -335,6 +363,7 @@ pub fn evidence_for_decision(
     evidence.after_origin = options.after_origin;
     evidence.source_identifier = source_identifier;
     evidence.target_identifier = target_identifier;
+    evidence.source_near_identifier = source_near_identifier;
     evidence.source_typo = typo_of(&baseline.original, detector, baseline.source_group)?;
     evidence.target_typo = typo_of(alternative, detector, target_group)?;
     evidence.source_opening = opens_sentences(&baseline.original, baseline.source_group);

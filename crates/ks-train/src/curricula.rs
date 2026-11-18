@@ -57,6 +57,7 @@ const FEEL_WORD_LETTERS: std::ops::RangeInclusive<usize> = 5..=10;
 const FEEL_REAL_LETTERS: std::ops::RangeInclusive<usize> = 4..=12;
 const FEEL_ATTEMPTS_PER_WORD: usize = 50;
 const FEEL_CAPITAL_MODULUS: usize = 3;
+const FEEL_MADE_UP: &str = "made_up";
 const FEEL_BOUNDARIES: [(&str, &str); 4] = [("punctuation", "."), ("punctuation", ","), ("enter", "\n"), ("pause", "")];
 const FEEL_RUSSIAN_VOWELS: &str = "аеёиоуыэюя";
 const FEEL_ENGLISH_VOWELS: &str = "aeiouy";
@@ -1338,15 +1339,25 @@ pub fn feel_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], op
                 continue;
             }
             made += 1;
-            counts.add(format!("made_up:{language}"));
-            words.push((word, group, "made_up"));
+            counts.add(format!("{FEEL_MADE_UP}:{language}"));
+            words.push((word, group, FEEL_MADE_UP));
         }
     }
+    // A made-up word is labelled by the language it was made from, and its letters may read as the other one: where the
+    // gap of its readings a key decides against its label, the frame would teach the head the gap backwards, and is left out.
+    let (ortho, status) = tools.resources.ortho_model();
+    let ortho = ortho.ok_or_else(|| format!("the feel curriculum reads the orthotactic model: {status}"))?;
     let mut rows = Vec::new();
     for (word, group, kind) in &words {
         for (typed, layout, action) in [(word.clone(), *group, Keep), (reading(word, *group), 1 - group, Convert)] {
             let stem = format!("feel:{kind}:{typed}");
             let typed = if variant_choice(&stem, "capital", FEEL_CAPITAL_MODULUS) == 0 { pystr::capitalize(&typed) } else { typed };
+            let judged = ks_context::context_policy::ortho_judgement(&ortho, &typed, &reading(&typed, layout), layout, "");
+            let gap = judged.map_or(0.0, |found| found.means.1 - found.means.0);
+            if *kind == FEEL_MADE_UP && gap.abs() >= ks_context::constants::FEEL_DECISIVE_GAP && (gap > 0.0) == (action == Keep) {
+                counts.add(format!("{}:against_its_letters", action.as_str()));
+                continue;
+            }
             let mut field = field_of(application_of(&stem), crate::rows::PUBLIC_TRAINING, "", "", FieldRole::Text);
             "reader".clone_into(&mut field.source);
             let (trigger, boundary) = FEEL_BOUNDARIES[variant_choice(&stem, "boundary", FEEL_BOUNDARIES.len())];

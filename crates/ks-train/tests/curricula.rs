@@ -659,11 +659,13 @@ fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
             words.insert(frame.original.to_lowercase());
         }
         // Each word kept as meant and converted from the other layout, at a space and at one more boundary: 300 made up
-        // in each language, and the words of the rows no lexicon knows.
+        // in each language, and the words of the rows no lexicon knows; a made-up word's frame whose letters decide
+        // against its label is left out, at both its boundaries.
         let kept: Vec<&ActionRow> = frames.iter().filter(|frame| frame.action == ContextAction::Keep && frame.trigger == "space").collect();
-        assert_eq!(kept.len() * 4, frames.len());
-        assert!(kept.iter().filter(|frame| frame.group == 0).count() > 300, "{split}");
-        assert!(kept.iter().filter(|frame| frame.group == 1).count() > 300, "{split}");
+        assert_eq!(frames.iter().filter(|frame| frame.trigger == "space").count() * 2, frames.len());
+        assert!(kept.len() * 2 < frames.len(), "{split}");
+        assert!(kept.iter().filter(|frame| frame.group == 0).count() > 250, "{split}");
+        assert!(kept.iter().filter(|frame| frame.group == 1).count() > 250, "{split}");
         for word in ["трулялятор", "zorblaxing"] {
             assert!(kept.iter().any(|frame| frame.original.to_lowercase() == word), "{split}: {word}");
         }

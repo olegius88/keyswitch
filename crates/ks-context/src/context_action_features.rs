@@ -972,7 +972,8 @@ fn start_evidence(item: &ContextEvidence, direction: &str, tables: &TermTables) 
 }
 
 /// A word of the message-start head's class (`start_question`) that neither reading's lexicon nor the identifier index
-/// knows, with both readings scored by the orthotactic model: its mean log-probability a key as typed and in the other
+/// knows, typed no edit from an identifier (a mistyped command stays as typed), with both readings scored by the
+/// orthotactic model: its mean log-probability a key as typed and in the other
 /// layout (`ContextEvidence::ortho_typed_mean`, `ortho_other_mean`), or `None` when the word is no member.
 #[must_use]
 pub fn feel_question(item: &ContextEvidence) -> Option<(f64, f64)> {
@@ -980,7 +981,8 @@ pub fn feel_question(item: &ContextEvidence) -> Option<(f64, f64)> {
         && !item.source_known
         && !item.target_known
         && !item.source_identifier
-        && !item.target_identifier;
+        && !item.target_identifier
+        && !item.source_near_identifier;
     if member { item.ortho_typed_mean.zip(item.ortho_other_mean) } else { None }
 }
 

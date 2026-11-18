@@ -212,6 +212,7 @@ mod tests {
             before_origin: BeforeOrigin::Field,
             source_identifier: false,
             target_identifier: false,
+            source_near_identifier: false,
             source_typo: false,
             target_typo: false,
             source_opening: false,
