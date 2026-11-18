@@ -1800,8 +1800,9 @@ pub fn letters_and_digits(token: &str) -> bool {
 /// Latin letters and digits, that Russian text is known to write as a whole token one way or the other
 /// (context-alnum-frequency.json counts it as typed or its Latin reading), after text that is Russian or none: a Latin
 /// token typed in the Russian layout in Russian text (`шзм6` for `ipv6`, `зь2` for `pm2`, `ч64` for `x64`, `2аф` for
-/// `2fa`), or a Russian one meant as typed (`1с`, `3д`, `100мс`): the letters-and-digits head's class. A reading with a sign
-/// is none (`2х` reads `2[`), nor a token with a sign inside (`-v2`, `5ю2`): the frozen model decides those, and the
+/// `2fa`), or a Russian one meant as typed (`1с`, `3д`, `100мс`): the letters-and-digits head's class. A comma or a full stop
+/// at the end of the Latin reading is set aside (`without_trailing_sign`: `шзм6б` for `ipv6,` before the rest of a Russian
+/// sentence); any other reading with a sign is none (`2х` reads `2[`), nor a token with a sign inside (`-v2`, `5ю2`): the frozen model decides those, and the
 /// lone-letter refusal (`context_policy`) a token of one letter. After English text the frozen model decides too, and for a
 /// token typed in Latin letters, whose typed questions label `1c` of Russian prose a conversion to `1с`. A token the table
 /// counts in neither script is the frozen model's as well: fitted on the 2023 dump, where such shapes are Russian (`2х`,
@@ -1810,6 +1811,7 @@ pub fn letters_and_digits(token: &str) -> bool {
 /// reads only the token, its other reading, the text before it and the packaged table, as the trainer and the GPU path
 /// route frames by them.
 pub fn alnum_question(original: &str, alternative: &str, before: &str, tables: &TermTables) -> Checked<bool> {
+    let (original, alternative) = without_trailing_sign(original, alternative);
     if !(count(original) <= ALNUM_HEAD_MAX_CHARACTERS
         && !original.is_ascii()
         && letters_and_digits(original)
@@ -1821,6 +1823,16 @@ pub fn alnum_question(original: &str, alternative: &str, before: &str, tables: &
     }
     let tokens = tables.alnum().map_err(|_| FeatureError("invalid term frequency table"))?;
     Ok(tokens.alphabet("cyrillic").count(&pystr::casefold(original)) > 0 || tokens.alphabet("latin").count(&pystr::casefold(alternative)) > 0)
+}
+
+/// A token typed in the Russian layout and its Latin reading without the one comma or full stop that reading ends in, typed
+/// with `б` or `ю` (`TERM_HEAD_TRAILING_SIGNS`): `шзм6б` for `ipv6,` is asked and read as `шзм6` for `ipv6`, as the term head
+/// sets aside the sign after `сымю` for `csv.`. Any other pair stays as it is.
+#[must_use]
+pub fn without_trailing_sign<'a>(original: &'a str, alternative: &'a str) -> (&'a str, &'a str) {
+    let last_sign = alternative.chars().last().is_some_and(|sign| TERM_HEAD_TRAILING_SIGNS.contains(sign));
+    let last_letter = original.chars().last().is_some_and(cyrillic_letter);
+    if last_sign && last_letter { (pystr::slice(original, None, Some(-1)), pystr::slice(alternative, None, Some(-1))) } else { (original, alternative) }
 }
 
 /// The runs of letters (`L`) and digits (`D`) of a token, each with its length up to `ALNUM_RUN_LENGTH_MAX`: `м67` is `L1D2`,
@@ -1869,8 +1881,9 @@ fn longest_run(text: &str, wanted: fn(char) -> bool) -> Checked<&str> {
 /// typing, ru.stackoverflow messages of 2023).
 pub fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pairs> {
     let tokens = tables.alnum().map_err(|_| FeatureError("invalid term frequency table"))?;
-    let cyrillic = pystr::casefold(&item.original);
-    let latin = pystr::casefold(&item.alternative);
+    let (original, alternative) = without_trailing_sign(&item.original, &item.alternative);
+    let cyrillic = pystr::casefold(original);
+    let latin = pystr::casefold(alternative);
     let typed = tokens.alphabet("cyrillic").count(&cyrillic);
     let other = tokens.alphabet("latin").count(&latin);
     let token = format!("token:{}:{}", bucket_of(typed), bucket_of(other));
@@ -1881,8 +1894,8 @@ pub fn alnum_evidence(item: &ContextEvidence, tables: &TermTables) -> Checked<Pa
     let english = tables.term("english").count(latin_letters).max(tables.term("latin").count(latin_letters));
     let ratio = format!("ratio:{}", ratio_of(russian, english));
     let seen = format!("seen:{}:{}", flag(russian > 0), flag(english > 0));
-    let shape = format!("shape:{}", alnum_shape(&item.original));
-    let letters: Vec<char> = item.original.chars().filter(|&c| ucd::isalpha(c)).collect();
+    let shape = format!("shape:{}", alnum_shape(original));
+    let letters: Vec<char> = original.chars().filter(|&c| ucd::isalpha(c)).collect();
     let case = format!(
         "case:{}",
         if letters.iter().all(|&c| ucd::isupper(c)) {
