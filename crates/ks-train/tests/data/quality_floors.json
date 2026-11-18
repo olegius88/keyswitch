@@ -27,5 +27,6 @@
  },
  "RECEIPT_MIN_RESTORED_SHARE": {
   "early_off": 0.97
- }
+ },
+ "RECEIPT_MAX_CORRUPTIONS_NEXT_PAIR": 0
 }
