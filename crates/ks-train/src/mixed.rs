@@ -1303,7 +1303,8 @@ pub fn devchat(request: &DevchatRequest<'_>) -> Result<Value, String> {
             return Err("no development result of this candidate is recorded; the test is not read".to_owned());
         }
         let recorded = crate::corpus::read_json(&development)?;
-        if !recorded["floors"].as_object().is_some_and(|table| table.values().all(|value| value == &json!(true))) {
+        // A table of no floors holds no gain either.
+        if !recorded["floors"].as_object().is_some_and(|table| !table.is_empty() && table.values().all(|value| value == &json!(true))) {
             return Err("the candidate's development result holds no gain; the test is not read".to_owned());
         }
         if recorded["runtime"] != pins || !same_models(&recorded["pairs"]) {

@@ -997,15 +997,35 @@ fn a_check_that_fails_keeps_the_test_unread() {
     let (held, said) = told(promote(&run).arg("--check-only"));
     assert!(!held && said.contains("the calibration could not be compared") && said.contains("no test byte was read"), "{said}");
     std::fs::write(&installed, pair).expect("the installed pair");
-    // No development result of the chat test, or one that holds nothing.
+    // A candidate that has read the chat test is held to what that read recorded: its development result is not asked
+    // again, whatever it holds.
     let development = run.chat.join(format!("{}.dev.json", checksum(&FITTED.model).expect("a checksum")));
     let bytes = std::fs::read(&development).expect("a record");
+    std::fs::write(&development, br#"{"floors": {}}"#).expect("a record");
+    let (held, said) = told(promote(&run).arg("--check-only"));
+    assert!(held && said.contains("every check holds"), "{said}");
+    // One that has not read it: no development result of the chat test, or one that holds nothing.
+    let read_before: Vec<(PathBuf, Vec<u8>)> = ["passed.access.json", "passed.result.json"]
+        .iter()
+        .map(|name| {
+            let path = run.chat.join(name);
+            let record = std::fs::read(&path).expect("a record");
+            std::fs::remove_file(&path).expect("the record goes");
+            (path, record)
+        })
+        .collect();
     for held_nothing in [json!({"floors": {}}), json!({"floors": {"a": false}}), json!({})] {
         std::fs::write(&development, serde_json::to_vec(&held_nothing).expect("json")).expect("a record");
         let (held, said) = told(promote(&run).arg("--check-only"));
-        assert!(!held && said.contains("developer-chat development"), "{said}");
+        assert!(!held && said.contains("development result holds no gain") && said.contains("no test byte was read"), "{said}");
     }
+    std::fs::remove_file(&development).expect("the record goes");
+    let (held, said) = told(promote(&run).arg("--check-only"));
+    assert!(!held && said.contains("no development result of this candidate") && said.contains("no test byte was read"), "{said}");
     std::fs::write(&development, bytes).expect("a record");
+    for (path, record) in read_before {
+        std::fs::write(path, record).expect("a record");
+    }
     // Seals that do not hold.
     let (other, seal) = (run.folder.join("other"), read(&FITTED.seal));
     std::fs::create_dir_all(&other).expect("a folder");
@@ -1082,7 +1102,7 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let run = promotion("no-chat", &accepted_report(&SEALED));
     std::fs::remove_dir_all(&run.chat).expect("the ledger goes");
     let (held, said) = told(promote(&run).arg("--check-only"));
-    assert!(!held && said.contains("developer-chat development"), "{said}");
+    assert!(!held && said.contains("no development result of this candidate"), "{said}");
 }
 
 #[test]
