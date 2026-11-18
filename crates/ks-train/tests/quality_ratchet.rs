@@ -59,8 +59,9 @@ fn the_installed_pair_corrupts_nothing_and_executes_every_row() {
     let (receipt, floors) = (receipt(), floors());
     for (name, mode, candidate, _) in modes(&receipt) {
         let label = format!("{name} {mode}");
-        assert!(number(&candidate["correct_text_corruptions"]) <= number(&floors["RECEIPT_MAX_CORRUPTIONS"]), "{label}");
-        assert_eq!(number(&candidate["initially_correct"]) - number(&candidate["preserved_correct"]), number(&candidate["correct_text_corruptions"]), "{label}");
+        let spoiled = number(&candidate["correct_text_corruptions"]);
+        assert!(spoiled <= number(&floors["RECEIPT_MAX_CORRUPTIONS"]), "{label}");
+        assert_eq!(number(&candidate["initially_correct"]) - number(&candidate["preserved_correct"]), spoiled, "{label}");
         assert!(number(&candidate["execution_errors"]) <= number(&floors["RECEIPT_MAX_EXECUTION_ERRORS"]), "{label}");
         assert!(number(&candidate["length_mismatches"]) <= number(&floors["RECEIPT_MAX_LENGTH_MISMATCHES"]), "{label}");
         assert!(number(&candidate["correction_layout_mismatches"]) <= number(&floors["RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES"]), "{label}");

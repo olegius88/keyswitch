@@ -1,6 +1,8 @@
 //! The replay tools as a person runs them: what they write, what they compare, and how they stop.
 #![cfg(any(not(debug_assertions), coverage))]
 
+mod recorded;
+
 use serde_json::{Value, json};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -80,7 +82,9 @@ fn a_replay_writes_its_report_and_compares_it_with_another() {
 }
 
 fn trace() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ks-trace"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ks-trace"));
+    command.env("KS_REPLAY_TREE", recorded::tree());
+    command
 }
 
 fn traces() -> PathBuf {

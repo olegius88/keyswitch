@@ -27,10 +27,6 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 /// What a trace says in place of the tree it was recorded in.
 const TREE_MARK: &str = "@TREE@";
-/// The context pair the traces were recorded with (their `engine_initialized.context_model_status`): a trace replays the
-/// engine around that pair's answers whatever pair the program ships now, which its own tests and batteries check. Its
-/// artifact is kept in the tree as the frozen base of the pairs fitted onto it.
-const RECORDED_CONTEXT_PAIR: &str = "model/context_v3/frozen-base-48a863e75bb6.json";
 
 /// The tree that holds the resources and the pinned lexicons: this workspace, or the one `KS_REPLAY_TREE` names.
 fn reference_tree() -> PathBuf {
@@ -386,11 +382,7 @@ impl Worker {
     fn kind_of(&self, models: Vec<Arc<LanguageModel>>, prefix_indexes: Vec<Arc<PrefixIndex>>) -> Kind {
         let known = EngineCore::known_of(&models);
         let mut policy = ContextPolicy::new(&self.resources, None, known, Some(Arc::new(|| 0.0)));
-        let recorded = ContextModel::load_artifact(&reference_tree().join(RECORDED_CONTEXT_PAIR), &self.resources.resource_dir().join("models"));
-        let recorded = recorded.expect("the context pair the traces were recorded with");
-        recorded.version.clone_into(&mut policy.status);
-        policy.model = None;
-        let model = Some(recorded);
+        let model = policy.model.take();
         Kind { models, prefix_indexes, policy: Some(policy), model }
     }
 

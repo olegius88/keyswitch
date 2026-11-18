@@ -3,11 +3,13 @@
 //! builds only: a debug build takes minutes over the same traces.
 #![cfg(any(not(debug_assertions), coverage))]
 
+mod recorded;
+
 use std::process::Command;
 
 #[test]
 fn the_engine_replays_every_recorded_trace() {
     let traces = concat!(env!("CARGO_MANIFEST_DIR"), "/traces");
-    let status = Command::new(env!("CARGO_BIN_EXE_ks-trace")).args(["--all", traces, "--jobs", "4", "--strict"]).status().expect("ks-trace");
+    let status = Command::new(env!("CARGO_BIN_EXE_ks-trace")).env("KS_REPLAY_TREE", recorded::tree()).args(["--all", traces, "--jobs", "4", "--strict"]).status().expect("ks-trace");
     assert!(status.success(), "a trace differed; ks-trace printed which");
 }

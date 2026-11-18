@@ -12,6 +12,9 @@ use ks_train::sequence_report::{AllPairs, ByPair, FirstGates, Gated, Gates, Inst
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+/// The installed pair's receipt.
+const RECEIPT: &str = "model/context_v3/release-receipt.json";
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
@@ -22,32 +25,33 @@ fn check(receipt: &Value) -> Result<(), String> {
     validate_evidence(receipt, &models.join("context_policy_v1.json"), &root, &models.join("prefix_policy_v1.json"), &models)
 }
 
-fn installed() -> Value {
-    read_json(&root().join("model/context_v3/release-receipt.json")).unwrap()
-}
-
 /// The installed pair's receipt as protocol 4 states one: the same numbers under the protocol and scope of version 4,
 /// without the first plans and the installed reference that version 5 adds. The checks of a receipt are tried on it, and
 /// on the receipt of version 5 made back from it (`version_five`).
 fn receipt() -> Value {
-    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
-    let set = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION - 1).unwrap();
-    let mut four = installed();
-    four["protocol"] = set["receipt"].clone();
-    four["scope"] = set["scope"].clone();
+    let mut four = read_json(&root().join(RECEIPT)).unwrap();
     let mut test = test_of(&four);
     test.first_ineligible_rows = None;
     test.installed_reference = None;
     for (_, profile) in test.profiles.each_mut() {
         profile.first = None;
     }
-    four["test"] = tree_of(&test);
+    state(&mut four, SEQUENCE_PROTOCOL_VERSION - 1, &test);
     four
+}
+
+/// A receipt stated under the protocol and scope of `version`, with `test` for its test.
+fn state(receipt: &mut Value, version: i64, test: &PublicTest) {
+    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
+    let set = protocol_set(&protocols, version).unwrap();
+    receipt["protocol"] = set["receipt"].clone();
+    receipt["scope"] = set["scope"].clone();
+    receipt["test"] = tree_of(test);
 }
 
 #[test]
 fn the_receipt_of_the_installed_pair_holds() {
-    check(&installed()).unwrap();
+    check(&read_json(&root().join(RECEIPT)).unwrap()).unwrap();
     check(&receipt()).unwrap();
 }
 
@@ -464,11 +468,7 @@ fn a_recipe_of_another_kind_than_the_receipt_knows_is_refused() {
 /// word without first plans, and first plans whose counts, earliness and gates hold together. `restored` gives the rows
 /// the baseline, candidate and installed pairs restore of their wrong first plans, each over ten.
 fn version_five() -> Value {
-    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
-    let set = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION).unwrap();
     let mut five = receipt();
-    five["protocol"] = set["receipt"].clone();
-    five["scope"] = set["scope"].clone();
     let mut test = test_of(&five);
     let words = test.documents.us + test.documents.ru - 1;
     // The candidate restores all but twenty of the words, the baseline ten fewer, the installed pair five fewer.
@@ -512,7 +512,7 @@ fn version_five() -> Value {
             gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
         });
     }
-    five["test"] = tree_of(&test);
+    state(&mut five, SEQUENCE_PROTOCOL_VERSION, &test);
     five
 }
 

@@ -1615,23 +1615,6 @@ mod tests {
     }
 
     #[test]
-    fn a_key_the_engine_fails_on_goes_to_its_recovery_and_the_typing_goes_on() {
-        let root = repository();
-        let bench = Bench::new(&root.join("resources")).expect("a bench");
-        let mut typist = bench.typist(&root.join("resources/models/context_policy_v1.json"), 7, Vec::new(), false).expect("a typist");
-        let mut session = typist.session(0, false).expect("a session");
-        // Every correction and layout switch fails, as when the window closes under them: `ghbdtn` is not converted at its
-        // space, the engine forgets the word and the keys after it are typed as they come.
-        session.backend.set_failing(true);
-        for key in "ghbdtn ok ".chars() {
-            let event = session.keys.key(&key.to_string(), session.backend.group());
-            Typist::tap(&mut session, event);
-        }
-        assert_eq!(typist.finish(session), "ghbdtn ok ");
-        let _ = std::fs::remove_dir_all(&typist.folder);
-    }
-
-    #[test]
     fn a_message_the_engine_fails_on_is_an_error_and_the_next_one_is_typed() {
         let root = repository();
         let bench = Bench::new(&root.join("resources")).expect("a bench");

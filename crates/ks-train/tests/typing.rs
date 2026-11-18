@@ -70,7 +70,9 @@ static BENCH: LazyLock<Bench> = LazyLock::new(|| {
     let code = folder.join("code.txt.gz");
     std::fs::write(&code, gz(&["let x = 1;".to_owned(), "fn main() {}".to_owned()])).expect("a file");
     let root = tree();
-    Bench { folder, messages, code, resources: root.join("resources"), model: root.join("resources/models/context_policy_v1.json") }
+    // The pair of 0.73.0, kept as the frozen base of the pairs fitted onto it: the engine fails at `TLV` with it, and the
+    // bench's recovery from an engine error is typed through as well, whatever pair the program ships.
+    Bench { folder, messages, code, resources: root.join("resources"), model: root.join("model/context_v3/frozen-base-48a863e75bb6.json") }
 });
 
 fn base_recipe() -> Value {

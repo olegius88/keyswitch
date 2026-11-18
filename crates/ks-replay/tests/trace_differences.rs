@@ -2,6 +2,8 @@
 //! stop that trace there; and the tool itself, run over folders it cannot read, with workers that die or cannot start.
 #![cfg(any(not(debug_assertions), coverage))]
 
+mod recorded;
+
 use ks_config::config::default_settings;
 use ks_config::constants::SETTINGS_SINCE_PYTHON;
 use serde_json::{Value, json};
@@ -72,7 +74,9 @@ fn write(folder: &Path, name: &str, trace: &Value) {
 }
 
 fn trace_tool() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ks-trace"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ks-trace"));
+    command.env("KS_REPLAY_TREE", recorded::tree());
+    command
 }
 
 /// One entry that changes nothing, with what is seen after it.

@@ -833,7 +833,7 @@
     "tests/receipt.rs": {
      "expect_roots": 1,
      "string_key_index": 209,
-     "value_tokens": 94
+     "value_tokens": 95
     },
     "tests/release_tools.rs": {
      "expect_roots": 1,
@@ -896,7 +896,7 @@
    },
    "literal_compares": 254,
    "string_key_index": 2816,
-   "value_tokens": 3726
+   "value_tokens": 3727
   },
   "ks-ui": {
    "expect_roots": 1,
