@@ -22,12 +22,32 @@ fn check(receipt: &Value) -> Result<(), String> {
     validate_evidence(receipt, &models.join("context_policy_v1.json"), &root, &models.join("prefix_policy_v1.json"), &models)
 }
 
-fn receipt() -> Value {
+fn installed() -> Value {
     read_json(&root().join("model/context_v3/release-receipt.json")).unwrap()
+}
+
+/// The installed pair's receipt as protocol 4 states one: the same numbers under the protocol and scope of version 4,
+/// without the first plans and the installed reference that version 5 adds. The checks of a receipt are tried on it, and
+/// on the receipt of version 5 made back from it (`version_five`).
+fn receipt() -> Value {
+    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
+    let set = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION - 1).unwrap();
+    let mut four = installed();
+    four["protocol"] = set["receipt"].clone();
+    four["scope"] = set["scope"].clone();
+    let mut test = test_of(&four);
+    test.first_ineligible_rows = None;
+    test.installed_reference = None;
+    for (_, profile) in test.profiles.each_mut() {
+        profile.first = None;
+    }
+    four["test"] = tree_of(&test);
+    four
 }
 
 #[test]
 fn the_receipt_of_the_installed_pair_holds() {
+    check(&installed()).unwrap();
     check(&receipt()).unwrap();
 }
 
@@ -440,7 +460,7 @@ fn a_recipe_of_another_kind_than_the_receipt_knows_is_refused() {
     }
 }
 
-/// The installed pair's receipt as protocol 5 states one: the same numbers under the protocol and scope of version 5, a
+/// The receipt of version 4 as protocol 5 states one: the same numbers under the protocol and scope of version 5, a
 /// word without first plans, and first plans whose counts, earliness and gates hold together. `restored` gives the rows
 /// the baseline, candidate and installed pairs restore of their wrong first plans, each over ten.
 fn version_five() -> Value {
@@ -451,6 +471,8 @@ fn version_five() -> Value {
     five["scope"] = set["scope"].clone();
     let mut test = test_of(&five);
     let words = test.documents.us + test.documents.ru - 1;
+    // The candidate restores all but twenty of the words, the baseline ten fewer, the installed pair five fewer.
+    let restored = words - 20;
     test.first_ineligible_rows = Some(1);
     test.installed_reference = Some(InstalledReference { context_sha256: "a".repeat(64), prefix_sha256: "b".repeat(64) });
     let counts = |restored: i64, spoiled: i64| PairCounts {
@@ -485,8 +507,8 @@ fn version_five() -> Value {
     };
     for (_, profile) in test.profiles.each_mut() {
         profile.first = Some(PublicFirst {
-            counts: ByPair { baseline: counts(690, 1), candidate: counts(700, 0), installed: counts(695, 1) },
-            earliness: ByPair { baseline: early(690), candidate: early(700), installed: early(695) },
+            counts: ByPair { baseline: counts(restored - 10, 1), candidate: counts(restored, 0), installed: counts(restored - 5, 1) },
+            earliness: ByPair { baseline: early(restored - 10), candidate: early(restored), installed: early(restored - 5) },
             gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
         });
     }
@@ -566,7 +588,7 @@ fn the_first_plans_of_a_receipt_hold_together() {
     refuses_five_typed(GATES, |test| {
         // The baseline restores more than the candidate: its earliness moves with it.
         let first = first_of(test);
-        first.counts.baseline.exactly_restored = 702;
+        first.counts.baseline.exactly_restored = first.counts.candidate.exactly_restored + 2;
         let early = &mut first.earliness.baseline;
         early.inside_word += 12;
         early.never -= 12;
