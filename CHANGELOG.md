@@ -4,6 +4,9 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- A term of letters and digits typed in the Russian layout with a comma or a full stop after it is converted with its sign: `шзм6б` before the rest of a Russian sentence becomes `ipv6,` and `ч64б` becomes `x64,`, as `шзм6` alone became `ipv6`. The comma typed in the Russian layout is the letter `б`, and with it the token was no token of letters and digits to the model, which left it as typed. A digit and a letter of Russian text (`5б`) stay as they are.
+- For developers: the letters-and-digits head's question and evidence set aside one comma or full stop at the end of the Latin reading typed with `б` or `ю` (`context_action_features::without_trailing_sign`), as the term head does; `crates/ks-replay/tests/alnum_signs.rs` types the case through the engine.
+
 ## 0.74.0 — 2026-11-18
 
 - Linux: the tray icon appears when the panel starts after KeySwitch. Started with the session, KeySwitch can be up before the desktop's panel; its icon then found no panel to register with and stayed away until KeySwitch was started again. It now registers as soon as a panel is there, and again whenever the panel starts again.
