@@ -616,3 +616,84 @@ fn the_currency_codes_are_taught_as_written_and_by_their_keys() {
         assert!(!codes.contains(*second), "{split}: the refused code");
     }
 }
+
+/// Rows whose first words no lexicon knows, and one of a letter no layout types.
+fn feel_rows() -> Vec<CorpusRow> {
+    let folder = scratch("curricula-feel");
+    let sentences: [(i64, &[&str]); 5] = [(1, &["кракозябра", "сидит"]), (1, &["трулялятор", "и"]), (0, &["zorblaxing", "the"]), (1, &["ñandu", "дом"]), (1, &["дом", "стоит"])];
+    let made: Vec<Value> = sentences.iter().enumerate().map(|(index, (group, words))| row("train", index, *group, words, 0)).collect();
+    let mut manifest = json!({"splits": {}});
+    write_split(&folder, "train", &made, &mut manifest);
+    std::fs::write(folder.join("manifest.json"), serde_json::to_vec(&manifest).expect("json")).expect("a manifest");
+    load_rows(&folder, "train").expect("the rows")
+}
+
+#[test]
+fn a_made_up_word_joins_syllables_or_changes_two_letters_of_their_kind() {
+    let (vowels, letters) = ("аеёиоуыэюя", "абвгдежзийклмнопрстуфхцчшщыэюя");
+    // The first half of the syllables of one word and the second half of another's.
+    assert_eq!(c::feel_word("малина", "дорога", 0, "stem", vowels, letters).as_deref(), Some("малирога"));
+    // A word of one syllable cannot be cut, first or second.
+    assert_eq!(c::feel_word("скрст", "дорога", 0, "stem", vowels, letters), None);
+    assert_eq!(c::feel_word("дорога", "скрст", 0, "stem", vowels, letters), None);
+    // Two letters changed, each into another of its kind.
+    let changed = c::feel_word("малина", "", 1, "stem", vowels, letters).expect("a word");
+    let pairs: Vec<(char, char)> = "малина".chars().zip(changed.chars()).filter(|(old, new)| old != new).collect();
+    assert_eq!(pairs.len(), 2, "{changed}");
+    assert!(pairs.iter().all(|(old, new)| vowels.contains(*old) == vowels.contains(*new)), "{changed}");
+}
+
+#[test]
+fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
+    let tools = &*TOOLS;
+    let rows = feel_rows();
+    let options = |made_up: usize, real: usize, file: &str| c::FeelOptions { made_up_per_language: made_up, real_per_language: real, sample_weight: 1.0, held_out_file: file.to_owned(), scope: String::new() };
+    let feel = options(300, 5, "model/context_v3/feel-held-out.json");
+    let mut words = BTreeSet::new();
+    for split in &SPLITS[..2] {
+        let (frames, _) = c::feel_curriculum(tools, split, &rows, &feel).expect("frames");
+        for frame in &frames {
+            assert_eq!(frame.category, "feel");
+            let other = ks_train::physical::reading(&frame.original, frame.group);
+            assert!(ks_context::context_action_features::start_question(&frame.original, &other, &frame.field.before, &frame.field.after), "{}", frame.original);
+            words.insert(frame.original.to_lowercase());
+        }
+        // Each word kept as meant and converted from the other layout, at a space and at one more boundary: 300 made up
+        // in each language, and the words of the rows no lexicon knows.
+        let kept: Vec<&ActionRow> = frames.iter().filter(|frame| frame.action == ContextAction::Keep && frame.trigger == "space").collect();
+        assert_eq!(kept.len() * 4, frames.len());
+        assert!(kept.iter().filter(|frame| frame.group == 0).count() > 300, "{split}");
+        assert!(kept.iter().filter(|frame| frame.group == 1).count() > 300, "{split}");
+        for word in ["трулялятор", "zorblaxing"] {
+            assert!(kept.iter().any(|frame| frame.original.to_lowercase() == word), "{split}: {word}");
+        }
+    }
+    // Real words alone, the made-up ones not.
+    let only_real = c::feel_curriculum(tools, "train", &rows, &options(0, 5, "model/context_v3/feel-held-out.json")).expect("frames");
+    assert!(reported(&only_real) > 0 && reported(&only_real) < 40);
+    // The words of the held-out file are left out, in either reading.
+    let folder = scratch("feel-held-out");
+    let mut digests = Vec::new();
+    for word in &words {
+        let group = i64::from(!word.is_ascii());
+        for alias in [word.clone(), ks_train::physical::reading(word, group)] {
+            digests.push(format!("{:?}", ks_train::physical::hex_digest(&format!("salt:{alias}")).chars().take(16).collect::<String>()));
+        }
+    }
+    let held = folder.join("held.json");
+    std::fs::write(&held, format!(r#"{{"scope": "test", "salt": "salt:", "digits": 16, "digests": [{}]}}"#, digests.join(", "))).expect("a file");
+    let (again, _) = c::feel_curriculum(tools, "train", &rows, &options(300, 5, held.to_str().expect("a path"))).expect("frames");
+    assert!(!again.is_empty() && again.iter().all(|frame| !words.contains(&frame.original.to_lowercase())));
+    // Nothing asked or nothing for this split; no file, or one that is not the file.
+    assert_eq!(reported(&c::feel_curriculum(tools, "calibration", &rows, &feel).expect("none")), 0);
+    assert_eq!(reported(&c::feel_curriculum(tools, "train", &rows, &options(0, 0, "")).expect("none")), 0);
+    assert!(c::feel_curriculum(tools, "train", &rows, &options(1, 0, "no/such/file.json")).is_err());
+    std::fs::write(folder.join("other.json"), "{}").expect("a file");
+    assert!(c::feel_curriculum(tools, "train", &rows, &options(1, 0, folder.join("other.json").to_str().expect("a path"))).is_err());
+    // A recipe whose part is not the curriculum's options.
+    let recipe = recipe();
+    let mut wrong = recipe.clone();
+    wrong["feel_curriculum"]["extra"] = Value::Bool(true);
+    assert!(own_curriculum(tools, "feel", "train", &rows, &wrong).unwrap_err().contains("feel_curriculum"));
+    assert!(own_curriculum(tools, "feel", "calibration", &rows, &recipe).is_ok());
+}

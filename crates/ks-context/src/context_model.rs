@@ -131,6 +131,12 @@ pub struct ContextEvidence {
     pub literal_tail: String,
     pub ortho_score: Option<f64>,
     pub ortho_threshold: Option<f64>,
+    /// The orthotactic model's log-probability a key of the reading its total judged (`OrthoScore::reading`, the end of
+    /// the word counted as a key, as the model's plausibility feature counts it): in the channel of the layout the token
+    /// was typed in, and in the other layout's channel. A word no lexicon knows in either reading is told apart by them
+    /// as a person tells it by its letters (the feel head).
+    pub ortho_typed_mean: Option<f64>,
+    pub ortho_other_mean: Option<f64>,
     pub boundary_text: String,
     pub after_origin: AfterOrigin,
     pub before_origin: BeforeOrigin,
@@ -171,6 +177,8 @@ impl ContextEvidence {
             literal_tail: String::new(),
             ortho_score: None,
             ortho_threshold: None,
+            ortho_typed_mean: None,
+            ortho_other_mean: None,
             boundary_text: String::new(),
             after_origin: AfterOrigin::None,
             before_origin: BeforeOrigin::Field,

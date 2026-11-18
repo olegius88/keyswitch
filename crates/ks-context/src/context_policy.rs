@@ -301,6 +301,7 @@ pub fn evidence_for_decision(
     let target_identifier = lexicon.is_some_and(|lexicon| lexicon.contains(alternative));
     let mut ortho_score = None;
     let mut ortho_threshold = None;
+    let mut ortho_means = None;
     if let Some(ortho) = options.ortho
         && (baseline.source_group == 0 || baseline.source_group == 1)
     {
@@ -311,6 +312,8 @@ pub fn evidence_for_decision(
         if scored.supported {
             ortho_score = Some(scored.total);
             ortho_threshold = Some(*ortho.thresholds.get(script));
+            let positions = (pystr::len(&scored.reading) + 1).to::<f64>();
+            ortho_means = Some((scored.source_logprob / positions, scored.target_logprob / positions));
         }
     }
     let mut evidence = ContextEvidence::new(&baseline.original, alternative, baseline.source_group, field.clone());
@@ -326,6 +329,8 @@ pub fn evidence_for_decision(
     evidence.literal_tail = options.literal_tail.to_string();
     evidence.ortho_score = ortho_score;
     evidence.ortho_threshold = ortho_threshold;
+    evidence.ortho_typed_mean = ortho_means.map(|means| means.0);
+    evidence.ortho_other_mean = ortho_means.map(|means| means.1);
     evidence.boundary_text = options.boundary_text.to_string();
     evidence.after_origin = options.after_origin;
     evidence.source_identifier = source_identifier;

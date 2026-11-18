@@ -205,6 +205,8 @@ mod tests {
             literal_tail: String::new(),
             ortho_score: None,
             ortho_threshold: None,
+            ortho_typed_mean: None,
+            ortho_other_mean: None,
             boundary_text: " ".to_owned(),
             after_origin: AfterOrigin::None,
             before_origin: BeforeOrigin::Field,

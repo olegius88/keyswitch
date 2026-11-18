@@ -3,7 +3,7 @@
 use ks_context::context_action_features::{
     abbreviation_question, alnum_question, alone_question, attested_abbreviation, brief_dominant, brief_question, brief_settled, capitals_question, cyrletter_question, dash_question, digit_dot_question,
     dotted_question, first_question, joined_parts, joined_question, kept_context_reachable, known_reply_question, latin_abbreviation_question, letter_question, letters_and_digits, nearest_count, quote_question,
-    common_question, common_shape, line_place, resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
+    common_question, common_shape, feel_question, line_place, resume_question, russian_ending_bucket, russian_start_bucket, short_question, sign_question, sign_token_asked, slip_question, start_question, term_question, unknown_cyrillic, unknown_question, unknown_shape,
     upper_question, upper_shape, variable_question, words_of,
 };
 use ks_backend::{FieldContext, FieldRole};
@@ -91,6 +91,9 @@ fn every_question_answers_for_every_token_in_every_place() {
                 count(alone_question(original, alternative, before, after, "space", &tables).unwrap_or(false));
                 count(alone_question(original, alternative, before, after, "pause", &tables).unwrap_or(false));
                 count(start_question(original, alternative, before, after));
+                let mut unknown = evidence(original, alternative, before, after, "space", AfterOrigin::None, false);
+                unknown.target_known = false;
+                count(feel_question(&unknown).is_some());
                 count(first_question(original, before, after, &tables));
                 count(brief_question(original, alternative, before, after, &tables).unwrap_or(false));
                 count(known_reply_question(original, alternative, before, after, &tables).unwrap_or(false));
@@ -126,6 +129,8 @@ fn evidence(original: &str, alternative: &str, before: &str, after: &str, trigge
         literal_tail: String::new(),
         ortho_score: Some(1.0),
         ortho_threshold: Some(1.0),
+        ortho_typed_mean: Some(-4.0),
+        ortho_other_mean: Some(-6.0),
         boundary_text: " ".to_owned(),
         after_origin: origin,
         before_origin: BeforeOrigin::Field,

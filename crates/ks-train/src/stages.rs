@@ -87,7 +87,8 @@ fn evidence_list(item: &ContextEvidence) -> Vec<Value> {
         json!(item.trigger), json!(item.baseline_convert), json!(item.source_known), json!(item.target_known), json!(hex_of(item.score_delta)), optional_hex(item.model_probability),
         optional_hex(item.model_threshold), json!(item.literal_tail), optional_hex(item.ortho_score), optional_hex(item.ortho_threshold), json!(item.boundary_text),
         json!(item.after_origin.as_str()), json!(item.before_origin.as_str()), json!(item.source_identifier), json!(item.target_identifier), json!(item.source_typo), json!(item.target_typo),
-        json!(item.source_opening), json!(item.target_opening), json!(item.inside), json!(item.term_counts_dropped),
+        json!(item.source_opening), json!(item.target_opening), json!(item.inside), json!(item.term_counts_dropped), optional_hex(item.ortho_typed_mean),
+        optional_hex(item.ortho_other_mean),
     ]);
     items
 }

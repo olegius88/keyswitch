@@ -51,6 +51,17 @@ const PLANNED_CONTEXT_AFTER_MAX_CHARACTERS: usize = 64;
 const PLANNED_CONTEXT_WORD_MAX_CHARACTERS: usize = 3;
 const LAYOUT_GROUP_COUNT: usize = 2;
 const CURRENCY_SPLIT_MODULUS: usize = 5;
+const FEEL_SPLIT_MODULUS: usize = 5;
+const FEEL_BASE_LETTERS: std::ops::RangeInclusive<usize> = 5..=9;
+const FEEL_WORD_LETTERS: std::ops::RangeInclusive<usize> = 5..=10;
+const FEEL_REAL_LETTERS: std::ops::RangeInclusive<usize> = 4..=12;
+const FEEL_ATTEMPTS_PER_WORD: usize = 50;
+const FEEL_CAPITAL_MODULUS: usize = 3;
+const FEEL_BOUNDARIES: [(&str, &str); 4] = [("punctuation", "."), ("punctuation", ","), ("enter", "\n"), ("pause", "")];
+const FEEL_RUSSIAN_VOWELS: &str = "аеёиоуыэюя";
+const FEEL_ENGLISH_VOWELS: &str = "aeiouy";
+const FEEL_RUSSIAN_LETTERS: &str = "абвгдежзийклмнопрстуфхцчшщыэюя";
+const FEEL_ENGLISH_LETTERS: &str = "abcdefghijklmnopqrstuvwxyz";
 
 pub type Curriculum = (Vec<ActionRow>, Value);
 
@@ -1200,4 +1211,152 @@ pub fn lone_word_curriculum(tools: &Tools, split: &str, evidence: &Value, decide
 #[must_use]
 pub fn curated(original: &str, alternative: &str) -> bool {
     curated_letter(original, alternative)
+}
+
+/// The recipe's `feel_curriculum`: how many words of each language the frames type, of the split's documents and made up,
+/// their weight, and the file of the words left out (`FeelHeldOut`), from the tree's root.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FeelOptions {
+    #[serde(default)]
+    pub made_up_per_language: usize,
+    #[serde(default)]
+    pub real_per_language: usize,
+    pub sample_weight: f64,
+    pub held_out_file: String,
+    #[serde(default)]
+    pub scope: String,
+}
+
+/// The words the feel curriculum leaves out, by digest: the words of the sets the feel head is accepted on and their
+/// other-layout readings, casefolded, each as the first `digits` hex digits of SHA-256 of `salt` and the word. The sets
+/// themselves are not in the tree.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FeelHeldOut {
+    #[serde(rename = "scope")]
+    _scope: String,
+    salt: String,
+    digits: usize,
+    digests: BTreeSet<String>,
+}
+
+impl FeelHeldOut {
+    fn holds(&self, word: &str) -> bool {
+        let digest = hex_digest(&format!("{}{}", self.salt, pystr::casefold(word)));
+        self.digests.contains(pystr::slice(&digest, None, Some(self.digits.to::<i64>())))
+    }
+}
+
+/// The syllables of a word as the feel curriculum cuts them: its vowels are the nuclei, and of the consonants between two
+/// vowels the last goes with the next vowel.
+fn feel_syllables(word: &[char], vowels: &str) -> Vec<String> {
+    let places: Vec<usize> = word.iter().enumerate().filter(|(_, letter)| vowels.contains(**letter)).map(|(place, _)| place).collect();
+    if places.len() < 2 {
+        return vec![word.iter().collect()];
+    }
+    let mut cuts = vec![0];
+    cuts.extend(places.windows(2).map(|pair| pair[0] + 1 + (pair[1] - pair[0] - 1).saturating_sub(1)));
+    cuts.push(word.len());
+    cuts.windows(2).map(|cut| word[cut[0]..cut[1]].iter().collect()).collect()
+}
+
+/// A made-up word of a language from two words of its prose, by the rule `rule` (`stem` chooses everything): 0 joins the
+/// first half of the first word's syllables to the second half of the second's; 1 replaces two letters of the first word,
+/// at two places, by other letters of the same kind (a vowel by a vowel, a consonant by a consonant).
+#[must_use]
+pub fn feel_word(first: &str, second: &str, rule: usize, stem: &str, vowels: &str, letters: &str) -> Option<String> {
+    let first: Vec<char> = first.chars().collect();
+    if rule == 0 {
+        let (head, tail) = (feel_syllables(&first, vowels), feel_syllables(&second.chars().collect::<Vec<char>>(), vowels));
+        if head.len() < 2 || tail.len() < 2 {
+            return None;
+        }
+        return Some(head[..head.len().div_ceil(2)].concat() + &tail[tail.len() / 2..].concat());
+    }
+    let mut word = first;
+    let one = variant_choice(stem, "place", word.len());
+    let other = (one + 1 + variant_choice(stem, "other place", word.len() - 1)) % word.len();
+    for (place, purpose) in [(one, "letter"), (other, "other letter")] {
+        let kind: Vec<char> = letters.chars().filter(|letter| vowels.contains(*letter) == vowels.contains(word[place]) && *letter != word[place]).collect();
+        word[place] = kind[variant_choice(stem, purpose, kind.len())];
+    }
+    Some(word.into_iter().collect())
+}
+
+/// `feel_curriculum`: words of the feel head's class (`features::feel_question`) alone in a field, typed as meant (keep) and
+/// in the other layout (convert), at a space and at one more boundary, a third of them with a capital: the focus words of
+/// this split's documents that neither reading's lexicon knows, and words made up from this split's share of the prose
+/// tables by the two rules of `feel_word`, unknown to every table and lexicon the program loads. The words of the head's
+/// acceptance sets are left out by digest (`held_out_file`).
+pub fn feel_curriculum(tools: &Tools, split: &str, source_rows: &[CorpusRow], options: &FeelOptions) -> Result<Curriculum, String> {
+    let (made_up, real, weight) = (options.made_up_per_language, options.real_per_language, options.sample_weight);
+    if (made_up == 0 && real == 0) || (split != TRAIN && split != DEVELOPMENT) {
+        return Ok(not_used());
+    }
+    let path = tools.root.join(&options.held_out_file);
+    let held: FeelHeldOut = ks_text::json::loads(&std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?).map_err(|error| format!("{}: {error}", path.display()))?;
+    let known = |word: &str, group: i64| tools.portable[group.to::<usize>()].score(word).known;
+    let counted = |word: &str| ["russian", "english", "latin", "cyrillic"].iter().any(|alphabet| tools.count(alphabet, &pystr::casefold(word)) > 0);
+    let identifier = |word: &str| tools.identifiers.as_ref().is_some_and(|lexicon| lexicon.contains(word));
+    let free = |word: &str, other: &str| !held.holds(word) && !held.holds(other) && !tools.is_refused(&[word, other]);
+    let unknown = |word: &str, other: &str, group: i64| !known(word, group) && !known(other, 1 - group) && !identifier(word) && !identifier(other);
+    let mut words: Vec<(String, i64, &'static str)> = Vec::new();
+    let mut counts = Counts::default();
+    let mut seen = BTreeSet::new();
+    for (language, group) in [("ru", 1), ("en", 0)] {
+        // The focus words of this split's documents, in the order of their digests.
+        let mut found: Vec<([u8; 32], String)> = Vec::new();
+        for row in source_rows.iter().filter(|row| row.language == language && row.group == Some(group)) {
+            let word = pystr::casefold(&row.original);
+            let Ok(other) = crate::physical::translated(&word, group) else { continue };
+            if FEEL_REAL_LETTERS.contains(&pystr::len(&word)) && pystr::isalpha(&word) && pystr::isalpha(&other) && unknown(&word, &other, group) && free(&word, &other) {
+                found.push((sha256(&format!("feel:{word}")), word));
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        for (_, word) in found.into_iter().take(real) {
+            counts.add(format!("real:{language}"));
+            words.push((word, group, "real"));
+        }
+        let (vowels, letters, table) = if group == 1 { (FEEL_RUSSIAN_VOWELS, FEEL_RUSSIAN_LETTERS, "russian") } else { (FEEL_ENGLISH_VOWELS, FEEL_ENGLISH_LETTERS, "english") };
+        let mut bases: Vec<&str> = tools.tables.term(table).words().filter(|word| FEEL_BASE_LETTERS.contains(&pystr::len(word)) && word.chars().all(|letter| letters.contains(letter)) && share_of(&format!("feel:{word}"), FEEL_SPLIT_MODULUS) == split).collect();
+        bases.sort_unstable();
+        let mut made = 0;
+        for attempt in 0..made_up * FEEL_ATTEMPTS_PER_WORD {
+            if made == made_up {
+                break;
+            }
+            let stem = format!("feel:{split}:{language}:{attempt}");
+            let first = bases[variant_choice(&stem, "first", bases.len())];
+            let second = bases[variant_choice(&stem, "second", bases.len())];
+            // A word joined to itself is that word, which the tables count.
+            let Some(word) = feel_word(first, second, attempt % 2, &stem, vowels, letters).filter(|word| FEEL_WORD_LETTERS.contains(&pystr::len(word))) else { continue };
+            let other = reading(&word, group);
+            if !pystr::isalpha(&other) || counted(&word) || counted(&other) || !unknown(&word, &other, group) || !free(&word, &other) || !seen.insert(word.clone()) {
+                continue;
+            }
+            made += 1;
+            counts.add(format!("made_up:{language}"));
+            words.push((word, group, "made_up"));
+        }
+    }
+    let mut rows = Vec::new();
+    for (word, group, kind) in &words {
+        for (typed, layout, action) in [(word.clone(), *group, Keep), (reading(word, *group), 1 - group, Convert)] {
+            let stem = format!("feel:{kind}:{typed}");
+            let typed = if variant_choice(&stem, "capital", FEEL_CAPITAL_MODULUS) == 0 { pystr::capitalize(&typed) } else { typed };
+            let mut field = field_of(application_of(&stem), crate::rows::PUBLIC_TRAINING, "", "", FieldRole::Text);
+            "reader".clone_into(&mut field.source);
+            let (trigger, boundary) = FEEL_BOUNDARIES[variant_choice(&stem, "boundary", FEEL_BOUNDARIES.len())];
+            for (trigger, boundary) in [("space", " "), (trigger, boundary)] {
+                counts.add(format!("{}:{kind}", action.as_str()));
+                rows.push(ActionRow::new(format!("{stem}:{trigger}:{}", boundary.escape_default()), typed.as_str(), layout, field.clone(), trigger, action, "feel", boundary).weighing(weight));
+            }
+        }
+    }
+    let frames = rows.len();
+    Ok((rows, json!({"frames": frames, "items": counts.report(), "held_out": held.digests.len(), "sample_weight": weight,
+        "scope": "words of four letters or more that neither reading's lexicon knows, alone in a field a reader read empty, typed as meant (keep) and in the other layout (convert), at a space and at one more boundary: the focus words of this split's documents and words made up from this split's share of the prose tables (feel_curriculum)."})))
 }

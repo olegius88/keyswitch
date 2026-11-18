@@ -6,7 +6,7 @@
 use crate::corpus::{CALIBRATION, DEVELOPMENT};
 use crate::fit::{Columns, FeatureSet, FitInputs, Frame, Stages, build_features_of_splits};
 use crate::ACTIONS;
-use ks_context::constants::{ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, COMMON_FEATURE_PREFIX};
+use ks_context::constants::{ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, CAPITALS_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, COMMON_FEATURE_PREFIX, FEEL_FEATURE_PREFIX};
 use ks_context::context_action_features::FeatureMap;
 use ks_context::context_model::{ACTIONS as ACTION_NAMES, ContextModel, softmax};
 use serde_json::{Map, Value, json};
@@ -15,9 +15,10 @@ use std::collections::{BTreeMap, HashMap};
 
 /// The classes a frame is counted in, by the first head whose prefix its features hold: a token in capitals is counted
 /// with the upper-case head whatever other head answers it too.
-const HEAD_CLASSES: [(&str, &str); 14] = [
+const HEAD_CLASSES: [(&str, &str); 15] = [
     ("upper", UPPER_FEATURE_PREFIX),
     ("common", COMMON_FEATURE_PREFIX),
+    ("feel", FEEL_FEATURE_PREFIX),
     ("abbreviation", ABBREVIATION_FEATURE_PREFIX), ("latin_abbreviation", LATIN_ABBREVIATION_FEATURE_PREFIX), ("letter", LETTER_FEATURE_PREFIX), ("alone", ALONE_FEATURE_PREFIX),
     ("start", START_FEATURE_PREFIX), ("capitals", CAPITALS_FEATURE_PREFIX), ("kept", KEPT_FEATURE_PREFIX), ("unknown", UNKNOWN_FEATURE_PREFIX), ("joined", JOINED_FEATURE_PREFIX),
     ("first", FIRST_FEATURE_PREFIX), ("term", TERM_FEATURE_PREFIX), ("brief", BRIEF_FEATURE_PREFIX),

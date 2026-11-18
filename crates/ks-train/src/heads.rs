@@ -6,7 +6,7 @@ use crate::curricula::{self, Curriculum};
 use crate::physical::reading;
 use crate::rows::ActionRow;
 use crate::tools::{Options, Tools};
-use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, COMMON_FEATURE_PREFIX};
+use ks_context::constants::{CAPITALS_FEATURE_PREFIX, ALONE_FEATURE_PREFIX, START_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, ABBREVIATION_FEATURE_PREFIX, LATIN_ABBREVIATION_FEATURE_PREFIX, UNKNOWN_FEATURE_PREFIX, JOINED_FEATURE_PREFIX, TERM_FEATURE_PREFIX, BRIEF_FEATURE_PREFIX, FIRST_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX, DOTTED_FEATURE_PREFIX, ALNUM_FEATURE_PREFIX, HYPOTHESIS_FEATURE_PREFIX, SHORT_FEATURE_PREFIX, SLIP_FEATURE_PREFIX, SIGN_FEATURE_PREFIX, RESUME_FEATURE_PREFIX, CYRLETTER_FEATURE_PREFIX, DASH_FEATURE_PREFIX, DIGIT_DOT_FEATURE_PREFIX, QUOTE_FEATURE_PREFIX, KNOWN_REPLY_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, COMMON_FEATURE_PREFIX, FEEL_FEATURE_PREFIX};
 use ks_context::context_action_features as f;
 use ks_context::context_model::{AfterOrigin, BeforeOrigin, ContextEvidence};
 use ks_text::pystr;
@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
 /// The heads a frozen base can carry besides the kept-neighbour question, by the recipe's name.
-pub const HEAD_PREFIXES: [(&str, &str); 26] = [
+pub const HEAD_PREFIXES: [(&str, &str); 27] = [
     ("capitals", CAPITALS_FEATURE_PREFIX),
     ("alone", ALONE_FEATURE_PREFIX),
     ("start", START_FEATURE_PREFIX),
@@ -42,11 +42,12 @@ pub const HEAD_PREFIXES: [(&str, &str); 26] = [
     ("knownreply", KNOWN_REPLY_FEATURE_PREFIX),
     ("upper", UPPER_FEATURE_PREFIX),
     ("common", COMMON_FEATURE_PREFIX),
+    ("feel", FEEL_FEATURE_PREFIX),
 ];
 
 /// The heads whose own frames of DEVELOPMENT choose their epoch, by feature prefix: the name their epoch goes by in the
 /// seal and the recipe's key of their curriculum.
-pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 19] = [
+pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 20] = [
     (JOINED_FEATURE_PREFIX, "joined", "joined_token_curriculum"),
     (TERM_FEATURE_PREFIX, "term", "term_curriculum"),
     (BRIEF_FEATURE_PREFIX, "brief", "brief_curriculum"),
@@ -66,6 +67,7 @@ pub const OWN_EPOCH_HEADS: [(&str, &str, &str); 19] = [
     (KNOWN_REPLY_FEATURE_PREFIX, "knownreply", "brief_curriculum"),
     (UPPER_FEATURE_PREFIX, "upper", "upper_curriculum"),
     (COMMON_FEATURE_PREFIX, "common", "common_curriculum"),
+    (FEEL_FEATURE_PREFIX, "feel", "feel_curriculum"),
 ];
 
 /// A recipe without a curriculum's options frames nothing.
@@ -120,6 +122,7 @@ pub fn own_curriculum(tools: &Tools, label: &str, split: &str, source_rows: &[Co
             let currencies = options.get("currencies").map(|part| curricula::CurrencyOptions::deserialize(part).expect("the recipe's currencies: contexts_per_code and sample_weight"));
             Ok(curricula::currency_curriculum(tools, split, source_rows, currencies.as_ref(), &held, captured))
         }
+        "feel" => curricula::feel_curriculum(tools, split, source_rows, &curricula::FeelOptions::deserialize(options).map_err(|error| format!("the recipe's feel_curriculum: {error}"))?),
         "knownreply" => {
             let (rows, mut report) = curricula::brief_curriculum(tools, split, options);
             let rows: Vec<ActionRow> = rows.into_iter().filter(|row| f::known_reply_question(&row.original, &reading(&row.original, 0), "", "", t).expect("the packaged capitals table")).collect();
@@ -152,7 +155,7 @@ pub fn head_question(tools: &Tools, original: &str, alternative: &str, before: &
         || (has(ABBREVIATION_FEATURE_PREFIX) && f::abbreviation_question(original, alternative, before, t))
         || (has(LATIN_ABBREVIATION_FEATURE_PREFIX) && f::latin_abbreviation_question(original, alternative, before, t))
         || (has(ALONE_FEATURE_PREFIX) && f::alone_question(original, alternative, before, after, trigger, t).expect("the packaged capitals table"))
-        || (has(START_FEATURE_PREFIX) && f::start_question(original, alternative, before, after))
+        || ((has(START_FEATURE_PREFIX) || has(FEEL_FEATURE_PREFIX)) && f::start_question(original, alternative, before, after))
         || (has(UNKNOWN_FEATURE_PREFIX) && f::unknown_question(original, before, t))
         || (has(JOINED_FEATURE_PREFIX) && f::joined_question(original))
         || (has(TERM_FEATURE_PREFIX) && f::term_question(original, before, t))

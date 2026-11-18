@@ -139,6 +139,27 @@ pub const START_DELTA_BAND_WIDTH: f64 = 2.5;
 
 pub const START_DELTA_BANDS: i64 = 6;
 
+// A word of the message-start head's class (START_HEAD_MIN_LETTERS letters or more, letters in both layouts, no letter on
+// either side) that no lexicon of the profile and no identifier index knows in either reading is asked of the feel head
+// as well. The frozen model decides such a word by the orthotactic total and its margin, which add up its keys: a long
+// word and a short one of the same per-key fit read differently, and a made-up Russian word typed in the English layout
+// at text start stayed Latin in 34 of 465 cases, 19 of them with the gap of its readings a key above 1.5 (the read half of
+// the made-up words of cycle v89).
+// The head reads, a key at a time (ContextEvidence::ortho_typed_mean, ortho_other_mean), the gap between the other
+// reading and the reading as typed in bands of FEEL_GAP_BAND_WIDTH up to FEEL_GAP_BANDS either way, and the typed
+// reading alone in bands of FEEL_TYPED_BAND_WIDTH up to FEEL_TYPED_BANDS; no letters and no copy of the shared features.
+// On the class's words of the training documents typed both ways, a gap above 1.5 was a conversion in all 825 cases and
+// one below -1.5 a word typed as meant in all 840; 6 lay between (of the 1 959 made-up words, 132).
+pub const FEEL_FEATURE_PREFIX: &str = "feel|";
+
+pub const FEEL_GAP_BAND_WIDTH: f64 = 1.5;
+
+pub const FEEL_GAP_BANDS: i64 = 4;
+
+pub const FEEL_TYPED_BAND_WIDTH: f64 = 2.0;
+
+pub const FEEL_TYPED_BANDS: i64 = 6;
+
 // A word of one letter, a letter in both layouts, right after a word whose letters are all Latin, has a
 // head of its own (context_action_features.letter_question): the class's features once more under this
 // prefix, and how often the word before it and the word after it occur in English prose and in Russian
@@ -676,8 +697,8 @@ pub const MAX_CONTEXT_MODEL_FEATURES: usize = 50000;
 // (COMMON_FEATURE_PREFIX), the slip head (SLIP_FEATURE_PREFIX), the
 // sign head (SIGN_FEATURE_PREFIX), the resume head (RESUME_FEATURE_PREFIX), the Cyrillic-letter head
 // (CYRLETTER_FEATURE_PREFIX), the dash head (DASH_FEATURE_PREFIX), the digit-dot head (DIGIT_DOT_FEATURE_PREFIX), the
-// quote head (QUOTE_FEATURE_PREFIX), the known-reply head (KNOWN_REPLY_FEATURE_PREFIX) and the upper-case head
-// (UPPER_FEATURE_PREFIX), each with its own budget in the recipe.
+// quote head (QUOTE_FEATURE_PREFIX), the known-reply head (KNOWN_REPLY_FEATURE_PREFIX), the upper-case head
+// (UPPER_FEATURE_PREFIX) and the feel head (FEEL_FEATURE_PREFIX), each with its own budget in the recipe.
 // Raised from 100 000 with the unknown-token head (the 0.54.0 pair holds 98 498), and from 110 000 with the hypothesis
 // and short-token heads: the 0.61.0 pair holds 107 808, about 8.6 MB written one feature to a line, and
 // MAX_CONTEXT_ACTION_MODEL_BYTES bounds the file.
