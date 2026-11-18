@@ -67,6 +67,26 @@ pub fn checksum(path: &Path) -> Result<String, String> {
     Ok(hex(&Sha256::digest(&bytes)))
 }
 
+/// The name a seal pins the lock file by: its dependencies, without the versions of the workspace's own packages, which
+/// every release raises. A seal that names `Cargo.lock` itself pinned those versions too, and no release of its pair could
+/// keep them; the Python trainer's seals left the version file out the same way.
+pub const LOCK_PIN: &str = "Cargo.lock without the workspace's versions";
+
+/// The file of the tree a pinned name stands for, digested as it is pinned: `LOCK_PIN` is `Cargo.lock` with the version of
+/// every package that has no source (the workspace's own) left out; any other name is a file's bytes.
+pub fn pinned_digest(root: &Path, name: &str) -> Result<String, String> {
+    if name != LOCK_PIN {
+        return checksum(&root.join(name));
+    }
+    let path = root.join("Cargo.lock");
+    let text = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let kept: Vec<String> = text
+        .split("\n\n")
+        .map(|block| if block.starts_with("[[package]]") && !block.contains("\nsource = ") { block.lines().filter(|line| !line.starts_with("version = ")).collect::<Vec<_>>().join("\n") } else { block.to_owned() })
+        .collect();
+    Ok(hex(&Sha256::digest(kept.join("\n\n").as_bytes())))
+}
+
 pub fn read_json(path: &Path) -> Result<Value, String> {
     let bytes = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
     serde_json::from_slice(&bytes).map_err(|error| format!("{}: {error}", path.display()))

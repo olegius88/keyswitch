@@ -855,7 +855,6 @@ pub fn provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, St
     for crate_name in ["ks-text", "ks-backend", "ks-config", "ks-lang", "ks-context", "ks-engine", "ks-replay", "ks-train", "ks-hunspell"] {
         walk(&root.join("crates").join(crate_name).join("src"), &mut paths)?;
     }
-    paths.push(root.join("Cargo.lock"));
     for folder in ["resources/models"] {
         for entry in std::fs::read_dir(root.join(folder)).map_err(|error| error.to_string())? {
             let path = entry.map_err(|error| error.to_string())?.path();
@@ -877,6 +876,7 @@ pub fn provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, St
         let name = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
         result.insert(name, checksum(&path)?);
     }
+    result.insert(crate::corpus::LOCK_PIN.to_owned(), crate::corpus::pinned_digest(root, crate::corpus::LOCK_PIN)?);
     Ok(result)
 }
 

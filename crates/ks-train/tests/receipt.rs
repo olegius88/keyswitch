@@ -12,6 +12,9 @@ use ks_train::sequence_report::{AllPairs, ByPair, FirstGates, Gated, Gates, Inst
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+/// The installed pair's receipt.
+const RECEIPT: &str = "model/context_v3/release-receipt.json";
+
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
@@ -22,12 +25,33 @@ fn check(receipt: &Value) -> Result<(), String> {
     validate_evidence(receipt, &models.join("context_policy_v1.json"), &root, &models.join("prefix_policy_v1.json"), &models)
 }
 
+/// The installed pair's receipt as protocol 4 states one: the same numbers under the protocol and scope of version 4,
+/// without the first plans and the installed reference that version 5 adds. The checks of a receipt are tried on it, and
+/// on the receipt of version 5 made back from it (`version_five`).
 fn receipt() -> Value {
-    read_json(&root().join("model/context_v3/release-receipt.json")).unwrap()
+    let mut four = read_json(&root().join(RECEIPT)).unwrap();
+    let mut test = test_of(&four);
+    test.first_ineligible_rows = None;
+    test.installed_reference = None;
+    for (_, profile) in test.profiles.each_mut() {
+        profile.first = None;
+    }
+    state(&mut four, SEQUENCE_PROTOCOL_VERSION - 1, &test);
+    four
+}
+
+/// A receipt stated under the protocol and scope of `version`, with `test` for its test.
+fn state(receipt: &mut Value, version: i64, test: &PublicTest) {
+    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
+    let set = protocol_set(&protocols, version).unwrap();
+    receipt["protocol"] = set["receipt"].clone();
+    receipt["scope"] = set["scope"].clone();
+    receipt["test"] = tree_of(test);
 }
 
 #[test]
 fn the_receipt_of_the_installed_pair_holds() {
+    check(&read_json(&root().join(RECEIPT)).unwrap()).unwrap();
     check(&receipt()).unwrap();
 }
 
@@ -376,12 +400,12 @@ fn the_sources_a_receipt_names_are_those_of_the_tree() {
     };
     refused("invalid object: provenance", &|value| value["provenance"] = json!(1));
     refused("missing required provenance", &|value| {
-        value["provenance"].as_object_mut().unwrap().remove("Cargo.lock");
+        value["provenance"].as_object_mut().unwrap().remove(ks_train::corpus::LOCK_PIN);
     });
     for path in ["../x", "/x", ".x"] {
         refused("nonpublic provenance", &|value| value["provenance"][path] = json!("0"));
     }
-    refused("provenance mismatch", &|value| value["provenance"]["Cargo.lock"] = json!("0"));
+    refused("provenance mismatch", &|value| value["provenance"][ks_train::corpus::LOCK_PIN] = json!("0"));
     refused("No such file", &|value| value["provenance"]["gone"] = json!("0"));
     refused("prefix baseline mismatch", &|value| value["prefix_baseline_sha256"] = json!("0".repeat(64)));
     refused("recipe or gate policy", &|value| value["recipe_sha256"] = json!("0".repeat(64)));
@@ -440,17 +464,15 @@ fn a_recipe_of_another_kind_than_the_receipt_knows_is_refused() {
     }
 }
 
-/// The installed pair's receipt as protocol 5 states one: the same numbers under the protocol and scope of version 5, a
+/// The receipt of version 4 as protocol 5 states one: the same numbers under the protocol and scope of version 5, a
 /// word without first plans, and first plans whose counts, earliness and gates hold together. `restored` gives the rows
 /// the baseline, candidate and installed pairs restore of their wrong first plans, each over ten.
 fn version_five() -> Value {
-    let protocols = read_json(&root().join(PROTOCOLS)).unwrap();
-    let set = protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION).unwrap();
     let mut five = receipt();
-    five["protocol"] = set["receipt"].clone();
-    five["scope"] = set["scope"].clone();
     let mut test = test_of(&five);
     let words = test.documents.us + test.documents.ru - 1;
+    // The candidate restores all but twenty of the words, the baseline ten fewer, the installed pair five fewer.
+    let restored = words - 20;
     test.first_ineligible_rows = Some(1);
     test.installed_reference = Some(InstalledReference { context_sha256: "a".repeat(64), prefix_sha256: "b".repeat(64) });
     let counts = |restored: i64, spoiled: i64| PairCounts {
@@ -485,12 +507,12 @@ fn version_five() -> Value {
     };
     for (_, profile) in test.profiles.each_mut() {
         profile.first = Some(PublicFirst {
-            counts: ByPair { baseline: counts(690, 1), candidate: counts(700, 0), installed: counts(695, 1) },
-            earliness: ByPair { baseline: early(690), candidate: early(700), installed: early(695) },
+            counts: ByPair { baseline: counts(restored - 10, 1), candidate: counts(restored, 0), installed: counts(restored - 5, 1) },
+            earliness: ByPair { baseline: early(restored - 10), candidate: early(restored), installed: early(restored - 5) },
             gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
         });
     }
-    five["test"] = tree_of(&test);
+    state(&mut five, SEQUENCE_PROTOCOL_VERSION, &test);
     five
 }
 
@@ -566,7 +588,7 @@ fn the_first_plans_of_a_receipt_hold_together() {
     refuses_five_typed(GATES, |test| {
         // The baseline restores more than the candidate: its earliness moves with it.
         let first = first_of(test);
-        first.counts.baseline.exactly_restored = 702;
+        first.counts.baseline.exactly_restored = first.counts.candidate.exactly_restored + 2;
         let early = &mut first.earliness.baseline;
         early.inside_word += 12;
         early.never -= 12;

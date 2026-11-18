@@ -1,6 +1,8 @@
 //! The replay tools as a person runs them: what they write, what they compare, and how they stop.
 #![cfg(any(not(debug_assertions), coverage))]
 
+mod recorded;
+
 use serde_json::{Value, json};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -80,7 +82,9 @@ fn a_replay_writes_its_report_and_compares_it_with_another() {
 }
 
 fn trace() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ks-trace"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ks-trace"));
+    command.env("KS_REPLAY_TREE", recorded::tree());
+    command
 }
 
 fn traces() -> PathBuf {
@@ -99,6 +103,9 @@ fn a_trace_runs_alone_with_many_or_as_a_worker() {
     let answer = trace().arg(&one).output().expect("it runs");
     let result: Value = serde_json::from_slice(&answer.stdout).expect("json");
     assert!(result["status"].is_string(), "{result}");
+    // In the workspace itself, with the pair the program ships: the trace is replayed and answered all the same.
+    let shipped = Command::new(env!("CARGO_BIN_EXE_ks-trace")).env_remove("KS_REPLAY_TREE").arg(&one).output().expect("it runs");
+    assert!(String::from_utf8_lossy(&shipped.stdout).contains("\"status\":"), "{}", said(&shipped));
     assert!(trace().arg(&one).arg("--verbose").output().expect("it runs").status.code().is_some());
     // Some of them, with a report.
     let folder = scratch();

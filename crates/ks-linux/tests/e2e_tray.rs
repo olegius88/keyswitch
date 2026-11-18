@@ -15,19 +15,37 @@ use support::{Watcher, dbus_call};
 const REGISTRATION_WAIT: Duration = Duration::from_secs(10);
 const EVENT_WAIT: Duration = Duration::from_secs(5);
 
+/// Waits until `watcher` lists the icon of `destination`; the object path it registered.
+fn registered(watcher: &Watcher, destination: &str) -> Option<String> {
+    let deadline = Instant::now() + REGISTRATION_WAIT;
+    while watcher.service(destination).is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    watcher.service(destination)
+}
+
 fn run() -> Result<(), String> {
-    let watcher = Watcher::new()?;
+    // On a private bus no panel runs yet: the program started with the session before it, as at a login.
+    let panel_before = dbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus.NameHasOwner", &["org.kde.StatusNotifierWatcher"])?.contains("true");
     let (sender, receiver) = channel();
     let sender = std::sync::Mutex::new(sender);
     let item = StatusNotifierItem::new(Arc::new(move |action| { let _ = sender.lock().expect("the channel").send(action); }), Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources").as_path())?;
+    if !panel_before && item.waiting().is_none() {
+        return Err("the icon registered with no panel to take it".to_owned());
+    }
     item.set_layout(1);
     let destination = format!("io.github.olegius88.KeySwitch.StatusNotifierItem.p{}", std::process::id());
-    let deadline = Instant::now() + REGISTRATION_WAIT;
-    while watcher.service(&destination).is_none() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
+    let mut watcher = Watcher::new()?;
+    if registered(&watcher, &destination).as_deref() != Some(OBJECT_PATH) {
+        return Err(format!("the icon did not register with the panel started after it: {:?}", watcher.service(&destination)));
     }
-    if watcher.service(&destination).as_deref() != Some(OBJECT_PATH) {
-        return Err(format!("the icon registered an unexpected object path: {:?}", watcher.service(&destination)));
+    if !panel_before {
+        // The panel starts again: the icon registers with it again.
+        drop(watcher);
+        watcher = Watcher::new()?;
+        if registered(&watcher, &destination).as_deref() != Some(OBJECT_PATH) {
+            return Err(format!("the icon did not register with the panel started again: {:?}", watcher.service(&destination)));
+        }
     }
     let properties = "org.freedesktop.DBus.Properties.Get";
     let item_is_menu = dbus_call(&destination, OBJECT_PATH, properties, &[ITEM_INTERFACE, "ItemIsMenu"])?;
@@ -112,6 +130,16 @@ fn run() -> Result<(), String> {
         ("what the menu does not have", refused.iter().all(|refused| *refused)),
     ];
     item.close();
+    // A closed icon is not put back on a panel that starts again.
+    let reopened = if panel_before {
+        true
+    } else {
+        drop(watcher);
+        let again = Watcher::new()?;
+        std::thread::sleep(Duration::from_millis(500));
+        again.service(&destination).is_none()
+    };
+    let checks = [checks.as_slice(), &[("a closed icon stays off a panel started again", reopened)]].concat();
     let failed: Vec<&str> = checks.iter().filter(|(_, passed)| !passed).map(|(name, _)| *name).collect();
     if failed.is_empty() { Ok(()) } else { Err(format!("failed tray checks: {}", failed.join(", "))) }
 }

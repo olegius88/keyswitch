@@ -819,7 +819,7 @@ fn check_pins(root: &Path, hashes: &Value, label: &str) -> Result<(), String> {
         if path.is_absolute() || name.contains("..") {
             return Err(format!("{label} provenance must use repository-relative paths"));
         }
-        if Some(checksum(&root.join(path))?.as_str()) != expected.as_str() {
+        if Some(crate::corpus::pinned_digest(root, name)?.as_str()) != expected.as_str() {
             return Err(format!("{label} provenance changed: {name}"));
         }
     }

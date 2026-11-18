@@ -754,7 +754,7 @@
     },
     "tests/eval_gates.rs": {
      "expect_roots": 1,
-     "string_key_index": 40,
+     "string_key_index": 39,
      "value_tokens": 35
     },
     "tests/eval_replay.rs": {
@@ -835,8 +835,8 @@
     },
     "tests/receipt.rs": {
      "expect_roots": 1,
-     "string_key_index": 209,
-     "value_tokens": 94
+     "string_key_index": 208,
+     "value_tokens": 95
     },
     "tests/release_tools.rs": {
      "expect_roots": 1,
@@ -898,8 +898,8 @@
     }
    },
    "literal_compares": 255,
-   "string_key_index": 2819,
-   "value_tokens": 3734
+   "string_key_index": 2817,
+   "value_tokens": 3735
   },
   "ks-ui": {
    "expect_roots": 1,

@@ -49,13 +49,19 @@ fn the_installed_pair_passed_the_chat_test_against_the_pair_it_replaced() {
     assert_eq!(block["pairs"]["candidate"]["sha256"], receipt["artifact_sha256"]);
 }
 
+/// The pair of corpus v88 spoiled one correct row of 697 on its sealed test, by default and with the early switch off, in
+/// both profiles (`RECEIPT_MAX_CORRUPTIONS` 1, by the owner's decision of 18.11.2026; it was 0 since the test of corpus
+/// v84, a sample of other rows): the baseline pair spoiled one as well with the early switch off, the pair it replaced
+/// spoiled as many first plans of the same test as it did, and on development neither spoiled any. The next pair is held
+/// to 0 again.
 #[test]
 fn the_installed_pair_corrupts_nothing_and_executes_every_row() {
     let (receipt, floors) = (receipt(), floors());
     for (name, mode, candidate, _) in modes(&receipt) {
         let label = format!("{name} {mode}");
-        assert!(number(&candidate["correct_text_corruptions"]) <= number(&floors["RECEIPT_MAX_CORRUPTIONS"]), "{label}");
-        assert_eq!(candidate["preserved_correct"], candidate["initially_correct"], "{label}");
+        let spoiled = number(&candidate["correct_text_corruptions"]);
+        assert!(spoiled <= number(&floors["RECEIPT_MAX_CORRUPTIONS"]), "{label}");
+        assert_eq!(number(&candidate["initially_correct"]) - number(&candidate["preserved_correct"]), spoiled, "{label}");
         assert!(number(&candidate["execution_errors"]) <= number(&floors["RECEIPT_MAX_EXECUTION_ERRORS"]), "{label}");
         assert!(number(&candidate["length_mismatches"]) <= number(&floors["RECEIPT_MAX_LENGTH_MISMATCHES"]), "{label}");
         assert!(number(&candidate["correction_layout_mismatches"]) <= number(&floors["RECEIPT_MAX_CORRECTION_LAYOUT_MISMATCHES"]), "{label}");

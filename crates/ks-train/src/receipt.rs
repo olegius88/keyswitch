@@ -377,7 +377,7 @@ pub fn validate_receipt(receipt: &Value, artifact: &Path, root: &Path, prefix_ar
         if name.contains("..") || name.starts_with('/') || name.starts_with('.') {
             return Err("nonpublic provenance path".to_owned());
         }
-        if Some(checksum(&root.join(name))?.as_str()) != expected.as_str() {
+        if Some(crate::corpus::pinned_digest(root, name)?.as_str()) != expected.as_str() {
             return Err(format!("context provenance mismatch: {name}"));
         }
     }

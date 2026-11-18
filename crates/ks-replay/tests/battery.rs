@@ -5,7 +5,12 @@
 //! answer a token in capitals, and 7 rows (4 with Hunspell) came out otherwise; a pair with the head installed writes them
 //! again. Written once more on 15.11.2026, when the head came to answer only a pair its counts settle and those heads
 //! answer the rest as before: of the Python's rows 2 differ in either mode, `ШЕ` alone before a colon, whose pair (`IT`) the
-//! head answers, and the word after it.
+//! head answers, and the word after it. Written again on 18.11.2026 with the pair of corpus v88 installed, which carries
+//! the upper-case and common-reading heads: 35 rows differ in either mode. Right now by the battery's labels: `ШЕ`, `BN`
+//! and `КЗ` in capitals, and the words they stand by (10). Wrong now by its labels: `ща` opening a text that goes on in
+//! English typed in the Russian layout, which the common-reading head keeps where the label wants `of`, with the words
+//! after it (10), and `DKRCV`, which the upper-case head converts to `ВЛКСМ` where the label keeps the keys (2). The
+//! rest (13) change the reading a word was typed in, not whether it ends right.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;

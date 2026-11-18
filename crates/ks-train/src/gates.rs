@@ -162,8 +162,10 @@ pub fn run(root: &Path) -> Result<Value, String> {
     let resources = root.join("resources/models");
     let receipt = read_json(&root.join("model/context_v3/release-receipt.json"))?;
     let (context, prefix) = (resources.join("context_policy_v1.json"), resources.join("prefix_policy_v1.json"));
-    // A pair sealed by the Python trainer pins sources this tree no longer has: its numbers and evidence are still checked.
-    if receipt["provenance"].get("Cargo.lock").is_some() {
+    // A pair sealed by the Python trainer pins sources this tree no longer has, and a pair sealed before the lock file was
+    // pinned without the workspace's versions (`LOCK_PIN`) pins a version every release raises (the pair of corpus v88):
+    // their numbers and evidence are still checked.
+    if receipt["provenance"].get(crate::corpus::LOCK_PIN).is_some() {
         crate::receipt::validate_receipt(&receipt, &context, root, &prefix, &resources)?;
     } else {
         crate::receipt::validate_evidence(&receipt, &context, root, &prefix, &resources)?;
