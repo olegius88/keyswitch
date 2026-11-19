@@ -72,14 +72,37 @@ fn sorted_keys<'a, I: Iterator<Item = &'a str> + Clone>(names: I, max_width: usi
     }
     drop(codes);
     let key = |index: u32| &buffer[index.to::<usize>() * width..(index.to::<usize>() + 1) * width];
-    let mut order: Vec<u32> = (0..count.to::<u32>()).collect();
-    order.sort_by(|&a, &b| key(a).cmp(key(b)));
+    // A key is at most eight bytes: as a big-endian integer it sorts as its bytes do. Sorted together with its place,
+    // equal keys keep the order they came in, as the stable sort of the places by their bytes kept them, at a fraction
+    // of the cost: a million grams are sorted as the program starts. Where the key leaves room, its place shares its
+    // integer, so the sort holds no more than eight bytes a gram.
+    let number = |index: u32| {
+        let mut bytes = [0u8; PACKED_GRAM_KEY_BYTES];
+        bytes[PACKED_GRAM_KEY_BYTES - width..].copy_from_slice(key(index));
+        u64::from_be_bytes(bytes)
+    };
     let mut keys = Vec::with_capacity(count * width);
     let mut winners = Vec::with_capacity(count);
-    for (position, &index) in order.iter().enumerate() {
-        if position + 1 == order.len() || key(order[position + 1]) != key(index) {
-            keys.extend_from_slice(key(index));
-            winners.push(index);
+    let place_bits = u64::BITS - u8::BITS * width.to::<u32>();
+    if place_bits > 0 && count.to::<u64>() >> place_bits == 0 {
+        let place_mask = (1_u64 << place_bits) - 1;
+        let mut order: Vec<u64> = (0..count.to::<u32>()).map(|index| (number(index) << place_bits) | u64::from(index)).collect();
+        order.sort_unstable();
+        for (position, &entry) in order.iter().enumerate() {
+            if position + 1 == order.len() || order[position + 1] >> place_bits != entry >> place_bits {
+                let index = (entry & place_mask).to::<u32>();
+                keys.extend_from_slice(key(index));
+                winners.push(index);
+            }
+        }
+    } else {
+        let mut order: Vec<(u64, u32)> = (0..count.to::<u32>()).map(|index| (number(index), index)).collect();
+        order.sort_unstable();
+        for (position, &(number, index)) in order.iter().enumerate() {
+            if position + 1 == order.len() || order[position + 1].0 != number {
+                keys.extend_from_slice(key(index));
+                winners.push(index);
+            }
         }
     }
     keys.shrink_to_fit();
