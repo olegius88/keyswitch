@@ -335,6 +335,74 @@ impl EngineCore {
         Ok(Some((split, decision)))
     }
 
+    /// The part before a joining sign converted alone, the part after it kept as typed.
+    ///
+    /// An English term typed in the Russian layout before a Russian word is no word whole: `зкщ-тарифу` is `pro-тарифу`,
+    /// its whole other reading `pro-nfhbae` is no word either, and the model kept the token (p=0.986), while `зкщ` before
+    /// a space became `pro`. When the part after the sign is a word of its lexicon as typed (`head_segment_settled`, and
+    /// not `сервисаююю`, `сервиса...` typed in the Russian layout), the model is asked about the part before it alone, in
+    /// the field before the token, with the sign as its boundary: the lexicons do not know most terms (`ыущ`, the model's
+    /// `seo`). A part before the sign that is a word of its own lexicon while its other reading is none (`по` of
+    /// `по-разному`) is not asked about. Converted, the part is typed in the other layout, and the sign and the word
+    /// after it again as they were, in the layout that stays (`kept_tail`). Only a token of one sign ended by a space,
+    /// and only a part whose other reading is letters too: `экс` of `экс-чемпион` reads `'rc`, which the model converted
+    /// alone.
+    ///
+    /// The caller asks only about a token kept whole, typed in a layout of the language models (`commit_word`).
+    pub fn decide_joined_head(
+        &mut self, strokes: &[Stroke], boundary: &Stroke, source_group: i64, target: i64, application: &str,
+    ) -> EngineResult<Option<PlanRef>> {
+        let joins: Vec<usize> = strokes.iter().enumerate().filter(|(_, stroke)| Self::joins_parts(stroke)).map(|(index, _)| index).collect();
+        let [join] = joins[..] else {
+            return Ok(None);
+        };
+        let (head, tail) = (&strokes[..join], &strokes[join + 1..]);
+        let lettered = |part: &[Stroke]| part.len() >= JOINED_PART_MIN_LETTERS && part.iter().all(|stroke| pystr::isalpha(&stroke.character) || Self::is_layout_letter(stroke));
+        // A space is never kept back (only Enter and Tab are, `KeyDisposition::Defer`).
+        if boundary.character != " "
+            || !lettered(head)
+            || !lettered(tail)
+            || !pystr::isalpha(&text_for_group(head, target))
+            || !self.flag("detection.context_aware", true)
+            || !self.context_assists()
+            || self.context_policy.model.is_none()
+            || self.detector.is_protected_token(&text_for_group(strokes, source_group))
+            || !self.head_segment_settled(tail, source_group, target)
+            || !self.model(source_group).score(&text_for_group(tail, source_group)).known
+            || (self.model(source_group).score(&text_for_group(head, source_group)).known && !self.model(target).score(&text_for_group(head, target)).known)
+        {
+            return Ok(None);
+        }
+        let head_text = text_for_group(head, source_group);
+        let alternatives: Alternatives = vec![(target, text_for_group(head, target))];
+        let result = self.context_result.clone();
+        let baseline = self.last_baseline.clone();
+        let field_override = result.as_ref().and_then(|asked| asked.field.clone());
+        let boundary_text = strokes[join].character.clone();
+        let decision = self.decide_word(&head_text, &alternatives, source_group, application, CorrectionTrigger::Punctuation, WordOptions {
+            boundary_text,
+            field_override,
+            ..WordOptions::default()
+        })?;
+        technical_event!(
+            self.shared, "joined_head_asked", "head_characters": head.len(), "part_characters": tail.len(), "converted": decision.should_convert,
+        );
+        self.context_result = result;
+        self.last_baseline = baseline;
+        if !decision.should_convert {
+            return Ok(None);
+        }
+        let kept = text_for_group(&strokes[join..], source_group);
+        Ok(Some(Arc::new(CorrectionPlan {
+            context_field: self.context_field_id(),
+            kept_tail: strokes.len() - join,
+            ..CorrectionPlan::new(
+                strokes.to_vec(), Some(boundary.clone()), source_group, decision.target_group, text_for_group(strokes, source_group),
+                format!("{}{kept}", decision.replacement), decision.confidence, application,
+            )
+        })))
+    }
+
     /// The part after the last joining sign of a token typed right after the user picked its layout by hand.
     ///
     /// The pick protects the word it was made for, and a joining sign ends that word: picked English for

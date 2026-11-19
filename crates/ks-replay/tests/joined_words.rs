@@ -1,12 +1,13 @@
 //! A hyphen joins two words, and the part after it is decided as a word of its own, behind the head as typed: with the
-//! field read as the program reads it, and right after a layout picked by hand.
+//! field read as the program reads it, and right after a layout picked by hand. The part before it is decided alone
+//! when the part after it is a word as typed.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
 use ks_config::config::SettingsStore;
 use ks_config::constants::{DETECTION_CONTEXT_READ_FIELD, DETECTION_CORRECT_ON_SPACE, EXCLUSIONS_APPLICATIONS};
-use ks_replay::harness::{Bundle, KEYS, Session};
+use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 
 /// The key that types `english` in the US layout, pressed in whatever layout is on.
 fn press(session: &mut Session, english: char) {
@@ -95,5 +96,39 @@ fn a_layout_picked_by_hand_keeps_the_word_up_to_the_hyphen() {
     // A path keeps its literal head, and a sign split off the end of the word keeps the token as typed.
     assert_eq!(typed(&mut bundle, 1, "yjdsq ", Some((0, "docs/vfufpby ")), as_shipped), "новый docs/vfufpby ");
     assert_eq!(typed(&mut bundle, 1, "yjdsq ", Some((0, "hello. ")), as_shipped), "новый hello. ");
+    bundle.clean();
+}
+
+#[test]
+fn a_term_typed_in_the_russian_layout_before_a_russian_word_converts_alone() {
+    let mut bundle = Bundle::load(None);
+    // `зкщ-тарифу` is no word whole and neither is `pro-nfhbae`, so the model kept the token; asked alone before its sign,
+    // `зкщ` is `pro`. The sign and the word after it are typed again as they were, and the Russian layout stays.
+    let mut session = bundle.session("firefox", 1, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    keys(&mut session, "ljcnegty njkmrj pro-nfhbae ");
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "доступен только pro-тарифу ");
+    assert_eq!(session.backend.group(), 1, "the layout the word after the sign was typed in");
+    // The undo hotkey puts the token back as typed.
+    session.core.schedule_undo_hotkey(i64::from(PAUSE_KEYCODE));
+    session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "доступен только зкщ-тарифу ");
+    bundle.give_back(session);
+    // A term the lexicons do not know, which the model knows; one the model was unsure of whole, which waited for the next
+    // word and stayed (`ьщтпщ-сервиса`), and the word after it in the layout that stayed.
+    assert_eq!(typed(&mut bundle, 1, "ye;yj seo-jgnbvbpfwbz ", None, as_shipped), "нужно seo-оптимизация ");
+    assert_eq!(typed(&mut bundle, 1, "mongo-cthdbcf ", None, as_shipped), "mongo-сервиса ");
+    assert_eq!(typed(&mut bundle, 1, "mongo-cthdbcf ghjdthm ", None, as_shipped), "mongo-сервиса проверь ");
+    // Russian words joined by a hyphen stay, and so does a part whose other reading is no letters: `экс` is `'rc`.
+    assert_eq!(typed(&mut bundle, 1, "xnj-nj ", None, as_shipped), "что-то ");
+    assert_eq!(typed(&mut bundle, 1, "ye;yj 'rc-xtvgbjy ", None, as_shipped), "нужно экс-чемпион ");
+    // Heads the model is asked about and keeps: a word no lexicon knows (`псевдо`), and a word of both lexicons (`руку`,
+    // `here`).
+    assert_eq!(typed(&mut bundle, 1, "gctdlj-yfexysq ", None, as_shipped), "псевдо-научный ");
+    assert_eq!(typed(&mut bundle, 1, "here-yjue ", None, as_shipped), "руку-ногу ");
+    // Two signs: the parts stay whole.
+    assert_eq!(typed(&mut bundle, 1, "pro-nfhbae-rkbtyn ", None, as_shipped), "зкщ-тарифу-клиент ");
     bundle.clean();
 }
