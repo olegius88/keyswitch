@@ -659,6 +659,9 @@ mod tests {
         // Four fractional bits, but a mantissa of 53 bits: 19 digits.
         assert!(ties_impossible(sixteenths));
         assert_eq!(float_repr(quarters), "742082672164581.2");
+        // 2^-24: a short exact value whose correctly rounded text of the shortest length does not parse back.
+        assert!(!ties_impossible(2.0_f64.powi(-24)));
+        assert_eq!(float_repr(2.0_f64.powi(-24)), "5.960464477539063e-08");
         assert_eq!(float_repr(sixteenths), "281474976710656.06");
         let mut text = String::from("x=");
         push_float_repr(&mut text, -0.5);

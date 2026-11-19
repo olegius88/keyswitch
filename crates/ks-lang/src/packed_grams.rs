@@ -323,6 +323,15 @@ mod tests {
     }
 
     #[test]
+    fn keys_of_eight_letters_keep_the_last_value_of_a_gram() {
+        // Eight letters leave no room for the place beside the key: the other way of sorting, with a gram given twice.
+        let names = ["abcdefgh", "b", "abcdefgh", "a"];
+        let packed = GramTable::from_raw(names.iter().copied(), &[1, 2, 3, 4]);
+        assert!(packed.packed().is_some());
+        assert_eq!((packed.get("abcdefgh"), packed.get("a"), packed.len()), (Some(3.0), Some(4.0), 3));
+    }
+
+    #[test]
     fn raw_tables_answer_the_same_either_way() {
         let names = ["a", "ab", "b", "a"];
         let mut packed = GramTable::from_raw(names.iter().copied(), &[1, 2, 3, 40_000]);

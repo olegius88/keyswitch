@@ -133,12 +133,8 @@ fn cyrillic_fold(c: char) -> Option<char> {
             .map(|cp| {
                 let mut folded = String::new();
                 push_fold(&mut folded, char::from_u32(cp).expect("the Cyrillic block holds scalar values"));
-                let mut chars = folded.chars();
                 // A letter that folds to more than one would take the long way; the block has none.
-                match (chars.next(), chars.next()) {
-                    (Some(only), None) => Some(only),
-                    _ => None,
-                }
+                folded.chars().next().filter(|_| folded.chars().count() == 1)
             })
             .collect()
     });
