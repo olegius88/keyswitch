@@ -188,6 +188,8 @@ impl EngineCore {
             {
                 decided = self.settle_early_switch(decided, &strokes, source_group, origin, &application, trigger, &boundary.character)?;
             }
+            // The layout an early switch left while the token was typed, when the part after its sign converts back to it.
+            let mut begun_in: Option<i64> = None;
             if inside.is_none() && head == 0 && trailing.is_empty() {
                 let targets: Vec<i64> = alternatives.iter().map(|entry| entry.0).collect();
                 let joined = match protected_part.clone() {
@@ -202,6 +204,7 @@ impl EngineCore {
                     signs = stem_signs;
                     original = text_for_group(&strokes, source_group);
                     alternatives = alternatives.iter().map(|(group, _)| (*group, text_for_group(&strokes, *group))).collect();
+                    begun_in = early_switch_origin.filter(|origin| *origin != source_group && decided.target_group == *origin);
                 }
             }
             excluded = self.application_excluded(&application);
@@ -318,13 +321,15 @@ impl EngineCore {
                 self.pending_trigger_keycode = i64::from(boundary.keycode);
                 decided = DetectionDecision { should_convert: true, ..found };
             } else if decided.should_convert {
-                let base = self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary");
+                let whole = begun_in.and_then(|origin| self.whole_token_from(&stem, &signs, head, boundary, &opened, origin, &decided, &application));
+                let base = whole.clone().unwrap_or_else(|| self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary"));
                 let quotation_closed = mention.first().is_some_and(|first| Self::quotation_closed(first, &trailing, Some(boundary)));
                 let base = base.replaced_with(|plan| {
                     plan.trailing.clone_from(&trailing);
                     plan.head = if !mention.is_empty() && quotation_closed { Vec::new() } else { mention.clone() };
                 });
-                let mut converted = Self::replay_sign_with_word(&self.with_signs(&base, &signs), &opened);
+                // The whole token's correction holds its signs, typed again in the layout it was begun in.
+                let mut converted = if whole.is_some() { base } else { Self::replay_sign_with_word(&self.with_signs(&base, &signs), &opened) };
                 if boundary.deferred {
                     // Enter/Tab has not reached the editor. Do not delete it
                     // as a character or include it in the text replacement.

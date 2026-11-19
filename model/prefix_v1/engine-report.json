@@ -303,7 +303,7 @@
     "crates/ks-context/src/typo_correction.rs": "784ef4b1784e24358308e5795b68f857aa2a94e79fee318b6ce1c0a4dddbeddc",
     "crates/ks-engine/src/constants.rs": "8c9f7a2b4e2d73b6e215ab3d3e957c4ceab957b8cf40f7d320763ddc7d5ff580",
     "crates/ks-engine/src/context_access.rs": "5d7cd5db884537ad9bb8ada7a5929ac6b95944ebe90aaf24d710cda025cbfdc7",
-    "crates/ks-engine/src/engine/commit.rs": "f0ec529f4863149ddcdae477d270e35ce284b1f022255424f9f4528f7a34f9db",
+    "crates/ks-engine/src/engine/commit.rs": "aaab04be85263f57351bbe416bf262fdb1fd37ba6e825f0433b2561045306f5b",
     "crates/ks-engine/src/engine/decide.rs": "88cce2cb4dcd2c52a6d61aa7acfcf7bb9e1701beef103fbfbbe9ed9a8c11e066",
     "crates/ks-engine/src/engine/early.rs": "65b6abf36de96e1fc2b7e8354b42f26eb3ec00e855261daa4320344f93da463f",
     "crates/ks-engine/src/engine/execute.rs": "f539db133251c190f2f479f6b12a8be2341d3e5786b0adc390037b6b0e6aaaec",
@@ -320,7 +320,7 @@
     "crates/ks-engine/src/engine/shared.rs": "d664b7ddfac4d5ae5a0d1df6bef4b34a8b878b016a5cd784b11751b700b101e0",
     "crates/ks-engine/src/engine/state.rs": "2cdc55dd3979cc9e2f646a8c820322085d63090d4b3106cfec3952c28920245c",
     "crates/ks-engine/src/engine/types.rs": "40bd3eccead65fd8b74d51ba8acd9e7eb6359827cf4eabc03faf692c6ceefb70",
-    "crates/ks-engine/src/engine/word_parts.rs": "4063f61027e9c0355e1d1b4c085270c81b43d4c37348c11f4e8d111accf45129",
+    "crates/ks-engine/src/engine/word_parts.rs": "4734110aac95c06030ae42e153223db10245f933f1f1e4fccc0614e489766f3c",
     "crates/ks-engine/src/engine_loader.rs": "ebdec49bdaacec9a8de5083875fd73d4f3185cfd661665464575385a03c74762",
     "crates/ks-engine/src/lib.rs": "804f78ed408d5dc44065879c794739abdc6ed2bf42a48028fa035bfd6db5c363",
     "crates/ks-engine/src/rule_editor.rs": "a32638b546c156e439278ebccbee29e473cd021168627ce23f1b5becda501771",
@@ -542,8 +542,8 @@
     }
   },
   "runtime_regression": {
-    "previous_report": "model/prefix_v1/engine-history/0947bcc2fee1c547a13abd0fc10cc27f5c34af6f196a90a5559bd5c314fbaf31.json",
-    "previous_sha256": "0947bcc2fee1c547a13abd0fc10cc27f5c34af6f196a90a5559bd5c314fbaf31"
+    "previous_report": "model/prefix_v1/engine-history/1190557a160fe318a7e71575c63277aed58c03122fdf495d9c20a136997c867d.json",
+    "previous_sha256": "1190557a160fe318a7e71575c63277aed58c03122fdf495d9c20a136997c867d"
   },
   "schema_version": 1,
   "scope": "in-process physical keys/live layout/exact final text/two spaces; separate observed and simulated field contexts; not native OS proof",

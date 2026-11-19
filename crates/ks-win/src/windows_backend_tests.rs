@@ -693,6 +693,30 @@ fn a_key_names_the_window_it_is_on_its_way_to() {
     subject.stop();
 }
 
+/// A key is translated once for its modifiers and layout and answered from then on as the system answered it; past the
+/// bound of what is kept, the kept answers are forgotten and the system is asked again, with the same answers.
+#[test]
+fn a_translation_is_asked_once_and_answered_the_same_after() {
+    let api = FakeWindowsAPI::plain();
+    {
+        let mut state = api.state();
+        state.translation.insert((u32::from(b'A'), ENGLISH_HKL), "a".to_owned());
+        state.translation.insert((u32::from(b'A'), RUSSIAN_HKL), "ф".to_owned());
+    }
+    let subject = backend(&api);
+    let inner = &subject.inner;
+    assert_eq!(inner.translated(u32::from(b'A'), SCAN_CODE_A, 0, RUSSIAN_HKL), "ф");
+    // The system now answers otherwise: the kept answer stands, as the system's own answers do not change.
+    api.state().translation.insert((u32::from(b'A'), RUSSIAN_HKL), "x".to_owned());
+    assert_eq!(inner.translated(u32::from(b'A'), SCAN_CODE_A, 0, RUSSIAN_HKL), "ф");
+    for scan_code in 0..TRANSLATIONS_KEPT_MAX.to::<u32>() {
+        assert_eq!(inner.translated(u32::from(b'A'), scan_code + 1000, 0, ENGLISH_HKL), "a");
+    }
+    // The bound was reached at the last of them: what was kept is forgotten, and the key is asked of the system again.
+    assert_eq!(inner.translated(u32::from(b'A'), SCAN_CODE_A, 0, RUSSIAN_HKL), "x");
+    assert_eq!(lock(&inner.translations).len(), 2);
+}
+
 #[test]
 fn a_window_without_a_focused_control_is_its_own_place() {
     let api = FakeWindowsAPI::plain();

@@ -315,7 +315,11 @@ mod win32 {
     /// window in front is asked, as before.
     fn input_window() -> (HWND, u32) {
         // SAFETY: GetForegroundWindow takes nothing and returns a handle or null.
-        let window = unsafe { GetForegroundWindow() };
+        input_window_of(unsafe { GetForegroundWindow() })
+    }
+
+    /// `input_window` for `window`, the window in front as GetForegroundWindow has just named it.
+    fn input_window_of(window: HWND) -> (HWND, u32) {
         if window.is_null() {
             return (null_mut(), 0);
         }
@@ -456,6 +460,15 @@ mod win32 {
 
         fn foreground_layout(&self) -> i64 {
             let (_window, thread_id) = input_window();
+            if thread_id == 0 {
+                return 0;
+            }
+            // SAFETY: GetKeyboardLayout takes a thread id by value and returns a handle or null.
+            from_handle(unsafe { GetKeyboardLayout(thread_id) })
+        }
+
+        fn foreground_layout_of(&self, window: i64) -> i64 {
+            let (_window, thread_id) = input_window_of(to_hwnd(window));
             if thread_id == 0 {
                 return 0;
             }
