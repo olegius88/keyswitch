@@ -12,6 +12,10 @@
 //! is `COMError` with its HRESULT, a null interface where comtypes would raise on the first use of it is `ValueError`, and
 //! a null string where the Python would call a method on None is `AttributeError`. A field without a text pattern is no
 //! failure: Chromium and Qt windows expose a focused element long before they expose its text.
+//!
+//! Each property asked of an element as it is now (`Current…`) is a call into the program that owns the field. The reader
+//! asks for the focused element together with the properties and the text pattern it needs (a cache request), so one call
+//! brings them all; where the cache does not answer, the reader asks as it did before, and so gets what it got before.
 
 #![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
@@ -40,8 +44,9 @@ use windows_sys::core::{BSTR, GUID, HRESULT};
 
 use crate::constants::{
     CLSCTX_SERVER, ENDPOINT_END, ENDPOINT_START, FIELD_AFTER_CARET_MAX_CHARACTERS, MILLISECONDS_PER_SECOND,
-    SELECTION_COMMAND_MAX_CHARACTERS, UIA_CONNECTION_TIMEOUT_MS, UIA_EDIT_CONTROL_TYPE_ID, UIA_EMBEDDED_OBJECT_CHARACTER, UIA_IS_READ_ONLY_ATTRIBUTE_ID,
-    UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS, UNIT_CHARACTER,
+    SELECTION_COMMAND_MAX_CHARACTERS, UIA_AUTOMATION_ID_PROPERTY_ID, UIA_CONNECTION_TIMEOUT_MS, UIA_EDIT_CONTROL_TYPE_ID, UIA_EMBEDDED_OBJECT_CHARACTER,
+    UIA_IS_PASSWORD_PROPERTY_ID, UIA_IS_READ_ONLY_ATTRIBUTE_ID, UIA_PROCESS_ID_PROPERTY_ID, UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS,
+    UNIT_CHARACTER,
 };
 use crate::windows_backend::SelectionReader;
 
@@ -54,17 +59,28 @@ const QUERY_INTERFACE: usize = 0;
 const RELEASE: usize = 2;
 // IUIAutomation : IUnknown
 const AUTOMATION_GET_FOCUSED_ELEMENT: usize = 8;
+const AUTOMATION_GET_FOCUSED_ELEMENT_BUILD_CACHE: usize = 12;
+const AUTOMATION_RAW_VIEW_CONDITION: usize = 17;
+const AUTOMATION_CREATE_CACHE_REQUEST: usize = 20;
 const AUTOMATION_RESERVED_MIXED_ATTRIBUTE_VALUE: usize = 55;
+// IUIAutomationCacheRequest : IUnknown
+const CACHE_REQUEST_ADD_PROPERTY: usize = 3;
+const CACHE_REQUEST_ADD_PATTERN: usize = 4;
+const CACHE_REQUEST_PUT_TREE_FILTER: usize = 9;
 // IUIAutomation2 : IUIAutomation, which has 58 slots
 const AUTOMATION2_PUT_CONNECTION_TIMEOUT: usize = 61;
 const AUTOMATION2_PUT_TRANSACTION_TIMEOUT: usize = 63;
 // IUIAutomationElement : IUnknown
 const ELEMENT_GET_RUNTIME_ID: usize = 4;
 const ELEMENT_GET_CURRENT_PATTERN: usize = 16;
+const ELEMENT_GET_CACHED_PATTERN: usize = 17;
 const ELEMENT_CURRENT_PROCESS_ID: usize = 20;
 const ELEMENT_CURRENT_CONTROL_TYPE: usize = 21;
 const ELEMENT_CURRENT_AUTOMATION_ID: usize = 29;
 const ELEMENT_CURRENT_IS_PASSWORD: usize = 35;
+const ELEMENT_CACHED_PROCESS_ID: usize = 52;
+const ELEMENT_CACHED_AUTOMATION_ID: usize = 61;
+const ELEMENT_CACHED_IS_PASSWORD: usize = 67;
 // IUIAutomationTextPattern : IUnknown
 const PATTERN_GET_SELECTION: usize = 5;
 const PATTERN_DOCUMENT_RANGE: usize = 7;
@@ -199,6 +215,82 @@ fn get_string(object: &ComPtr, slot: usize) -> Result<Option<String>, ReaderFail
 
 fn focused_element(automation: &ComPtr) -> Result<ComPtr, ReaderFailure> {
     automation.get_used(AUTOMATION_GET_FOCUSED_ELEMENT)
+}
+
+/// A cache request for `properties` and `patterns` of the element itself, in the raw view of the tree: every focused
+/// element gets its cache, as every one of them answers `Current…` (the default filter caches only control elements).
+fn cache_request(automation: &ComPtr, properties: &[i32], patterns: &[i32]) -> Result<ComPtr, ReaderFailure> {
+    type Add = unsafe extern "system" fn(*mut c_void, i32) -> HRESULT;
+    type PutFilter = unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT;
+    let request = automation.get_used(AUTOMATION_CREATE_CACHE_REQUEST)?;
+    for (slot, ids) in [(CACHE_REQUEST_ADD_PROPERTY, properties), (CACHE_REQUEST_ADD_PATTERN, patterns)] {
+        for &id in ids {
+            // SAFETY: both slots of IUIAutomationCacheRequest take one id by value.
+            check(unsafe { method::<Add>(request.raw(), slot)(request.raw(), id) })?;
+        }
+    }
+    let raw_view = automation.get_used(AUTOMATION_RAW_VIEW_CONDITION)?;
+    // SAFETY: the slot takes a live IUIAutomationCondition, which the request keeps a reference of its own to.
+    check(unsafe { method::<PutFilter>(request.raw(), CACHE_REQUEST_PUT_TREE_FILTER)(request.raw(), raw_view.raw()) })?;
+    Ok(request)
+}
+
+/// The focused element, and whether it came with the cache of a request: then its properties and its text pattern are
+/// read from that cache, and otherwise asked of it as it is.
+struct Focused {
+    element: ComPtr,
+    cached: bool,
+}
+
+impl Focused {
+    /// The focused element with what `request` names in its cache; the plain focused element where there is no request
+    /// or that call fails, whose properties are then asked one by one, as before.
+    fn get(automation: &ComPtr, request: Option<&ComPtr>) -> Result<Focused, ReaderFailure> {
+        type BuildCache = unsafe extern "system" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> HRESULT;
+        if let Some(request) = request {
+            let mut out = null_mut();
+            // SAFETY: the slot of IUIAutomation has this signature, `request` is a live cache request, and `out` is valid.
+            let answered = unsafe {
+                method::<BuildCache>(automation.raw(), AUTOMATION_GET_FOCUSED_ELEMENT_BUILD_CACHE)(automation.raw(), request.raw(), &raw mut out)
+            };
+            if answered >= 0
+                && let Some(element) = NonNull::new(out).map(ComPtr)
+            {
+                return Ok(Focused { element, cached: true });
+            }
+        }
+        Ok(Focused { element: focused_element(automation)?, cached: false })
+    }
+
+    /// A number property: from the cache, or, where the cache does not hold it, asked of the element.
+    fn number(&self, cached: usize, current: usize) -> Result<i32, ReaderFailure> {
+        if self.cached
+            && let Ok(value) = self.element.get_number(cached)
+        {
+            return Ok(value);
+        }
+        self.element.get_number(current)
+    }
+
+    /// A string property: from the cache, or asked of the element.
+    fn string(&self, cached: usize, current: usize) -> Result<Option<String>, ReaderFailure> {
+        if self.cached
+            && let Ok(value) = get_string(&self.element, cached)
+        {
+            return Ok(value);
+        }
+        get_string(&self.element, current)
+    }
+
+    /// The text pattern: from the cache, which holds it or says the element has none, or asked of the element.
+    fn text_pattern(&self) -> Result<Option<ComPtr>, ReaderFailure> {
+        if self.cached
+            && let Ok(pattern) = self.element.get_indexed(ELEMENT_GET_CACHED_PATTERN, UIA_TEXT_PATTERN_ID)
+        {
+            return Ok(pattern);
+        }
+        self.element.get_indexed(ELEMENT_GET_CURRENT_PATTERN, UIA_TEXT_PATTERN_ID)
+    }
 }
 
 fn element_process_id(element: &ComPtr) -> Result<i32, ReaderFailure> {
@@ -342,6 +434,11 @@ fn password_field(application: &str, field_id: String) -> FieldContext {
 
 pub struct WindowsFieldReader {
     automation: Option<ComPtr>,
+    /// What `read` asks of the focused element first, in one call: its process, whether it is a password field, its
+    /// automation id and its text pattern. None where the request could not be made: `read` then asks one by one.
+    read_request: Option<ComPtr>,
+    /// What `read` asks of the focused element once more after the text, to see that the focus stayed.
+    check_request: Option<ComPtr>,
     thread: ThreadId,
     /// This thread entered the apartment and owes it one `CoUninitialize`.
     com: bool,
@@ -360,7 +457,7 @@ impl WindowsFieldReader {
         if unsafe { CoInitializeEx(null(), COINIT_MULTITHREADED.to::<u32>()) } < 0 {
             return Err(os_error());
         }
-        let mut reader = WindowsFieldReader { automation: None, thread: thread::current().id(), com: true };
+        let mut reader = WindowsFieldReader { automation: None, read_request: None, check_request: None, thread: thread::current().id(), com: true };
         let mut out = null_mut();
         // SAFETY: both GUIDs are valid for the call, no outer object is passed, and `out` is a valid place.
         let created =
@@ -382,6 +479,9 @@ impl WindowsFieldReader {
             // SAFETY: the object was asked for as IUIAutomation2, whose slots these are, with this signature.
             check(unsafe { method::<PutTimeout>(automation.raw(), slot)(automation.raw(), timeout) })?;
         }
+        reader.read_request =
+            cache_request(&automation, &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_AUTOMATION_ID_PROPERTY_ID], &[UIA_TEXT_PATTERN_ID]).ok();
+        reader.check_request = cache_request(&automation, &[UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
         reader.automation = Some(automation);
         Ok(reader)
     }
@@ -394,28 +494,30 @@ impl WindowsFieldReader {
     /// The field around the caret. None for a field that cannot be read at all.
     pub fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure> {
         let automation = self.automation()?;
-        let element = focused_element(automation)?;
-        if i64::from(element_process_id(&element)?) != process_for_window(window) {
+        let focused = Focused::get(automation, self.read_request.as_ref())?;
+        let element = &focused.element;
+        if i64::from(focused.number(ELEMENT_CACHED_PROCESS_ID, ELEMENT_CURRENT_PROCESS_ID)?) != process_for_window(window) {
             return Ok(None);
         }
-        let identity = runtime_id(&element)?;
+        let identity = runtime_id(element)?;
         let field_id = identity.iter().map(i32::to_string).collect::<Vec<_>>().join(":");
-        if element_is_password(&element)? {
+        if focused.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0 {
             return Ok(Some(password_field(application, field_id)));
         }
-        let Some(supported) = element.get_indexed(ELEMENT_GET_CURRENT_PATTERN, UIA_TEXT_PATTERN_ID)? else {
+        let Some(supported) = focused.text_pattern()? else {
             // Chromium and Qt windows expose a focused element long before they expose its text. That is a field KeySwitch
             // cannot read, not a provider that has to be rebuilt: GetCurrentPattern answers S_OK with a null pointer.
             return Ok(None);
         };
         let pattern = supported.query_interface(&IID_IUIAUTOMATION_TEXT_PATTERN)?;
         let ranges = selection_ranges(&pattern)?;
-        if ranges.get_number(RANGES_LENGTH)? > 1 {
+        let count = ranges.get_number(RANGES_LENGTH)?;
+        if count > 1 {
             let mut field = uia_field(application, field_id);
             field.selection = true;
             return Ok(Some(field));
         }
-        if ranges.get_number(RANGES_LENGTH)? != 1 {
+        if count != 1 {
             return Ok(None);
         }
         let caret = ranges.get_indexed(RANGES_GET_ELEMENT, 0)?.ok_or_else(value_error)?;
@@ -424,8 +526,9 @@ impl WindowsFieldReader {
             field.selection = true;
             return Ok(Some(field));
         }
+        // The caret's own range is needed no more: it becomes the range after the caret, one copy fewer.
         let before = caret.get_used(RANGE_CLONE)?;
-        let after = caret.get_used(RANGE_CLONE)?;
+        let after = caret;
         move_endpoint_by_unit(&before, ENDPOINT_START, -CONTEXT_LIMIT)?;
         move_endpoint_by_unit(&after, ENDPOINT_END, FIELD_AFTER_CARET_MAX_CHARACTERS)?;
         // A browser's text ranges run through the whole page: Chromium moves an endpoint past the edge of the focused input
@@ -442,16 +545,16 @@ impl WindowsFieldReader {
         }
         let prefix = text_without_placeholder(&before, CONTEXT_LIMIT)?;
         let suffix = text_without_placeholder(&after, FIELD_AFTER_CARET_MAX_CHARACTERS)?;
-        let current = focused_element(automation)?;
-        if element_is_password(&current)? {
+        let current = Focused::get(automation, self.check_request.as_ref())?;
+        if current.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0 {
             return Ok(Some(password_field(application, field_id)));
         }
-        if runtime_id(&current)? != identity {
+        if runtime_id(&current.element)? != identity {
             // Explicit contradictory evidence, not an unsupported provider. An empty native suffix makes the policy reject
             // stale strokes.
             return Ok(Some(uia_field(application, field_id)));
         }
-        let automation_id = get_string(&element, ELEMENT_CURRENT_AUTOMATION_ID)?.ok_or_else(attribute_error)?;
+        let automation_id = focused.string(ELEMENT_CACHED_AUTOMATION_ID, ELEMENT_CURRENT_AUTOMATION_ID)?.ok_or_else(attribute_error)?;
         let mut result = uia_field(application, field_id);
         result.before = prefix;
         result.after = suffix;
@@ -509,6 +612,8 @@ impl WindowsFieldReader {
     pub fn close(&mut self) {
         if self.com && thread::current().id() == self.thread {
             // Drop all apartment-bound interface references before uninit.
+            self.read_request = None;
+            self.check_request = None;
             self.automation = None;
             // SAFETY: this thread entered the apartment in `new`, and `com` makes this the one matching call.
             unsafe { CoUninitialize() };

@@ -27,6 +27,9 @@ pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
 /// milliseconds later or in another window: its release may have gone where the hook does not reach (a UAC prompt, the
 /// Ctrl+Alt+Del screen, an elevated window).
 pub const MODIFIER_RECHECK_GAP_MS: i64 = 1000;
+/// How many translations of a key the hook keeps (`Inner::translated`): every key, with and without Shift and Caps Lock, in
+/// both layouts, is a few hundred; past this number the kept ones are forgotten and asked again.
+pub const TRANSLATIONS_KEPT_MAX: usize = 4096;
 /// How long `hold_input` waits for a key the hook is answering at that moment to reach the engine's queue. The hook
 /// answers a key in tens of microseconds; a hook thread kept from the processor for longer than this is not waited for,
 /// and the hold begins without that key, as every hold did before.
@@ -197,6 +200,11 @@ pub const VK_LAST: u32 = 0xFF;
 /// UI Automation `TextPattern` id. `GetCurrentPattern` answers `S_OK` with a null pointer when the element does not support
 /// it: a field without text is an ordinary answer.
 pub const UIA_TEXT_PATTERN_ID: i32 = 10014;
+/// `UIA_ProcessIdPropertyId`, `UIA_IsPasswordPropertyId` and `UIA_AutomationIdPropertyId` (Property Identifiers,
+/// UIAutomationClient.h): what the field reader asks of the focused element, fetched with it in one request.
+pub const UIA_PROCESS_ID_PROPERTY_ID: i32 = 30002;
+pub const UIA_IS_PASSWORD_PROPERTY_ID: i32 = 30019;
+pub const UIA_AUTOMATION_ID_PROPERTY_ID: i32 = 30011;
 /// `TextPatternRangeEndpoint_Start` and _End, and `TextUnit_Character` (UIAutomationClient.h).
 pub const ENDPOINT_START: i32 = 0;
 pub const ENDPOINT_END: i32 = 1;
