@@ -49,7 +49,7 @@ use crate::constants::{
     ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK,
     ENGINE_HOLD_MAX_MS, HELD_KEY_RETRY_POLL_SECONDS, HELD_KEY_RETRY_SECONDS, HOOK_SILENCE_MS, KEY_IN_FLIGHT_POLL_SECONDS, KEY_IN_FLIGHT_WAIT_SECONDS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
-    LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS,
+    LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS, TRANSLATIONS_KEPT_MAX,
     KEYPAD_SLASH_KEY_NAME, KEYS_TYPED_BY_VIRTUAL_KEY, PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
     UNOWNED_HOLD_MAX_MS, UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
@@ -153,6 +153,12 @@ pub type HookReady = Box<dyn FnOnce() + Send>;
 pub trait WindowsAPI: Send + Sync {
     fn loaded_layouts(&self) -> Result<Vec<i64>, WindowsBackendError>;
     fn foreground_layout(&self) -> i64;
+    /// `foreground_layout`, `window` being the window in front `foreground_window` has just named: the hook asks for that
+    /// window once a key and uses it for the layout too.
+    fn foreground_layout_of(&self, window: i64) -> i64 {
+        let _ = window;
+        self.foreground_layout()
+    }
     /// The layout of `window`, in front or not: the one of the thread its keys go to.
     fn window_layout(&self, window: i64) -> i64;
     fn request_layout(&self, layout: i64) -> bool;
@@ -429,6 +435,9 @@ impl KeySet {
 
 /// What only the hook's thread touches. The mutex exists because `handle_native` takes `&self`; nothing else ever holds
 /// it, and it is never held across the filter, the listener or another lock's owner.
+/// The characters of a key in a layout, by virtual key, scan code, modifiers and layout (`Inner::translated`).
+type Translations = std::collections::HashMap<(u32, u32, u32, i64), String>;
+
 #[derive(Default)]
 struct HookState {
     pressed: KeySet,
@@ -593,6 +602,10 @@ struct Inner {
     inject_lock: Mutex<()>,
     input_delay: InputDelay,
     unseen: Mutex<UnseenState>,
+    /// What `translate_key` answered for a key, modifiers and layout: the same arguments give the same characters (the
+    /// translation keeps the keyboard state as it is), and every key the hook answers is translated twice. The hook's
+    /// thread only.
+    translations: Mutex<Translations>,
     /// UI Automation for the selection hotkeys, made on first use by the factory (`read_selection`). Engine's thread only.
     selection_reader: Mutex<Option<Box<dyn SelectionReader>>>,
     selection_reader_factory: SelectionReaderFactory,
@@ -658,6 +671,7 @@ impl WindowsBackend {
                 unseen: Mutex::new(UnseenState::default()),
                 selection_reader: Mutex::new(None),
                 selection_reader_factory: parts.selection_reader_factory,
+                translations: Mutex::new(Translations::new()),
                 work_window: AtomicI64::new(0),
                 menu_switch: AtomicBool::new(false),
             }),
@@ -937,6 +951,29 @@ impl Inner {
             return self.group_for_layout(self.api.window_layout(work_window));
         }
         self.group_for_layout(self.api.foreground_layout())
+    }
+
+    /// `current_group` for the hook, `foreground` being the window in front it has just asked for.
+    fn group_in_front(&self, foreground: i64) -> Result<i32, WindowsBackendError> {
+        let work_window = self.work_window.load(Ordering::Acquire);
+        if work_window != 0 && self.is_shell_tray_window(foreground) {
+            return self.group_for_layout(self.api.window_layout(work_window));
+        }
+        self.group_for_layout(self.api.foreground_layout_of(foreground))
+    }
+
+    /// `translate_key`, answered from what it answered before for the same arguments.
+    fn translated(&self, virtual_key: u32, scan_code: u32, state: u32, layout: i64) -> String {
+        let mut translations = lock(&self.translations);
+        if let Some(characters) = translations.get(&(virtual_key, scan_code, state, layout)) {
+            return characters.clone();
+        }
+        let characters = self.api.translate_key(virtual_key, scan_code, state, layout);
+        if translations.len() >= TRANSLATIONS_KEPT_MAX {
+            translations.clear();
+        }
+        translations.insert((virtual_key, scan_code, state, layout), characters.clone());
+        characters
     }
 
     fn switch_group(&self, group: i32) -> Result<(), WindowsBackendError> {
@@ -1502,10 +1539,13 @@ impl Inner {
                 return true;
             }
         }
+        // The window in front, asked once for this key: the check of the modifiers, the layout and the window the key goes
+        // to all take it from here, where each of them asked again.
+        let foreground = self.api.foreground_window();
         if native.virtual_key != VK_PACKET {
             // A packet is a character, not a key: nothing is held down by it.
             if !native.injected && !native.replayed && !native.foreign {
-                self.recheck_modifiers(native);
+                self.recheck_modifiers(native, foreground);
             }
             self.track_key_state(native);
         }
@@ -1516,11 +1556,11 @@ impl Inner {
             return false;
         };
         let characters = vec![
-            self.api.translate_key(native.virtual_key, native.scan_code, state, english),
-            self.api.translate_key(native.virtual_key, native.scan_code, state, russian),
+            self.translated(native.virtual_key, native.scan_code, state, english),
+            self.translated(native.virtual_key, native.scan_code, state, russian),
         ];
         // The layouts were read just above and stay: an unknown layout is the group of none.
-        let group = self.current_group().unwrap_or(-1);
+        let group = self.group_in_front(foreground).unwrap_or(-1);
         let character = usize::try_from(group).ok().and_then(|index| characters.get(index)).cloned().unwrap_or_default();
         let mut event = KeyEvent {
             pressed: native.pressed,
@@ -1538,7 +1578,7 @@ impl Inner {
             // the focused control: a key typed behind a Tab is seen here before the program has taken the Tab, and goes
             // to the next field. A key kept back comes here again when it is typed again, with the window of that
             // moment. KeySwitch's own keys are not the engine's to place.
-            window: if native.injected { 0 } else { self.api.foreground_window() },
+            window: if native.injected { 0 } else { foreground },
         };
         let repeated_answer = !event.synthetic && event.pressed && lock(&self.hook).consumed_keys.contains(event.keycode);
         let consumed = self.consumes(&event);
@@ -1580,8 +1620,7 @@ impl Inner {
     /// again. So when a key comes after a pause or in another window, each modifier still in the books is asked of the
     /// keyboard. Only then: the key being answered is not in the keyboard state yet, and asking at every key would race
     /// the user's own chord.
-    fn recheck_modifiers(&self, native: NativeKeyEvent) {
-        let window = self.api.foreground_window();
+    fn recheck_modifiers(&self, native: NativeKeyEvent, window: i64) {
         let mut hook = lock(&self.hook);
         let (previous_time, previous_window) = hook.last_typed;
         hook.last_typed = (native.timestamp, window);

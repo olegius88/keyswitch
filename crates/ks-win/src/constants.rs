@@ -27,6 +27,9 @@ pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
 /// milliseconds later or in another window: its release may have gone where the hook does not reach (a UAC prompt, the
 /// Ctrl+Alt+Del screen, an elevated window).
 pub const MODIFIER_RECHECK_GAP_MS: i64 = 1000;
+/// How many translations of a key the hook keeps (`Inner::translated`): every key, with and without Shift and Caps Lock, in
+/// both layouts, is a few hundred; past this number the kept ones are forgotten and asked again.
+pub const TRANSLATIONS_KEPT_MAX: usize = 4096;
 /// How long `hold_input` waits for a key the hook is answering at that moment to reach the engine's queue. The hook
 /// answers a key in tens of microseconds; a hook thread kept from the processor for longer than this is not waited for,
 /// and the hold begins without that key, as every hold did before.
