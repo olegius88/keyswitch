@@ -132,3 +132,43 @@ fn a_term_typed_in_the_russian_layout_before_a_russian_word_converts_alone() {
     assert_eq!(typed(&mut bundle, 1, "pro-nfhbae-rkbtyn ", None, as_shipped), "зкщ-тарифу-клиент ");
     bundle.clean();
 }
+
+#[test]
+fn undo_after_an_early_switch_inside_a_joined_token_puts_back_every_key_as_typed() {
+    let mut bundle = Bundle::load(None);
+    // `ьщтпщ-сервиса` typed in the Russian layout: the early switch makes `ьщтп` `mong` while it is typed, the rest comes in
+    // English, and the part after the hyphen converts back at the space.
+    let mut session = bundle.session("firefox", 1, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    keys(&mut session, "ljcnegty njkmrj mongo-cthdbcf ");
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "доступен только mongo-сервиса ");
+    assert_eq!(session.backend.group(), 1, "the layout the word after the sign was typed in");
+    // Undo takes back the whole token, the early switch's part too, as after the early switch of a word of one part.
+    session.core.schedule_undo_hotkey(i64::from(PAUSE_KEYCODE));
+    session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "доступен только ьщтпщ-сервиса ");
+    bundle.give_back(session);
+    // A sign split off the end goes with the rest, and so does a boundary both layouts type alike; one the converted part
+    // takes as another sign (`?` is `,`) leaves the part corrected alone.
+    for (typed, shown, undone) in [
+        ("ljcnegty njkmrj mongo-cthdbcf/ ", "доступен только mongo-сервиса. ", Some("доступен только ьщтпщ-сервиса. ")),
+        ("ljcnegty njkmrj mongo-cthdbcf! ", "доступен только mongo-сервиса! ", Some("доступен только ьщтпщ-сервиса! ")),
+        ("ljcnegty njkmrj mongo-cthdbcf?", "доступен только mongo-сервиса,", None),
+    ] {
+        let mut session = bundle.session("firefox", 1, Vec::new());
+        session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+        keys(&mut session, typed);
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), shown);
+        if let Some(undone) = undone {
+            session.core.schedule_undo_hotkey(i64::from(PAUSE_KEYCODE));
+            session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+            session.idle(1.0);
+            assert_eq!(session.backend.text().iter().collect::<String>(), undone, "{typed}");
+        }
+        bundle.give_back(session);
+    }
+    bundle.clean();
+}

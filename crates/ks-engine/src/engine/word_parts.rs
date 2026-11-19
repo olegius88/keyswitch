@@ -403,6 +403,39 @@ impl EngineCore {
         })))
     }
 
+    /// The correction of a token an early switch began to convert while it was typed and whose part after the sign
+    /// converts back at its boundary, from the layout the token was begun in.
+    ///
+    /// `ьщтпщ-сервиса` typed in the Russian layout: the early switch made `ьщтп` `mong` and the rest was typed in English,
+    /// `o-cthdbcf`, whose part after the hyphen converts back (`mongo-сервиса`). Corrected alone, the part was all undo
+    /// took back, and it left `mongo-cthdbcf`. The correction covers the whole token instead: the part before the sign in
+    /// the layout the switch went to, the sign and the rest in the one it was begun in (`kept_tail`), which stays, and
+    /// undo types every key back in that layout, as after the early switch of a word of one part (`typed`). Signs split
+    /// off the end go with the rest (`mongo-cthdbcf/` is `mongo-сервиса.`). A boundary the converted word takes as another
+    /// sign (`replay_sign_with_word`: `?` is `,`) leaves the part corrected alone, as before.
+    #[expect(clippy::too_many_arguments, reason = "the token's parts, its ends and the layouts are one correction's inputs")]
+    pub fn whole_token_from(
+        &self, stem: &[Stroke], signs: &[Stroke], split: usize, boundary: &Stroke, opened: &[Stroke], begun_in: i64, decision: &DetectionDecision,
+        application: &str,
+    ) -> Option<PlanRef> {
+        let current = decision.source_group;
+        let probe = Arc::new(CorrectionPlan::new(Vec::new(), Some(boundary.clone()), current, begun_in, String::new(), String::new(), 0.0, application));
+        if Self::replay_sign_with_word(&probe, opened).sign_replayed {
+            return None;
+        }
+        let sign = split - 1;
+        let keys: Strokes = stem.iter().chain(signs).cloned().collect();
+        Some(Arc::new(CorrectionPlan {
+            context_field: self.context_field_id(),
+            kept_tail: keys.len() - sign,
+            typed: text_for_group(&keys, begun_in),
+            ..CorrectionPlan::new(
+                keys.clone(), Some(boundary.clone()), begun_in, current, text_for_group(&keys, current),
+                format!("{}{}", text_for_group(&keys[..sign], current), text_for_group(&keys[sign..], begun_in)), decision.confidence, application,
+            )
+        }))
+    }
+
     /// The part after the last joining sign of a token typed right after the user picked its layout by hand.
     ///
     /// The pick protects the word it was made for, and a joining sign ends that word: picked English for
