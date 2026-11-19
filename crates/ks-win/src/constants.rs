@@ -200,6 +200,11 @@ pub const VK_LAST: u32 = 0xFF;
 /// UI Automation `TextPattern` id. `GetCurrentPattern` answers `S_OK` with a null pointer when the element does not support
 /// it: a field without text is an ordinary answer.
 pub const UIA_TEXT_PATTERN_ID: i32 = 10014;
+/// `UIA_ProcessIdPropertyId`, `UIA_IsPasswordPropertyId` and `UIA_AutomationIdPropertyId` (Property Identifiers,
+/// UIAutomationClient.h): what the field reader asks of the focused element, fetched with it in one request.
+pub const UIA_PROCESS_ID_PROPERTY_ID: i32 = 30002;
+pub const UIA_IS_PASSWORD_PROPERTY_ID: i32 = 30019;
+pub const UIA_AUTOMATION_ID_PROPERTY_ID: i32 = 30011;
 /// `TextPatternRangeEndpoint_Start` and _End, and `TextUnit_Character` (UIAutomationClient.h).
 pub const ENDPOINT_START: i32 = 0;
 pub const ENDPOINT_END: i32 = 1;
