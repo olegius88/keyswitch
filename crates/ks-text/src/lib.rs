@@ -20,7 +20,7 @@ mod unicode_tables;
 
 pub use pyjson::{json_dumps, Indent, JsonOptions};
 pub use pynum::{
-    exp, float_repr, fmean, fsum, log, log2, log_base, max_by_key_first, max_first, min_by_key_first,
+    exp, float_repr, fmean, fsum, log, log2, log_base, max_by_key_first, max_first, min_by_key_first, push_float_repr,
     pstdev, py_float, py_int, py_round, py_round_ndigits, py_round_to_int, sqrt, FsumError,
 };
 pub use ucd::UNICODE_VERSION;

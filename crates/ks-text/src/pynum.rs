@@ -12,34 +12,60 @@ use crate::ucd;
 /// `repr(x)` and `str(x)` of a float: the shortest text that parses back to `x`, in Python's layout
 /// (`1e+16`, `1.5e-07`, `0.0001`, `inf`, `nan`, `-0.0`).
 #[must_use]
-#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
 pub fn float_repr(x: f64) -> String {
+    let mut out = String::with_capacity(REPR_CAPACITY_BYTES);
+    push_float_repr(&mut out, x);
+    out
+}
+
+/// What `float_repr` usually needs: a sign, 17 digits, a point and an exponent.
+const REPR_CAPACITY_BYTES: usize = 24;
+
+/// `float_repr(x)`, appended to `out`: a checksum over hundreds of thousands of weights writes them one after another.
+#[expect(clippy::float_cmp, reason = "the exact double is the meaning here, as it is in the Python this was checked against")]
+pub fn push_float_repr(out: &mut String, x: f64) {
+    use std::fmt::Write as _;
     if x.is_nan() {
-        return "nan".to_string();
+        out.push_str("nan");
+        return;
     }
     if x.is_infinite() {
-        return if x < 0.0 { "-inf" } else { "inf" }.to_string();
+        out.push_str(if x < 0.0 { "-inf" } else { "inf" });
+        return;
     }
     let sign = if x.is_sign_negative() { "-" } else { "" };
     if x == 0.0 {
-        return format!("{sign}0.0");
+        out.push_str(sign);
+        out.push_str("0.0");
+        return;
     }
+    let a = x.abs();
     // Rust's `{:e}` prints the shortest digits that round-trip, as Python's repr does, but when two
     // candidates of that length are equally close to the exact value it takes the upper one (Python's
     // dtoa takes the even one: 742082672164581.25 is `...581.2`). The correctly rounded text of the same
     // length, when it still round-trips, is the one Python writes.
-    let mut text = format!("{:e}", x.abs());
-    let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(char::is_ascii_digit).count();
-    let exact = format!("{:.*e}", shortest_len - 1, x.abs());
-    if exact != text && exact.parse::<f64>().is_ok_and(|v| v == x.abs()) {
-        text = exact;
+    let shortest = Formatted::of(format_args!("{a:e}"));
+    let mut text = shortest.text();
+    let corrected;
+    // A tie needs an exact value with at most 18 significant digits (see `ties_impossible`); most doubles have far
+    // more, and for them the second formatting and the parse, which cost twice the first, would change nothing.
+    if !ties_impossible(a) {
+        let shortest_len = text.split_once('e').expect("exponent form").0.chars().filter(char::is_ascii_digit).count();
+        corrected = Formatted::of(format_args!("{:.*e}", shortest_len - 1, a));
+        if corrected.text() != text && corrected.text().parse::<f64>().is_ok_and(|v| v == a) {
+            text = corrected.text();
+        }
     }
     let (mantissa, exponent) = text.split_once('e').expect("exponent form");
-    let digits: String = mantissa.chars().filter(|&c| c != '.').collect();
+    let mut digit_buffer = Formatted::default();
+    for part in mantissa.split('.') {
+        digit_buffer.write_str(part).expect("a double has at most 17 digits");
+    }
+    let digits = digit_buffer.text();
     let exp10: i32 = exponent.parse().expect("exponent");
     let decpt = exp10 + 1;
     let n = digits.len().low::<i32>();
-    let mut out = String::from(sign);
+    out.push_str(sign);
     if !(-4..16).contains(&exp10) {
         out.push_str(digits.get(..1).unwrap_or_default());
         if n > 1 {
@@ -48,13 +74,13 @@ pub fn float_repr(x: f64) -> String {
         }
         out.push('e');
         out.push(if exp10 < 0 { '-' } else { '+' });
-        out.push_str(&format!("{:02}", exp10.abs()));
+        write!(out, "{:02}", exp10.abs()).expect("a String takes any text");
     } else if decpt <= 0 {
         out.push_str("0.");
         out.extend(std::iter::repeat_n('0', (-decpt).to::<usize>()));
-        out.push_str(&digits);
+        out.push_str(digits);
     } else if decpt >= n {
-        out.push_str(&digits);
+        out.push_str(digits);
         out.extend(std::iter::repeat_n('0', (decpt - n).to::<usize>()));
         out.push_str(".0");
     } else {
@@ -62,7 +88,70 @@ pub fn float_repr(x: f64) -> String {
         out.push('.');
         out.push_str(digits.get(decpt.to::<usize>()..).unwrap_or_default());
     }
-    out
+}
+
+/// One double formatted on the stack: `{:e}` of an `f64` is at most 24 characters.
+struct Formatted {
+    bytes: [u8; FORMATTED_BYTES],
+    len: usize,
+}
+
+const FORMATTED_BYTES: usize = 32;
+
+impl Default for Formatted {
+    fn default() -> Self {
+        Formatted { bytes: [0; FORMATTED_BYTES], len: 0 }
+    }
+}
+
+impl std::fmt::Write for Formatted {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let end = self.len + text.len();
+        self.bytes.get_mut(self.len..end).ok_or(std::fmt::Error)?.copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+impl Formatted {
+    fn of(arguments: std::fmt::Arguments<'_>) -> Formatted {
+        let mut formatted = Formatted::default();
+        std::fmt::Write::write_fmt(&mut formatted, arguments).expect("a double fits in the buffer");
+        formatted
+    }
+
+    fn text(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("the digits of a double are ASCII")
+    }
+}
+
+/// Whether no two decimals of the shortest length can be equally close to `a`, a finite double above zero.
+///
+/// The shortest text has at most 17 significant digits. Two texts of `n` digits are equally close to `a` only when `a`
+/// lies halfway between them, that is when its exact decimal value has `n + 1` significant digits, the last a 5. The
+/// exact value of `mantissa * 2^-k` (odd mantissa) is `mantissa * 5^k / 10^k`, and the odd integer `mantissa * 5^k` ends
+/// in no zero, so its digits are the significant digits of `a`: from 19 of them on, no tie is possible. Integers and
+/// short fractions (`742082672164581.25`) go the long way.
+fn ties_impossible(a: f64) -> bool {
+    const FRACTION_BITS: u32 = 52;
+    const EXPONENT_MASK: u64 = 0x7ff;
+    // The exponent of the lowest mantissa bit: 2^-1074 for a subnormal, `stored - 1075` for a normal double.
+    const SUBNORMAL_EXPONENT: i64 = -1074;
+    const EXPONENT_BIAS: i64 = 1075;
+    // 5^26 > 10^18: with that many fractional bits the exact value has more than 18 digits, whatever the mantissa.
+    const FIVES_ALWAYS_LONG: i64 = 26;
+    const MAX_TIE_DIGITS: u32 = 18;
+    let bits = a.to_bits();
+    let stored = (bits >> FRACTION_BITS) & EXPONENT_MASK;
+    let fraction = bits & ((1 << FRACTION_BITS) - 1);
+    let (mantissa, exponent) =
+        if stored == 0 { (fraction, SUBNORMAL_EXPONENT) } else { (fraction | (1 << FRACTION_BITS), stored.to::<i64>() - EXPONENT_BIAS) };
+    let zeros = mantissa.trailing_zeros();
+    let fives = -(exponent + i64::from(zeros));
+    if fives <= 0 {
+        return false;
+    }
+    fives >= FIVES_ALWAYS_LONG || u128::from(mantissa >> zeros) * 5_u128.pow(fives.to::<u32>()) >= 10_u128.pow(MAX_TIE_DIGITS)
 }
 
 // ---------------------------------------------------------------- parsing
@@ -555,6 +644,26 @@ where
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_short_exact_value_can_tie() {
+        // Integers and fractions of few bits have short exact values: they take the long way.
+        // 742082672164581.25 and 281474976710656.0625, made of numbers a double holds exactly.
+        let (quarters, sixteenths) = (2_968_330_688_658_325.0 / 4.0, 4_503_599_627_370_497.0 / 16.0);
+        assert!(!ties_impossible(2.0));
+        assert!(!ties_impossible(1e16));
+        assert!(!ties_impossible(quarters));
+        // 0.1 has 55 fractional bits, far more than a tie allows.
+        assert!(ties_impossible(0.1));
+        assert!(ties_impossible(f64::from_bits(1)));
+        // Four fractional bits, but a mantissa of 53 bits: 19 digits.
+        assert!(ties_impossible(sixteenths));
+        assert_eq!(float_repr(quarters), "742082672164581.2");
+        assert_eq!(float_repr(sixteenths), "281474976710656.06");
+        let mut text = String::from("x=");
+        push_float_repr(&mut text, -0.5);
+        assert_eq!(text, "x=-0.5");
+    }
 
     #[test]
     fn floats_end_where_the_text_ends() {
