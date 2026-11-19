@@ -202,6 +202,31 @@ jobs:
         run: |
           # The Windows 11 Arm image opens the host of web apps at sign-in, and it holds the foreground.
           Get-Process WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force
+          # Its image of 15.11.2026 opens Windows Terminal too, in front of the test's window: the test's keys went to the
+          # terminal. Its windows are minimized, not closed, since the terminal may host the runner's own shell.
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public static class Terminals {
+              public delegate bool EachWindow(IntPtr window, IntPtr data);
+              [DllImport("user32.dll")] public static extern bool EnumWindows(EachWindow each, IntPtr data);
+              [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+              [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+              [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr window, int command);
+              public static int Minimize() {
+                  int minimized = 0;
+                  EnumWindows((window, data) => {
+                      var name = new StringBuilder(256);
+                      GetClassName(window, name, name.Capacity);
+                      if (IsWindowVisible(window) && name.ToString() == "CASCADIA_HOSTING_WINDOW_CLASS") { ShowWindow(window, 6); minimized++; }
+                      return true;
+                  }, IntPtr.Zero);
+                  return minimized;
+              }
+          }
+          "@
+          Write-Host "terminal windows minimized: $([Terminals]::Minimize())"
           Start-Sleep -Seconds 2
           $list = New-WinUserLanguageList -Language "en-US"
           $list.Add("ru-RU")
