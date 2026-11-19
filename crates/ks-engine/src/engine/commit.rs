@@ -228,6 +228,7 @@ impl EngineCore {
                 None
             };
             let mut alone: Option<PlanRef> = None;
+            let mut head_alone = false;
             let unsplit = head == 0 && trailing.is_empty() && signs.is_empty() && !switched;
             if let (Some(found), Some(waited)) = (&joint, &waiting) {
                 let taken = self.take_along(&kept, &found.0, pystr::len(&waited.plan.original), &application, switched)?;
@@ -245,6 +246,16 @@ impl EngineCore {
                         // The kept letter converts with the sign after it; nothing before it is taken along any more.
                         kept = Vec::new();
                         matched = true;
+                    }
+                }
+                // A token a layout picked by hand protects up to its sign has a head (`protected_joined_part`): not unsplit.
+                if !matched && waiting.is_none() && unsplit && inside.is_none() && !decided.should_convert {
+                    alone = self.decide_joined_head(&strokes, boundary, source_group, alternatives[0].0, &application)?;
+                    if alone.is_some() {
+                        // Only the part before the sign converts (`pro-тарифу`); the words before it go along no more.
+                        kept = Vec::new();
+                        matched = true;
+                        head_alone = true;
                     }
                 }
                 if !matched
@@ -367,7 +378,9 @@ impl EngineCore {
                 }
                 let remembered = strokes_of(&[&typed[..head], &strokes, &signs]);
                 self.remember_context(&application, source_group, &remembered);
-                let waits = self.start_context_wait(&plan, &decided, boundary, &trailing, head, false);
+                // A token whose head converted alone is settled: no next word takes it back or along as it was typed, which
+                // its keys no longer show.
+                let waits = !head_alone && self.start_context_wait(&plan, &decided, boundary, &trailing, head, false);
                 let typo = if waits || alone.is_some() || !plain {
                     None
                 } else {
@@ -394,7 +407,7 @@ impl EngineCore {
                         plan = self.fix_double_capitals(&plan, boundary);
                     }
                     // A word waiting for its neighbour joins the kept words only if the wait fails.
-                    let word = if waits || has_typo {
+                    let word = if waits || has_typo || head_alone {
                         None
                     } else {
                         Some(Arc::new(KeptWord {
