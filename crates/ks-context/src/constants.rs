@@ -863,6 +863,10 @@ pub const TYPO_SECTIONS: &[&str] = &["forms", "weights", "seen"];
 
 // The byte that ends each stored form; the letters are coded from one up, in the order of their alphabet.
 pub const TYPO_FORM_SEPARATOR: usize = 0;
+/// How many sorted forms of a typo list share one offset: a lookup finds the block by binary search and walks it.
+pub const TYPO_BLOCK_FORMS: usize = 16;
+/// The most bytes a stored form of a typo list keeps of the form before it: the count is one byte.
+pub const TYPO_SHARED_MAX_BYTES: usize = 255;
 
 // The letters of each language's forms, in their coding order.
 pub const TYPO_ALPHABETS: &[(&str, &str)] = &[("en_US", "abcdefghijklmnopqrstuvwxyz"), ("ru_RU", "абвгдеёжзийклмнопрстуфхцчшщъыьэюя")];

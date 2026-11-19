@@ -283,12 +283,19 @@ impl AffixCounts {
 
     fn build(table: &CountTable, ending: bool) -> Self {
         let mut counts: HashMap<String, u32> = HashMap::new();
+        // Built on the first word that asks, which then waited for it: a text for every affix of every word was half a
+        // million allocations. An affix is copied once, when it is first met; the letters' places reuse one buffer.
+        let mut chars: Vec<(usize, char)> = Vec::new();
         for word in table.words() {
-            let chars: Vec<(usize, char)> = word.char_indices().collect();
+            chars.clear();
+            chars.extend(word.char_indices());
             for size in crate::constants::TERM_HEAD_ENDING_LETTERS {
                 if chars.len() > *size {
                     let affix = if ending { word.get(chars[chars.len() - size].0..).unwrap_or_default() } else { word.get(..chars[*size].0).unwrap_or_default() };
-                    *counts.entry(affix.to_string()).or_insert(0) += 1;
+                    match counts.get_mut(affix) {
+                        Some(count) => *count += 1,
+                        None => drop(counts.insert(affix.to_owned(), 1)),
+                    }
                 }
             }
         }
