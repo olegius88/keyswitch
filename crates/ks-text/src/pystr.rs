@@ -112,11 +112,38 @@ pub fn casefold(s: &str) -> String {
     for c in s.chars() {
         if c.is_ascii() {
             out.push(c.to_ascii_lowercase());
+        } else if let Some(folded) = cyrillic_fold(c) {
+            out.push(folded);
         } else {
             push_fold(&mut out, c);
         }
     }
     out
+}
+
+/// The first code point and the end of the Cyrillic block, where nearly every letter that is not ASCII lives.
+const CYRILLIC_FOLD_FIRST: u32 = 0x400;
+const CYRILLIC_FOLD_END: u32 = 0x500;
+
+/// `push_fold` of a letter of the Cyrillic block, from a table `push_fold` itself filled once: a dictionary of hundreds
+/// of thousands of words is casefolded as the program starts, and two binary searches a letter were most of it.
+fn cyrillic_fold(c: char) -> Option<char> {
+    static TABLE: std::sync::LazyLock<Vec<Option<char>>> = std::sync::LazyLock::new(|| {
+        (CYRILLIC_FOLD_FIRST..CYRILLIC_FOLD_END)
+            .map(|cp| {
+                let mut folded = String::new();
+                push_fold(&mut folded, char::from_u32(cp).expect("the Cyrillic block holds scalar values"));
+                let mut chars = folded.chars();
+                // A letter that folds to more than one would take the long way; the block has none.
+                match (chars.next(), chars.next()) {
+                    (Some(only), None) => Some(only),
+                    _ => None,
+                }
+            })
+            .collect()
+    });
+    let cp = u32::from(c);
+    if (CYRILLIC_FOLD_FIRST..CYRILLIC_FOLD_END).contains(&cp) { TABLE[(cp - CYRILLIC_FOLD_FIRST).to::<usize>()] } else { None }
 }
 
 /// `str.capitalize()`: the first character titlecased, the rest lowercased.
@@ -621,6 +648,9 @@ mod tests {
         assert_eq!(lower("İ"), "i\u{307}");
         assert_eq!(upper("ß"), "SS");
         assert_eq!(casefold("ß"), "ss");
+        // The Cyrillic block from its table, the letters beside it the long way: the same answers.
+        assert_eq!(casefold("ЁЖИКЯЀЏҐӀ"), "ёжикяѐџґӏ");
+        assert_eq!(casefold("ԀÉ"), "ԁé");
         assert_eq!(casefold("Σς"), "σσ");
         assert_eq!(capitalize("ǆx"), "ǅx");
         assert_eq!(title("hello wORLD-x"), "Hello World-X");
