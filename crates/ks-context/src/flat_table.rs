@@ -11,7 +11,6 @@ use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer as _};
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::io::BufReader;
 use std::path::Path;
 
 /// FNV-1a over the bytes of a name.
@@ -350,22 +349,28 @@ fn json_error(error: &serde_json::Error) -> LoadError {
     LoadError { name: "JSONDecodeError", message: error.to_string() }
 }
 
-fn open_limited(path: &Path, limit: usize, too_large: &str) -> Result<BufReader<std::fs::File>, LoadError> {
-    let file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
+/// The whole file, refused before it is read when its length is above `limit`. Parsed from memory, the JSON reads about
+/// five times faster than through a reader; the bytes are dropped as soon as the table is built.
+fn read_limited(path: &Path, limit: usize, too_large: &str) -> Result<Vec<u8>, LoadError> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path).map_err(|error| LoadError::os(&error, path))?;
     let length = file.metadata().map_err(|error| LoadError::os(&error, path))?.len();
     if length > limit.to::<u64>() {
         return Err(LoadError::value(too_large));
     }
-    Ok(BufReader::with_capacity(1 << 16, file))
+    let mut bytes = Vec::with_capacity(length.to::<usize>());
+    file.read_to_end(&mut bytes).map_err(|error| LoadError::os(&error, path))?;
+    Ok(bytes)
 }
 
 /// `context_model.load_term_frequency(path, alphabets, maximum)`: the counts of each alphabet, checked like the
 /// artifact. A count above 2^32 - 1 is refused with the others that are no counts.
 pub fn load_term_frequency(path: &Path, alphabets: &[&str], limit: usize) -> Result<CountTables, LoadError> {
-    let reader = open_limited(path, limit, "term frequency table is too large")?;
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let bytes = read_limited(path, limit, "term frequency table is too large")?;
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
     let parsed = deserializer.deserialize_any(TablesVisitor).map_err(|error| json_error(&error))?;
     deserializer.end().map_err(|error| json_error(&error))?;
+    drop(bytes);
     let invalid = || LoadError::value("invalid term frequency table");
     let mut tables = parsed.ok_or_else(invalid)?;
     // `sorted(payload) != list(alphabets)`: the alphabets are given in sorted order.
@@ -642,6 +647,7 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
 /// The checksum of the weights as the artifacts state it: the JSON text of the object with sorted keys, no spaces and
 /// no escaping of non-ASCII letters.
 fn checksum(table: &WeightTable, integers: &[u8]) -> String {
+    use std::fmt::Write as _;
     let mut order: Vec<u32> = table.index.order.clone();
     order.sort_unstable_by(|&a, &b| table.index.name(a.to::<usize>()).cmp(table.index.name(b.to::<usize>())));
     let mut hasher = Sha256::new();
@@ -660,9 +666,9 @@ fn checksum(table: &WeightTable, integers: &[u8]) -> String {
             }
             let value = table.values[ACTION_COUNT * entry + action];
             if integers[entry] & (1 << action) != 0 {
-                text.push_str(&format!("{}", value.to::<i64>()));
+                write!(text, "{}", value.to::<i64>()).expect("a String takes any text");
             } else {
-                text.push_str(&ks_text::float_repr(value));
+                ks_text::push_float_repr(&mut text, value);
             }
         }
         text.push(']');
@@ -744,14 +750,10 @@ const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
 
 pub fn load_artifact(path: &Path, limit: usize, too_large: &str, spec: &WeightSpec) -> Result<(Option<Artifact>, u64), LoadError> {
     let length = std::fs::metadata(path).map_err(|error| LoadError::os(&error, path))?.len();
-    use std::io::BufRead;
-    let mut reader = open_limited(path, limit, too_large)?;
+    let bytes = read_limited(path, limit, too_large)?;
     // A byte-order mark does not change what the file says: `json.loads` of bytes skips it too.
-    let mark = reader.fill_buf().map_err(|error| LoadError::os(&error, path))?.starts_with(UTF8_BOM);
-    if mark {
-        reader.consume(UTF8_BOM.len());
-    }
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let text = bytes.strip_prefix(UTF8_BOM).unwrap_or(&bytes);
+    let mut deserializer = serde_json::Deserializer::from_slice(text);
     let artifact = ArtifactSeed(spec).deserialize(&mut deserializer).map_err(|error| json_error(&error))?;
     deserializer.end().map_err(|error| json_error(&error))?;
     Ok((artifact, length))
