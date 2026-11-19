@@ -242,6 +242,12 @@ pub type EngineResult<T> = Result<T, EngineError>;
 impl EngineCore {
     /// `KeySwitchEngine.__init__` on models already loaded.
     pub fn from_parts(parts: EngineParts) -> EngineResult<EngineCore> {
+        Self::from_parts_with_typo(parts, None)
+    }
+
+    /// `from_parts` with the typo lists read beforehand, when the caller read them beside its other files: the corrector
+    /// `typo_corrector` reads from the packaged lists of the engine's locales, given here or read now.
+    pub fn from_parts_with_typo(parts: EngineParts, typo: Option<Arc<TypoCorrector>>) -> EngineResult<EngineCore> {
         let EngineParts {
             settings, history, backend, learning, backend_label, models, intent_model, intent_model_status, protected_tokens,
             context_policy, boundary_model, prefix_model, prefix_indexes, resource_dir, clock, platform_reader,
@@ -352,7 +358,7 @@ impl EngineCore {
             selection_pending: None,
             foreign_input_active: false,
             contexts: Vec::new(),
-            typo: None,
+            typo,
             typo_keys: KeyTemplates::default(),
             personal: Arc::new(personal),
             personal_pending: String::new(),

@@ -227,6 +227,28 @@ fn a_list_of_word_counts_answers_for_its_words() {
 }
 
 #[test]
+fn a_long_list_of_word_counts_answers_for_every_word_in_every_block() {
+    // 42 two-letter forms in order, more than two blocks of offsets, each with a weight of its own.
+    let letters: Vec<char> = TYPO_ALPHABETS.iter().find(|entry| entry.0 == "ru_RU").expect("Russian").1.chars().collect();
+    let pairs: Vec<(u8, u8)> = (1..=7_u8).flat_map(|first| (1..=6_u8).map(move |second| (first, second))).collect();
+    let forms: Vec<u8> = pairs.iter().flat_map(|&(first, second)| [first, second, 0]).collect();
+    let weights: Vec<u8> = (0..42_u8).collect();
+    let lexicon = TypoLexicon::load(&written(&typo_file(&|_| {}, [&forms, &weights, &[0]])), "ru_RU").expect("it loads");
+    let text = |codes: &[u8]| codes.iter().map(|&code| letters[usize::from(code) - 1]).collect::<String>();
+    for (index, &(first, second)) in pairs.iter().enumerate() {
+        assert_eq!(lexicon.weight(&text(&[first, second])), Some(i64::from(weights[index])), "form {index}");
+    }
+    // Before the first form, between forms, after the last one.
+    assert_eq!(lexicon.weight(&text(&[1])), None);
+    assert_eq!(lexicon.weight(&text(&[3, 3, 3])), None);
+    assert_eq!(lexicon.weight(&text(&[7, 7])), None);
+    assert_eq!(lexicon.weight(&text(&[8])), None);
+    // A list of no words answers for none.
+    let empty = TypoLexicon::load(&written(&typo_file(&|_| {}, [&[], &[], &[0]])), "ru_RU").expect("it loads");
+    assert_eq!((empty.size(), empty.weight(&text(&[1]))), (0, None));
+}
+
+#[test]
 fn a_damaged_list_of_word_counts_is_refused() {
     assert_eq!(typo_refusal(b"no line break"), "typo frequency file has no header");
     assert!(TypoLexicon::load(&written(b"{\n"), "ru_RU").is_err());

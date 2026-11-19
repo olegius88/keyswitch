@@ -22,7 +22,7 @@
 
 use ks_cast::To as _;
 use crate::constants::{
-    KEYBOARD_ROW_LENGTHS, TYPO_ALPHABETS, TYPO_CANDIDATE_MIN_COUNT, TYPO_COUNT_LOG_SCALE, TYPO_DELETION_LOG_PROBABILITY, TYPO_FORM_SEPARATOR,
+    KEYBOARD_ROW_LENGTHS, TYPO_ALPHABETS, TYPO_BLOCK_FORMS, TYPO_SHARED_MAX_BYTES, TYPO_CANDIDATE_MIN_COUNT, TYPO_COUNT_LOG_SCALE, TYPO_DELETION_LOG_PROBABILITY, TYPO_FORM_SEPARATOR,
     TYPO_FREQUENCY_MAX_BYTES, TYPO_FREQUENCY_SCHEMA_VERSION, TYPO_INSERTION_LOG_PROBABILITY, TYPO_MIN_LETTERS, TYPO_OCCURRENCE_HASH_BYTES,
     TYPO_POSTERIOR_RATIO, TYPO_SECTIONS, TYPO_SUBSTITUTION_LOG_PROBABILITY, TYPO_TRANSPOSED_LETTERS, TYPO_TRANSPOSITION_LOG_PROBABILITY,
     TYPO_WRITTEN_MIN_COUNT, TYPO_WRITTEN_SECTIONS, VERSION_HASH_CHARACTERS,
@@ -186,15 +186,19 @@ pub fn keyboard_neighbours(keys: &str) -> Result<HashMap<char, String>, LoadErro
 
 /// A counted word list of one language: forms with their counts, and a membership filter for the rarer forms.
 ///
-/// `forms` holds the stored forms sorted, each coded one byte per letter (its place in `alphabet`, from one up) and ended
-/// by `TYPO_FORM_SEPARATOR`; `starts` the offset of each, with one more for the end; `weights` each form's count as
+/// `forms` holds the stored forms sorted, each coded one byte per letter (its place in `alphabet`, from one up), in blocks
+/// of `TYPO_BLOCK_FORMS`: the first form of a block whole, each other as the number of bytes it shares with the form
+/// before it and the bytes after them, every form ended by `TYPO_FORM_SEPARATOR` (sorted forms share long beginnings:
+/// this keeps the lists in half the bytes); `blocks` the offset of each block; `weights` each form's count as
 /// `round(ln(count) * TYPO_COUNT_LOG_SCALE)`. `seen` is a Bloom filter of `seen_bits` bits and `seen_hashes` positions over
 /// the forms too rare to be stored: it may hold a form it was not given, never miss one it was.
 pub struct TypoLexicon {
     pub locale: String,
     pub alphabet: String,
+    /// The letters of `alphabet`, decoded once: every lookup codes its form letter by letter.
+    letters: Vec<char>,
     forms: Vec<u8>,
-    starts: Vec<u32>,
+    blocks: Vec<u32>,
     weights: Vec<u8>,
     seen: Vec<u8>,
     seen_bits: u64,
@@ -228,14 +232,14 @@ impl TypoLexicon {
     fn coded(&self, form: &str) -> Option<Vec<u8>> {
         let mut coded = Vec::with_capacity(form.len());
         for c in form.chars() {
-            match self.alphabet.chars().position(|letter| letter == c) {
+            match self.letters.iter().position(|&letter| letter == c) {
                 Some(place) => coded.push((place + 1).to::<u8>()),
                 None if c.to::<u32>() < 256 => coded.push((c.to::<u32>()).to::<u8>()),
                 None => return None,
             }
         }
         // `not coded or max(coded) > len(self.alphabet)`
-        if coded.is_empty() || coded.iter().copied().max().is_some_and(|byte| usize::from(byte) > self.alphabet.chars().count()) {
+        if coded.is_empty() || coded.iter().copied().max().is_some_and(|byte| usize::from(byte) > self.letters.len()) {
             return None;
         }
         Some(coded)
@@ -245,17 +249,43 @@ impl TypoLexicon {
     #[must_use]
     pub fn weight(&self, form: &str) -> Option<i64> {
         let coded = self.coded(form)?;
-        let (mut low, mut high) = (0, self.size());
+        // The last block whose first form is not above the form: the form is there if anywhere, the forms being sorted.
+        let (mut low, mut high) = (0, self.blocks.len());
         while low < high {
             let middle = usize::midpoint(low, high);
-            let stored = &self.forms[self.starts[middle].to::<usize>()..(self.starts[middle + 1]).to::<usize>() - 1];
-            match stored.cmp(coded.as_slice()) {
-                std::cmp::Ordering::Equal => return Some(i64::from(self.weights[middle])),
-                std::cmp::Ordering::Less => low = middle + 1,
-                std::cmp::Ordering::Greater => high = middle,
+            if self.form_at(self.blocks[middle].to::<usize>()) <= coded.as_slice() {
+                low = middle + 1;
+            } else {
+                high = middle;
             }
         }
+        let block = low.checked_sub(1)?;
+        let end = self.blocks.get(block + 1).map_or(self.forms.len(), |next| next.to::<usize>());
+        let (mut at, mut index) = (self.blocks[block].to::<usize>(), block * TYPO_BLOCK_FORMS);
+        let mut current: Vec<u8> = Vec::with_capacity(coded.len() + TYPO_BLOCK_FORMS);
+        while at < end {
+            // The first form of the block is stored whole; each other after the count of bytes it keeps of the one before.
+            if index > block * TYPO_BLOCK_FORMS {
+                current.truncate(usize::from(self.forms[at]));
+                at += 1;
+            }
+            let rest = self.form_at(at);
+            current.extend_from_slice(rest);
+            at += rest.len() + 1;
+            match current.as_slice().cmp(coded.as_slice()) {
+                std::cmp::Ordering::Equal => return Some(i64::from(self.weights[index])),
+                std::cmp::Ordering::Greater => return None,
+                std::cmp::Ordering::Less => {}
+            }
+            index += 1;
+        }
         None
+    }
+
+    /// The stored form that begins at `at`, without its separator.
+    fn form_at(&self, at: usize) -> &[u8] {
+        let rest = &self.forms[at..];
+        &rest[..rest.iter().position(|&byte| usize::from(byte) == TYPO_FORM_SEPARATOR).unwrap_or(rest.len())]
     }
 
     /// Whether a lowercase form occurs in the list at all, written with `ё` or with `е`.
@@ -315,20 +345,26 @@ impl TypoLexicon {
         }
         let ends: Vec<usize> = sizes.iter().scan(0, |total, &size| { *total += size.to::<usize>(); Some(*total) }).collect();
         let inflate = |bytes: &[u8]| miniz_oxide::inflate::decompress_to_vec_zlib(bytes).map_err(|error| LoadError::value(format!("Error -3 while decompressing data: {error:?}")));
-        let forms = inflate(&payload[..ends[0]])?;
-        let weights = inflate(&payload[ends[0]..ends[1]])?;
+        // Inflating grows its buffer by doubling, and the offsets were collected the same way: the two lists, which the
+        // corrector keeps for as long as the program runs, held up to twice their bytes. They are kept at their size.
+        let mut forms = inflate(&payload[..ends[0]])?;
+        forms.shrink_to_fit();
+        let mut weights = inflate(&payload[ends[0]..ends[1]])?;
+        weights.shrink_to_fit();
         let filter_bits = payload[ends[1]..].to_vec();
-        let mut starts: Vec<u32> = vec![0];
-        starts.extend(forms.iter().enumerate().filter(|(_, byte)| usize::from(**byte) == TYPO_FORM_SEPARATOR).map(|(at, _)| (at + 1).to::<u32>()));
-        if starts.len() - 1 != weights.len() || (!forms.is_empty() && usize::from(forms[forms.len() - 1]) != TYPO_FORM_SEPARATOR) || filter_bits.len().to::<i64>() * 8 < bits {
+        let count = forms.iter().filter(|byte| usize::from(**byte) == TYPO_FORM_SEPARATOR).count();
+        if count != weights.len() || (!forms.is_empty() && usize::from(forms[forms.len() - 1]) != TYPO_FORM_SEPARATOR) || filter_bits.len().to::<i64>() * 8 < bits {
             return Err(LoadError::value("invalid typo frequency payload"));
         }
+        let (forms, blocks) = front_coded(&forms, count);
         let version_digest: String = Sha256::digest(&raw).iter().map(|byte| format!("{byte:02x}")).collect();
+        let alphabet = header.get("alphabet").and_then(Value::as_str).unwrap_or_default().to_string();
         Ok(TypoLexicon {
             locale: locale.to_string(),
-            alphabet: header.get("alphabet").and_then(Value::as_str).unwrap_or_default().to_string(),
+            letters: alphabet.chars().collect(),
+            alphabet,
             forms,
-            starts,
+            blocks,
             weights,
             seen: filter_bits,
             seen_bits: bits.to::<u64>(),
@@ -336,6 +372,29 @@ impl TypoLexicon {
             version: format!("typo-frequency-{}", version_digest.get(..VERSION_HASH_CHARACTERS).unwrap_or_default()),
         })
     }
+}
+
+/// The `count` forms of `forms` (each ended by the separator) in the blocks `TypoLexicon` keeps, and where each block
+/// starts. A form keeps at most `TYPO_SHARED_MAX_BYTES` bytes of the one before, the count fitting one byte.
+fn front_coded(forms: &[u8], count: usize) -> (Vec<u8>, Vec<u32>) {
+    let mut packed: Vec<u8> = Vec::with_capacity(forms.len());
+    let mut blocks: Vec<u32> = Vec::with_capacity(count.div_ceil(TYPO_BLOCK_FORMS));
+    let mut previous: &[u8] = &[];
+    let separator = TYPO_FORM_SEPARATOR.to::<u8>();
+    for (index, form) in forms.split(|&byte| byte == separator).take(count).enumerate() {
+        if index % TYPO_BLOCK_FORMS == 0 {
+            blocks.push(packed.len().to::<u32>());
+            packed.extend_from_slice(form);
+        } else {
+            let shared = previous.iter().zip(form).take_while(|(before, now)| before == now).count().min(TYPO_SHARED_MAX_BYTES);
+            packed.push(shared.to::<u8>());
+            packed.extend_from_slice(&form[shared..]);
+        }
+        packed.push(separator);
+        previous = form;
+    }
+    packed.shrink_to_fit();
+    (packed, blocks)
 }
 
 /// The filter positions of a form: two hashes from its SHA-256, combined (Kirsch and Mitzenmacher).

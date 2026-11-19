@@ -74,7 +74,14 @@ impl KeySwitchEngine {
         // part is what it was, read by the same call.
         let models_dir = resources.resource_dir().join("models");
         let wanted: Vec<String> = locales.into_iter().take(ks_backend::constants::LAYOUT_GROUP_COUNT.to::<usize>()).collect();
-        let (models, (intent_model, intent_model_status), context_policy, prefix_indexes) = std::thread::scope(|scope| -> EngineResult<_> {
+        // The typo lists are read beside the rest too, when the engine is to correct typos; `from_parts` reads them itself
+        // otherwise, as it did before (and again, should this reading fail).
+        let correct_typos = settings.with_value("detection.correct_typos", |value| value.is_none_or(truthy));
+        let (models, (intent_model, intent_model_status), context_policy, prefix_indexes, typo) = std::thread::scope(|scope| -> EngineResult<_> {
+            let typo = scope.spawn(|| {
+                let locales: Vec<&str> = wanted.iter().map(String::as_str).collect();
+                correct_typos.then(|| TypoCorrector::packaged(resources.resource_dir(), &locales).ok().map(Arc::new)).flatten()
+            });
             let intent = scope.spawn(|| resources.intent_model());
             let context = scope.spawn(|| ks_context::ContextModel::try_load(&models_dir));
             let dictionaries: Arc<OnceLock<Vec<Arc<LanguageModel>>>> = Arc::new(OnceLock::new());
@@ -90,9 +97,9 @@ impl KeySwitchEngine {
             // Before the orthotactic model is joined, and so before anything can ask it a word.
             let _ = dictionaries.set(models.clone());
             let context_policy = ContextPolicy::with_models(resources, reader, joined(ortho), joined(context), Some(clock.clone()));
-            Ok((models, joined(intent), context_policy, indexes))
+            Ok((models, joined(intent), context_policy, indexes, joined(typo)))
         })?;
-        let core = EngineCore::from_parts(EngineParts {
+        let core = EngineCore::from_parts_with_typo(EngineParts {
             settings,
             history,
             backend,
@@ -109,7 +116,7 @@ impl KeySwitchEngine {
             resource_dir: resources.resource_dir().to_path_buf(),
             clock,
             platform_reader,
-        })?;
+        }, typo)?;
         Ok(KeySwitchEngine::of(core))
     }
 
