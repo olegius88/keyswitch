@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.74.1 — 2026-11-19
+
 - A term of letters and digits typed in the Russian layout with a comma or a full stop after it is converted with its sign: `шзм6б` before the rest of a Russian sentence becomes `ipv6,` and `ч64б` becomes `x64,`, as `шзм6` alone became `ipv6`. The comma typed in the Russian layout is the letter `б`, and with it the token was no token of letters and digits to the model, which left it as typed. A digit and a letter of Russian text (`5б`) stay as they are.
 - A letter pressed while KeySwitch corrected the word before it, and let go once the correction was typed, no longer makes it forget the sentence: the next word is decided with the text before it. `для шзм6 и socks5` typed in the Russian layout became `для ipv6 b socks5` when `и` was pressed as `шзм6` was converted: the key-up of that letter was taken for a click, the words before it were forgotten, and the lone `b` was left as typed.
 - For developers: the letters-and-digits head's question and evidence set aside one comma or full stop at the end of the Latin reading typed with `б` or `ю` (`context_action_features::without_trailing_sign`), as the term head does; `crates/ks-replay/tests/alnum_signs.rs` types the case through the engine.
