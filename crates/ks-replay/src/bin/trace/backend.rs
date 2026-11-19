@@ -97,6 +97,23 @@ impl Tape {
         }
     }
 
+    /// The reads of the field the Python made and the Rust engine did not: a read of the field changes nothing, and the
+    /// Rust engine reads the field less often (the later letters of a word take the field an early switch read at an
+    /// earlier letter of it). A read the Rust engine makes is still answered in its place, and one the Python never made
+    /// is a difference. The time a fake moved while it answered passes as it did.
+    fn skip_field_reads(&mut self) {
+        while self.at_field_read() {
+            let call = self.calls[self.at].clone();
+            self.follow_clock(&call);
+            self.at += 1;
+            self.skip_foreign();
+        }
+    }
+
+    fn at_field_read(&self) -> bool {
+        self.calls.get(self.at).is_some_and(|call| call["o"] == "r" && call["m"] == "read")
+    }
+
     /// Remembers a pure read's answer; a changed one the Rust engine would not have looked at is a difference.
     fn pass_pure(&mut self) {
         let call = self.calls[self.at].clone();
@@ -130,9 +147,13 @@ impl Tape {
     /// The Python calls the Rust engine did not make, when the entry is over.
     pub(crate) fn leftover(&mut self) -> Option<String> {
         self.skip_foreign();
-        while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) {
-            self.pass_pure();
-            self.skip_foreign();
+        while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) || self.at_field_read() {
+            if self.at_field_read() {
+                self.skip_field_reads();
+            } else {
+                self.pass_pure();
+                self.skip_foreign();
+            }
         }
         let call = self.calls.get(self.at)?;
         Some(format!("{} {}", call["m"].as_str().unwrap_or("?"), compact(&call["a"])))
@@ -165,12 +186,19 @@ impl Tape {
             self.at += 1;
             return Some(call);
         }
-        while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) {
-            self.pass_pure();
-            self.skip_foreign();
-            if self.difference.is_some() {
-                return None;
+        let field_read = origin == "r" && method == "read";
+        loop {
+            while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) {
+                self.pass_pure();
+                self.skip_foreign();
+                if self.difference.is_some() {
+                    return None;
+                }
             }
+            if field_read || !self.at_field_read() {
+                break;
+            }
+            self.skip_field_reads();
         }
         let Some(call) = self.calls.get(self.at).cloned() else {
             self.note(format!("extra call {method}"), format!("the Rust engine called {method} {}, the Python made no more calls", compact(&args)));
@@ -691,6 +719,28 @@ mod tests {
     fn the_calls_left_over_name_the_first_one() {
         let tape = tape(&json!([{"o": "r", "m": "diagnostics"}, {"o": "b", "m": "stop", "a": []}]));
         assert_eq!(tape.lock().expect("not poisoned").leftover().as_deref(), Some("stop []"));
+    }
+
+    #[test]
+    fn reads_of_the_field_the_rust_engine_did_not_make_are_passed() {
+        // Reads of the field between pure reads, a call and a read after it: the Rust engine makes the call alone.
+        let calls = json!([
+            {"o": "r", "m": "read", "a": ["app", 1], "r": null, "c": 5.0},
+            {"o": "b", "m": "focused_window", "r": 1},
+            {"o": "r", "m": "read", "a": ["app", 1], "r": null},
+            {"o": "b", "m": "stop", "a": []},
+            {"o": "b", "m": "focused_window", "r": 1},
+            {"o": "r", "m": "read", "a": ["app", 1], "r": null},
+        ]);
+        let tape = tape(&calls);
+        assert!(tape.lock().expect("not poisoned").take("b", "stop", json!([])).is_some());
+        assert_eq!(noted(&tape), None);
+        assert_eq!(tape.lock().expect("not poisoned").leftover(), None);
+        // A read the Rust engine makes is answered in its place, and one where the Python made a call is a difference.
+        let tape = self::tape(&json!([{"o": "r", "m": "read", "a": ["app", 1], "r": null}, {"o": "b", "m": "stop", "a": []}]));
+        assert!(tape.lock().expect("not poisoned").take("r", "read", json!(["app", 1])).is_some());
+        assert!(tape.lock().expect("not poisoned").take("r", "read", json!(["app", 1])).is_none());
+        assert_eq!(noted(&tape).as_deref(), Some("call stop expected, read made"));
     }
 
     #[test]

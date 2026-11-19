@@ -2,6 +2,7 @@
 
 use super::logging::technical_event;
 use super::*;
+use ks_backend::constants::FIELD_CONTEXT_MAX_CHARACTERS;
 use ks_context::context_policy::{caret_lag, typed_short_of};
 use ks_context::prefix_model::{PrefixInput, PrefixSide};
 use ks_context::typo_correction::{corrected_keys, known_elsewhere, written_section};
@@ -141,6 +142,18 @@ impl EngineCore {
         if !self.flag("detection.context_aware", true) {
             field = FieldContext::new(application, self.focus_or_zero().to_string());
         }
+        // The field read at an earlier letter of this word that found the word there stands for this letter too: a read
+        // is a dozen calls into the program that owns the field, half the reads were these, and the text around a word
+        // does not change while it is typed. A word begun anew has another first key, and its field is read again.
+        let kept = match (&self.early_field, self.strokes.first()) {
+            (Some(kept), Some(start)) if Arc::ptr_eq(&kept.first, start) => kept.at(pystr::len(original)),
+            _ => None,
+        };
+        if self.flag("detection.context_read_field", false)
+            && let Some(kept) = kept
+        {
+            return (kept, "");
+        }
         if self.flag("detection.context_read_field", false)
             && let Some(reader) = self.context_policy.reader.clone()
             && let Some(snapshot) = reader.read(application, self.focus_or_zero())
@@ -164,7 +177,11 @@ impl EngineCore {
             }
             let changed = snapshot.selection || snapshot.field_id.is_empty() || snapshot.application != application;
             match around {
-                Some((before, after)) if !changed => field = field_with(&snapshot, before, after),
+                Some((before, after)) if !changed => {
+                    field = field_with(&snapshot, before, after);
+                    let full = pystr::len(&snapshot.before) >= FIELD_CONTEXT_MAX_CHARACTERS;
+                    self.early_field = self.strokes.first().map(|first| EarlyField { first: first.clone(), field: field.clone(), letters: pystr::len(original), full });
+                }
                 _ => return (snapshot, "context_field_changed"),
             }
         }
@@ -631,5 +648,20 @@ mod tests {
         ] {
             assert_eq!(super::os_error_name(&Error::from(kind)), name);
         }
+    }
+
+    #[test]
+    fn a_kept_field_is_the_one_a_read_at_more_letters_would_give() {
+        use super::{EarlyField, FieldContext};
+        let mut field = FieldContext::new("app", "1");
+        field.before = "abcdef".to_owned();
+        let kept = |full| EarlyField { first: std::sync::Arc::new(ks_backend::KeyEvent::default()), field: field.clone(), letters: 4, full };
+        // Text before the word that filled what a read keeps loses a character at its start for every letter typed since.
+        assert_eq!(kept(true).at(6).map(|field| field.before).as_deref(), Some("cdef"));
+        assert_eq!(kept(true).at(4).map(|field| field.before).as_deref(), Some("abcdef"));
+        // Shorter text stays whole.
+        assert_eq!(kept(false).at(6).map(|field| field.before).as_deref(), Some("abcdef"));
+        // A word shorter than at the read would show text that was not kept: it is read again.
+        assert!(kept(true).at(3).is_none());
     }
 }

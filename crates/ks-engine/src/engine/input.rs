@@ -159,6 +159,18 @@ impl EngineCore {
                 self.shared.dismiss_learning_prompt(Some(&prompt), "other_key");
             }
         }
+        // A key that edits rather than types (Backspace, a click, a move of the caret, a shortcut) leaves the field an early
+        // switch read for this word no answer for the next letter: a word reopened by Backspace has its first key again, and
+        // the field around it is read anew, as it was before the field was kept (`early_prefix_field`).
+        if event.pressed
+            && (["BackSpace", "Delete", "Pointer"].contains(&event.key_name.as_str())
+                || is_navigation_key(&event.key_name)
+                || event.control()
+                || event.alt()
+                || event.super_key())
+        {
+            self.early_field = None;
+        }
         // An Enter or Tab the hook keeps back has reached no window yet, and the backend passes it on only to the window
         // it was pressed for.
         let elsewhere = event.pressed && !event.deferred && self.typed_elsewhere(&event);

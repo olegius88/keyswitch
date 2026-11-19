@@ -259,6 +259,29 @@ pub struct LanguageContext {
     pub updated_at: f64,
 }
 
+/// The field an early switch read at a letter of the word being typed that found the word there, with the word's first
+/// key, how many letters the word had then, and whether the text before the caret filled what a read keeps of it.
+#[derive(Clone, Debug)]
+pub struct EarlyField {
+    pub first: Stroke,
+    pub field: FieldContext,
+    pub letters: usize,
+    pub full: bool,
+}
+
+impl EarlyField {
+    /// The field as a read at `letters` letters of the word would show it. A read keeps the last characters before the
+    /// caret up to its limit (`FieldContext::bounded`): where the text before the word filled them, every letter typed
+    /// since pushes one out at its start. A word shorter than at the read would show more of that text than was kept,
+    /// and is read again (None).
+    #[must_use]
+    pub fn at(&self, letters: usize) -> Option<FieldContext> {
+        let grown = letters.checked_sub(self.letters)?;
+        let before = if self.full { self.field.before.chars().skip(grown).collect() } else { self.field.before.clone() };
+        Some(FieldContext { before, ..self.field.clone() })
+    }
+}
+
 /// The letters that already stood right before and after the caret when a word began there.
 #[derive(Clone, Debug)]
 pub struct InsertionPoint {

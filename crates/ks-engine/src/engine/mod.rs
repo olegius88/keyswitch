@@ -150,6 +150,10 @@ pub struct EngineCore {
     pub caret_moved: bool,
     pub early_switch_origin: Option<i64>,
     pub early_switch_at: Option<f64>,
+    /// The text around the word being typed, as the field showed it at the first check of an early switch that found the
+    /// word there: the text before and after a word stays while it is typed, so the later letters of the word read the
+    /// field no more (`early_prefix_field`). The correction reads it again before it types.
+    pub early_field: Option<EarlyField>,
     pub engine_switch_at: Option<f64>,
     pub engine_switch_group: Option<i64>,
     pub manual_layout_observed_at: Option<f64>,
@@ -346,6 +350,7 @@ impl EngineCore {
             caret_moved: false,
             early_switch_origin: None,
             early_switch_at: None,
+            early_field: None,
             engine_switch_at: None,
             engine_switch_group: None,
             manual_layout_observed_at: None,
