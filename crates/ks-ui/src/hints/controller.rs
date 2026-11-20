@@ -26,8 +26,8 @@ use ks_engine::{CorrectionPlan, EngineSnapshot, LearningPrompt, RememberedWord, 
 use ks_updates::SemanticVersion;
 use serde_json::Value;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::catalogue::{CATALOGUE, CorrectionInfo, Hint, HotkeyName, Hotkeys, Opens, Place, Platform, SettingsPage, TapKeys};
 use super::schedule::{HintSettings, HintView, Moment, Scheduler, Step};
@@ -90,7 +90,14 @@ pub fn subscribe<A: Send + 'static>(
     post: Arc<dyn Fn(EngineInput<A>) + Send + Sync>,
 ) {
     let deliver = post.clone();
-    shared.subscribe(Arc::new(move |snapshot: &EngineSnapshot| deliver(EngineInput::Snapshot { running: snapshot.running })));
+    // The hints read only whether the engine runs, and the engine updates its snapshot at every key (the word typed so far):
+    // a snapshot that leaves that as it was is not posted, so the main thread is not woken for every key typed.
+    let running = Mutex::new(None);
+    shared.subscribe(Arc::new(move |snapshot: &EngineSnapshot| {
+        if running.lock().unwrap_or_else(PoisonError::into_inner).replace(snapshot.running) != Some(snapshot.running) {
+            deliver(EngineInput::Snapshot { running: snapshot.running });
+        }
+    }));
     let deliver = post.clone();
     let find = anchor.clone();
     shared.subscribe_corrections(Arc::new(move |plan: &CorrectionPlan| {
@@ -419,8 +426,8 @@ mod tests {
     use crate::hints::catalogue::{HINT_UNDO_REMEMBERED_LABEL, REMEMBERED_HINT_ID};
     use ks_backend::{BackendError, BackendProbe, FocusInfo, InputBackend, Injection, KeyFilter, KeyListener};
     use ks_config::learning::{LearnedRule, LearningStore, RuleAction};
+    use ks_engine::engine::Update;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
     type Anchor = (i32, i32);
     const AT: Anchor = (100, 200);
@@ -973,6 +980,14 @@ mod tests {
         let wants = Arc::new(AtomicBool::new(true));
         let sink = posted.clone();
         subscribe::<Anchor>(&shared, wants.clone(), Arc::new(|| Some(AT)), Arc::new(move |input| sink.lock().unwrap().push(input)));
+        // The snapshot of every key, with the word typed so far, is posted only when the engine starts or stops running.
+        for update in [
+            Update { current_word: Some("g".into()), ..Update::default() },
+            Update { running: Some(true), ..Update::default() },
+            Update { current_word: Some("gh".into()), ..Update::default() },
+        ] {
+            shared.update(update);
+        }
         let plan = CorrectionPlan::new(Vec::new(), None, 0, 1, "ghbdtn".into(), "привет".into(), 0.9, "app");
         for callback in shared.correction_callbacks() {
             callback(&plan);
@@ -1005,6 +1020,7 @@ mod tests {
             [
                 EngineInput::Snapshot { running: false },
                 EngineInput::Prompt { shown: false },
+                EngineInput::Snapshot { running: true },
                 EngineInput::Correction { correction: LAYOUT, anchor: Some(AT) },
                 EngineInput::Correction { correction: LAYOUT, anchor: None },
                 EngineInput::KeptByChoice { anchor: Some(AT) },

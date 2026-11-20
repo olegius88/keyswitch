@@ -28,6 +28,7 @@ use ks_engine::rule_editor::draft_from_prompt;
 use ks_engine::{CorrectionPlan, EngineSnapshot, KeySwitchEngine, LearningPrompt, Shared, engine::default_learning_store};
 use ks_ui::constants::HINT_TICK_INTERVAL_MS;
 use ks_ui::hints::{Click, EngineInput, HintPresenter, HintView, Hints, Moment, Opens, RUNNING_PLATFORM, SettingsPage, subscribe as subscribe_hints};
+use ks_ui::windows_ui_model::ShownStatus;
 use serde_json::Value;
 use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
 use windows_sys::Win32::Foundation::{GENERIC_WRITE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, WPARAM};
@@ -935,9 +936,13 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             Arc::new(move || hint_anchor_backend.input_anchor()),
             Arc::new(|input| post(Box::new(move || with_app(|app| app.hint_input(input))))),
         );
-        engine.subscribe(Arc::new(|snapshot: &EngineSnapshot| {
-            let snapshot = snapshot.clone();
-            post(Box::new(move || with_app(|app| app.apply_snapshot(snapshot))));
+        // Only a snapshot that changes what the tray and the settings window show, not each key's.
+        let shown = ShownStatus::default();
+        engine.subscribe(Arc::new(move |snapshot: &EngineSnapshot| {
+            if shown.changed(snapshot) {
+                let snapshot = snapshot.clone();
+                post(Box::new(move || with_app(|app| app.apply_snapshot(snapshot))));
+            }
         }));
         engine.subscribe_corrections(Arc::new(|plan: &CorrectionPlan| {
             let plan = plan.clone();

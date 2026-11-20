@@ -22,7 +22,7 @@ use ks_engine::engine_loader::{Build, DeferredEngine, Post};
 use ks_ui::constants::HINT_TICK_INTERVAL_MS;
 use ks_ui::hints::{EngineInput, Hints, HintView, Moment, RUNNING_PLATFORM, SettingsPage, subscribe};
 use ks_ui::tray_model::{TrayAction, TrayState};
-use ks_ui::windows_ui_model::{NoUpdates, truthy};
+use ks_ui::windows_ui_model::{NoUpdates, ShownStatus, truthy};
 use ks_updates::http_curl::CurlOpener;
 use ks_updates::{UpdateChecks, UpdateController, UpdateError, UpdateManager, UpdatePhase, UpdateSnapshot};
 use objc2::{class, msg_send};
@@ -331,11 +331,15 @@ fn attach_engine(services: &Arc<Services>, wants_caret: Arc<AtomicBool>) {
                 run_on_main(Box::new(move || with_hints(|hints, panel, moment| hints.engine_input(panel, input, moment))));
             }),
         );
-        engine.subscribe(Arc::new(|_snapshot| {
-            run_on_main(Box::new(|| {
-                sync_tray();
-                settings_window::refresh_status();
-            }));
+        // Only a snapshot that changes what the tray and the settings window show, not each key's.
+        let shown = ShownStatus::default();
+        engine.subscribe(Arc::new(move |snapshot| {
+            if shown.changed(snapshot) {
+                run_on_main(Box::new(|| {
+                    sync_tray();
+                    settings_window::refresh_status();
+                }));
+            }
         }));
         engine.subscribe_corrections(Arc::new(|plan| {
             let title = if plan.case_fix() { "Регистр исправлен" } else { "Раскладка исправлена" };

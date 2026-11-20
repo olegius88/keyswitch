@@ -4,6 +4,7 @@
 
 use ks_cast::To as _;
 use std::fmt;
+use std::sync::{Mutex, PoisonError};
 
 use ks_config::app_quirks::MENTION_HEADS;
 use ks_config::constants::{
@@ -22,7 +23,7 @@ use ks_engine::constants::{
     PAUSE_DELAY_SETTING_MIN_SECONDS, PREFIX_MIN_CHARACTERS, SELECTION_HOTKEYS, UNDO_AVAILABLE_WINDOW_SECONDS,
 };
 use ks_engine::engine::{
-    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, HotkeyProblem, LAYOUT_SWITCH_KEY_DESCRIPTION,
+    CONVERT_LAST_KEY_DESCRIPTION, CONVERT_LAST_KEY_LABELS, CONVERT_LAST_KEY_TITLE, EngineSnapshot, HotkeyProblem, LAYOUT_SWITCH_KEY_DESCRIPTION,
     LAYOUT_SWITCH_KEY_LABELS, LAYOUT_SWITCH_KEY_TITLE,
 };
 use ks_engine::rule_editor::{action_text, condition_text, other_layout_text};
@@ -668,6 +669,28 @@ pub fn settings_window_title(version: &str) -> String {
     format!("KeySwitch {version}")
 }
 
+/// The last engine snapshot the tray and the status of the settings window were handed. They show whether the engine runs
+/// and switches, the layout, the count of corrections and the last action or error, but not the word typed so far, with
+/// which the engine updates its snapshot at every key: `changed` lets on only a snapshot that changes what they show, so
+/// the main thread is not woken to draw the same for every key typed.
+#[derive(Default)]
+pub struct ShownStatus(Mutex<Option<EngineSnapshot>>);
+
+impl ShownStatus {
+    /// Whether `snapshot` shows anything the last one let on did not; if so, it is the last one let on.
+    pub fn changed(&self, snapshot: &EngineSnapshot) -> bool {
+        fn shown(one: &EngineSnapshot) -> (bool, bool, i64, i64, &str, &str) {
+            (one.running, one.enabled, one.current_group, one.correction_count, &one.last_action, &one.last_error)
+        }
+        let mut last = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if last.as_ref().is_some_and(|last| shown(last) == shown(snapshot)) {
+            return false;
+        }
+        *last = Some(snapshot.clone());
+        true
+    }
+}
+
 /// The engine's status line (`_apply_snapshot`).
 #[must_use]
 pub fn status_line(enabled: bool, running: bool) -> &'static str {
@@ -1133,6 +1156,33 @@ mod tests {
         assert_eq!(with_word(vec!["Привет".into()], "привет"), None);
         assert_eq!(with_word(Vec::new(), " Слово "), Some(vec!["Слово".into()]));
         assert_eq!(without(vec!["Code".into(), "x".into()], "code"), ["x"]);
+    }
+
+    #[test]
+    fn a_snapshot_is_let_on_to_the_windows_only_when_what_they_show_changes() {
+        let shown = ShownStatus::default();
+        let mut snapshot = EngineSnapshot::default();
+        assert!(shown.changed(&snapshot));
+        assert!(!shown.changed(&snapshot));
+        // The word typed so far, the backend and the context's action are not shown: every key changes the word.
+        snapshot.current_word = "ghb".into();
+        snapshot.backend = "x11".into();
+        snapshot.context_action = "keep".into();
+        assert!(!shown.changed(&snapshot));
+        // Each of what is shown is.
+        let changes: [fn(&mut EngineSnapshot); 6] = [
+            |one| one.running = !one.running,
+            |one| one.enabled = !one.enabled,
+            |one| one.current_group += 1,
+            |one| one.correction_count += 1,
+            |one| one.last_action.push('.'),
+            |one| one.last_error.push('!'),
+        ];
+        for change in changes {
+            change(&mut snapshot);
+            assert!(shown.changed(&snapshot));
+            assert!(!shown.changed(&snapshot));
+        }
     }
 
     #[test]
