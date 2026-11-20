@@ -202,6 +202,7 @@ mod win32 {
     use std::mem::{size_of, zeroed};
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
+    use std::sync::{Mutex, PoisonError};
 
     use ks_backend::ScreenAnchor;
     use windows_sys::Win32::Foundation::{
@@ -426,12 +427,21 @@ mod win32 {
     }
 
     /// Small owner of the User32/Kernel32 calls required by `KeySwitch`.
-    pub struct NativeWindowsAPI;
+    pub struct NativeWindowsAPI {
+        /// The window `active_application` named last, its process and the program's name. The engine asks for the
+        /// program in front about twice a key, and each answer opened the process and read the path of its image: 0.40–0.46 s
+        /// of CPU per 1000 keys typed in a VM (20.11.2026). A window of the same process names the same program while it
+        /// lives, so only another window or process is asked again.
+        application: Mutex<Option<(i64, u32, String)>>,
+        /// The window `window_class` named last and its class. The hook and the engine ask at every key whether the window
+        /// in front is the shell's taskbar (`is_shell_tray_window`), and a window's class is fixed when it is made.
+        class: Mutex<Option<(i64, String)>>,
+    }
 
     impl NativeWindowsAPI {
         #[must_use]
         pub fn new() -> Self {
-            NativeWindowsAPI
+            NativeWindowsAPI { application: Mutex::new(None), class: Mutex::new(None) }
         }
     }
 
@@ -562,6 +572,13 @@ mod win32 {
             if unsafe { GetWindowThreadProcessId(window, &raw mut process_id) } == 0 {
                 return String::new();
             }
+            let key = (from_handle(window), process_id);
+            let mut known = self.application.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((window, process, name)) = known.as_ref()
+                && (*window, *process) == key
+            {
+                return name.clone();
+            }
             // SAFETY: OpenProcess takes its arguments by value and returns a handle or null, closed below.
             let process: HANDLE = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
             if process.is_null() {
@@ -578,7 +595,9 @@ mod win32 {
             }
             buffer.truncate(size.to::<usize>());
             let path = String::from_utf16_lossy(&buffer);
-            ntpath_splitext(ntpath_basename(&path)).0.to_owned()
+            let name = ntpath_splitext(ntpath_basename(&path)).0.to_owned();
+            *known = Some((key.0, key.1, name.clone()));
+            name
         }
 
         fn foreground_window(&self) -> i64 {
@@ -802,11 +821,21 @@ mod win32 {
             if window == 0 {
                 return String::new();
             }
+            let mut known = self.class.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((named, class)) = known.as_ref()
+                && *named == window
+            {
+                return class.clone();
+            }
             let mut buffer = [0u16; WINDOW_CLASS_NAME_MAX_CHARACTERS + 1];
             // SAFETY: `buffer` has room for the count passed.
             let written = unsafe { GetClassNameW(to_hwnd(window), buffer.as_mut_ptr(), buffer.len().low::<i32>()) };
             let written = usize::try_from(written).unwrap_or(0).min(buffer.len());
-            buffer.get(..written).map_or_else(String::new, String::from_utf16_lossy)
+            let class = buffer.get(..written).map_or_else(String::new, String::from_utf16_lossy);
+            if !class.is_empty() {
+                *known = Some((window, class.clone()));
+            }
+            class
         }
 
         fn text_caret(&self, window: i64) -> bool {
