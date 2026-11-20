@@ -149,17 +149,13 @@ impl EngineCore {
     /// Anything but the held key itself ends a lone press: another key going down or up, a click, a turned wheel, a key
     /// another program injected that the settings do not count as typing, the rule window taking the keyboard, the key
     /// chosen for something else meanwhile. Anything but a key of the layout switch key ends a double tap begun, and
-    /// anything but a Shift ends the chord of both. A key coming up that the engine does not hold down ends nothing
-    /// (`release_of_unheld_key`). Called for every key before anything else looks at it.
+    /// anything but a Shift ends the chord of both. Called for every key before anything else looks at it.
     pub fn follow_layout_tap(&mut self, event: &KeyEvent) {
         if self.layout_tap.is_none() && self.switch_tapped.is_none() && self.shift_chord.is_none() {
             return;
         }
         if self.shared.input_suspended() || (event.foreign && !self.shared.accepts_injected(event)) {
             self.forget_taps();
-            return;
-        }
-        if self.release_of_unheld_key(event) {
             return;
         }
         let action = self.tap_action(&event.key_name);
@@ -430,19 +426,6 @@ impl EngineCore {
             callback(enabled);
         }
         Ok(())
-    }
-
-    /// Whether `event` is a key coming up that the engine does not hold down: its press never came, or was forgotten with the
-    /// window it went to or as one whose release was lost (`prune_stale_presses`). It types nothing and leaves no key down,
-    /// so it ends no tap and stops no correction (`collect_late_input`). Windows sends such a key-up of the left Ctrl (scan
-    /// code 0x21D, not marked as injected) as a window takes the English layout, and the layout switch key switches layouts:
-    /// a probe hook on Windows 10 saw one each time the window took the English layout (12 of 12) and none when it took the
-    /// Russian one (0 of 12). From Russian, the first tap's switch put it between the taps, which it ended; the switch back a
-    /// double tap makes before it converts put it in the queue the conversion takes, which it stopped as a modifier typed
-    /// after the word.
-    pub(crate) fn release_of_unheld_key(&self, event: &KeyEvent) -> bool {
-        // The books of modifiers held (`modifier_keycodes`) are a part of these.
-        !event.pressed && !self.pressed.contains(&event.keycode)
     }
 
     /// Whether `key`, a modifier queued behind a correction about to be typed (`collect_late_input`), is the conversion key

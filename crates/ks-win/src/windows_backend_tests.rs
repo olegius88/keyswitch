@@ -3269,6 +3269,33 @@ fn a_key_up_of_a_key_never_seen_down_goes_through_a_hold_at_once() {
     subject.stop();
 }
 
+/// The scan code of the key-up of the left Ctrl that Windows sends to a window as it takes the English layout.
+const SCAN_CODE_LAYOUT_CONTROL: u32 = 0x21D;
+
+#[test]
+fn a_key_up_of_a_key_never_seen_down_goes_to_the_window_and_not_to_the_engine() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.start(collecting(&delivered)).unwrap();
+    let hook = api.hook();
+    let keys = || delivered.lock().unwrap().iter().map(|event| (event.pressed, event.keycode)).collect::<Vec<_>>();
+    // The key-up of Ctrl Windows sends as the window takes the English layout: the window has it, the engine does not,
+    // with no hold and during one.
+    assert!(!hook(native(false, VK_LCONTROL, SCAN_CODE_LAYOUT_CONTROL, false, 10)));
+    subject.hold_input();
+    assert!(!hook(native(false, VK_LCONTROL, SCAN_CODE_LAYOUT_CONTROL, false, 11)));
+    assert_eq!(subject.release_input().unwrap(), 0);
+    assert_eq!(keys(), []);
+    // A Ctrl the user presses and lets go is the engine's both ways. So is a key-up another program sends with no key-down:
+    // whether that is typing is the engine's to judge (`detection.injected_input`).
+    assert!(!hook(native(true, VK_LCONTROL, SCAN_CODE_LEFT_CONTROL, false, 12)));
+    assert!(!hook(native(false, VK_LCONTROL, SCAN_CODE_LEFT_CONTROL, false, 13)));
+    assert!(!hook(NativeKeyEvent { foreign: true, ..native(false, VK_LCONTROL, SCAN_CODE_LEFT_CONTROL, false, 14) }));
+    assert_eq!(keys(), [(true, SCAN_CODE_LEFT_CONTROL), (false, SCAN_CODE_LEFT_CONTROL), (false, SCAN_CODE_LEFT_CONTROL)]);
+    subject.stop();
+}
+
 // ------------------------------------------------------------------- keys between the hook, a hold and their replay
 
 /// The scan codes of the left Win key and of V.

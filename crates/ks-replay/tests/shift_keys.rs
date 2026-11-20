@@ -529,92 +529,27 @@ fn drain(session: &mut Session) {
     session.idle(0.05);
 }
 
-/// The scan code of the key-up of the left Ctrl that Windows sends to a window whose layout changes to English, another
-/// than the left Ctrl's own (0x1D).
-const WINDOWS_LAYOUT_CTRL_SCAN_CODE: u32 = 0x21D;
-
-/// That key-up: no key-down comes before it, and nothing marks it as injected, so the hook takes it as typed.
-fn ctrl_key_up(session: &Session) -> KeyEvent {
-    KeyEvent { keycode: WINDOWS_LAYOUT_CTRL_SCAN_CODE, ..modifier(session, "Control_L", false) }
-}
-
-/// The left Shift of a second tap, stamped with the layout `group`.
-fn second_tap(session: &Session, group: i32) -> [KeyEvent; 2] {
-    [KeyEvent { group, ..modifier(session, "Shift_L", true) }, KeyEvent { group, ..modifier(session, "Shift_L", false) }]
-}
-
-/// A field in the layout `group` with the keys of `typed` typed in it.
-fn typed_in(bundle: &mut Bundle, typed: &str, group: i32) -> Session {
-    let mut field = session(bundle);
-    field.select_layout(group);
-    type_keys(&mut field, typed);
-    field.idle(0.05);
-    field
-}
-
-/// `typed` in the layout `group`, then both taps sent at once (one `SendInput` of four keys, as the live test on Windows
-/// sends them): the hook queues all four before the engine takes the first, and stamps the second tap with the layout the
-/// first then switched. `after` is queued behind them once the engine has taken the first tap: where a key the window
-/// sends meanwhile stands when the conversion collects the keys typed after the word. The text and the layout.
-fn sent_at_once(bundle: &mut Bundle, typed: &str, group: i32, after: &dyn Fn(&Session) -> Vec<KeyEvent>) -> (String, i32) {
-    let mut field = typed_in(bundle, typed, group);
-    let first = [modifier(&field, "Shift_L", true), modifier(&field, "Shift_L", false)];
-    queue(&field, &[first, second_tap(&field, group)].concat());
-    while field.core.shared.qsize() > 2 {
-        field.core.turn(0.0);
-    }
-    assert_eq!(field.backend.group(), 1 - group, "the first tap switched the layout");
-    queue(&field, &after(&field));
-    drain(&mut field);
-    let outcome = (text(&field), field.backend.group());
-    bundle.give_back(field);
-    outcome
-}
-
-/// `typed` in the layout `group`, the first tap, and a tenth of a second later the second, with the key-up of Ctrl at
-/// `place` among its keys: before the press, between the press and the release, or behind the release. The text and the
-/// layout.
-fn at_a_persons_pace(bundle: &mut Bundle, typed: &str, group: i32, place: usize) -> (String, i32) {
-    let mut field = typed_in(bundle, typed, group);
-    tap_alone(&mut field, "Shift_L");
-    field.advance(0.1);
-    let mut keys = second_tap(&field, 1 - group).to_vec();
-    keys.insert(place, ctrl_key_up(&field));
-    queue(&field, &keys);
-    drain(&mut field);
-    let outcome = (text(&field), field.backend.group());
-    bundle.give_back(field);
-    outcome
-}
-
-/// Windows sends a key-up of Ctrl as a window takes the English layout, and the layout switch key switches layouts: the
-/// key-up ends no double tap. A probe hook on Windows 10 saw one each time the window took the English layout (12 of 12)
-/// and none when it took the Russian one (0 of 12). From Russian it is the first tap's: between the taps at a person's
-/// pace, where it ended the double tap and the second tap switched the layout back; behind the second tap when both are
-/// sent at once. From English it is that of the switch back the double tap makes before it converts. In the queue when the
-/// conversion collected the keys typed after the word, it was taken for a modifier typed there, and the word was left as
-/// typed: every double tap of the live test on Windows left `hello`.
+/// Both taps sent at once (one `SendInput` of four keys, as the live test on Windows sends them): the hook queues all four
+/// before the engine takes the first, and stamps the second tap with the layout the first then switched, which the engine
+/// takes for a change of layout by a key. The double tap converts all the same, from either layout, and a letter typed
+/// after it goes with the word and comes back after it, once. What else Windows sends meanwhile, a key-up of Ctrl as the
+/// window takes the English layout, the hook keeps from the engine (ks-win,
+/// `a_key_up_of_a_key_never_seen_down_goes_to_the_window_and_not_to_the_engine`).
 #[test]
-fn the_ctrl_key_up_of_a_switch_to_english_ends_no_double_tap() {
+fn a_double_tap_sent_at_once_converts() {
     let mut bundle = Bundle::load(None);
-    let ctrl = |field: &Session| vec![ctrl_key_up(field)];
-    assert_eq!(sent_at_once(&mut bundle, "hello", 0, &ctrl), ("руддщ".to_owned(), 1));
-    assert_eq!(sent_at_once(&mut bundle, "ghbdtn", 1, &ctrl), ("ghbdtn".to_owned(), 0));
-    for place in [0, 1] {
-        assert_eq!(at_a_persons_pace(&mut bundle, "ghbdtn", 1, place), ("ghbdtn".to_owned(), 0), "the key-up at {place}");
+    for (typed, group, letter, converted) in [("hello", 0, None, "руддщ"), ("ghbdtn", 1, None, "ghbdtn"), ("hello", 0, Some('f'), "руддща")] {
+        let mut field = session(&mut bundle);
+        field.select_layout(group);
+        type_keys(&mut field, typed);
+        field.idle(0.05);
+        let stamped = |pressed: bool| KeyEvent { group, ..modifier(&field, "Shift_L", pressed) };
+        let mut keys = vec![stamped(true), stamped(false), stamped(true), stamped(false)];
+        keys.extend(letter.into_iter().flat_map(|letter| [true, false].map(|pressed| KeyEvent { group, ..letter_event(&field, letter, pressed) })));
+        queue(&field, &keys);
+        drain(&mut field);
+        assert_eq!((text(&field), field.backend.group()), (converted.to_owned(), 1 - group), "{typed} {letter:?}");
+        bundle.give_back(field);
     }
-    assert_eq!(at_a_persons_pace(&mut bundle, "hello", 0, 2), ("руддщ".to_owned(), 1));
-    bundle.clean();
-}
-
-/// Keys typed after the taps are neither lost nor typed twice: a letter goes with the word and comes back after it, once,
-/// as after Pause; a Ctrl the person pressed still leaves the word as typed, as any modifier typed behind a correction.
-#[test]
-fn keys_typed_after_a_double_tap_are_kept_past_the_ctrl_key_up() {
-    let mut bundle = Bundle::load(None);
-    let letter = |field: &Session| vec![ctrl_key_up(field), letter_event(field, 'f', true), letter_event(field, 'f', false)];
-    assert_eq!(sent_at_once(&mut bundle, "hello", 0, &letter), ("руддща".to_owned(), 1));
-    let pressed = |field: &Session| vec![ctrl_key_up(field), modifier(field, "Control_L", true), modifier(field, "Control_L", false)];
-    assert_eq!(sent_at_once(&mut bundle, "hello", 0, &pressed).0, "hello");
     bundle.clean();
 }

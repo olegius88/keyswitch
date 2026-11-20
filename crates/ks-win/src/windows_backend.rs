@@ -1496,6 +1496,14 @@ impl Inner {
             // KeySwitch's own mask key (mask_menu) is no key of the user's.
             return false;
         }
+        // A key-up of a key never seen going down (`orphan_release` below), not another program's, goes on to the window
+        // and not to the engine: it is no key the user typed. Windows sends one of the left Ctrl (scan code 0x21D) to a
+        // window as it takes the English layout; a probe hook on Windows 10 saw one each time a window took the English
+        // layout (12 of 12) and none when it took the Russian one (0 of 12). The engine took it for a Ctrl typed: between
+        // two taps of the layout switch key, the first of which switched from Russian, it ended the double tap, and the
+        // second tap switched the layout back; in the queue when a double tap's conversion began, after the switch back
+        // to English the double tap makes, it gave the conversion up as a modifier typed after the word.
+        let mut unseen_release = false;
         if !native.injected && !native.replayed {
             let (consumed_scan_code, down) = {
                 let hook = lock(&self.hook);
@@ -1538,6 +1546,7 @@ impl Inner {
                 hold.keep(native);
                 return true;
             }
+            unseen_release = orphan_release && !native.foreign;
         }
         // The window in front, asked once for this key: the check of the modifiers, the layout and the window the key goes
         // to all take it from here, where each of them asked again.
@@ -1596,7 +1605,7 @@ impl Inner {
             drop(hold);
             event.deferred = true;
         }
-        if !repeated_answer && let Some(listener) = self.listener.get() {
+        if !repeated_answer && !unseen_release && let Some(listener) = self.listener.get() {
             listener(event);
         }
         consumed != KeyDisposition::Pass
