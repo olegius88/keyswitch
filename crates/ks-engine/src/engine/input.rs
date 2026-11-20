@@ -185,9 +185,10 @@ impl EngineCore {
                 && self.flag("detection.context_read_field", false)
                 && self.context_policy.reader.is_some()
             {
+                // Only whether it is a password field: a platform that can tell without the text (UI Automation's password
+                // flag) answers that for one call of a read's dozen, and every word asks it.
                 let window = self.focus_or_zero();
-                let field = self.context_policy.reader.as_ref().and_then(|reader| reader.read(&application, window));
-                if field.is_some_and(|field| field.sensitive) {
+                if self.context_policy.reader.as_ref().and_then(|reader| reader.sensitive(&application, window)) == Some(true) {
                     self.shared.set_sensitive_context_window(self.shared.focus_window());
                     self.cancel_context_wait("sensitive_field");
                     self.context_policy.stream.clear();

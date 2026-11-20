@@ -439,6 +439,8 @@ pub struct WindowsFieldReader {
     read_request: Option<ComPtr>,
     /// What `read` asks of the focused element once more after the text, to see that the focus stayed.
     check_request: Option<ComPtr>,
+    /// What `sensitive` asks of the focused element, in one call: its process and whether it is a password field.
+    sensitive_request: Option<ComPtr>,
     thread: ThreadId,
     /// This thread entered the apartment and owes it one `CoUninitialize`.
     com: bool,
@@ -457,7 +459,14 @@ impl WindowsFieldReader {
         if unsafe { CoInitializeEx(null(), COINIT_MULTITHREADED.to::<u32>()) } < 0 {
             return Err(os_error());
         }
-        let mut reader = WindowsFieldReader { automation: None, read_request: None, check_request: None, thread: thread::current().id(), com: true };
+        let mut reader = WindowsFieldReader {
+            automation: None,
+            read_request: None,
+            check_request: None,
+            sensitive_request: None,
+            thread: thread::current().id(),
+            com: true,
+        };
         let mut out = null_mut();
         // SAFETY: both GUIDs are valid for the call, no outer object is passed, and `out` is a valid place.
         let created =
@@ -482,6 +491,7 @@ impl WindowsFieldReader {
         reader.read_request =
             cache_request(&automation, &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_AUTOMATION_ID_PROPERTY_ID], &[UIA_TEXT_PATTERN_ID]).ok();
         reader.check_request = cache_request(&automation, &[UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
+        reader.sensitive_request = cache_request(&automation, &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
         reader.automation = Some(automation);
         Ok(reader)
     }
@@ -562,6 +572,18 @@ impl WindowsFieldReader {
         Ok(Some(result.bounded()))
     }
 
+    /// Whether the focused field of `window` is a password field, as `read` says it before it reads any text: the focused
+    /// element's process and password flag, in one call where the cache request could be made. None for an element of
+    /// another process, which `read` does not read either. `read` gives no field for an element without a text pattern
+    /// either; it is no password field there, so the answer is the same.
+    pub fn sensitive(&self, window: i64) -> Result<Option<bool>, ReaderFailure> {
+        let focused = Focused::get(self.automation()?, self.sensitive_request.as_ref())?;
+        if i64::from(focused.number(ELEMENT_CACHED_PROCESS_ID, ELEMENT_CURRENT_PROCESS_ID)?) != process_for_window(window) {
+            return Ok(None);
+        }
+        Ok(Some(focused.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0))
+    }
+
     /// The text selected in the focused field of `window`.
     ///
     /// None where UI Automation cannot say (no text pattern, another process in focus): the clipboard is asked then.
@@ -614,6 +636,7 @@ impl WindowsFieldReader {
             // Drop all apartment-bound interface references before uninit.
             self.read_request = None;
             self.check_request = None;
+            self.sensitive_request = None;
             self.automation = None;
             // SAFETY: this thread entered the apartment in `new`, and `com` makes this the one matching call.
             unsafe { CoUninitialize() };
@@ -659,6 +682,10 @@ impl From<SelectionFailure> for SelectionError {
 impl ManagedFieldReader for WindowsFieldReader {
     fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure> {
         WindowsFieldReader::read(self, application, window)
+    }
+
+    fn sensitive(&self, _application: &str, window: i64) -> Result<Option<bool>, ReaderFailure> {
+        WindowsFieldReader::sensitive(self, window)
     }
 
     fn close(&mut self) {

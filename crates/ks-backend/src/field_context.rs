@@ -100,6 +100,12 @@ impl FieldContext {
 pub trait FieldReader: Send + Sync {
     fn read(&self, application: &str, window: i64) -> Option<FieldContext>;
 
+    /// Whether the focused field is one whose text is never read (a password field), as `read` would say it; None where
+    /// `read` gives no field. A reader that can tell without the text answers for less than a read.
+    fn sensitive(&self, application: &str, window: i64) -> Option<bool> {
+        self.read(application, window).map(|field| field.sensitive)
+    }
+
     /// How the reader last fared; `available` lets the engine trust the text around a moved caret.
     fn status(&self) -> String {
         "not_requested".to_owned()
@@ -123,6 +129,13 @@ pub struct ReaderFailure {
 pub trait ManagedFieldReader {
     /// The field, None for a field it cannot read, or the reason the provider did not answer.
     fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure>;
+
+    /// Whether the focused field is a password field, as `read` would say it, None where `read` gives no field; a
+    /// platform that can tell without reading the text answers so.
+    fn sensitive(&self, application: &str, window: i64) -> Result<Option<bool>, ReaderFailure> {
+        self.read(application, window).map(|field| field.map(|field| field.sensitive))
+    }
+
     fn close(&mut self);
 }
 

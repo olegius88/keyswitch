@@ -100,6 +100,23 @@ impl PlatformFieldReader {
         result
     }
 
+    /// The reader of this thread, built where it is not yet; false, with the failure recorded, where it cannot be.
+    fn opened(&self) -> bool {
+        let opened = READER.with_borrow_mut(|reader| {
+            if reader.is_none() {
+                *reader = Some((self.factory)()?);
+            }
+            Ok::<(), ReaderFailure>(())
+        });
+        match opened {
+            Ok(()) => true,
+            Err(failure) => {
+                self.fail("initialization", failure);
+                false
+            }
+        }
+    }
+
     fn fail(&self, stage: &'static str, failure: ReaderFailure) -> Option<FieldContext> {
         // Never format provider exceptions: they may contain user text. Missing dependencies, access denial and failed
         // cleanup require an explicit reset, not repeated calls against the same failure.
@@ -146,14 +163,8 @@ impl FieldReader for PlatformFieldReader {
                 }
             });
         }
-        let opened = READER.with_borrow_mut(|reader| {
-            if reader.is_none() {
-                *reader = Some((self.factory)()?);
-            }
-            Ok::<(), ReaderFailure>(())
-        });
-        if let Err(failure) = opened {
-            return self.fail("initialization", failure);
+        if !self.opened() {
+            return None;
         }
         let started = (self.clock)();
         let result = READER.with_borrow(|reader| reader.as_ref().expect("just opened").read(application, window));
@@ -172,6 +183,30 @@ impl FieldReader for PlatformFieldReader {
                 state.retry_attempts = 0;
                 state.retry_after = None;
                 result.map(|field| field.bounded())
+            }
+        }
+    }
+
+    /// The platform's own answer where it has one (UI Automation's password flag of the focused element, one call), not a
+    /// read of a dozen calls: the engine asks it at the first key of every word. The text is not read, so the status of the
+    /// last read stands. A failed reader is reopened or left alone as a read decides, and the compositor's word is the
+    /// read's, so those go through `read`.
+    fn sensitive(&self, application: &str, window: i64) -> Option<bool> {
+        if application.is_empty()
+            || window == 0
+            || self.password.as_ref().is_some_and(|password| password(window))
+            || self.state().status == "unavailable"
+        {
+            return self.read(application, window).map(|field| field.sensitive);
+        }
+        if !self.opened() {
+            return None;
+        }
+        match READER.with_borrow(|reader| reader.as_ref().expect("just opened").sensitive(application, window)) {
+            Ok(answer) => answer,
+            Err(failure) => {
+                self.fail("read", failure);
+                None
             }
         }
     }
@@ -271,5 +306,43 @@ mod tests {
         assert!(field.sensitive && field.role == FieldRole::Password && field.source == "compositor");
         assert!(reader.read("app", 6).is_none());
         assert!(!reader.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn the_password_question_takes_the_platform_answer_and_leaves_the_status_of_reads() {
+        let answers: Arc<Mutex<VecDeque<Answer>>> = Arc::default();
+        let opens: Arc<Mutex<VecDeque<Result<(), ReaderFailure>>>> = Arc::default();
+        let now = Arc::new(AtomicU64::new(0));
+        let clock_now = now.clone();
+        let clock: Clock = Arc::new(move || clock_now.load(Ordering::SeqCst).to::<f64>());
+        let (factory_answers, factory_opens) = (answers.clone(), opens.clone());
+        let factory: ReaderFactory = Arc::new(move || {
+            factory_opens.lock().unwrap().pop_front().unwrap_or(Ok(()))?;
+            let opened: Box<dyn ManagedFieldReader> = Box::new(Scripted { answers: factory_answers.clone(), closed: Arc::default() });
+            Ok(opened)
+        });
+        let reader = PlatformFieldReader::new(factory, clock).with_password_focus(Arc::new(|window| window == 5));
+        // No application or window, and a password field the compositor draws: as a read answers.
+        assert_eq!((reader.sensitive("", 1), reader.sensitive("app", 0), reader.sensitive("app", 5)), (None, None, Some(true)));
+        // A reader that cannot be built, then one that failed and waits for its time: as a read.
+        opens.lock().unwrap().push_back(Err(failure(false)));
+        assert_eq!(reader.sensitive("app", 1), None);
+        assert_eq!(reader.diagnostics()["failure_stage"], "initialization");
+        let mut password = FieldContext::new("app", "1");
+        password.sensitive = true;
+        answers.lock().unwrap().push_back(Ok(Some(password)));
+        assert_eq!(reader.sensitive("app", 1), None);
+        now.store(1000, Ordering::SeqCst);
+        assert_eq!(reader.sensitive("app", 1), Some(true));
+        assert_eq!(reader.status(), "available");
+        // A reader that works answers itself (here as its read does), and the status stays that of the last read.
+        answers.lock().unwrap().push_back(Ok(Some(FieldContext::new("app", "1"))));
+        assert_eq!(reader.sensitive("app", 1), Some(false));
+        assert_eq!(reader.sensitive("app", 1), None);
+        assert_eq!(reader.status(), "available");
+        answers.lock().unwrap().push_back(Err(failure(false)));
+        assert_eq!(reader.sensitive("app", 1), None);
+        assert_eq!((reader.status().as_str(), &reader.diagnostics()["failure_stage"]), ("unavailable", &json!("read")));
+        reader.close();
     }
 }
