@@ -113,7 +113,7 @@
      "value_tokens": 3
     },
     "src/engine/execute.rs": {
-     "literal_compares": 21
+     "literal_compares": 20
     },
     "src/engine/input.rs": {
      "literal_compares": 21,
@@ -157,7 +157,7 @@
      "expect_roots": 1
     }
    },
-   "literal_compares": 94,
+   "literal_compares": 93,
    "string_key_index": 1,
    "value_tokens": 119
   },

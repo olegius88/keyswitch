@@ -100,6 +100,11 @@ impl PlatformFieldReader {
         result
     }
 
+    /// The last attempt failed (`fail`): the next one waits for its time, or never comes.
+    fn unavailable(&self) -> bool {
+        self.state().status == "unavailable"
+    }
+
     /// The reader of this thread, built where it is not yet; false, with the failure recorded, where it cannot be.
     fn opened(&self) -> bool {
         let opened = READER.with_borrow_mut(|reader| {
@@ -147,8 +152,7 @@ impl FieldReader for PlatformFieldReader {
             "compositor".clone_into(&mut field.source);
             return Some(field);
         }
-        let unavailable = self.state().status == "unavailable";
-        if unavailable {
+        if self.unavailable() {
             let mut state = self.state();
             if state.retry_after.is_none_or(|after| (self.clock)() < after) {
                 return None;
@@ -195,7 +199,7 @@ impl FieldReader for PlatformFieldReader {
         if application.is_empty()
             || window == 0
             || self.password.as_ref().is_some_and(|password| password(window))
-            || self.state().status == "unavailable"
+            || self.unavailable()
         {
             return self.read(application, window).map(|field| field.sensitive);
         }

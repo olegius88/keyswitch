@@ -514,14 +514,15 @@ impl EngineCore {
             let typed: Strokes = plan.strokes.iter().chain(plan.trailing.iter()).cloned().collect();
             let ahead = self.typed_ahead(&typed);
             let refusal = Self::field_refusal(&plan, field.as_ref(), &suffix, &ahead);
-            if refusal == "other_text" && plan.mode == "early" && field.as_ref().is_some_and(|field| Self::typed_in_field(field, &plan.original, &ahead).is_some()) {
+            let early = plan.mode == "early";
+            if refusal == "other_text" && early && field.as_ref().is_some_and(|field| Self::typed_in_field(field, &plan.original, &ahead).is_some()) {
                 // The field has not taken the last letters in yet (typed_in_field). The word is
                 // still the one typed: it stays tracked for a later letter or its boundary.
                 technical_event!(self.shared, "early_switch_dropped", "reason": "field_behind", "current_word_length": self.strokes.len());
                 return false;
             }
             if refusal == "other_text"
-                && plan.mode != "early"
+                && !early
                 && field.as_ref().is_some_and(|field| self.waits_for_field(&requested, learning_prompt.as_ref(), field, waiting.as_ref()))
             {
                 return false;
@@ -534,7 +535,7 @@ impl EngineCore {
             let kept_earlier = self.early_field.as_ref().is_some_and(|kept| {
                 plan.strokes.first().is_some_and(|first| Arc::ptr_eq(&kept.first, first)) && kept.letters < pystr::len(&plan.original)
             });
-            if !refusal.is_empty() && plan.mode == "early" && kept_earlier {
+            if !refusal.is_empty() && early && kept_earlier {
                 self.early_field = None;
                 technical_event!(self.shared, "early_switch_dropped", "reason": "context_field_changed", "current_word_length": self.strokes.len());
                 return false;

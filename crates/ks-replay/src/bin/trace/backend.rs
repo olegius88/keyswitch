@@ -88,13 +88,15 @@ impl Tape {
 
     /// Reader calls no reader trait has (`close`, the diagnostics) belong to the platform reader, which a trace does not run.
     fn skip_foreign(&mut self) {
-        while let Some(call) = self.calls.get(self.at) {
-            if call["o"] == "r" && call["m"] != "read" {
-                self.at += 1;
-            } else {
-                break;
-            }
+        while self.reader_call() == Some(false) {
+            self.at += 1;
         }
+    }
+
+    /// Whether the call at hand is the field reader's: Some(true) for a read of the field, Some(false) for another of its
+    /// calls; None for one of the backend's, or for none left.
+    fn reader_call(&self) -> Option<bool> {
+        self.calls.get(self.at).and_then(|call| (call["o"] == "r").then(|| call["m"] == FIELD_READ))
     }
 
     /// The reads of the field the Python made and the Rust engine did not: a read of the field changes nothing, and the
@@ -111,7 +113,7 @@ impl Tape {
     }
 
     fn at_field_read(&self) -> bool {
-        self.calls.get(self.at).is_some_and(|call| call["o"] == "r" && call["m"] == "read")
+        self.reader_call() == Some(true)
     }
 
     /// Remembers a pure read's answer; a changed one the Rust engine would not have looked at is a difference.
@@ -186,7 +188,7 @@ impl Tape {
             self.at += 1;
             return Some(call);
         }
-        let field_read = origin == "r" && method == "read";
+        let field_read = origin == "r" && method == FIELD_READ;
         loop {
             while self.calls.get(self.at).is_some_and(|call| is_pure(call["m"].as_str().unwrap_or(""))) {
                 self.pass_pure();
@@ -247,6 +249,9 @@ impl Tape {
 }
 
 const PURE_READS: [&str; 3] = ["active_application", "focused_window", "current_group"];
+
+/// The field reader's read of the field, as a trace names its method.
+const FIELD_READ: &str = "read";
 
 fn is_pure(method: &str) -> bool {
     PURE_READS.contains(&method)
