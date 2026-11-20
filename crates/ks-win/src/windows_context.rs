@@ -19,6 +19,7 @@
 
 #![cfg_attr(windows, expect(unsafe_code, reason = "calls into Win32"))]
 use ks_cast::To as _;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::mem::{transmute_copy, zeroed};
 use std::ptr::{NonNull, null, null_mut};
@@ -56,6 +57,7 @@ const CONTEXT_LIMIT: i32 = ks_cast::const_i32(FIELD_CONTEXT_MAX_CHARACTERS);
 
 // Vtable slots: IUnknown
 const QUERY_INTERFACE: usize = 0;
+const ADD_REF: usize = 1;
 const RELEASE: usize = 2;
 // IUIAutomation : IUnknown
 const AUTOMATION_GET_FOCUSED_ELEMENT: usize = 8;
@@ -143,6 +145,14 @@ struct ComPtr(NonNull<c_void>);
 impl ComPtr {
     fn raw(&self) -> *mut c_void {
         self.0.as_ptr()
+    }
+
+    /// One more reference to the same object, owned by the copy.
+    fn add_ref(&self) -> ComPtr {
+        type AddRef = unsafe extern "system" fn(*mut c_void) -> u32;
+        // SAFETY: every COM interface starts with IUnknown, whose slot has this signature; the copy owns what it adds.
+        unsafe { method::<AddRef>(self.raw(), ADD_REF)(self.raw()) };
+        ComPtr(self.0)
     }
 
     /// `object.Name`, or a method of no arguments that gives an interface.
@@ -441,6 +451,13 @@ pub struct WindowsFieldReader {
     check_request: Option<ComPtr>,
     /// What `sensitive` asks of the focused element, in one call: its process and whether it is a password field.
     sensitive_request: Option<ComPtr>,
+    /// The focused element of the last `read` or `sensitive`, kept until the next one replaces it, and never called.
+    /// UI Automation serves a client's connections to the programs it reads on one I/O thread, which ends when the last
+    /// element of the last connection is let go: with every element released at the end of each request, each read and
+    /// each password question started and ended that thread (729 threads while 1529 keys were typed into Notepad, 0.35 s
+    /// of CPU per 1000 keys, in a VM, 20.11.2026). One element kept keeps the connection to the field's program, and the
+    /// thread, alive; held so, 500 reads in a row started none.
+    held: RefCell<Option<ComPtr>>,
     thread: ThreadId,
     /// This thread entered the apartment and owes it one `CoUninitialize`.
     com: bool,
@@ -464,6 +481,7 @@ impl WindowsFieldReader {
             read_request: None,
             check_request: None,
             sensitive_request: None,
+            held: RefCell::new(None),
             thread: thread::current().id(),
             com: true,
         };
@@ -504,7 +522,7 @@ impl WindowsFieldReader {
     /// The field around the caret. None for a field that cannot be read at all.
     pub fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure> {
         let automation = self.automation()?;
-        let focused = Focused::get(automation, self.read_request.as_ref())?;
+        let focused = self.hold(Focused::get(automation, self.read_request.as_ref())?);
         let element = &focused.element;
         if i64::from(focused.number(ELEMENT_CACHED_PROCESS_ID, ELEMENT_CURRENT_PROCESS_ID)?) != process_for_window(window) {
             return Ok(None);
@@ -577,11 +595,17 @@ impl WindowsFieldReader {
     /// another process, which `read` does not read either. `read` gives no field for an element without a text pattern
     /// either; it is no password field there, so the answer is the same.
     pub fn sensitive(&self, window: i64) -> Result<Option<bool>, ReaderFailure> {
-        let focused = Focused::get(self.automation()?, self.sensitive_request.as_ref())?;
+        let focused = self.hold(Focused::get(self.automation()?, self.sensitive_request.as_ref())?);
         if i64::from(focused.number(ELEMENT_CACHED_PROCESS_ID, ELEMENT_CURRENT_PROCESS_ID)?) != process_for_window(window) {
             return Ok(None);
         }
         Ok(Some(focused.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0))
+    }
+
+    /// Keeps `focused`'s element in `held` in place of the one kept before, which goes only now that the new one exists.
+    fn hold(&self, focused: Focused) -> Focused {
+        *self.held.borrow_mut() = Some(focused.element.add_ref());
+        focused
     }
 
     /// The text selected in the focused field of `window`.
@@ -637,6 +661,7 @@ impl WindowsFieldReader {
             self.read_request = None;
             self.check_request = None;
             self.sensitive_request = None;
+            *self.held.get_mut() = None;
             self.automation = None;
             // SAFETY: this thread entered the apartment in `new`, and `com` makes this the one matching call.
             unsafe { CoUninitialize() };
