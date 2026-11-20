@@ -274,7 +274,10 @@ impl EngineCore {
                     if key.synthetic {
                         kept.push(item.clone());
                     } else if is_modifier_key(&key.key_name) {
-                        if refusal.is_empty() && !self.queued_conversion_tap(&queued, key) {
+                        // A modifier coming up that the engine does not hold down types nothing and holds no key down under
+                        // the correction (`release_of_unheld_key`): taken for one, the key-up of Ctrl Windows sends to a
+                        // window whose layout a double tap has just switched to English stopped the double tap's conversion.
+                        if refusal.is_empty() && !self.release_of_unheld_key(key) && !self.queued_conversion_tap(&queued, key) {
                             refusal = "modifier";
                         }
                         kept.push(item.clone());

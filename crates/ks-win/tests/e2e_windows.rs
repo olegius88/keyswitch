@@ -88,6 +88,8 @@ mod scenario {
     const PHASE_SETTLE: u64 = 300;
     /// Two taps of the layout switch key further apart than a double tap (`LAYOUT_DOUBLE_TAP_SECONDS`), as two switches.
     const TAPS_APART: u64 = 700;
+    /// The time between the two taps of a double tap made at a person's pace.
+    const TAPS_OF_A_DOUBLE_TAP_APART: u64 = 120;
     const WINDOW_OPENS: u64 = 1_000;
     const START_ATTEMPTS: u32 = 4;
     const PROBE_ATTEMPTS: u32 = 3;
@@ -833,8 +835,10 @@ mod scenario {
     }
 
     /// The Shift keys of a new installation (`detection.double_tap_converts`, `detection.both_shifts_toggle`): two quick
-    /// taps of the layout switch key convert the word just typed as Pause does, and both Shifts pause the automatic
-    /// switching and let it go on.
+    /// taps of the layout switch key convert the word just typed as Pause does, both sent at once and at a person's pace,
+    /// and both Shifts pause the automatic switching and let it go on. Windows sends a key-up of Ctrl as the window takes
+    /// the English layout: from English, the switch back the double tap makes sends it as the conversion begins; from
+    /// Russian, the first tap's switch sends it between the taps.
     fn shift_keys(editor: &Editor, root: &Path) -> Result<(), String> {
         let enabled = |wanted: bool| SettingsStore::new(Some(root.join("config/config.json"))).read(ENABLED) == Some(wanted);
         editor.pump(TAPS_APART);
@@ -847,6 +851,11 @@ mod scenario {
         editor.send(&[left(true), left(false), left(true), left(false)])?;
         editor.expect("руддщ", 1, LONG)?;
         editor.pump(TAPS_APART);
+        editor.send(&[left(true), left(false)])?;
+        editor.pump(TAPS_OF_A_DOUBLE_TAP_APART);
+        editor.send(&[left(true), left(false)])?;
+        editor.expect("hello", 0, LONG)?;
+        editor.pump(TAPS_APART);
         for wanted in [false, true] {
             editor.send(&[left(true), right(true), right(false), left(false)])?;
             if !editor.pump_until(LONG, |_| enabled(wanted)) {
@@ -854,7 +863,7 @@ mod scenario {
             }
             editor.pump(PHASE_SETTLE);
         }
-        if editor.group() != 1 {
+        if editor.group() != 0 {
             return Err(format!("both Shifts switched the layout to {}", editor.group()));
         }
         println!("WINDOWS_SHIFT_KEYS_E2E_OK");
