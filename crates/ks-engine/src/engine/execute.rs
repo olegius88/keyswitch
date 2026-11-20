@@ -526,6 +526,19 @@ impl EngineCore {
             {
                 return false;
             }
+            // An early switch that took the field kept at an earlier letter of its word (`early_field`) finds the field
+            // changed since then, not since the letter it was planned at: a selection, another field of the window, a page
+            // that built the field anew. A read at this letter would have given the switch up and kept the word, and so
+            // does this: its next letter reads the field again, and its boundary decides it. Dropped with the word as
+            // below, a word whose field a page rebuilt mid-word stayed unconverted.
+            let kept_earlier = self.early_field.as_ref().is_some_and(|kept| {
+                plan.strokes.first().is_some_and(|first| Arc::ptr_eq(&kept.first, first)) && kept.letters < pystr::len(&plan.original)
+            });
+            if !refusal.is_empty() && plan.mode == "early" && kept_earlier {
+                self.early_field = None;
+                technical_event!(self.shared, "early_switch_dropped", "reason": "context_field_changed", "current_word_length": self.strokes.len());
+                return false;
+            }
             if !refusal.is_empty() {
                 let typed_after_boundary = !self.strokes.is_empty();
                 self.action_goes_on("field_refused");

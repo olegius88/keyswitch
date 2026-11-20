@@ -8,7 +8,7 @@ use ks_backend::constants::{ALT_MASK, CONTROL_MASK, SHIFT_MASK, SUPER_MASK};
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::config::SettingsStore;
 use ks_config::selection_commands::SelectionCommand;
-use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EngineCore, FieldWait, Hotkey, HotkeyProblem, InsertionPoint, KeptWord, PlanRef, QueueItem, Shared, Stroke, Strokes, WordEvaluation, WordOptions};
+use ks_engine::engine::{ConvertOutcome, CorrectionPlan, EarlyField, EngineCore, FieldWait, Hotkey, HotkeyProblem, InsertionPoint, KeptWord, PlanRef, QueueItem, Shared, Stroke, Strokes, WordEvaluation, WordOptions};
 use ks_lang::detector::DetectionDecision;
 use ks_lang::intent_model::CorrectionTrigger;
 use ks_lang::early_switch::EarlySwitchDecision;
@@ -196,8 +196,20 @@ fn a_correction_waits_only_for_a_field_that_is_behind() {
     assert!(!core.execute_correction(early.clone(), None));
     assert!(!core.strokes.is_empty());
     reader.show(Some(field("nothing like it", "")));
-    assert!(!core.execute_correction(early, None));
+    assert!(!core.execute_correction(early.clone(), None));
     assert!(core.strokes.is_empty());
+    // One that took the field kept at an earlier letter of its word finds it changed since then: given up, the word stays
+    // tracked, as a read at that letter kept it. A field kept at the letter the switch was planned at, or for another word,
+    // was read for it, and the word goes as above.
+    let first = early.strokes[0].clone();
+    for (kept_first, letters, tracked) in [(first.clone(), 4, true), (first, 6, false), (key('g'), 4, false)] {
+        core.strokes = keys("ghbdtn");
+        core.early_field = Some(EarlyField { first: kept_first, field: field("ghbd", ""), letters, full: false });
+        assert!(!core.execute_correction(early.clone(), None));
+        assert_eq!(!core.strokes.is_empty(), tracked, "{letters}");
+        assert_eq!(core.early_field.is_none(), tracked, "{letters}");
+    }
+    core.early_field = None;
     // Retried only with no key down and nothing newer planned.
     let waiting = |core: &mut EngineCore| {
         core.field_wait = Some(FieldWait { plan: of_field("ghbdtn", Some(' ')), learning_prompt: None, deadline: f64::MAX, presses: core.presses_handled, rolled: 0 });
