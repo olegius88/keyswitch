@@ -649,7 +649,7 @@ fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
     let rows = feel_rows();
     let options = |made_up: usize, real: usize, file: &str| c::FeelOptions { made_up_per_language: made_up, real_per_language: real, sample_weight: 1.0, held_out_file: file.to_owned(), scope: String::new() };
     let feel = options(300, 5, "model/context_v3/feel-held-out.json");
-    let mut words = BTreeSet::new();
+    let (mut words, mut meant) = (BTreeSet::new(), BTreeSet::new());
     for split in &SPLITS[..2] {
         let (frames, _) = c::feel_curriculum(tools, split, &rows, &feel).expect("frames");
         for frame in &frames {
@@ -657,6 +657,9 @@ fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
             let other = ks_train::physical::reading(&frame.original, frame.group);
             assert!(ks_context::context_action_features::start_question(&frame.original, &other, &frame.field.before, &frame.field.after), "{}", frame.original);
             words.insert(frame.original.to_lowercase());
+            if frame.action == ContextAction::Keep {
+                meant.insert(frame.original.to_lowercase());
+            }
         }
         // Each word kept as meant and converted from the other layout, at a space and at one more boundary: 300 made up
         // in each language, and the words of the rows no lexicon knows; a made-up word's frame whose letters decide
@@ -674,19 +677,19 @@ fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
     // Real words alone, the made-up ones not.
     let only_real = c::feel_curriculum(tools, "train", &rows, &options(0, 5, "model/context_v3/feel-held-out.json")).expect("frames");
     assert!(reported(&only_real) > 0 && reported(&only_real) < 40);
-    // The words of the held-out file are left out, in either reading.
+    // The words of the held-out file are left out, in either reading: held as typed and as the other layout reads them, and
+    // held only as the other layout reads the word meant (`words` has both forms of a word, `meant` the one kept as typed).
     let folder = scratch("feel-held-out");
-    let mut digests = Vec::new();
-    for word in &words {
-        let group = i64::from(!word.is_ascii());
-        for alias in [word.clone(), ks_train::physical::reading(word, group)] {
-            digests.push(format!("{:?}", ks_train::physical::hex_digest(&format!("salt:{alias}")).chars().take(16).collect::<String>()));
-        }
+    let digest = |alias: &str| format!("{:?}", ks_train::physical::hex_digest(&format!("salt:{alias}")).chars().take(16).collect::<String>());
+    let reading = |word: &str| ks_train::physical::reading(word, i64::from(!word.is_ascii()));
+    let both: Vec<String> = words.iter().flat_map(|word| [digest(word), digest(&reading(word))]).collect();
+    let other: Vec<String> = meant.iter().map(|word| digest(&reading(word))).collect();
+    for (name, digests) in [("held.json", both), ("held-other.json", other)] {
+        let held = folder.join(name);
+        std::fs::write(&held, format!(r#"{{"scope": "test", "salt": "salt:", "digits": 16, "digests": [{}]}}"#, digests.join(", "))).expect("a file");
+        let (again, _) = c::feel_curriculum(tools, "train", &rows, &options(300, 5, held.to_str().expect("a path"))).expect("frames");
+        assert!(!again.is_empty() && again.iter().all(|frame| !words.contains(&frame.original.to_lowercase())), "{name}");
     }
-    let held = folder.join("held.json");
-    std::fs::write(&held, format!(r#"{{"scope": "test", "salt": "salt:", "digits": 16, "digests": [{}]}}"#, digests.join(", "))).expect("a file");
-    let (again, _) = c::feel_curriculum(tools, "train", &rows, &options(300, 5, held.to_str().expect("a path"))).expect("frames");
-    assert!(!again.is_empty() && again.iter().all(|frame| !words.contains(&frame.original.to_lowercase())));
     // Nothing asked or nothing for this split; no file, or one that is not the file.
     assert_eq!(reported(&c::feel_curriculum(tools, "calibration", &rows, &feel).expect("none")), 0);
     assert_eq!(reported(&c::feel_curriculum(tools, "train", &rows, &options(0, 0, "")).expect("none")), 0);

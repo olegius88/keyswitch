@@ -997,6 +997,13 @@ fn a_check_that_fails_keeps_the_test_unread() {
     let (held, said) = told(promote(&run).arg("--check-only"));
     assert!(!held && said.contains("the calibration could not be compared") && said.contains("no test byte was read"), "{said}");
     std::fs::write(&installed, pair).expect("the installed pair");
+    // The floors of the program's quality test, that the sealed test's damage is held to, cannot be read.
+    let floors = run.tree.join("crates/ks-train/tests/data/quality_floors.json");
+    let kept = std::fs::read(&floors).expect("the floors");
+    std::fs::write(&floors, "{}").expect("a file");
+    let (held, said) = told(promote(&run).arg("--check-only"));
+    assert!(!held && said.contains("the quality floors could not be read") && said.contains("no test byte was read"), "{said}");
+    std::fs::write(&floors, kept).expect("the floors");
     // A candidate that has read the chat test is held to what that read recorded: its development result is not asked
     // again, whatever it holds.
     let development = run.chat.join(format!("{}.dev.json", checksum(&FITTED.model).expect("a checksum")));
@@ -1083,6 +1090,16 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let run = promotion("behind-first", &tree_of(&behind));
     let (held, said) = told(&mut promote(&run));
     assert!(!held && said.contains("short of the release receipt") && said.contains("reference_hunspell/default"), "{said}");
+    // Passed, and past the floors of the program's quality test on what it spoils: nothing is installed and the chat test
+    // is not read.
+    let mut spoiled = parsed(&accepted_report(&SEALED));
+    portable(&mut spoiled).counts.candidate.correct_text_corruptions = 1_000;
+    let run = promotion("spoiled", &tree_of(&spoiled));
+    let before = installed(&run);
+    let (held, said) = told(&mut promote(&run));
+    assert!(!held && said.contains("past the quality floors") && said.contains("portable/default: 1000 correct rows spoiled"), "{said}");
+    assert_eq!(installed(&run), before);
+    assert!(!run.report.with_file_name("devchat-test.json").exists());
     // The chat test recorded for it holds nothing.
     let run = promotion("chat-failed", &accepted_report(&SEALED));
     let result = run.chat.join("passed.result.json");
