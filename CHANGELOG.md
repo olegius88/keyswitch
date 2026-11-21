@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.74.4 — 2026-11-21
+
 - On Windows and macOS the program's window thread is no longer woken at every key typed. The engine updates its state at each key with the word typed so far, which neither the tray icon nor the settings window shows, and each update was handed to them and to the hints to redraw the same; now the tray and the settings window are handed only a change of what they show (whether the program runs and switches, the layout, the count of corrections, the last action or error), and the hints only a start or a stop of the engine, on every system.
 - For developers: `ks_ui::windows_ui_model::ShownStatus` lets on an engine snapshot only when it changes what the tray and the status of the settings window show (`running`, `enabled`, `current_group`, `correction_count`, `last_action`, `last_error`); the Windows and macOS apps subscribe through it. `ks_ui::hints::subscribe` posts `EngineInput::Snapshot` only when `running` changes: the hints read nothing else of it, and their timer ticks while a hint waits or shows. The Linux app is unchanged, as its settings window shows the word typed so far.
 - Windows: typing no longer opens the program in front about twice a key to learn its name, and no longer asks the window in front for its class at each key to learn whether it is the taskbar. The name is kept for the window and its process, and the class for the window, until another one comes to the front. On a test machine the name alone took 0.40–0.46 s of processor time per 1000 keys typed.
