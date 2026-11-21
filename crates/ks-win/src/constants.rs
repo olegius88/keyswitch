@@ -205,6 +205,18 @@ pub const UIA_TEXT_PATTERN_ID: i32 = 10014;
 pub const UIA_PROCESS_ID_PROPERTY_ID: i32 = 30002;
 pub const UIA_IS_PASSWORD_PROPERTY_ID: i32 = 30019;
 pub const UIA_AUTOMATION_ID_PROPERTY_ID: i32 = 30011;
+/// `UIA_HasKeyboardFocusPropertyId` and `UIA_FrameworkIdPropertyId` (UIAutomationClient.h): whether an element has the
+/// keyboard focus, and the UI framework that made it.
+pub const UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID: i32 = 30008;
+pub const UIA_FRAMEWORK_ID_PROPERTY_ID: i32 = 30024;
+/// The frameworks whose element says truly whether it still has the keyboard focus, so that the field reader takes the
+/// element it read before without looking the focus up again: a classic window's edit control (`Win32`: Notepad, a rich
+/// edit) and a Windows Forms one (`WinForm`). In 2320 checks after moves of the focus in a VM (Tab and clicks between
+/// fields, another program, an element destroyed, a field turned into a password field) the check never took a field
+/// that had lost the focus for one that had it. Chromium (`Chrome`: Edge, Electron) answers whether an element is
+/// focused within its page: after Ctrl+L into the address bar, a switch of tab or the focus moved into DevTools, the
+/// field left behind still said it had the focus (21.11.2026), so it is looked up every time.
+pub const UIA_FOCUS_TRUSTED_FRAMEWORKS: [&str; 2] = ["Win32", "WinForm"];
 /// `TextPatternRangeEndpoint_Start` and _End, and `TextUnit_Character` (UIAutomationClient.h).
 pub const ENDPOINT_START: i32 = 0;
 pub const ENDPOINT_END: i32 = 1;
