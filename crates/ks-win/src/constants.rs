@@ -209,13 +209,19 @@ pub const UIA_AUTOMATION_ID_PROPERTY_ID: i32 = 30011;
 /// keyboard focus, and the UI framework that made it.
 pub const UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID: i32 = 30008;
 pub const UIA_FRAMEWORK_ID_PROPERTY_ID: i32 = 30024;
+/// `UIA_NativeWindowHandlePropertyId` (UIAutomationClient.h): the window an element is, none for one drawn inside a
+/// window.
+pub const UIA_NATIVE_WINDOW_HANDLE_PROPERTY_ID: i32 = 30020;
+/// `UIA_E_ELEMENTNOTAVAILABLE` (UIAutomationCoreApi.h): the element is gone, as a field destroyed since it was found.
+pub const UIA_E_ELEMENT_NOT_AVAILABLE: u32 = 0x8004_0201;
 /// The frameworks whose element says truly whether it still has the keyboard focus, so that the field reader takes the
 /// element it read before without looking the focus up again: a classic window's edit control (`Win32`: Notepad, a rich
-/// edit) and a Windows Forms one (`WinForm`). In 2320 checks after moves of the focus in a VM (Tab and clicks between
-/// fields, another program, an element destroyed, a field turned into a password field) the check never took a field
-/// that had lost the focus for one that had it. Chromium (`Chrome`: Edge, Electron) answers whether an element is
-/// focused within its page: after Ctrl+L into the address bar, a switch of tab or the focus moved into DevTools, the
-/// field left behind still said it had the focus (21.11.2026), so it is looked up every time.
+/// edit) and a Windows Forms one (`WinForm`), each a window of its own (`Focused::window`). In 2320 checks after moves of
+/// the focus in a VM (Tab and clicks between fields, another program, an element destroyed, a field turned into a
+/// password field) the check never took a field that had lost the focus for one that had it. Chromium (`Chrome`: Edge,
+/// Electron) answers whether an element is focused within its page: after Ctrl+L into the address bar, a switch of tab or
+/// the focus moved into DevTools, the field left behind still said it had the focus (21.11.2026), so it is looked up
+/// every time, as is any element drawn inside a window, whatever its framework says.
 pub const UIA_FOCUS_TRUSTED_FRAMEWORKS: [&str; 2] = ["Win32", "WinForm"];
 /// `TextPatternRangeEndpoint_Start` and _End, and `TextUnit_Character` (UIAutomationClient.h).
 pub const ENDPOINT_START: i32 = 0;

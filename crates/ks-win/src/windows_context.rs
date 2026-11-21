@@ -46,8 +46,9 @@ use windows_sys::core::{BSTR, GUID, HRESULT};
 use crate::constants::{
     CLSCTX_SERVER, ENDPOINT_END, ENDPOINT_START, FIELD_AFTER_CARET_MAX_CHARACTERS, MILLISECONDS_PER_SECOND,
     SELECTION_COMMAND_MAX_CHARACTERS, UIA_AUTOMATION_ID_PROPERTY_ID, UIA_CONNECTION_TIMEOUT_MS, UIA_EDIT_CONTROL_TYPE_ID, UIA_EMBEDDED_OBJECT_CHARACTER,
-    UIA_FOCUS_TRUSTED_FRAMEWORKS, UIA_FRAMEWORK_ID_PROPERTY_ID, UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID,
-    UIA_IS_READ_ONLY_ATTRIBUTE_ID, UIA_PROCESS_ID_PROPERTY_ID, UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS, UNIT_CHARACTER,
+    UIA_E_ELEMENT_NOT_AVAILABLE, UIA_FOCUS_TRUSTED_FRAMEWORKS, UIA_FRAMEWORK_ID_PROPERTY_ID, UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID,
+    UIA_IS_PASSWORD_PROPERTY_ID, UIA_IS_READ_ONLY_ATTRIBUTE_ID, UIA_NATIVE_WINDOW_HANDLE_PROPERTY_ID, UIA_PROCESS_ID_PROPERTY_ID,
+    UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS, UNIT_CHARACTER,
 };
 use crate::windows_backend::SelectionReader;
 
@@ -85,6 +86,7 @@ const ELEMENT_CACHED_PROCESS_ID: usize = 52;
 const ELEMENT_CACHED_HAS_KEYBOARD_FOCUS: usize = 58;
 const ELEMENT_CACHED_AUTOMATION_ID: usize = 61;
 const ELEMENT_CACHED_IS_PASSWORD: usize = 67;
+const ELEMENT_CACHED_NATIVE_WINDOW_HANDLE: usize = 68;
 const ELEMENT_CACHED_FRAMEWORK_ID: usize = 72;
 // IUIAutomationTextPattern : IUnknown
 const PATTERN_GET_SELECTION: usize = 5;
@@ -256,8 +258,11 @@ struct Focused {
     /// Whether it is a password field, as a check of the element held from the request before answered just now
     /// (`still_focused`); None where it was looked up, and the cache or the element tells.
     password: Option<bool>,
-    /// Whether its framework says truly whether it still has the keyboard focus (`UIA_FOCUS_TRUSTED_FRAMEWORKS`).
+    /// Whether it says truly whether it still has the keyboard focus: its framework is one of
+    /// `UIA_FOCUS_TRUSTED_FRAMEWORKS` and it is a window of its own, the one that has the focus (`window`).
     trusted: bool,
+    /// The window it is, from the lookup's cache; 0 for an element drawn inside a window or a lookup without a cache.
+    window: i64,
 }
 
 /// The focused element of the last request: the window the request was for, and whether it came with the cache of a read
@@ -282,21 +287,25 @@ impl Focused {
             if answered >= 0
                 && let Some(element) = NonNull::new(out).map(ComPtr)
             {
-                // Only a request that names the framework (`read_request`, `sensitive_request`) can make it trusted: the
-                // framework is not asked of the element on its own, and without it the focus is looked up each time.
+                // Only a request that names the framework and the window (`read_request`, `sensitive_request`) can make
+                // it trusted: neither is asked of the element on its own, and without them the focus is looked up each
+                // time. A field drawn inside a window is never trusted: the checks measured were of fields that are
+                // windows, and a program answering through the older accessibility interface may call a field of a
+                // page `Win32` and say it has the focus as Chromium does.
                 let trusted = get_string(&element, ELEMENT_CACHED_FRAMEWORK_ID)
                     .ok()
                     .flatten()
                     .is_some_and(|framework| UIA_FOCUS_TRUSTED_FRAMEWORKS.contains(&framework.as_str()));
-                return Ok(Focused { element, cached: true, password: None, trusted });
+                let window = cached_window(&element);
+                return Ok(Focused { element, cached: true, password: None, trusted: trusted && window != 0, window });
             }
         }
-        Ok(Focused { element: focused_element(automation)?, cached: false, password: None, trusted: false })
+        Ok(Focused { element: focused_element(automation)?, cached: false, password: None, trusted: false, window: 0 })
     }
 
     /// The same element and what is known of it, with a reference of its own.
     fn again(&self) -> Focused {
-        Focused { element: self.element.add_ref(), cached: self.cached, password: self.password, trusted: self.trusted }
+        Focused { element: self.element.add_ref(), cached: self.cached, password: self.password, trusted: self.trusted, window: self.window }
     }
 
     /// Whether it is a password field: as the check of a held element answered, or from the cache or the element.
@@ -336,6 +345,18 @@ impl Focused {
         }
         self.element.get_indexed(ELEMENT_GET_CURRENT_PATTERN, UIA_TEXT_PATTERN_ID)
     }
+}
+
+/// The window `element` is, from its cache (`UIA_NATIVE_WINDOW_HANDLE_PROPERTY_ID`); 0 for none or a cache without it.
+fn cached_window(element: &ComPtr) -> i64 {
+    type HandleGetter = unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT;
+    let mut out = null_mut();
+    // SAFETY: the slot of IUIAutomationElement has this signature; what it writes is a window handle, no interface, and is
+    // not released.
+    if unsafe { method::<HandleGetter>(element.raw(), ELEMENT_CACHED_NATIVE_WINDOW_HANDLE)(element.raw(), &raw mut out) } < 0 {
+        return 0;
+    }
+    out.to::<isize>().to::<i64>()
 }
 
 fn element_process_id(element: &ComPtr) -> Result<i32, ReaderFailure> {
@@ -553,13 +574,23 @@ impl WindowsFieldReader {
         }
         reader.read_request = cache_request(
             &automation,
-            &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_AUTOMATION_ID_PROPERTY_ID, UIA_FRAMEWORK_ID_PROPERTY_ID],
+            &[
+                UIA_PROCESS_ID_PROPERTY_ID,
+                UIA_IS_PASSWORD_PROPERTY_ID,
+                UIA_AUTOMATION_ID_PROPERTY_ID,
+                UIA_FRAMEWORK_ID_PROPERTY_ID,
+                UIA_NATIVE_WINDOW_HANDLE_PROPERTY_ID,
+            ],
             &[UIA_TEXT_PATTERN_ID],
         )
         .ok();
         reader.check_request = cache_request(&automation, &[UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
-        reader.sensitive_request =
-            cache_request(&automation, &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_FRAMEWORK_ID_PROPERTY_ID], &[]).ok();
+        reader.sensitive_request = cache_request(
+            &automation,
+            &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_FRAMEWORK_ID_PROPERTY_ID, UIA_NATIVE_WINDOW_HANDLE_PROPERTY_ID],
+            &[],
+        )
+        .ok();
         reader.focus_request = cache_request(&automation, &[UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
         reader.automation = Some(automation);
         Ok(reader)
@@ -626,8 +657,14 @@ impl WindowsFieldReader {
         let suffix = text_without_placeholder(&after, FIELD_AFTER_CARET_MAX_CHARACTERS)?;
         // Whether the focus stayed in the field read, and whether it is a password field now: a trusted element says it
         // itself, any other is told by a lookup of the focus that finds the same element.
-        let (stayed, password) = if focused.trusted {
-            self.still_focused(element)?.map_or((false, false), |password| (true, password))
+        let (stayed, password) = if focused.trusted && self.focus_request.is_some() {
+            match self.still_focused(element) {
+                Ok(answer) => answer.map_or((false, false), |password| (true, password)),
+                // A field destroyed since it was read has lost the focus: the field changed, as a lookup that finds
+                // another element says, and no failure of the reader.
+                Err(failure) if failure.failure_code == Some(i64::from(UIA_E_ELEMENT_NOT_AVAILABLE.cast_signed())) => (false, false),
+                Err(failure) => return Err(failure),
+            }
         } else {
             let current = Focused::get(automation, self.check_request.as_ref())?;
             (runtime_id(&current.element)? == identity, current.is_password()?)
@@ -662,15 +699,16 @@ impl WindowsFieldReader {
 
     /// The focused element for a request about `window`.
     ///
-    /// The element held from the request before stands for it when its framework is trusted, it was taken for the same
-    /// window, it came with a read's cache where `read` asks (its text pattern and automation id), and a check of it says
-    /// it still has the keyboard focus; its password flag is then the one the check gave. Otherwise the focus is looked up
-    /// with `request`, and the element found is held from then on in place of the one before, which goes only once the
-    /// new one exists.
+    /// The element held from the request before stands for it when it is trusted, it is the window the request is about
+    /// and was taken for that window, it came with a read's cache where `read` asks (its text pattern and automation id),
+    /// and a check of it says it still has the keyboard focus; its password flag is then the one the check gave. Otherwise
+    /// the focus is looked up with `request`, and the element found is held from then on in place of the one before, which
+    /// goes only once the new one exists.
     fn focused(&self, automation: &ComPtr, request: Option<&ComPtr>, window: i64, read: bool) -> Result<Focused, ReaderFailure> {
         if let Some(held) = self.held.borrow().as_ref()
             && window != 0
             && held.window == window
+            && held.focused.window == window
             && held.focused.trusted
             && (held.readable || !read)
             && let Ok(Some(password)) = self.still_focused(&held.focused.element)
@@ -753,6 +791,7 @@ impl WindowsFieldReader {
             self.read_request = None;
             self.check_request = None;
             self.sensitive_request = None;
+            self.focus_request = None;
             *self.held.get_mut() = None;
             self.automation = None;
             // SAFETY: this thread entered the apartment in `new`, and `com` makes this the one matching call.
