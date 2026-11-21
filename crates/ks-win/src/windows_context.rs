@@ -46,8 +46,8 @@ use windows_sys::core::{BSTR, GUID, HRESULT};
 use crate::constants::{
     CLSCTX_SERVER, ENDPOINT_END, ENDPOINT_START, FIELD_AFTER_CARET_MAX_CHARACTERS, MILLISECONDS_PER_SECOND,
     SELECTION_COMMAND_MAX_CHARACTERS, UIA_AUTOMATION_ID_PROPERTY_ID, UIA_CONNECTION_TIMEOUT_MS, UIA_EDIT_CONTROL_TYPE_ID, UIA_EMBEDDED_OBJECT_CHARACTER,
-    UIA_IS_PASSWORD_PROPERTY_ID, UIA_IS_READ_ONLY_ATTRIBUTE_ID, UIA_PROCESS_ID_PROPERTY_ID, UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS,
-    UNIT_CHARACTER,
+    UIA_FOCUS_TRUSTED_FRAMEWORKS, UIA_FRAMEWORK_ID_PROPERTY_ID, UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID,
+    UIA_IS_READ_ONLY_ATTRIBUTE_ID, UIA_PROCESS_ID_PROPERTY_ID, UIA_TEXT_PATTERN_ID, UIA_TRANSACTION_TIMEOUT_MS, UNIT_CHARACTER,
 };
 use crate::windows_backend::SelectionReader;
 
@@ -74,6 +74,7 @@ const AUTOMATION2_PUT_CONNECTION_TIMEOUT: usize = 61;
 const AUTOMATION2_PUT_TRANSACTION_TIMEOUT: usize = 63;
 // IUIAutomationElement : IUnknown
 const ELEMENT_GET_RUNTIME_ID: usize = 4;
+const ELEMENT_BUILD_UPDATED_CACHE: usize = 9;
 const ELEMENT_GET_CURRENT_PATTERN: usize = 16;
 const ELEMENT_GET_CACHED_PATTERN: usize = 17;
 const ELEMENT_CURRENT_PROCESS_ID: usize = 20;
@@ -81,8 +82,10 @@ const ELEMENT_CURRENT_CONTROL_TYPE: usize = 21;
 const ELEMENT_CURRENT_AUTOMATION_ID: usize = 29;
 const ELEMENT_CURRENT_IS_PASSWORD: usize = 35;
 const ELEMENT_CACHED_PROCESS_ID: usize = 52;
+const ELEMENT_CACHED_HAS_KEYBOARD_FOCUS: usize = 58;
 const ELEMENT_CACHED_AUTOMATION_ID: usize = 61;
 const ELEMENT_CACHED_IS_PASSWORD: usize = 67;
+const ELEMENT_CACHED_FRAMEWORK_ID: usize = 72;
 // IUIAutomationTextPattern : IUnknown
 const PATTERN_GET_SELECTION: usize = 5;
 const PATTERN_DOCUMENT_RANGE: usize = 7;
@@ -250,6 +253,17 @@ fn cache_request(automation: &ComPtr, properties: &[i32], patterns: &[i32]) -> R
 struct Focused {
     element: ComPtr,
     cached: bool,
+    /// Whether it is a password field, as a check of the element held from the request before answered just now
+    /// (`still_focused`); None where it was looked up, and the cache or the element tells.
+    password: Option<bool>,
+    /// Whether its framework says truly whether it still has the keyboard focus (`UIA_FOCUS_TRUSTED_FRAMEWORKS`).
+    trusted: bool,
+}
+
+/// The focused element of the last read, and the window the read was for.
+struct Held {
+    focused: Focused,
+    window: i64,
 }
 
 impl Focused {
@@ -266,10 +280,29 @@ impl Focused {
             if answered >= 0
                 && let Some(element) = NonNull::new(out).map(ComPtr)
             {
-                return Ok(Focused { element, cached: true });
+                // Only a request that names the framework (`read_request`) can make it trusted: the framework is not asked
+                // of the element on its own, and without it the focus is looked up each time.
+                let trusted = get_string(&element, ELEMENT_CACHED_FRAMEWORK_ID)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|framework| UIA_FOCUS_TRUSTED_FRAMEWORKS.contains(&framework.as_str()));
+                return Ok(Focused { element, cached: true, password: None, trusted });
             }
         }
-        Ok(Focused { element: focused_element(automation)?, cached: false })
+        Ok(Focused { element: focused_element(automation)?, cached: false, password: None, trusted: false })
+    }
+
+    /// The same element and what is known of it, with a reference of its own.
+    fn again(&self) -> Focused {
+        Focused { element: self.element.add_ref(), cached: self.cached, password: self.password, trusted: self.trusted }
+    }
+
+    /// Whether it is a password field: as the check of a held element answered, or from the cache or the element.
+    fn is_password(&self) -> Result<bool, ReaderFailure> {
+        match self.password {
+            Some(password) => Ok(password),
+            None => Ok(self.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0),
+        }
     }
 
     /// A number property: from the cache, or, where the cache does not hold it, asked of the element.
@@ -449,13 +482,21 @@ pub struct WindowsFieldReader {
     read_request: Option<ComPtr>,
     /// What `read` asks of the focused element once more after the text, to see that the focus stayed.
     check_request: Option<ComPtr>,
-    /// The focused element of the last `read`, kept until the next one replaces it, and never called.
+    /// What the check of a held element asks of it, in one call: whether it still has the keyboard focus, and whether it
+    /// is a password field now (`still_focused`).
+    focus_request: Option<ComPtr>,
+    /// The focused element of the last `read`, kept until a lookup replaces it.
+    ///
     /// UI Automation serves a client's connections to the programs it reads on one I/O thread, which ends when the last
     /// element of the last connection is let go: with every element released at the end of each request, each read started
     /// and ended that thread (729 threads while 1529 keys were typed into Notepad, 0.35 s of CPU per 1000 keys, in a VM,
     /// 20.11.2026). One element kept keeps the connection to the field's program, and the thread, alive; held so, 500 reads
     /// in a row started none.
-    held: RefCell<Option<ComPtr>>,
+    ///
+    /// The lookup of the focused element was half the engine's CPU while typing (7.6-8.3 M cycles each, 0.78 a key), and
+    /// a check of the held element costs an eighth of it: where its framework is trusted (`Focused::trusted`), a read for
+    /// the same window takes the held element while the check says it has the focus.
+    held: RefCell<Option<Held>>,
     thread: ThreadId,
     /// This thread entered the apartment and owes it one `CoUninitialize`.
     com: bool,
@@ -478,6 +519,7 @@ impl WindowsFieldReader {
             automation: None,
             read_request: None,
             check_request: None,
+            focus_request: None,
             held: RefCell::new(None),
             thread: thread::current().id(),
             com: true,
@@ -503,9 +545,14 @@ impl WindowsFieldReader {
             // SAFETY: the object was asked for as IUIAutomation2, whose slots these are, with this signature.
             check(unsafe { method::<PutTimeout>(automation.raw(), slot)(automation.raw(), timeout) })?;
         }
-        reader.read_request =
-            cache_request(&automation, &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_AUTOMATION_ID_PROPERTY_ID], &[UIA_TEXT_PATTERN_ID]).ok();
+        reader.read_request = cache_request(
+            &automation,
+            &[UIA_PROCESS_ID_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID, UIA_AUTOMATION_ID_PROPERTY_ID, UIA_FRAMEWORK_ID_PROPERTY_ID],
+            &[UIA_TEXT_PATTERN_ID],
+        )
+        .ok();
         reader.check_request = cache_request(&automation, &[UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
+        reader.focus_request = cache_request(&automation, &[UIA_HAS_KEYBOARD_FOCUS_PROPERTY_ID, UIA_IS_PASSWORD_PROPERTY_ID], &[]).ok();
         reader.automation = Some(automation);
         Ok(reader)
     }
@@ -518,14 +565,14 @@ impl WindowsFieldReader {
     /// The field around the caret. None for a field that cannot be read at all.
     pub fn read(&self, application: &str, window: i64) -> Result<Option<FieldContext>, ReaderFailure> {
         let automation = self.automation()?;
-        let focused = self.hold(Focused::get(automation, self.read_request.as_ref())?);
+        let focused = self.focused(automation, self.read_request.as_ref(), window)?;
         let element = &focused.element;
         if i64::from(focused.number(ELEMENT_CACHED_PROCESS_ID, ELEMENT_CURRENT_PROCESS_ID)?) != process_for_window(window) {
             return Ok(None);
         }
         let identity = runtime_id(element)?;
         let field_id = identity.iter().map(i32::to_string).collect::<Vec<_>>().join(":");
-        if focused.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0 {
+        if focused.is_password()? {
             return Ok(Some(password_field(application, field_id)));
         }
         let Some(supported) = focused.text_pattern()? else {
@@ -569,11 +616,18 @@ impl WindowsFieldReader {
         }
         let prefix = text_without_placeholder(&before, CONTEXT_LIMIT)?;
         let suffix = text_without_placeholder(&after, FIELD_AFTER_CARET_MAX_CHARACTERS)?;
-        let current = Focused::get(automation, self.check_request.as_ref())?;
-        if current.number(ELEMENT_CACHED_IS_PASSWORD, ELEMENT_CURRENT_IS_PASSWORD)? != 0 {
+        // Whether the focus stayed in the field read, and whether it is a password field now: a trusted element says it
+        // itself, any other is told by a lookup of the focus that finds the same element.
+        let (stayed, password) = if focused.trusted {
+            self.still_focused(element)?.map_or((false, false), |password| (true, password))
+        } else {
+            let current = Focused::get(automation, self.check_request.as_ref())?;
+            (runtime_id(&current.element)? == identity, current.is_password()?)
+        };
+        if password {
             return Ok(Some(password_field(application, field_id)));
         }
-        if runtime_id(&current.element)? != identity {
+        if !stayed {
             // Explicit contradictory evidence, not an unsupported provider. An empty native suffix makes the policy reject
             // stale strokes.
             return Ok(Some(uia_field(application, field_id)));
@@ -586,10 +640,42 @@ impl WindowsFieldReader {
         Ok(Some(result.bounded()))
     }
 
-    /// Keeps `focused`'s element in `held` in place of the one kept before, which goes only now that the new one exists.
-    fn hold(&self, focused: Focused) -> Focused {
-        *self.held.borrow_mut() = Some(focused.element.add_ref());
-        focused
+    /// The focused element for a read about `window`.
+    ///
+    /// The element held from the read before stands for it when its framework is trusted, it was taken for the same
+    /// window, and a check of it says it still has the keyboard focus; its password flag is then the one the check gave.
+    /// Otherwise the focus is looked up with `request`, and the element found is held from then on in place of the one
+    /// before, which goes only once the new one exists.
+    fn focused(&self, automation: &ComPtr, request: Option<&ComPtr>, window: i64) -> Result<Focused, ReaderFailure> {
+        if let Some(held) = self.held.borrow().as_ref()
+            && window != 0
+            && held.window == window
+            && held.focused.trusted
+            && let Ok(Some(password)) = self.still_focused(&held.focused.element)
+        {
+            return Ok(Focused { password: Some(password), ..held.focused.again() });
+        }
+        let focused = Focused::get(automation, request)?;
+        *self.held.borrow_mut() = Some(Held { focused: focused.again(), window });
+        Ok(focused)
+    }
+
+    /// Whether `element` still has the keyboard focus, and if it has, whether it is a password field now: both in one
+    /// request (`focus_request`). None for no focus, or no request to ask with; an error where the call fails, as an
+    /// element destroyed since answers (`UIA_E_ELEMENTNOTAVAILABLE`).
+    fn still_focused(&self, element: &ComPtr) -> Result<Option<bool>, ReaderFailure> {
+        type BuildUpdatedCache = unsafe extern "system" fn(*mut c_void, *mut c_void, *mut *mut c_void) -> HRESULT;
+        let Some(request) = self.focus_request.as_ref() else {
+            return Ok(None);
+        };
+        let mut out = null_mut();
+        // SAFETY: the slot of IUIAutomationElement has this signature, `request` is a live cache request, and `out` is valid.
+        check(unsafe { method::<BuildUpdatedCache>(element.raw(), ELEMENT_BUILD_UPDATED_CACHE)(element.raw(), request.raw(), &raw mut out) })?;
+        let updated = NonNull::new(out).map(ComPtr).ok_or_else(value_error)?;
+        if updated.get_number(ELEMENT_CACHED_HAS_KEYBOARD_FOCUS)? == 0 {
+            return Ok(None);
+        }
+        Ok(Some(updated.get_number(ELEMENT_CACHED_IS_PASSWORD)? != 0))
     }
 
     /// The text selected in the focused field of `window`.
