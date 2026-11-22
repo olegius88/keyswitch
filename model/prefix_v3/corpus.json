@@ -1,70 +1,133 @@
 {
- "config_sha256": "4c21529b30a595be285e93c82143c14bdac1b900ad121ff379740111460bf587",
+ "config_sha256": "78198bf0cb20c0f4a6a73317c7e1e2cffa023f2f9284c5660e424adb05321964",
  "counts": {
-  "calibration": {
-   "convert_words": 2831,
-   "families": 815,
-   "hard_keep_words": 1058,
-   "keep_words": 4311,
-   "rows": 12933,
-   "words": 4311,
+  "acceptance": {
+   "convert_words": 8850,
+   "families": 1158,
+   "hard_keep_words": 9535,
+   "hard_keep_words_by_group": [
+    8666,
+    869
+   ],
+   "keep_words": 16601,
+   "keep_words_by_group": [
+    12057,
+    4544
+   ],
+   "rows": 49803,
+   "words": 16601,
    "words_by_class": {
-    "en:address": 75,
-    "en:frequent": 249,
-    "en:name": 131,
+    "en:address": 35,
+    "en:frequent": 266,
+    "en:low_keys": 761,
+    "en:name": 154,
+    "en:rare": 2166,
+    "en:short_term": 334,
+    "en:sign_led": 4305,
+    "en:term": 3077,
+    "en:unknown": 959,
+    "ru:english_keys": 82,
+    "ru:frequent": 209,
+    "ru:low_keys": 703,
+    "ru:name": 158,
+    "ru:rare": 2669,
+    "ru:unknown": 723
+   }
+  },
+  "calibration": {
+   "convert_words": 5204,
+   "families": 1167,
+   "hard_keep_words": 3342,
+   "hard_keep_words_by_group": [
+    2115,
+    1227
+   ],
+   "keep_words": 6690,
+   "keep_words_by_group": [
+    3512,
+    3178
+   ],
+   "rows": 20070,
+   "words": 6690,
+   "words_by_class": {
+    "en:address": 47,
+    "en:frequent": 397,
+    "en:low_keys": 400,
+    "en:name": 229,
     "en:rare": 600,
-    "en:short_term": 405,
+    "en:short_term": 439,
     "en:sign_led": 400,
     "en:term": 600,
     "en:unknown": 400,
-    "ru:english_keys": 122,
-    "ru:frequent": 198,
-    "ru:name": 131,
-    "ru:rare": 600,
-    "ru:unknown": 400
+    "ru:english_keys": 120,
+    "ru:frequent": 267,
+    "ru:low_keys": 1000,
+    "ru:name": 191,
+    "ru:rare": 1000,
+    "ru:unknown": 600
    }
   },
   "development": {
-   "convert_words": 2792,
-   "families": 835,
-   "hard_keep_words": 995,
-   "keep_words": 4196,
-   "rows": 12588,
-   "words": 4196,
+   "convert_words": 5176,
+   "families": 1164,
+   "hard_keep_words": 3304,
+   "hard_keep_words_by_group": [
+    2047,
+    1257
+   ],
+   "keep_words": 6654,
+   "keep_words_by_group": [
+    3415,
+    3239
+   ],
+   "rows": 19962,
+   "words": 6654,
    "words_by_class": {
-    "en:address": 20,
-    "en:frequent": 249,
-    "en:name": 132,
+    "en:address": 37,
+    "en:frequent": 368,
+    "en:low_keys": 400,
+    "en:name": 169,
     "en:rare": 600,
-    "en:short_term": 384,
+    "en:short_term": 441,
     "en:sign_led": 400,
     "en:term": 600,
     "en:unknown": 400,
-    "ru:english_keys": 79,
-    "ru:frequent": 195,
-    "ru:name": 137,
-    "ru:rare": 600,
-    "ru:unknown": 400
+    "ru:english_keys": 163,
+    "ru:frequent": 252,
+    "ru:low_keys": 983,
+    "ru:name": 241,
+    "ru:rare": 1000,
+    "ru:unknown": 600
    }
   },
   "train": {
-   "convert_words": 9755,
-   "families": 4306,
-   "hard_keep_words": 4005,
-   "keep_words": 14007,
-   "rows": 42021,
-   "words": 14007,
+   "convert_words": 12938,
+   "families": 4116,
+   "hard_keep_words": 9631,
+   "hard_keep_words_by_group": [
+    6381,
+    3250
+   ],
+   "keep_words": 17070,
+   "keep_words_by_group": [
+    9901,
+    7169
+   ],
+   "rows": 51210,
+   "words": 17070,
    "words_by_class": {
-    "en:address": 252,
-    "en:frequent": 1500,
-    "en:name": 750,
+    "en:address": 132,
+    "en:frequent": 1270,
+    "en:low_keys": 1500,
+    "en:name": 749,
     "en:rare": 1500,
     "en:short_term": 1000,
     "en:sign_led": 1500,
     "en:term": 1500,
     "en:unknown": 750,
-    "ru:english_keys": 755,
-    "ru:frequent": 1500,
+    "ru:english_keys": 388,
+    "ru:frequent": 1281,
+    "ru:low_keys": 2500,
     "ru:name": 750,
     "ru:rare": 1500,
     "ru:unknown": 750
@@ -72,32 +135,39 @@
   }
  },
  "families": {
-  "calibration": 815,
-  "development": 835,
-  "train": 4306
+  "acceptance": 1158,
+  "calibration": 1167,
+  "development": 1164,
+  "train": 4116
  },
  "family_overlap": 0,
- "generator_sha256": "c4bc4e7a5212b6b73d8f7e807f6c9d207cc3fc648d534e2612f2c62a3186a8a0",
+ "generator_sha256": "3b8c05be3e0e5ca3759b02225d7cd06b66db62fd5b2e4cca39edd641bccb91f0",
  "held_out": {
-  "aliases": 25895,
+  "aliases": 55368,
   "file": "held-out.json.gz",
-  "files": 35,
-  "sha256": "61d07a298f4c8e9f35337aef831149ec6f9a624e88f8b5b5f9e863081ea1cb09",
-  "words": 8368
+  "files": 50,
+  "sha256": "026add1f4813b5c28c5114279be3603c639e33a1577847d8d1be77da658855c0",
+  "words": 17887
  },
  "kind": "prefix-words",
  "labels": "made by the trainer from each row: a paired word typed as meant is kept at every length; typed in the other layout it converts from the recipe's number of letters, and waits before it, while the typed prefix continues a word of the typed layout's lexicon or a known term; every other row is kept",
- "rows": {
-  "calibration": 12933,
-  "development": 12588,
-  "train": 42021
+ "low_keys_cut_nats": {
+  "en": -2.58642578125,
+  "ru": -2.76220703125
  },
- "schema_version": 2,
- "scope": "Words of pinned public sources typed in the other layout and as meant, and real tokens typed as meant, for the prefix model. Words come from the training split of the frozen base corpus (UD treebanks and Debian commands; their families are in every later holdout's base exclusions) and from the CC0 Tatoeba snapshot (previously exposed to every holdout); terms from the tree's identifier lexicon, protected tokens and the Latin column of the term table. The focus words of the development samples held out at the freeze are left out by their physical aliases. Physical families (first three keys) split by hash into train, development and calibration; there is no test split: the pair's sealed test is the holdout freeze. Epoch selected on development, threshold on calibration.",
+ "rows": {
+  "acceptance": 49803,
+  "calibration": 20070,
+  "development": 19962,
+  "train": 51210
+ },
+ "schema_version": 3,
+ "scope": "Words of pinned public sources typed in the other layout and as meant, and real tokens typed as meant, for the prefix model. Words come from the training split of the frozen base corpus (UD treebanks and Debian commands; their families are in every later holdout's base exclusions) and from the CC0 Tatoeba snapshot (previously exposed to every holdout); terms from the tree's identifier lexicon, protected tokens and the Latin column of the term table. The focus words of the development samples and of the made-up and rare word lists held out at the freeze are left out by their physical aliases. Physical families (first three keys) split by hash, under a namespace no earlier draw used, into train, development, calibration and acceptance; no fit reads acceptance, which takes every word of its families: engine acceptance samples are made of it. A word is hard by its first keys when its own layout's orthotactic channel reads its first four keys among the worst fifth of its language's words; development and calibration each hold at least 3000 words typed as meant in each direction, 1000 of them hard. There is no test split: the pair's sealed test is the holdout freeze. The epoch is chosen on development, the thresholds on calibration, read once.",
  "sha256": {
-  "calibration": "40f6f90b7649055a0afc91ffa4297caeaf4cd11738670f062ff5dc06c38cece6",
-  "development": "6f73d66f715fe17203c13893f72b124ce1c478e71eeef56e2072be4157f70261",
-  "train": "7c92f6211c4affb0271da1621a15bc300be04181ea0d32a5312d6222f20ee3ab"
+  "acceptance": "0f3b8dfefe75fe5465b3bec3c81138af9b29ab819d687d174ce5e62a5d5c0a34",
+  "calibration": "937d2521d995a4d2c753a2b7fdae2494bb358148bc88be73e24ffd0e9153a167",
+  "development": "609a7c81dd92cd512faa75636a4153ec25b1240cdda0e311a8958b9d376d3b2e",
+  "train": "ce43a6088a27040e0c35fe7cabbfa86b85fa496d56591a27046cda5c3a2bf5f3"
  },
  "situations": "each word in three of four situations drawn by hash (an empty field of unknown role, Russian text, English text, a code comment); an address part in its own sentence and two of the four; one application for every row",
  "sources": [
