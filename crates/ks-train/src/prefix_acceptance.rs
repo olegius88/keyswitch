@@ -8,7 +8,7 @@
 //! replayed twice, with the term lists open and with them closed to its tokens. Only counts are written: no text of a
 //! sample is printed, before the run or after it.
 use ks_cast::To as _;
-use crate::corpus::{DEVELOPMENT, checksum, load_rows};
+use crate::corpus::{CALIBRATION, DEVELOPMENT, checksum, load_rows};
 use crate::evaluate::{EARLY_KIND, PROFILES, first_word, script_group, trimmed_window, typed_first};
 use crate::physical::{expanded_aliases, hex};
 use crate::prefix_words::{ACCEPTANCE_SPLIT, draw, held_out_of, read_split};
@@ -124,6 +124,8 @@ pub struct BuildRequest<'a> {
     pub corpus: &'a Path,
     /// Frozen base corpora whose development split is plain text.
     pub bases: &'a [PathBuf],
+    /// Their calibration split too; never their training or test split.
+    pub base_calibration: bool,
     /// Files of plain text, a text a line (gzip when named `.gz`).
     pub texts: &'a [PathBuf],
     /// Exposure inventories (`base inventory`): the aliases of every word a prefix fit read.
@@ -255,6 +257,11 @@ fn plain_rows(words: &BTreeSet<(String, i64)>, sample: Sample, namespace: &str, 
     rows
 }
 
+/// The splits of a base corpus whose texts are plain text: development, and calibration when asked.
+fn base_splits(calibration: bool) -> &'static [&'static str] {
+    if calibration { &[DEVELOPMENT, CALIBRATION] } else { &[DEVELOPMENT] }
+}
+
 /// The counts of the rows of each sample.
 fn sample_counts(rows: &[AcceptanceRow]) -> BTreeMap<String, SampleCount> {
     let mut counts: BTreeMap<String, SampleCount> = [Sample::A1, Sample::A2, Sample::A3, Sample::N1, Sample::N2].iter().map(|sample| (sample.as_str().to_owned(), SampleCount::default())).collect();
@@ -300,10 +307,13 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         held.extend(aliases_of(text));
     }
     let mut plain: BTreeSet<(String, i64)> = BTreeSet::new();
+    let splits = base_splits(request.base_calibration);
     for base in request.bases {
-        for row in load_rows(base, DEVELOPMENT)? {
-            let (before, after, _, _) = trimmed_window(&row);
-            words_of(&format!("{before}{}{after}", row.original), &mut plain);
+        for split in splits {
+            for row in load_rows(base, split)? {
+                let (before, after, _, _) = trimmed_window(&row);
+                words_of(&format!("{before}{}{after}", row.original), &mut plain);
+            }
         }
     }
     for path in request.texts {
@@ -334,7 +344,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         kind: SAMPLES_KIND.to_owned(),
         namespace: request.namespace.to_owned(),
         corpus_receipt_sha256: checksum(&request.corpus.join("corpus.json"))?,
-        bases: input_files(&request.bases.iter().map(|base| base.join(format!("{DEVELOPMENT}.jsonl.gz"))).collect::<Vec<_>>())?,
+        bases: input_files(&request.bases.iter().flat_map(|base| splits.iter().map(move |split| base.join(format!("{split}.jsonl.gz")))).collect::<Vec<_>>())?,
         texts: input_files(request.texts)?,
         inventories: input_files(request.inventories)?,
         hold_out: input_files(request.hold_out)?,
@@ -342,7 +352,7 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         minimums,
         counts,
         sha256: [(ROWS_FILE.to_owned(), hex(&Sha256::digest(&packed))), (PLAIN_AS_MEANT_FILE.to_owned(), hex(&Sha256::digest(as_meant.as_bytes())))].into_iter().collect(),
-        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads; N1 and N2 from the development split of frozen base corpora and files of plain text, without the words any prefix selection, held-out sample or the acceptance split holds, by their physical aliases. A row is one token typed first in an empty text field and followed by a space; only counts are read.".to_owned(),
+        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads; N1 and N2 from the development split (and, when asked, the calibration split) of frozen base corpora and files of plain text, without the words any prefix selection, held-out sample or the acceptance split holds, by their physical aliases. A row is one token typed first in an empty text field and followed by a space; only counts are read.".to_owned(),
     };
     std::fs::write(request.output.join(RECEIPT_FILE), ks_text::json::dumps(&receipt, &readable()) + "\n").map_err(|error| error.to_string())?;
     Ok(receipt)
@@ -975,5 +985,6 @@ mod tests {
         assert!(letters_both_ways("мама", 1) && !letters_both_ways("жук", 1) && letters_both_ways("quick", 0));
         assert_eq!(row(true).direction(), 0);
         assert_eq!(row(false).direction(), 1);
+        assert_eq!((base_splits(false), base_splits(true)), (&[DEVELOPMENT][..], &[DEVELOPMENT, CALIBRATION][..]));
     }
 }

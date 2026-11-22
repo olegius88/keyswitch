@@ -2,7 +2,7 @@
 //! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--development-only] [--jobs N]`
 //! `ks-train prefix-report --fit <folder> --output <file>`
 //! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--frames-cache <folder>] --output <file> [--jobs N]`
-//! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
+//! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
 //! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>... --reference <name> [--key early|any] --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
@@ -470,7 +470,7 @@ fn acceptance_command(arguments: &[String]) -> i32 {
             let (bases, texts, inventories, hold_out) = (paths("--base"), paths("--text"), paths("--inventory"), paths("--hold-out"));
             let (corpus, output) = (required("--corpus"), required("--output"));
             let namespace = option(arguments, "--namespace").expect("--namespace is required");
-            let request = BuildRequest { corpus: &corpus, bases: &bases, texts: &texts, inventories: &inventories, hold_out: &hold_out, namespace, minimums, output: &output };
+            let request = BuildRequest { corpus: &corpus, bases: &bases, base_calibration: flag(arguments, "--base-calibration"), texts: &texts, inventories: &inventories, hold_out: &hold_out, namespace, minimums, output: &output };
             prefix_acceptance::build(&request).map(|receipt| ks_text::json::dumps(&receipt.counts, &JsonOptions { indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }))
         }
         Some("run") => {

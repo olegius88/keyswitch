@@ -921,7 +921,7 @@ mod acceptance {
 
     fn build(inputs: &Inputs, output: &Path, minimums: [&str; 3]) -> std::process::Output {
         let mut command = trainer();
-        command.arg("prefix-acceptance").arg("build").arg("--corpus").arg(&inputs.corpus).arg("--base").arg(&inputs.base);
+        command.arg("prefix-acceptance").arg("build").arg("--corpus").arg(&inputs.corpus).arg("--base").arg(&inputs.base).arg("--base-calibration");
         command.arg("--text").arg(&inputs.text).arg("--text").arg(&inputs.packed_text).arg("--inventory").arg(&inputs.inventory).arg("--hold-out").arg(&inputs.list);
         command.args(["--namespace", "test-acceptance", "--minimum-paired", minimums[0], "--minimum-plain", minimums[1], "--engine-plain", minimums[2]]).arg("--output").arg(output);
         command.output().expect("the trainer starts")
@@ -972,7 +972,8 @@ mod acceptance {
         assert!(rows.iter().filter(|row| row.sample != Sample::N1 && row.sample != Sample::N2).all(|row| row.engine));
         let listed = std::fs::read_to_string(output.join("n2-words.txt")).expect("the words of N2");
         assert_eq!(listed.lines().count(), at(&receipt.counts, "N2").words.iter().sum::<usize>());
-        assert_eq!((receipt.bases.len(), receipt.texts.len(), receipt.inventories.len(), receipt.hold_out.len()), (1, 2, 1, 1));
+        // The development and calibration splits of the base, never its training or test split.
+        assert_eq!((receipt.bases.len(), receipt.texts.len(), receipt.inventories.len(), receipt.hold_out.len()), (2, 2, 1, 1));
         refused(&build(&inputs, &output, ["2", "3", "2"]), "refusing to overwrite");
         refused(&build(&inputs, &scratch("acceptance-small").join("samples"), ["2", "100000", "2"]), "the samples ask for");
 

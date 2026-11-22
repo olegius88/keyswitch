@@ -153,8 +153,11 @@ fn development_row(index: usize, original: &str, group: Option<i64>, before: &st
     value
 }
 
-/// A development replay of the installed pair over these rows, in this tree, with more options.
-fn development_replay(root: &Path, folder: &Path, rows: &[Value], extra: &[&str]) -> Output {
+/// A development replay of the installed pair over these rows, in this tree, with more options; with another prefix
+/// candidate when one is named.
+fn development_replay(root: &Path, folder: &Path, rows: &[Value], prefix: Option<&Path>, extra: &[&str]) -> Output {
+    let installed = tree().join("resources/models/prefix_policy_v1.json");
+    let prefix = prefix.unwrap_or(installed.as_path());
     let corpus = folder.join("corpus");
     std::fs::create_dir_all(&corpus).expect("a folder");
     let mut manifest = json!({"splits": {}});
@@ -168,7 +171,7 @@ fn development_replay(root: &Path, folder: &Path, rows: &[Value], extra: &[&str]
         .arg("--candidate")
         .arg(models.join("context_policy_v1.json"))
         .arg("--prefix-candidate")
-        .arg(models.join("prefix_policy_v1.json"))
+        .arg(prefix)
         .arg("--corpus")
         .arg(&corpus)
         .arg("--output")
@@ -193,7 +196,7 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
         development_row(5, "world", Some(0), &full_before("xxx"), &full_after("zzz")),
         development_row(6, "2nd", Some(0), "the ", " one"),
     ];
-    let answer = development_replay(&tree(), &folder, &rows, &[]);
+    let answer = development_replay(&tree(), &folder, &rows, None, &[]);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
     let report: Report = ks_text::json::loads(std::fs::read(folder.join("report.json")).expect("a report")).expect("a report of the shape the evaluation writes");
     let (selection, profiles) = (report.selection.as_ref().expect("a selection"), report.profiles.as_ref().expect("profiles"));
@@ -256,12 +259,32 @@ fn an_installed_pair_changed_during_a_replay_stops_its_report() {
     assert!(installed_unchanged_since(&root, &reference).is_err());
 }
 
+/// A prefix candidate of schema four is replayed with the term lists its engines read, built once for each profile.
+#[test]
+fn a_prefix_candidate_of_schema_four_is_replayed_with_its_term_lists() {
+    let folder = scratch("evaluate-schema-four");
+    let weights = r#"{"bias":[0,40,0,0]}"#;
+    let sum = digest(weights.as_bytes());
+    let version = format!("prefix-v4-{}", sum.get(..12).expect("a digest"));
+    let model = folder.join("eager.json");
+    let text = format!(
+        r#"{{"actions":["keep","convert","wait","suggest"],"conversion_threshold":0.985,"feature_version":4,"kind":"keyswitch.prefix-policy","prefix_feature_version":4,"version":"{version}","weights":{weights},"weights_sha256":"{sum}"}}"#
+    );
+    std::fs::write(&model, text).expect("a model");
+    let answer = development_replay(&tree(), &folder, &[development_row(0, "garden", Some(0), "", "")], Some(&model), &[]);
+    assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
+    let report: Report = ks_text::json::loads(std::fs::read(folder.join("report.json")).expect("a report")).expect("a report of the shape the evaluation writes");
+    // A model that converts every prefix it is asked about switches the word typed as meant away at its fourth key.
+    let first = report.profiles.as_ref().expect("profiles").portable.first.as_ref().expect("the first plans");
+    assert_eq!(first.earliness.candidate.correct_first_plans.false_early, 1);
+}
+
 #[test]
 fn a_replay_without_an_orthotactic_model_still_runs() {
     let root = eval_support::linked("evaluate-no-ortho");
     std::fs::write(eval_support::own(&root, "resources/models/ortho_v1.json"), b"{}").expect("a file");
     let folder = scratch("evaluate-no-ortho-rows");
-    let answer = development_replay(&root, &folder, &[development_row(0, "hello", Some(0), "we say ", "")], &[]);
+    let answer = development_replay(&root, &folder, &[development_row(0, "hello", Some(0), "we say ", "")], None, &[]);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
 }
 
@@ -271,14 +294,14 @@ fn a_replay_without_an_orthotactic_model_still_runs() {
 fn a_development_replay_read_back_from_its_cache_writes_the_same_report() {
     let folder = scratch("evaluate-cache");
     let rows = [development_row(0, "hello", Some(0), "we say ", " to you"), development_row(1, "привет", Some(1), "мы скажем ", " вам")];
-    let plain = development_replay(&tree(), &folder, &rows, &[]);
+    let plain = development_replay(&tree(), &folder, &rows, None, &[]);
     assert!(plain.status.success(), "{}", String::from_utf8_lossy(&plain.stderr));
     assert!(!String::from_utf8_lossy(&plain.stdout).contains("replay cache"));
     let without = std::fs::read(folder.join("report.json")).expect("a report");
     let cache = folder.join("cache").display().to_string();
     // The candidate here is the installed pair: a replay of one may be read back for the other already in the first run.
     for read_back in [" of 20 replays read back", "replay cache: 20 of 20 replays read back"] {
-        let answer = development_replay(&tree(), &folder, &rows, &["--cache", &cache]);
+        let answer = development_replay(&tree(), &folder, &rows, None, &["--cache", &cache]);
         let said = String::from_utf8_lossy(&answer.stdout).into_owned();
         assert!(answer.status.success() && said.contains(read_back), "{said}{}", String::from_utf8_lossy(&answer.stderr));
         assert_eq!(std::fs::read(folder.join("report.json")).expect("a report"), without);
