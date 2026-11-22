@@ -1579,5 +1579,9 @@ fn a_prefix_model_of_schema_four_reads_the_term_lists_built_once_and_each_direct
     assert_eq!(unanswered.reason, "prefix_model_unavailable");
     core.context_policy.ortho = ortho;
     bundle.give_back(session);
+    // The next engine takes the lists the first one built.
+    let next = self::session(&mut bundle);
+    assert!(Arc::ptr_eq(&terms, &next.core.prefix_terms().expect("the lists of the first engine")));
+    bundle.give_back(next);
     bundle.clean();
 }

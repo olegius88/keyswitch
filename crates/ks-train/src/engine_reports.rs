@@ -118,6 +118,7 @@ fn engine(parts: Parts<'_>) -> Result<Engine, String> {
         boundary_model: boundary,
         prefix_model: prefix,
         prefix_indexes: indexes,
+        prefix_terms: None,
         resource_dir: resources.resource_dir().to_path_buf(),
         clock: clock.read(),
         platform_reader: None,

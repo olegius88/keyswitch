@@ -528,6 +528,7 @@ impl Worker {
             boundary_model: self.boundary_model.clone(),
             prefix_model: self.prefix_model.clone(),
             prefix_indexes,
+            prefix_terms: None,
             resource_dir: self.resources.resource_dir().to_path_buf(),
             clock,
             platform_reader: None,

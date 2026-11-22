@@ -44,6 +44,12 @@ fn the_lists_say_what_each_term_and_each_longer_one_a_reading_begins_is() {
     assert_eq!(terms.lookup("руддщ", 1), TermMatch::default());
     assert_eq!(terms.lookup("zzz", 0), TermMatch::default());
     assert_eq!(PrefixTerms::default().len(), [0, 0]);
+    // Closed to some tokens, the lists read as if they never held them, in either script.
+    let closed = terms.without(&["git".to_owned(), "лямбду".to_owned()].into_iter().collect());
+    assert_eq!(closed.len(), [5, 1]);
+    assert_eq!(closed.lookup("git", 0).exact, None);
+    assert_eq!(closed.lookup("git", 0).begins.map(|evidence| evidence.count), Some(100));
+    assert_eq!(closed.lookup("лям", 1), TermMatch::default());
 }
 
 #[test]

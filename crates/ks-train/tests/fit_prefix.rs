@@ -391,8 +391,8 @@ mod words {
             evidence_scope: "test".to_owned(),
             low_keys: Some(LowKeysRule { characters: 4, per_mille: 200 }),
             acceptance_per_mille: Some(250),
-            minimum_calibration_words_per_direction: Some(0),
-            minimum_calibration_hard_words_per_direction: Some(0),
+            minimum_words_per_direction: Some(0),
+            minimum_hard_words_per_direction: Some(0),
         }
     }
 
@@ -456,6 +456,12 @@ mod words {
         assert!(texts.iter().any(|(_, class, hard)| *class == Class::SignLed && *hard));
         let verified = succeeded(&on(&[]));
         assert_eq!(verified.matches(": same").count(), 5, "{verified}");
+        // Made again from its sources into a new folder, the corpus has the tree's receipt; from other held-out words not.
+        let again = scratch("words-freeze-again").join("again");
+        let rebuilt = succeeded(&on(&["--hold-out", &sample_text, "--hold-out", &list_text, "--rebuild", &again.display().to_string()]));
+        assert!(rebuilt.contains("corpus.json: same as the tree's"), "{rebuilt}");
+        let other = scratch("words-freeze-other").join("other");
+        refused(&on(&["--hold-out", &sample_text, "--rebuild", &other.display().to_string()]), "the rebuilt word corpus differs from its receipt");
         refused(&on(&["--hold-out", &sample_text, "--freeze", &frozen_text]), "refusing to overwrite");
         std::fs::write(frozen.join("development.jsonl.gz"), gz(&[Sample { original: "" }])).expect("a split");
         refused(&on(&[]), "1 files of the word corpus differ");
@@ -626,8 +632,8 @@ mod words {
     /// is the installed model at the top of the grid, where it converts nothing: any epoch is as early.
     const KEY_CHANGES: [(&str, &str); 11] = [
         ("epochs", "30"), ("early_stop_patience", "10"), ("learning_rate", "0.5"), ("minimum_feature_mass", "1.0"), ("support", "\"engine\""),
-        ("importance_normalization", "\"mean_one\""), ("epoch_selection", "\"mean_key\""), ("minimum_calibration_words_per_direction", "2"),
-        ("minimum_calibration_hard_words_per_direction", "0"), ("floor_model", "\"resources/models/prefix_policy_v1.json\""), ("floor_threshold", "1.0"),
+        ("importance_normalization", "\"mean_one\""), ("epoch_selection", "\"mean_key\""), ("minimum_words_per_direction", "2"),
+        ("minimum_hard_words_per_direction", "0"), ("floor_model", "\"resources/models/prefix_policy_v1.json\""), ("floor_threshold", "1.0"),
     ];
 
     /// `KEY_CHANGES` and the version of the installed model the floor names.
@@ -694,6 +700,7 @@ mod words {
         thresholds: [f64; 2],
         minimum_characters: usize,
         by_threshold: BTreeMap<String, [DirectionCounts; 2]>,
+        false_words: [usize; 2],
         false_texts: Vec<String>,
     }
 
@@ -736,7 +743,8 @@ mod words {
         // Typed in Latin: four English words and four led by a sign key, which are hard; in Cyrillic four Russian words.
         assert_eq!(seal.calibration_cells.map(|cell| (cell.words, cell.hard)), [(8, 4), (4, 0)]);
 
-        // The model measured without the engine: on development, on calibration (numbers only) and on a list of words.
+        // The model measured without the engine: on development, from the third letter in numbers only, and on a list of
+        // words; never on calibration, which the fit read once, or on any other split.
         let probe = scratch("words-key-probe");
         let model = first.join("prefix-candidate.json");
         let probed = |extra: &[&str], output: &Path| trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&model).arg("--recipe").arg(&recipe_path).arg("--output").arg(output).args(extra).output().expect("the trainer starts");
@@ -744,19 +752,24 @@ mod words {
         succeeded(&probed(&["--split", "development"], &development));
         let found: Probe = read(&development);
         assert_eq!((found.words, found.thresholds, found.minimum_characters, at(&found.by_threshold, "0.985")[0].desired), (28, seal.thresholds, 4, 24));
-        let calibration = probe.join("calibration.json");
-        succeeded(&probed(&["--split", "calibration", "--minimum-characters", "3", "--frames-cache", &cache.display().to_string()], &calibration));
-        let found: Probe = read(&calibration);
+        let third = probe.join("third.json");
+        succeeded(&probed(&["--split", "development", "--minimum-characters", "3", "--numbers-only", "--frames-cache", &cache.display().to_string()], &third));
+        let found: Probe = read(&third);
         assert_eq!((found.false_texts.len(), found.minimum_characters), (0, 3));
+        for split in ["calibration", "acceptance", "test"] {
+            refused(&probed(&["--split", split], &probe.join("refused.json")), &format!("a probe reads development or a list of words, not {split}"));
+        }
         let list = probe.join("words.txt");
         std::fs::write(&list, "garden\n\nпогода\n").expect("a list");
         let listed = probe.join("listed.json");
         succeeded(&probed(&["--words", &list.display().to_string()], &listed));
         let found: Probe = read(&listed);
         assert_eq!((found.words, at(&found.by_threshold, "0.985")[0].desired, at(&found.by_threshold, "0.985")[1].kept), (2, 2, 2));
+        // The words typed as meant that the model converts, each once, by the layout they were typed in.
+        assert!(found.false_words.iter().zip([1, 1]).all(|(words, most)| *words <= most));
+        assert_eq!(found.false_words.iter().sum::<usize>(), found.false_texts.len());
         std::fs::write(&list, "garden\n123\n").expect("a list");
         refused(&probed(&["--words", &list.display().to_string()], &listed), "opens with a letter of neither layout");
-        refused(&probed(&["--split", "test"], &listed), "only exposed train/development/calibration");
     }
 
     #[test]
@@ -764,7 +777,7 @@ mod words {
         let small = small_tree("words-small-cell", &recipe());
         small_word_corpus(&small, "words-small-cell", true);
         let fit = |recipe_path: &Path, name: &str| trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(recipe_path).arg("--output").arg(scratch(name).join("out")).output().expect("the trainer starts");
-        let recipe_path = key_recipe(&small, "words-small-cell", &[("minimum_calibration_words_per_direction", "1000")]);
+        let recipe_path = key_recipe(&small, "words-small-cell", &[("minimum_words_per_direction", "1000")]);
         refused(&fit(&recipe_path, "words-small-cell-out"), "development typed in layout group 0 holds");
         refused(&fit(&recipe_path, "words-small-cell-out"), "the recipe asks for 1000 and 0");
         let recipe_path = key_recipe(&small, "words-small-cell", &[("floor_model_version", "\"prefix-v2-000000000000\"")]);
@@ -775,5 +788,252 @@ mod words {
         let recipe_path = word_recipe(&small, "words-small-cell", &[("epochs", "2")]);
         let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(scratch("words-unread").join("out")).arg("--development-only").output().expect("the trainer starts");
         refused(&answer, "only a fit by the mean key leaves calibration unread");
+    }
+}
+
+/// The acceptance samples of a prefix candidate: built once from a word corpus's acceptance split and from plain text,
+/// without the words held out, and replayed through the engine for each pair named, the report in numbers only.
+mod acceptance {
+    use flate2::Compression;
+    use flate2::read::MultiGzDecoder;
+    use flate2::write::GzEncoder;
+    use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, KeyKind, Sample, SamplesReceipt};
+    use ks_train::prefix_words::{Class, Situation, WordRow};
+    use serde::Serialize;
+    use std::collections::BTreeMap;
+    use std::io::{BufRead as _, Write as _};
+    use std::path::{Path, PathBuf};
+    use super::support::{corpus, digest, recipe, refused, scratch, small_tree, succeeded, trainer};
+
+    fn gz(text: &str) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(text.as_bytes()).expect("in memory");
+        encoder.finish().expect("in memory")
+    }
+
+    fn lines<T: Serialize>(rows: &[T]) -> String {
+        rows.iter().map(|row| ks_text::json::dumps(row, &ks_text::JsonOptions::default()) + "\n").collect()
+    }
+
+    fn read<T: for<'a> serde::Deserialize<'a>>(path: &Path) -> T {
+        ks_text::json::loads(std::fs::read(path).expect("a file the test reads")).expect("JSON of the shape the test reads")
+    }
+
+    /// A word of the acceptance split, in an empty field.
+    fn word(text: &str, group: i64, class: Class, hard: bool) -> WordRow {
+        WordRow {
+            before: String::new(),
+            class,
+            family: format!("family-{text}"),
+            group,
+            paired: class.paired(),
+            role: Situation::Empty.role().to_owned(),
+            situation: Situation::Empty,
+            source: "test".to_owned(),
+            text: text.to_owned(),
+            hard,
+        }
+    }
+
+    #[derive(Serialize)]
+    struct Pins {
+        kind: &'static str,
+        sha256: BTreeMap<&'static str, String>,
+    }
+
+    /// A word corpus with an acceptance split: words of both languages typed both ways, one of them hard, a name, a term
+    /// and a token led by a sign key, which are typed only as meant.
+    fn word_corpus(folder: &Path) {
+        std::fs::create_dir_all(folder).expect("a folder");
+        let rows = [
+            word("garden", 0, Class::Rare, false),
+            word("window", 0, Class::Rare, false),
+            word("Kaplan", 0, Class::Name, false),
+            word("погода", 1, Class::Rare, false),
+            // Its row says it is hard by its first keys: A3 types it too.
+            word("машина", 1, Class::Rare, true),
+            word("kubectl", 0, Class::Term, false),
+            word("<window", 0, Class::SignLed, false),
+            // A word in a second situation is the same word.
+            WordRow { situation: Situation::Comment, before: "// ".to_owned(), ..word("garden", 0, Class::Rare, false) },
+        ];
+        let packed = gz(&lines(&rows));
+        std::fs::write(folder.join("acceptance.jsonl.gz"), &packed).expect("a split");
+        let pins = Pins { kind: "prefix-words", sha256: [("acceptance", digest(&packed))].into_iter().collect() };
+        std::fs::write(folder.join("corpus.json"), ks_text::json::dumps(&pins, &ks_text::JsonOptions::default())).expect("a receipt");
+    }
+
+    #[derive(Serialize)]
+    struct Inventory {
+        aliases_sha256: Vec<String>,
+    }
+
+    /// A prefix model of schema four whose only weight is the bias, at a value that converts every prefix it is asked about.
+    fn eager_model(path: &Path) {
+        let weights = r#"{"bias":[0,40,0,0]}"#;
+        let sum = digest(weights.as_bytes());
+        let version = format!("prefix-v4-{}", sum.get(..12).expect("a digest"));
+        let text = format!(
+            r#"{{"actions":["keep","convert","wait","suggest"],"conversion_threshold":0.985,"feature_version":4,"kind":"keyswitch.prefix-policy","prefix_feature_version":4,"version":"{version}","weights":{weights},"weights_sha256":"{sum}"}}"#
+        );
+        std::fs::write(path, text).expect("a model");
+    }
+
+    /// The entry of a key a report must have.
+    fn at<'a, T>(map: &'a BTreeMap<String, T>, key: &str) -> &'a T {
+        map.get(key).expect("a key the report has")
+    }
+
+    fn rows_of(folder: &Path) -> Vec<AcceptanceRow> {
+        let file = std::fs::File::open(folder.join("rows.jsonl.gz")).expect("the rows");
+        std::io::BufReader::new(MultiGzDecoder::new(file)).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect()
+    }
+
+    struct Inputs {
+        small: PathBuf,
+        corpus: PathBuf,
+        base: PathBuf,
+        text: PathBuf,
+        packed_text: PathBuf,
+        inventory: PathBuf,
+        list: PathBuf,
+    }
+
+    fn inputs(name: &str) -> Inputs {
+        let small = small_tree(name, &recipe());
+        let folder = scratch(&format!("{name}-inputs"));
+        let corpus_folder = folder.join("words");
+        word_corpus(&corpus_folder);
+        let base = folder.join("base");
+        corpus(&base);
+        let text = folder.join("text.txt");
+        std::fs::write(&text, "Мама мыла раму, «quick» brown fox 123abc: жёлтый!\n").expect("a text");
+        let packed_text = folder.join("text.txt.gz");
+        std::fs::write(&packed_text, gz("Длинная история about everything\n")).expect("a text");
+        // An inventory names `hello` by its aliases, a list names `today`: neither is a word of plain text then.
+        let inventory = folder.join("inventory.json");
+        let aliases: Vec<String> = ks_train::physical::expanded_aliases("hello").into_iter().collect();
+        std::fs::write(&inventory, ks_text::json::dumps(&Inventory { aliases_sha256: aliases }, &ks_text::JsonOptions::default())).expect("an inventory");
+        let list = folder.join("held.txt");
+        std::fs::write(&list, "today\n").expect("a list");
+        Inputs { small, corpus: corpus_folder, base, text, packed_text, inventory, list }
+    }
+
+    fn build(inputs: &Inputs, output: &Path, minimums: [&str; 3]) -> std::process::Output {
+        let mut command = trainer();
+        command.arg("prefix-acceptance").arg("build").arg("--corpus").arg(&inputs.corpus).arg("--base").arg(&inputs.base);
+        command.arg("--text").arg(&inputs.text).arg("--text").arg(&inputs.packed_text).arg("--inventory").arg(&inputs.inventory).arg("--hold-out").arg(&inputs.list);
+        command.args(["--namespace", "test-acceptance", "--minimum-paired", minimums[0], "--minimum-plain", minimums[1], "--engine-plain", minimums[2]]).arg("--output").arg(output);
+        command.output().expect("the trainer starts")
+    }
+
+    #[test]
+    fn the_trainer_builds_the_term_lists_an_engine_of_schema_four_builds() {
+        // The acceptance replay hands its engines the lists the trainer built, as the frames of a fit read them.
+        let mut bundle = ks_replay::harness::Bundle::load(None);
+        let eager = scratch("acceptance-lists").join("eager.json");
+        eager_model(&eager);
+        bundle.set_prefix_model(Some(std::sync::Arc::new(ks_context::VersionedPrefixModel::load(&eager).expect("the model"))));
+        let session = bundle.session("Editor", 0, Vec::new());
+        let engine = session.core.prefix_terms().expect("the lists of an engine of schema four");
+        let resources = ks_replay::harness::reference_tree().join("resources");
+        let trainer = ks_train::prefix::prefix_terms_of(&resources, &bundle.models().to_vec()).expect("the lists");
+        assert!(engine.len()[0] > 1000 && *engine == trainer);
+        bundle.give_back(session);
+        bundle.clean();
+    }
+
+    #[test]
+    fn the_samples_are_built_once_without_the_words_held_out_and_replayed_in_numbers_only() {
+        let inputs = inputs("acceptance");
+        let output = scratch("acceptance-samples").join("samples");
+        succeeded(&build(&inputs, &output, ["2", "3", "2"]));
+        let receipt: SamplesReceipt = read(&output.join("receipt.json"));
+        let rows = rows_of(&output);
+        let count = |sample: Sample, text: &str, other: bool| rows.iter().filter(|row| row.sample == sample && row.text == text && row.other == other).count();
+        let has = |sample: Sample, text: &str, other: bool| count(sample, text, other) > 0;
+        // A1 and A2 hold the paired words, A3 the tokens typed only as meant and the hard words; a word of two situations
+        // is one.
+        assert!(has(Sample::A1, "garden", true) && has(Sample::A2, "garden", false) && has(Sample::A1, "Kaplan", true) && has(Sample::A3, "машина", false));
+        assert!(has(Sample::A3, "kubectl", false) && has(Sample::A3, "<window", false) && has(Sample::A3, "Kaplan", false));
+        assert!(!has(Sample::A1, "kubectl", true) && !has(Sample::A3, "погода", false));
+        assert_eq!(count(Sample::A1, "garden", true), 1);
+        // Plain text: words of four letters or more of one layout, case-folded; not those held out or of the acceptance
+        // split.
+        for (text, there) in [("мама", true), ("quick", true), ("длинная", true), ("people", true), ("fox", false), ("123abc", false), ("hello", false), ("today", false), ("погода", false)] {
+            assert_eq!(has(Sample::N2, text, false), there, "{text}");
+        }
+        // N1: the words whose keys read as letters in the other layout too.
+        assert!(has(Sample::N1, "мама", true) && !has(Sample::N1, "жёлтый", true) && has(Sample::N2, "жёлтый", false));
+        for direction in 0..2 {
+            assert_eq!(at(&receipt.counts, "N2").engine[direction], 2);
+            assert_eq!(rows.iter().filter(|row| row.sample == Sample::N1 && row.engine && row.direction() == direction).count(), 2);
+        }
+        assert!(rows.iter().filter(|row| row.sample != Sample::N1 && row.sample != Sample::N2).all(|row| row.engine));
+        let listed = std::fs::read_to_string(output.join("n2-words.txt")).expect("the words of N2");
+        assert_eq!(listed.lines().count(), at(&receipt.counts, "N2").words.iter().sum::<usize>());
+        assert_eq!((receipt.bases.len(), receipt.texts.len(), receipt.inventories.len(), receipt.hold_out.len()), (1, 2, 1, 1));
+        refused(&build(&inputs, &output, ["2", "3", "2"]), "refusing to overwrite");
+        refused(&build(&inputs, &scratch("acceptance-small").join("samples"), ["2", "100000", "2"]), "the samples ask for");
+
+        // The replay: the installed pair, and the same context with a prefix model that converts every prefix.
+        let eager = scratch("acceptance-eager").join("eager.json");
+        eager_model(&eager);
+        let models = inputs.small.join("resources/models");
+        let installed = format!("installed={},{}", models.join("context_policy_v1.json").display(), models.join("prefix_policy_v1.json").display());
+        let early = format!("eager={},{}", models.join("context_policy_v1.json").display(), eager.display());
+        let run = |pairs: &[&str], reference: &str, report: &Path, extra: &[&str]| {
+            let mut command = trainer();
+            command.arg("prefix-acceptance").arg("run").arg("--tree").arg(&inputs.small).arg("--samples").arg(&output);
+            for pair in pairs {
+                command.arg("--pair").arg(pair);
+            }
+            command.args(["--reference", reference, "--jobs", "2"]).args(extra).arg("--output").arg(report);
+            command.output().expect("the trainer starts")
+        };
+        let report_path = scratch("acceptance-report").join("report.json");
+        let said = succeeded(&run(&[&installed, &early], "installed", &report_path, &[]));
+        assert!(said.contains("eager: gates held false"), "{said}");
+        let report: AcceptanceReport = read(&report_path);
+        assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager"]);
+        let (reference, candidate) = (at(&report.pairs, "installed"), at(&report.pairs, "eager"));
+        for pair in [reference, candidate] {
+            assert_eq!(pair.untyped_rows, 0);
+            assert!(pair.safety_by_sample.contains_key("N2") && pair.safety_by_profile.len() == 2);
+            assert_eq!(at(&pair.safety_by_sample, "A3_closed")[0].rows, at(&pair.safety_by_sample, "A3")[0].rows);
+            assert_eq!(at(&pair.earliness, "A1")[0].rows, 2 * at(&receipt.counts, "A1").words[0]);
+        }
+        // A model that converts every prefix switches words typed as meant away: more false early switches than the
+        // installed one, and its gates do not hold.
+        assert!(at(&candidate.safety, "all").false_early.words > at(&reference.safety, "all").false_early.words);
+        let held = at(&report.gates, "eager");
+        assert!(!at(&held.s1, "all").false_early_not_more && !held.all_held && held.execution);
+        // The report names no text of a sample.
+        let written = std::fs::read_to_string(&report_path).expect("the report");
+        assert!(!["garden", "мама", "kubectl", "quick"].iter().any(|text| written.contains(text)));
+        // The mean key of any first correction, as a run may ask.
+        let any = scratch("acceptance-any").join("report.json");
+        succeeded(&run(&[&installed], "installed", &any, &["--key", "any"]));
+        let named: AcceptanceReport = read(&any);
+        assert_eq!(named.key_kind, KeyKind::Any);
+        refused(&run(&[&installed], "installed", &report_path, &[]), "refusing to overwrite");
+        refused(&run(&[&installed], "nobody", &scratch("acceptance-nobody").join("report.json"), &[]), "no pair is named nobody");
+        refused(&run(&[&installed], "installed", &scratch("acceptance-late").join("report.json"), &["--key", "late"]), "--key is early or any, not late");
+        // A pair whose context model is none.
+        let broken = format!("broken={},{}", eager.display(), models.join("prefix_policy_v1.json").display());
+        refused(&run(&[&broken], "broken", &scratch("acceptance-broken").join("report.json"), &[]), &eager.display().to_string());
+        refused(&trainer().arg("prefix-acceptance").output().expect("the trainer starts"), "prefix-acceptance build or run");
+        // A folder whose receipt is of something else.
+        let elsewhere = scratch("acceptance-elsewhere").join("samples");
+        std::fs::create_dir_all(&elsewhere).expect("a folder");
+        let mut other: SamplesReceipt = read(&output.join("receipt.json"));
+        other.kind = "other".to_owned();
+        std::fs::write(elsewhere.join("receipt.json"), ks_text::json::dumps(&other, &ks_text::JsonOptions::default())).expect("a receipt");
+        let mut command = trainer();
+        command.arg("prefix-acceptance").arg("run").arg("--tree").arg(&inputs.small).arg("--samples").arg(&elsewhere).arg("--pair").arg(&installed);
+        refused(&command.args(["--reference", "installed"]).arg("--output").arg(scratch("acceptance-other").join("report.json")).output().expect("the trainer starts"), "holds no acceptance samples");
+        // Rows whose bytes are not those of the receipt.
+        std::fs::write(output.join("rows.jsonl.gz"), gz("")).expect("rows");
+        refused(&run(&[&installed], "installed", &scratch("acceptance-changed").join("report.json"), &[]), "differ from their receipt");
     }
 }

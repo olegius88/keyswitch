@@ -213,11 +213,12 @@ pub struct WordConfig {
     /// Schema three: the thousandths of the families the acceptance split takes, after development and calibration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_per_mille: Option<u64>,
-    /// Schema three: the fewest words typed as meant, and of them hard ones, calibration holds in each direction.
+    /// Schema three: the fewest words typed as meant, and of them hard ones, development and calibration each hold in each
+    /// direction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub minimum_calibration_words_per_direction: Option<usize>,
+    pub minimum_words_per_direction: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub minimum_calibration_hard_words_per_direction: Option<usize>,
+    pub minimum_hard_words_per_direction: Option<usize>,
 }
 
 impl WordConfig {
@@ -884,16 +885,18 @@ fn gunzip(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 /// A calibration smaller than the config asks for is no corpus: its words typed as meant and the hard ones, in all and in
-/// each direction.
-fn calibration_holds(config: &WordConfig, calibration: &SplitCounts) -> Result<(), String> {
+/// each direction; and the development split holds as many in each direction, since an epoch is chosen on it.
+fn cells_hold(config: &WordConfig, development: &SplitCounts, calibration: &SplitCounts) -> Result<(), String> {
     if calibration.keep_words < config.minimum_calibration_negatives || calibration.hard_keep_words < config.minimum_calibration_hard_negatives {
         return Err(format!("calibration holds {} negative words, {} hard: the config asks for {} and {}", calibration.keep_words, calibration.hard_keep_words, config.minimum_calibration_negatives, config.minimum_calibration_hard_negatives));
     }
-    let (words, hard) = (config.minimum_calibration_words_per_direction.unwrap_or(0), config.minimum_calibration_hard_words_per_direction.unwrap_or(0));
-    let (by_group, hard_by_group) = (calibration.keep_words_by_group.unwrap_or_default(), calibration.hard_keep_words_by_group.unwrap_or_default());
-    for group in 0..2 {
-        if by_group[group] < words || hard_by_group[group] < hard {
-            return Err(format!("calibration typed in layout group {group} holds {} words, {} hard: the config asks for {words} and {hard}", by_group[group], hard_by_group[group]));
+    let (words, hard) = (config.minimum_words_per_direction.unwrap_or(0), config.minimum_hard_words_per_direction.unwrap_or(0));
+    for (split, counts) in [("development", development), ("calibration", calibration)] {
+        let (by_group, hard_by_group) = (counts.keep_words_by_group.unwrap_or_default(), counts.hard_keep_words_by_group.unwrap_or_default());
+        for group in 0..2 {
+            if by_group[group] < words || hard_by_group[group] < hard {
+                return Err(format!("{split} typed in layout group {group} holds {} words, {} hard: the config asks for {words} and {hard}", by_group[group], hard_by_group[group]));
+            }
         }
     }
     Ok(())
@@ -908,6 +911,9 @@ pub struct WordCorpusRequest<'a> {
     /// The development samples to leave out, for a freeze; a verification reads the frozen held-out file.
     pub hold_out: &'a [PathBuf],
     pub output: Option<&'a Path>,
+    /// A freeze into `output` that makes the tree's corpus again from its sources: its receipt must be the tree's, byte
+    /// for byte, as the files are not tracked and the receipt is.
+    pub rebuild: bool,
 }
 
 /// The bytes of a generation: each split's content and the receipt, from the held-out aliases it is given.
@@ -949,7 +955,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
         row_counts.insert((*split).to_owned(), split_count.rows);
         counts.insert((*split).to_owned(), split_count);
     }
-    calibration_holds(config, &counts.get("calibration").cloned().unwrap_or_default())?;
+    cells_hold(config, &counts.get("development").cloned().unwrap_or_default(), &counts.get("calibration").cloned().unwrap_or_default())?;
     let tree_file = |name: &str| checksum(&request.root.join(name));
     let ud = crate::base_corpus::BASE_PINS.iter().map(|(name, commit)| format!("{name}@{commit}")).collect::<Vec<_>>().join(", ");
     let sources = vec![
@@ -1020,7 +1026,14 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
     if !output.join(CONFIG_FILE).exists() {
         std::fs::copy(request.config, output.join(CONFIG_FILE)).map_err(|error| error.to_string())?;
     }
-    std::fs::write(output.join(RECEIPT_FILE), receipt).map_err(|error| error.to_string())?;
+    std::fs::write(output.join(RECEIPT_FILE), &receipt).map_err(|error| error.to_string())?;
+    if request.rebuild {
+        let tracked = request.root.join(&config.directory).join(RECEIPT_FILE);
+        if std::fs::read(&tracked).map_err(|error| format!("{}: {error}", tracked.display()))? != receipt {
+            return Err(format!("the rebuilt word corpus differs from its receipt {}", tracked.display()));
+        }
+        println!("{RECEIPT_FILE}: same as the tree's");
+    }
     Ok(counts)
 }
 
@@ -1078,8 +1091,8 @@ mod tests {
             evidence_scope: String::new(),
             low_keys: None,
             acceptance_per_mille: None,
-            minimum_calibration_words_per_direction: None,
-            minimum_calibration_hard_words_per_direction: None,
+            minimum_words_per_direction: None,
+            minimum_hard_words_per_direction: None,
         }
     }
 
@@ -1198,14 +1211,16 @@ mod tests {
     }
 
     #[test]
-    fn a_calibration_holds_its_words_in_all_and_in_each_direction() {
+    fn development_and_calibration_hold_their_words_in_all_and_in_each_direction() {
         let cells = SplitCounts { keep_words: 10, hard_keep_words: 4, keep_words_by_group: Some([6, 4]), hard_keep_words_by_group: Some([3, 1]), ..SplitCounts::default() };
-        let asking = |all: usize, words: Option<usize>, hard: Option<usize>| WordConfig { minimum_calibration_negatives: all, minimum_calibration_words_per_direction: words, minimum_calibration_hard_words_per_direction: hard, ..config() };
-        assert!(calibration_holds(&asking(10, Some(4), Some(1)), &cells).is_ok());
-        assert!(calibration_holds(&asking(11, None, None), &cells).unwrap_err().contains("10 negative words, 4 hard"));
-        assert!(calibration_holds(&asking(0, Some(5), None), &cells).unwrap_err().contains("layout group 1 holds 4 words, 1 hard: the config asks for 5 and 0"));
-        assert!(calibration_holds(&asking(0, None, Some(2)), &cells).unwrap_err().contains("layout group 1 holds 4 words, 1 hard"));
+        let smaller = SplitCounts { keep_words_by_group: Some([6, 3]), ..cells.clone() };
+        let asking = |all: usize, words: Option<usize>, hard: Option<usize>| WordConfig { minimum_calibration_negatives: all, minimum_words_per_direction: words, minimum_hard_words_per_direction: hard, ..config() };
+        assert!(cells_hold(&asking(10, Some(4), Some(1)), &cells, &cells).is_ok());
+        assert!(cells_hold(&asking(11, None, None), &cells, &cells).unwrap_err().contains("10 negative words, 4 hard"));
+        assert!(cells_hold(&asking(0, Some(5), None), &cells, &cells).unwrap_err().contains("development typed in layout group 1 holds 4 words, 1 hard: the config asks for 5 and 0"));
+        assert!(cells_hold(&asking(0, None, Some(2)), &cells, &cells).unwrap_err().contains("layout group 1 holds 4 words, 1 hard"));
+        assert!(cells_hold(&asking(0, Some(4), None), &cells, &smaller).unwrap_err().contains("calibration typed in layout group 1 holds 3 words"));
         // A split of schema two counts no direction: a config of schema two asks for none.
-        assert!(calibration_holds(&asking(0, None, None), &SplitCounts::default()).is_ok());
+        assert!(cells_hold(&asking(0, None, None), &SplitCounts::default(), &SplitCounts::default()).is_ok());
     }
 }

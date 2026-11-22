@@ -37,7 +37,7 @@ pub struct TermMatch {
 }
 
 /// The terms of each script, sorted, each once.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PrefixTerms {
     latin: Vec<(String, TermEvidence)>,
     cyrillic: Vec<(String, TermEvidence)>,
@@ -67,6 +67,13 @@ impl PrefixTerms {
         let mut cyrillic_terms: Vec<(String, TermEvidence)> = cyrillic.words().map(|term| (pystr::casefold(term), TermEvidence { count: cyrillic.count(term), ..TermEvidence::default() })).collect();
         cyrillic_terms.retain(|(term, _)| !known_word(&read_as(term, "ru", "us"), 0));
         PrefixTerms { latin: sorted(latin_terms), cyrillic: sorted(cyrillic_terms) }
+    }
+
+    /// The lists without these tokens, given case-folded: what a model reads of a token no list holds.
+    #[must_use]
+    pub fn without(&self, tokens: &std::collections::BTreeSet<String>) -> PrefixTerms {
+        let kept = |terms: &[(String, TermEvidence)]| terms.iter().filter(|(term, _)| !tokens.contains(term)).cloned().collect();
+        PrefixTerms { latin: kept(&self.latin), cyrillic: kept(&self.cyrillic) }
     }
 
     /// How many terms each script holds.

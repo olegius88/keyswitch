@@ -2,7 +2,7 @@
  "schema_version": 3,
  "kind": "prefix-words",
  "directory": "model/prefix_v3",
- "namespace": "keyswitch:prefix-v3:20261117-redraw",
+ "namespace": "keyswitch:prefix-v3:20261122-cycle-v89",
  "minimum_word_length": 3,
  "maximum_word_length": 16,
  "frequent_words_per_language": 2500,
@@ -16,8 +16,8 @@
  "low_keys": {"characters": 4, "per_mille": 200},
  "minimum_calibration_negatives": 6000,
  "minimum_calibration_hard_negatives": 2000,
- "minimum_calibration_words_per_direction": 3000,
- "minimum_calibration_hard_words_per_direction": 1000,
+ "minimum_words_per_direction": 3000,
+ "minimum_hard_words_per_direction": 1000,
  "quotas": {
   "train": {
    "en": {"frequent": 1500, "rare": 1500, "name": 750, "unknown": 750, "low_keys": 1500, "term": 1500, "short_term": 1000, "sign_led": 1500, "address": 1000000},
@@ -32,9 +32,9 @@
    "ru": {"frequent": 1000000, "rare": 1000, "name": 1000000, "unknown": 600, "low_keys": 1000, "english_keys": 1000000}
   },
   "acceptance": {
-   "en": {"frequent": 1000000, "rare": 600, "name": 1000000, "unknown": 400, "low_keys": 400, "term": 600, "short_term": 1000000, "sign_led": 400, "address": 1000000},
-   "ru": {"frequent": 1000000, "rare": 1000, "name": 1000000, "unknown": 600, "low_keys": 1000, "english_keys": 1000000}
+   "en": {"frequent": 1000000, "rare": 1000000, "name": 1000000, "unknown": 1000000, "low_keys": 1000000, "term": 1000000, "short_term": 1000000, "sign_led": 1000000, "address": 1000000},
+   "ru": {"frequent": 1000000, "rare": 1000000, "name": 1000000, "unknown": 1000000, "low_keys": 1000000, "english_keys": 1000000}
   }
  },
- "evidence_scope": "Words of pinned public sources typed in the other layout and as meant, and real tokens typed as meant, for the prefix model. Words come from the training split of the frozen base corpus (UD treebanks and Debian commands; their families are in every later holdout's base exclusions) and from the CC0 Tatoeba snapshot (previously exposed to every holdout); terms from the tree's identifier lexicon, protected tokens and the Latin column of the term table. The focus words of the development samples and of the made-up and rare word lists held out at the freeze are left out by their physical aliases. Physical families (first three keys) split by hash, under a namespace no earlier draw used, into train, development, calibration and acceptance; no fit reads acceptance: engine acceptance samples are made of it. A word is hard by its first keys when its own layout's orthotactic channel reads its first four keys among the worst fifth of its language's words; calibration holds at least 3000 words typed as meant in each direction, 1000 of them hard. There is no test split: the pair's sealed test is the holdout freeze. Epoch and thresholds chosen on development and calibration."
+ "evidence_scope": "Words of pinned public sources typed in the other layout and as meant, and real tokens typed as meant, for the prefix model. Words come from the training split of the frozen base corpus (UD treebanks and Debian commands; their families are in every later holdout's base exclusions) and from the CC0 Tatoeba snapshot (previously exposed to every holdout); terms from the tree's identifier lexicon, protected tokens and the Latin column of the term table. The focus words of the development samples and of the made-up and rare word lists held out at the freeze are left out by their physical aliases. Physical families (first three keys) split by hash, under a namespace no earlier draw used, into train, development, calibration and acceptance; no fit reads acceptance, which takes every word of its families: engine acceptance samples are made of it. A word is hard by its first keys when its own layout's orthotactic channel reads its first four keys among the worst fifth of its language's words; development and calibration each hold at least 3000 words typed as meant in each direction, 1000 of them hard. There is no test split: the pair's sealed test is the holdout freeze. The epoch is chosen on development, the thresholds on calibration, read once."
 }

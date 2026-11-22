@@ -185,8 +185,8 @@ pub struct RecipeOptions {
     pub epoch_selection: Option<EpochSelection>,
     /// The fewest words typed as meant a direction's calibration cell holds, and of them hard ones: a fit on fewer is
     /// refused.
-    pub minimum_calibration_words_per_direction: Option<usize>,
-    pub minimum_calibration_hard_words_per_direction: Option<usize>,
+    pub minimum_words_per_direction: Option<usize>,
+    pub minimum_hard_words_per_direction: Option<usize>,
     /// Schema four: the thousandths of the training families whose frames read no term list.
     pub closed_term_families_per_mille: Option<u64>,
     /// The model an epoch chosen by the mean key must not be worse than on development, relative to the tree, its
@@ -869,6 +869,17 @@ fn false_texts(scores: &[Sequence], thresholds: [f64; 2], classes: &[String], ty
     found.into_iter().collect()
 }
 
+/// The distinct texts typed as meant that the thresholds convert, in either profile, by the layout group of the keys.
+fn false_words(scores: &[Sequence], thresholds: [f64; 2], typed: &[String]) -> [usize; 2] {
+    let mut found: [BTreeSet<&str>; 2] = [BTreeSet::new(), BTreeSet::new()];
+    for (value, text) in scores.iter().zip(typed) {
+        if !value.desired && first_conversion(value, thresholds).is_some() {
+            found[usize::from(value.source.min(1))].insert(text.as_str());
+        }
+    }
+    found.map(|texts| texts.len())
+}
+
 /// The metrics of each class of parents, both profiles together, and the length of the first conversion of each
 /// sequence typed in the other layout.
 fn class_metrics(scores: &[Sequence], thresholds: [f64; 2], classes: &[String]) -> BTreeMap<String, ClassMetrics> {
@@ -1210,6 +1221,16 @@ impl KeyMeasure {
     }
 }
 
+/// The trainer's kernel and the program's scoring of the written artifact count the same at these thresholds; otherwise
+/// the thresholds would not be the ones the engine meets.
+fn agree(trainer: &[Sequence], program: &[Sequence], thresholds: [f64; 2], split: &str) -> Result<(), String> {
+    if direction_metrics(trainer, thresholds) == direction_metrics(program, thresholds) {
+        Ok(())
+    } else {
+        Err(format!("the program's scoring of the written artifact differs from the trainer's on {split}"))
+    }
+}
+
 /// An epoch of a fit by the mean key, as its seal's history lists it.
 #[derive(serde::Serialize)]
 struct KeyEpoch<'a> {
@@ -1273,7 +1294,7 @@ fn cells_of(parents: &[ParentWord]) -> [Cell; 2] {
 /// A recipe that names the size of a direction's cell is not fitted on a smaller one, in development or in calibration.
 fn check_cells(split: &str, parents: &[ParentWord], options: &RecipeOptions) -> Result<[Cell; 2], String> {
     let cells = cells_of(parents);
-    let (words, hard) = (options.minimum_calibration_words_per_direction.unwrap_or(0), options.minimum_calibration_hard_words_per_direction.unwrap_or(0));
+    let (words, hard) = (options.minimum_words_per_direction.unwrap_or(0), options.minimum_hard_words_per_direction.unwrap_or(0));
     for (direction, cell) in cells.iter().enumerate() {
         if cell.words < words || cell.hard < hard {
             return Err(format!("{split} typed in layout group {direction} holds {} words, {} hard: the recipe asks for {words} and {hard}", cell.words, cell.hard));
@@ -1649,14 +1670,33 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         .collect();
     let model = PrefixModel { weights: WeightTable::from_entries(entries), version: version.clone(), conversion_threshold: 1.0 };
     let final_development = sequence_scores(&development_frames, &kernel::predict(&development, &best));
-    // The program's own softmax must answer as the trainer's kernel did where the epoch was chosen: the thresholds are
-    // then the ones the engine meets.
-    if by_key && direction_metrics(&final_development, development_thresholds) != direction_metrics(&sequence_scores(&development_frames, &runtime_probabilities(&model, &development_frames)), development_thresholds) {
-        return Err("the program's scoring of the written weights differs from the trainer's on development".to_owned());
+    let actions: Vec<&str> = ks_context::context_model::ACTIONS.iter().map(|action| action.as_str()).collect();
+    // The artifact's bytes at a threshold, with each direction's own when the fit chose them: a reader that knows only the
+    // scalar takes the larger, stricter one.
+    let artifact_of = |threshold: f64, directions: Option<[f64; 2]>| -> Result<Vec<u8>, String> {
+        let mut payload = json!({"kind": "keyswitch.prefix-policy", "feature_version": feature_version, "prefix_feature_version": feature_version, "actions": actions,
+            "version": version, "conversion_threshold": threshold, "weights_sha256": weight_digest, "weights": learned});
+        if let Some(both) = directions {
+            merged(&mut payload, &DirectionArtifact { conversion_thresholds: both })?;
+        }
+        Ok(crate::artifact::canonical(&payload))
+    };
+    // By the mean key the program scores the artifact as written, its weights read back from the file, and the trainer's
+    // kernel must count as it does where the epoch was chosen and where the thresholds were: they are then the ones the
+    // engine meets.
+    let program = if by_key {
+        let path = output.join("prefix-candidate.json");
+        std::fs::write(&path, artifact_of(1.0, None)?).map_err(|error| error.to_string())?;
+        ks_context::prefix_schema::VersionedPrefixModel::load(&path).map_err(|error| format!("prefix export does not load: {}", error.name))?.model
+    } else {
+        model
+    };
+    if by_key {
+        agree(&final_development, &sequence_scores(&development_frames, &runtime_probabilities(&program, &development_frames)), development_thresholds, DEVELOPMENT)?;
     }
     let calibration_frames = if request.development_only { None } else { Some(maker.frames(CALIBRATION, &parents[CALIBRATION])?) };
     // The runtime's own softmax: what the installed candidate answers.
-    let scores = calibration_frames.as_ref().map(|frames| sequence_scores(frames, &runtime_probabilities(&model, frames)));
+    let scores = calibration_frames.as_ref().map(|frames| sequence_scores(frames, &runtime_probabilities(&program, frames)));
     let (per_direction, passed) = match &scores {
         None => (development_thresholds, false),
         Some(scores) if by_key => calibrated_thresholds(scores, &thresholds, development_thresholds, minimum_recall),
@@ -1665,15 +1705,12 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             ([threshold, threshold], passed)
         }
     };
-    let threshold = per_direction[0].max(per_direction[1]);
-    let actions: Vec<&str> = ks_context::context_model::ACTIONS.iter().map(|action| action.as_str()).collect();
-    let mut payload = json!({"kind": "keyswitch.prefix-policy", "feature_version": feature_version, "prefix_feature_version": feature_version, "actions": actions,
-        "version": version, "conversion_threshold": threshold, "weights_sha256": weight_digest, "weights": learned});
-    if by_key {
-        // Each direction's own threshold; a reader that knows only the scalar takes the larger, stricter one.
-        merged(&mut payload, &DirectionArtifact { conversion_thresholds: per_direction })?;
+    if by_key && let (Some(frames), Some(scores)) = (&calibration_frames, &scores) {
+        let trainer = sequence_scores(frames, &kernel::predict(&packed_rows(frames, &names, &cfg, mean_one), &best));
+        agree(&trainer, scores, per_direction, CALIBRATION)?;
     }
-    let raw = crate::artifact::canonical(&payload);
+    let threshold = per_direction[0].max(per_direction[1]);
+    let raw = artifact_of(threshold, by_key.then_some(per_direction))?;
     let mut budgets = Map::new();
     let mut pair_counts = Map::new();
     for (split, frames) in [(TRAIN, Some(&train_frames)), (DEVELOPMENT, Some(&development_frames)), (CALIBRATION, calibration_frames.as_ref())] {
@@ -1763,6 +1800,8 @@ pub struct ProbeRequest<'a> {
     pub words: ProbeWords<'a>,
     /// The fewest letters of a prefix the model is asked about, when not the recipe's.
     pub minimum_characters: Option<usize>,
+    /// Write no text of the words: a sample whose texts are read nowhere.
+    pub numbers_only: bool,
     pub output: &'a Path,
     pub jobs: usize,
     pub frames_cache: Option<&'a Path>,
@@ -1781,6 +1820,9 @@ pub struct ProbeReport {
     /// Both profiles together, each direction, at every threshold of the grid.
     by_threshold: BTreeMap<String, [DirectionMetrics; 2]>,
     by_class: BTreeMap<String, ClassMetrics>,
+    /// The distinct words typed as meant that the model's thresholds convert at any prefix it is asked about, in either
+    /// profile, by the layout group of the keys.
+    false_words: [usize; 2],
     false_texts: Vec<String>,
 }
 
@@ -1816,7 +1858,9 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
     let options = RecipeOptions::of(request.recipe)?;
     let loaded = ks_context::prefix_schema::VersionedPrefixModel::load(request.model).map_err(|error| format!("{}: {}", request.model.display(), error.name))?;
     let (parents, texts) = match request.words {
-        ProbeWords::List(path) => (listed_parents(path)?, true),
+        ProbeWords::List(path) => (listed_parents(path)?, !request.numbers_only),
+        // Calibration is read once, by the fit of the chosen recipe; the acceptance split by its samples alone.
+        ProbeWords::Split(split) if split != DEVELOPMENT => return Err(format!("a probe reads development or a list of words, not {split}")),
         ProbeWords::Split(split) => {
             let directory = request.root.join(options.corpus.as_deref().unwrap_or("model/prefix_v1"));
             let parents = if options.corpus.is_some() {
@@ -1824,8 +1868,7 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
             } else {
                 load_parents(&directory, split, cfg.maximum_families.get(split).copied().unwrap_or_default(), cfg.maximum_words_per_family)?
             };
-            // Calibration is reported in numbers only: a threshold is chosen on it.
-            (parents, split != CALIBRATION)
+            (parents, !request.numbers_only)
         }
     };
     let mut rules = frame_rules(&options, request.resource_dir)?;
@@ -1847,6 +1890,7 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
         at_model: direction_metrics(&scores, thresholds),
         by_threshold: grid.iter().map(|threshold| (threshold.to_string(), pooled(&direction_metrics(&scores, [*threshold, *threshold])))).collect(),
         by_class: class_metrics(&scores, thresholds, &frames.classes),
+        false_words: false_words(&scores, thresholds, &frames.typed),
         false_texts: false_texts(&scores, thresholds, &frames.classes, &typed),
     };
     let options = JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() };
@@ -2006,6 +2050,16 @@ mod tests {
         assert_eq!(ks_text::json::dumps(&empty, &JsonOptions::default()), r#"{"desired": 0, "converted": 0, "converted_before_end": 0, "switched_by_key": 0, "key_sum": 0, "kept": 0, "false": 0}"#);
     }
 
+    #[test]
+    fn the_trainer_and_the_program_agree_when_they_count_the_same_at_the_thresholds() {
+        let trainer = [typed(0, 0, true, &[(4, 0.9991)]), typed(0, 0, false, &[])];
+        // A probability that differs and still converts at the same key counts the same.
+        let same = [typed(0, 0, true, &[(4, 0.9992)]), typed(0, 0, false, &[])];
+        assert!(agree(&trainer, &same, [0.999, 0.999], "development").is_ok());
+        let later = [typed(0, 0, true, &[(5, 0.9992)]), typed(0, 0, false, &[])];
+        assert_eq!(agree(&trainer, &later, [0.999, 0.999], "calibration").unwrap_err(), "the program's scoring of the written artifact differs from the trainer's on calibration");
+    }
+
     /// Calibration of both profiles: in each direction a word to convert (at 4 keys from 0.99) and a word to keep, which
     /// the Latin direction converts at 0.995 and below and the Cyrillic direction never.
     fn calibration() -> Vec<Sequence> {
@@ -2086,7 +2140,7 @@ mod tests {
         let parents = [parent("cntk", 0, true), parent("cntk", 0, false), parent("house", 0, false), parent("housing", 0, false), parent("офсет", 1, true)];
         let cells = [Cell { words: 3, hard: 1, heads: 2 }, Cell { words: 1, hard: 1, heads: 1 }];
         assert_eq!(cells_of(&parents), cells);
-        let options = |words: usize, hard: usize| RecipeOptions { minimum_calibration_words_per_direction: Some(words), minimum_calibration_hard_words_per_direction: Some(hard), ..RecipeOptions::default() };
+        let options = |words: usize, hard: usize| RecipeOptions { minimum_words_per_direction: Some(words), minimum_hard_words_per_direction: Some(hard), ..RecipeOptions::default() };
         assert_eq!(check_cells(CALIBRATION, &parents, &options(1, 1)), Ok(cells));
         assert!(check_cells(CALIBRATION, &parents, &options(2, 1)).unwrap_err().contains("calibration typed in layout group 1 holds 1 words, 1 hard"));
         assert!(check_cells(DEVELOPMENT, &parents, &options(1, 2)).unwrap_err().contains("development typed in layout group 0 holds 3 words, 1 hard"));

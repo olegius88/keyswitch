@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "data_revision": "prefix-words-v3-redraw",
+ "data_revision": "prefix-words-v3-cycle-v89",
  "corpus": "model/prefix_v3",
  "runtime_feature_version": 4,
  "maximum_prefix_length": 12,
@@ -17,9 +17,12 @@
  "wait_on_known_terms": false,
  "support": "engine",
  "closed_term_families_per_mille": 500,
- "epoch_selection": "switch_key",
- "minimum_calibration_words_per_direction": 3000,
- "minimum_calibration_hard_words_per_direction": 1000,
+ "epoch_selection": "mean_key",
+ "floor_model": "resources/models/prefix_policy_v1.json",
+ "floor_model_version": "prefix-v2-bf3dc28f8567",
+ "floor_threshold": 0.985,
+ "minimum_words_per_direction": 3000,
+ "minimum_hard_words_per_direction": 1000,
  "thresholds": [
   0.985,
   0.99,
@@ -33,6 +36,6 @@
   1.0
  ],
  "minimum_early_recall": 0.7,
- "scope": "Candidate development only, on the word corpus model/prefix_v3 (schema three, drawn again under a new namespace): words of the base corpus's training split and of the CC0 Tatoeba snapshot typed in the other layout and as meant, and real tokens typed as meant, each in three of four situations. No test and no acceptance word is read. Each direction's threshold is the first of the grid its calibration cell allows (no sequence typed as meant converted, early recall at least the floor, in both profiles); the epoch is the one whose development words typed in the other layout switch by the fourth key most often at those thresholds, then at the lowest mean key. Promotion requires the frozen joint engine evaluation and the sealed holdout test.",
- "training_revision": "v89: schema four (the term lists the program loads with their counts, each reading's own orthotactic score, a whole word or term at the start of the typed keys), half of the training families without the term lists, no wait label on known terms, a threshold for each direction, epoch and thresholds chosen by the switch key, importance scaled to a mean of one, early stop after fifteen epochs without progress of that measure"
+ "scope": "Candidate development only, on the word corpus model/prefix_v3 (schema three, drawn again under a new namespace): words of the base corpus's training split and of the CC0 Tatoeba snapshot typed in the other layout and as meant, and real tokens typed as meant, each in three of four situations. No test and no acceptance word is read. The epoch is chosen on development alone: each direction at the first threshold of the grid at which no development sequence typed as meant in it converts in either profile, the lowest mean switch key of the two directions added among the epochs not later and switching no fewer sequences by the fourth key than the installed prefix-v2-bf3dc28f8567 at 0.985 in either direction. Calibration is read once, for the chosen epoch: each direction's threshold is the first of the grid, not below its development threshold, at which no calibration sequence typed as meant converts in either profile and at least the floor of those typed in the other layout convert before their end. Promotion requires the frozen acceptance samples and the sealed holdout test.",
+ "training_revision": "v89: schema four (the term lists the program loads with their counts, each reading's own orthotactic score, a whole word or term at the start of the typed keys), half of the training families without the term lists, no wait label on known terms, a threshold for each direction, the epoch chosen by the mean switch key on development with the installed model as its floor and calibration read once, importance scaled to a mean of one, early stop after fifteen epochs in which neither that measure nor the development loss improved"
 }

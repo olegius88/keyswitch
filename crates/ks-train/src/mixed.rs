@@ -542,6 +542,7 @@ impl Typist {
             boundary_model: self.resources.boundary_policy(),
             prefix_model: None,
             prefix_indexes: Vec::new(),
+            prefix_terms: None,
             resource_dir: self.resources.resource_dir().to_path_buf(),
             clock: clock.read(),
             platform_reader: None,

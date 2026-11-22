@@ -12,6 +12,7 @@ use ks_context::context_model::{ContextAction, ContextEvidence, ContextModel, Co
 use ks_context::context_policy::SharedOrtho;
 use ks_context::flat_table::WeightTable;
 use ks_context::input_context::InputContext;
+use ks_context::prefix_terms::PrefixTerms;
 use ks_context::{ContextPolicy, VersionedPrefixModel};
 use ks_engine::engine::{EngineCore, EngineParts};
 use ks_lang::boundary_policy::BoundaryPolicy;
@@ -113,6 +114,8 @@ pub struct Replayer {
     boundary_model: Option<Arc<BoundaryPolicy>>,
     prefix_model: Option<Arc<VersionedPrefixModel>>,
     prefix_indexes: Vec<Arc<PrefixIndex>>,
+    /// The term lists every engine of this replayer takes; none, and each builds them from its models.
+    prefix_terms: Option<Arc<PrefixTerms>>,
     context_policy: Option<ContextPolicy>,
     recording: Option<Arc<Mutex<Recording>>>,
     folder: PathBuf,
@@ -142,10 +145,17 @@ impl Replayer {
             boundary_model: resources.boundary_policy(),
             prefix_model: prefix,
             prefix_indexes: indexes,
+            prefix_terms: None,
             context_policy: Some(context_policy),
             recording: None,
             folder,
         }
+    }
+
+    /// The same, every engine reading these term lists: built once for many engines, or closed to some tokens.
+    #[must_use]
+    pub fn with_prefix_terms(self, terms: Arc<PrefixTerms>) -> Replayer {
+        Replayer { prefix_terms: Some(terms), ..self }
     }
 
     /// `_Recorder`: every question recorded and answered `keep`.
@@ -216,6 +226,7 @@ impl Replayer {
             boundary_model: self.boundary_model.clone(),
             prefix_model: self.prefix_model.clone(),
             prefix_indexes: self.prefix_indexes.clone(),
+            prefix_terms: self.prefix_terms.clone(),
             resource_dir: self.resource_dir.clone(),
             clock: clock.read(),
             platform_reader: None,

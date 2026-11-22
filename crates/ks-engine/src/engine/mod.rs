@@ -77,6 +77,9 @@ pub struct EngineParts {
     pub boundary_model: Option<Arc<BoundaryPolicy>>,
     pub prefix_model: Option<Arc<VersionedPrefixModel>>,
     pub prefix_indexes: Vec<Arc<PrefixIndex>>,
+    /// The term lists a prefix model of schema four reads, when the caller built them already (a replay that builds one
+    /// engine after another, or that closes the lists to some tokens); none, and the engine builds them from its models.
+    pub prefix_terms: Option<Arc<ks_context::prefix_terms::PrefixTerms>>,
     pub resource_dir: PathBuf,
     pub clock: Clock,
     /// The platform reader, if the context policy's reader is one: what the diagnostics of the reader name.
@@ -273,7 +276,7 @@ impl EngineCore {
     pub fn from_parts_with_typo(parts: EngineParts, typo: Option<Arc<TypoCorrector>>) -> EngineResult<EngineCore> {
         let EngineParts {
             settings, history, backend, learning, backend_label, models, intent_model, intent_model_status, protected_tokens,
-            context_policy, boundary_model, prefix_model, prefix_indexes, resource_dir, clock, platform_reader,
+            context_policy, boundary_model, prefix_model, prefix_indexes, prefix_terms, resource_dir, clock, platform_reader,
         } = parts;
         let learning = match learning {
             Some(learning) => learning,
@@ -395,12 +398,12 @@ impl EngineCore {
             corrected_word: None,
             layout_erased: None,
             term_tables: RefCell::new(None),
-            prefix_terms: std::cell::OnceCell::new(),
+            prefix_terms: prefix_terms.map_or_else(std::cell::OnceCell::new, |terms| std::cell::OnceCell::from(Some(terms))),
             hotkey_cache: RefCell::new(HashMap::new()),
             executed: None,
         };
         core.typo_corrector()?;
-        // A prefix model that reads the term lists has them built before the first key, not on it.
+        // A prefix model that reads the term lists has them built before the first key, not on it, unless they were given.
         if core.prefix_model.as_ref().is_some_and(|model| model.needs_terms()) {
             core.prefix_terms();
         }

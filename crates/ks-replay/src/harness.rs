@@ -665,6 +665,9 @@ pub struct Bundle {
     boundary_model: Option<Arc<BoundaryPolicy>>,
     prefix_model: Option<Arc<VersionedPrefixModel>>,
     prefix_indexes: Vec<Arc<PrefixIndex>>,
+    /// The term lists a prefix model of schema four reads, as the first engine that needed them built them: every later
+    /// engine takes them, as one program builds them once.
+    prefix_terms: Option<Arc<ks_context::prefix_terms::PrefixTerms>>,
     context_policy: Option<ContextPolicy>,
     root: PathBuf,
     debug: bool,
@@ -710,6 +713,7 @@ impl Bundle {
             intent_model_status,
             prefix_model,
             prefix_indexes,
+            prefix_terms: None,
             models,
             context_policy: Some(context_policy),
             resources,
@@ -767,11 +771,15 @@ impl Bundle {
             boundary_model: self.boundary_model.clone(),
             prefix_model: self.prefix_model.clone(),
             prefix_indexes: self.prefix_indexes.clone(),
+            prefix_terms: self.prefix_terms.clone(),
             resource_dir: self.resources.resource_dir().to_path_buf(),
             clock: clock.read(),
             platform_reader: None,
         })
         .expect("an engine over the shared models");
+        if self.prefix_terms.is_none() && self.prefix_model.as_ref().is_some_and(|model| model.needs_terms()) {
+            self.prefix_terms = core.prefix_terms();
+        }
         core.executed = Some(Vec::new());
         core
     }

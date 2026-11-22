@@ -113,6 +113,7 @@ impl KeySwitchEngine {
             boundary_model: resources.boundary_policy(),
             prefix_model: VersionedPrefixModel::default_model(&resources.resource_dir().join("models")).map(Arc::new),
             prefix_indexes,
+            prefix_terms: None,
             resource_dir: resources.resource_dir().to_path_buf(),
             clock,
             platform_reader,

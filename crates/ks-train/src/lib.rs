@@ -34,6 +34,7 @@ pub mod ortho;
 pub mod ortho_inputs;
 pub mod physical;
 pub mod prefix;
+pub mod prefix_acceptance;
 pub mod prefix_cache;
 pub mod prefix_corpus;
 pub mod prefix_words;

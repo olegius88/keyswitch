@@ -76,7 +76,7 @@ fn is_alpha(character: char) -> bool {
 }
 
 /// `trimmed_window`: at a full window clipped inside letters, only that outer letter fragment goes.
-fn trimmed_window(row: &CorpusRow) -> (String, String, usize, usize) {
+pub(crate) fn trimmed_window(row: &CorpusRow) -> (String, String, usize, usize) {
     let mut before: Vec<char> = row.before.chars().collect();
     let mut after: Vec<char> = row.after.chars().collect();
     let (mut left, mut right) = (0, 0);
@@ -176,10 +176,17 @@ pub fn first_plan(row: &CorpusRow, initially_wrong: bool) -> Option<Plan> {
         return None;
     }
     let (_, after, _, right) = trimmed_window(row);
+    Some(typed_first(row.identifier.clone(), row.document.clone(), declared, &row.original, &after, right, initially_wrong))
+}
+
+/// The plan of a text typed first in an empty field, `after` behind it, as `first_plan` types a row's focus: the editor
+/// opens in the declared layout, or in the other one for a wrong plan, and the first key selects none.
+#[must_use]
+pub fn typed_first(identifier: String, document: String, declared: i64, original: &str, after: &str, trimmed_right: usize, initially_wrong: bool) -> Plan {
     let mut intended = declared;
     let mut keys: Vec<PhysicalKey> = Vec::new();
     let mut unsupported: BTreeSet<String> = BTreeSet::new();
-    for character in row.original.chars().chain(after.chars()) {
+    for character in original.chars().chain(after.chars()) {
         let mut explicit: Option<i64> = None;
         if let Some(group) = script_group(character).filter(|group| *group != intended) {
             intended = group;
@@ -193,21 +200,21 @@ pub fn first_plan(row: &CorpusRow, initially_wrong: bool) -> Option<Plan> {
         }
     }
     let initial_group = if initially_wrong { 1 - declared } else { declared };
-    Some(Plan {
-        identifier: row.identifier.clone(),
-        document: row.document.clone(),
-        group: row.group,
+    Plan {
+        identifier,
+        document,
+        group: Some(declared),
         initially_wrong,
-        expected: format!("{}{after}", row.original),
+        expected: format!("{original}{after}"),
         keys,
         unsupported: unsupported.into_iter().collect(),
         trimmed_left: 0,
-        trimmed_right: right,
+        trimmed_right,
         expected_final_group: intended,
         intervention_event: initially_wrong.then_some(1),
         initial_group: initial_group.to::<i32>(),
-        focus_letters: Some(opening_letters(&row.original)),
-    })
+        focus_letters: Some(opening_letters(original)),
+    }
 }
 
 /// `select_rows`: hash-ranked documents and one hash-ranked focus per document and group.
@@ -347,7 +354,7 @@ impl Default for Earliness {
 }
 
 /// A text up to its first space.
-fn first_word(text: &str) -> &str {
+pub(crate) fn first_word(text: &str) -> &str {
     text.split(|character: char| pystr::isspace(character.encode_utf8(&mut [0_u8; 4]))).next().unwrap_or_default()
 }
 
