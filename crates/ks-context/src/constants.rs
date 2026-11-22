@@ -715,6 +715,17 @@ pub const MAX_CONTEXT_MODEL_VERSION_CHARACTERS: usize = 80;
 
 pub const MAX_CONTEXT_WEIGHT_MAGNITUDE: i64 = 1000;
 
+// A weight table keeps its weights as whole numbers of steps of one billionth: the trainer writes every weight rounded
+// to nine decimals (DETERMINISTIC_ROUNDING_DECIMALS of ks-train), and a count of steps divided by this is then the
+// very float the weight's text parses to.
+pub const WEIGHT_STEPS_PER_UNIT: f64 = 1e9;
+
+// The two counts of steps no weight is kept as: a weight of negative zero, and a weight kept apart as it parsed
+// (beyond the range of the counts, or no whole number of steps).
+pub const WEIGHT_STEPS_NEGATIVE_ZERO: i32 = i32::MIN;
+
+pub const WEIGHT_STEPS_KEPT_APART: i32 = i32::MIN + 1;
+
 pub const MIN_CONTEXT_CONVERSION_THRESHOLD: f64 = 0.95;
 
 // ---- constants/prefix.py

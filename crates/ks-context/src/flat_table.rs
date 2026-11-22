@@ -6,6 +6,7 @@
 //! The files are read through serde visitors, so no tree of `serde_json::Value` is built.
 
 use ks_cast::To as _;
+use crate::constants::{WEIGHT_STEPS_KEPT_APART, WEIGHT_STEPS_NEGATIVE_ZERO, WEIGHT_STEPS_PER_UNIT};
 use ks_lang::LoadError;
 use serde::de::{self, DeserializeSeed, IgnoredAny, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer as _};
@@ -404,18 +405,65 @@ pub struct WeightSpec {
     pub table_error: &'static str,
 }
 
+/// The weights of a table in the order of the file, as whole numbers of steps (`WEIGHT_STEPS_PER_UNIT`): the trainer
+/// writes every weight rounded to nine decimals, and the count of steps divided back is then the very float the text
+/// parsed to. A weight that is no such count is kept apart as it parsed. A weight answers the float of the file, bit
+/// for bit, in half the memory: four bytes instead of eight.
+#[derive(Default)]
+struct WeightValues {
+    steps: Vec<i32>,
+    /// The weights kept apart, `(position, weight)` by position.
+    apart: Vec<(u32, f64)>,
+}
+
+impl WeightValues {
+    fn new(values: &[f64]) -> WeightValues {
+        let mut apart = Vec::new();
+        let steps = values
+            .iter()
+            .enumerate()
+            .map(|(position, &value)| {
+                if value.to_bits() == (-0.0_f64).to_bits() {
+                    return WEIGHT_STEPS_NEGATIVE_ZERO;
+                }
+                let scaled = (value * WEIGHT_STEPS_PER_UNIT).round();
+                let fits = scaled > f64::from(WEIGHT_STEPS_KEPT_APART) && scaled <= f64::from(i32::MAX);
+                if fits && (scaled / WEIGHT_STEPS_PER_UNIT).to_bits() == value.to_bits() {
+                    scaled.to::<i32>()
+                } else {
+                    apart.push((position.to::<u32>(), value));
+                    WEIGHT_STEPS_KEPT_APART
+                }
+            })
+            .collect();
+        apart.shrink_to_fit();
+        WeightValues { steps, apart }
+    }
+
+    fn get(&self, position: usize) -> f64 {
+        match self.steps[position] {
+            WEIGHT_STEPS_NEGATIVE_ZERO => -0.0,
+            WEIGHT_STEPS_KEPT_APART => {
+                let at = self.apart.partition_point(|entry| entry.0.to::<usize>() < position);
+                self.apart[at].1
+            }
+            steps => f64::from(steps) / WEIGHT_STEPS_PER_UNIT,
+        }
+    }
+}
+
 /// `dict[str, tuple[float, float, float, float]]`: the weights of four actions per feature name.
 #[derive(Default)]
 pub struct WeightTable {
     index: NameIndex,
-    values: Vec<f64>,
+    values: WeightValues,
 }
 
 impl WeightTable {
     /// A table with no features: a model whose answers come from elsewhere.
     #[must_use]
     pub fn empty() -> WeightTable {
-        WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new(), order: Vec::new() }, values: Vec::new() }
+        WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new(), order: Vec::new() }, values: WeightValues::default() }
     }
 }
 
@@ -424,8 +472,8 @@ pub const ACTION_COUNT: usize = 4;
 impl WeightTable {
     /// `weights.get(name)`.
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<&[f64; ACTION_COUNT]> {
-        self.index.find(name).map(|entry| self.values[ACTION_COUNT * entry..ACTION_COUNT * (entry + 1)].try_into().expect("four weights"))
+    pub fn get(&self, name: &str) -> Option<[f64; ACTION_COUNT]> {
+        self.index.find(name).map(|entry| std::array::from_fn(|action| self.values.get(ACTION_COUNT * entry + action)))
     }
 
     #[must_use]
@@ -451,7 +499,7 @@ impl WeightTable {
             names.push(name);
             values.extend(weights);
         }
-        WeightTable { index: names.index(), values }
+        WeightTable { index: names.index(), values: WeightValues::new(&values) }
     }
 
 }
@@ -611,9 +659,10 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
                     }
                     integers.push(mask);
                 }
-                values.shrink_to_fit();
-                let table = WeightTable { index: names.index(), values };
-                let digest = checksum(&table, &integers);
+                let index = names.index();
+                let digest = checksum(&index, &values, &integers);
+                let table = WeightTable { index, values: WeightValues::new(&values) };
+                drop(values);
                 let entries = table.len();
                 Ok(Some(Weights { table, digest, refusal, entries }))
             }
@@ -646,10 +695,10 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
 
 /// The checksum of the weights as the artifacts state it: the JSON text of the object with sorted keys, no spaces and
 /// no escaping of non-ASCII letters.
-fn checksum(table: &WeightTable, integers: &[u8]) -> String {
+fn checksum(index: &NameIndex, values: &[f64], integers: &[u8]) -> String {
     use std::fmt::Write as _;
-    let mut order: Vec<u32> = table.index.order.clone();
-    order.sort_unstable_by(|&a, &b| table.index.name(a.to::<usize>()).cmp(table.index.name(b.to::<usize>())));
+    let mut order: Vec<u32> = index.order.clone();
+    order.sort_unstable_by(|&a, &b| index.name(a.to::<usize>()).cmp(index.name(b.to::<usize>())));
     let mut hasher = Sha256::new();
     let mut text = String::with_capacity(1 << 16);
     text.push('{');
@@ -658,13 +707,13 @@ fn checksum(table: &WeightTable, integers: &[u8]) -> String {
         if position > 0 {
             text.push(',');
         }
-        text.push_str(&ks_text::pyjson::json_string(table.index.name(entry), false));
+        text.push_str(&ks_text::pyjson::json_string(index.name(entry), false));
         text.push_str(":[");
         for action in 0..ACTION_COUNT {
             if action > 0 {
                 text.push(',');
             }
-            let value = table.values[ACTION_COUNT * entry + action];
+            let value = values[ACTION_COUNT * entry + action];
             if integers[entry] & (1 << action) != 0 {
                 write!(text, "{}", value.to::<i64>()).expect("a String takes any text");
             } else {
@@ -825,9 +874,21 @@ mod tests {
     fn a_name_given_twice_keeps_its_last_value() {
         let table = WeightTable::from_entries([("a", [1.0, 2.0, 3.0, 4.0]), ("b", [0.0; 4]), ("a", [5.0, 6.0, 7.0, 8.0])]);
         assert_eq!(table.len(), 2);
-        assert_eq!(table.get("a"), Some(&[5.0, 6.0, 7.0, 8.0]));
-        assert_eq!(table.get("b"), Some(&[0.0; 4]));
+        assert_eq!(table.get("a"), Some([5.0, 6.0, 7.0, 8.0]));
+        assert_eq!(table.get("b"), Some([0.0; 4]));
         assert_eq!(table.get("c"), None);
+    }
+
+    #[test]
+    fn a_weight_answers_the_float_it_was_given_bit_for_bit() {
+        // Nine decimals, as the trainer writes them; a negative zero; one beyond the range of the steps; one with more
+        // decimals than a step; the extremes of the steps.
+        let given = [0.968_489_788, -1.5e-8, -0.0, 0.0, 10.561_457_417, 1e-10, 2.147_483_647, -2.147_483_646, -2.147_483_647, 0.1 + 0.2];
+        let values = WeightValues::new(&given);
+        assert_eq!(values.apart.len(), 4);
+        for (position, value) in given.iter().enumerate() {
+            assert_eq!(values.get(position).to_bits(), value.to_bits(), "weight {position}");
+        }
     }
 
     #[test]
@@ -837,8 +898,7 @@ mod tests {
         for name in ["b", "a"] {
             names.push(name);
         }
-        let table = WeightTable { index: names.index(), values: vec![0.0, 0.5, 1e-5, -2.0, 1.0, 1.0, 1.0, 1.0] };
-        let digest = checksum(&table, &[0b0001, 0b1111]);
+        let digest = checksum(&names.index(), &[0.0, 0.5, 1e-5, -2.0, 1.0, 1.0, 1.0, 1.0], &[0b0001, 0b1111]);
         let text = r#"{"a":[1,1,1,1],"b":[0,0.5,1e-05,-2.0]}"#;
         let wanted: String = Sha256::digest(text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(digest, wanted);
