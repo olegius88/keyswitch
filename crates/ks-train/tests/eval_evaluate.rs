@@ -153,8 +153,8 @@ fn development_row(index: usize, original: &str, group: Option<i64>, before: &st
     value
 }
 
-/// A development replay of the installed pair over these rows, in this tree.
-fn development_replay(root: &Path, folder: &Path, rows: &[Value]) -> Output {
+/// A development replay of the installed pair over these rows, in this tree, with more options.
+fn development_replay(root: &Path, folder: &Path, rows: &[Value], extra: &[&str]) -> Output {
     let corpus = folder.join("corpus");
     std::fs::create_dir_all(&corpus).expect("a folder");
     let mut manifest = json!({"splits": {}});
@@ -176,6 +176,7 @@ fn development_replay(root: &Path, folder: &Path, rows: &[Value]) -> Output {
         .arg("--ledger")
         .arg(folder.join("ledger"))
         .args(["--unsealed", "--split", "development", "--jobs", "2"])
+        .args(extra)
         .output()
         .expect("the trainer starts")
 }
@@ -192,7 +193,7 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
         development_row(5, "world", Some(0), &full_before("xxx"), &full_after("zzz")),
         development_row(6, "2nd", Some(0), "the ", " one"),
     ];
-    let answer = development_replay(&tree(), &folder, &rows);
+    let answer = development_replay(&tree(), &folder, &rows, &[]);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
     let report: Report = ks_text::json::loads(std::fs::read(folder.join("report.json")).expect("a report")).expect("a report of the shape the evaluation writes");
     let (selection, profiles) = (report.selection.as_ref().expect("a selection"), report.profiles.as_ref().expect("profiles"));
@@ -260,6 +261,46 @@ fn a_replay_without_an_orthotactic_model_still_runs() {
     let root = eval_support::linked("evaluate-no-ortho");
     std::fs::write(eval_support::own(&root, "resources/models/ortho_v1.json"), b"{}").expect("a file");
     let folder = scratch("evaluate-no-ortho-rows");
-    let answer = development_replay(&root, &folder, &[development_row(0, "hello", Some(0), "we say ", "")]);
+    let answer = development_replay(&root, &folder, &[development_row(0, "hello", Some(0), "we say ", "")], &[]);
     assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
+}
+
+/// A replay kept in a cache is read back instead of being typed again, and the report is the one written without a
+/// cache; a sealed test refuses a cache.
+#[test]
+fn a_development_replay_read_back_from_its_cache_writes_the_same_report() {
+    let folder = scratch("evaluate-cache");
+    let rows = [development_row(0, "hello", Some(0), "we say ", " to you"), development_row(1, "привет", Some(1), "мы скажем ", " вам")];
+    let plain = development_replay(&tree(), &folder, &rows, &[]);
+    assert!(plain.status.success(), "{}", String::from_utf8_lossy(&plain.stderr));
+    assert!(!String::from_utf8_lossy(&plain.stdout).contains("replay cache"));
+    let without = std::fs::read(folder.join("report.json")).expect("a report");
+    let cache = folder.join("cache").display().to_string();
+    // The candidate here is the installed pair: a replay of one may be read back for the other already in the first run.
+    for read_back in [" of 20 replays read back", "replay cache: 20 of 20 replays read back"] {
+        let answer = development_replay(&tree(), &folder, &rows, &["--cache", &cache]);
+        let said = String::from_utf8_lossy(&answer.stdout).into_owned();
+        assert!(answer.status.success() && said.contains(read_back), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        assert_eq!(std::fs::read(folder.join("report.json")).expect("a report"), without);
+    }
+    let models = tree().join("resources/models");
+    let sealed = trainer()
+        .arg("evaluate")
+        .arg("--tree")
+        .arg(tree())
+        .arg("--candidate")
+        .arg(models.join("context_policy_v1.json"))
+        .arg("--prefix-candidate")
+        .arg(models.join("prefix_policy_v1.json"))
+        .arg("--corpus")
+        .arg(folder.join("corpus"))
+        .arg("--output")
+        .arg(folder.join("test.json"))
+        .arg("--ledger")
+        .arg(folder.join("ledger"))
+        .args(["--split", "test", "--cache", &cache])
+        .output()
+        .expect("the trainer starts");
+    assert!(!sealed.status.success() && String::from_utf8_lossy(&sealed.stderr).contains("without a cache"), "{}", String::from_utf8_lossy(&sealed.stderr));
+    assert!(!folder.join("ledger").exists());
 }

@@ -17,6 +17,7 @@ pub mod flat_table;
 pub mod input_context;
 pub mod prefix_model;
 pub mod prefix_schema;
+pub mod prefix_terms;
 pub mod context_policy;
 pub mod typo_correction;
 

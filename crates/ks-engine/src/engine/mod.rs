@@ -223,6 +223,8 @@ pub struct EngineCore {
     /// caret move, another window or Enter end it.
     pub layout_erased: Option<CorrectedWord>,
     term_tables: RefCell<Option<Arc<TermTables>>>,
+    /// The term lists a prefix model of schema four reads (`prefix_terms`), built once.
+    prefix_terms: std::cell::OnceCell<Option<Arc<ks_context::prefix_terms::PrefixTerms>>>,
     hotkey_cache: RefCell<HashMap<String, Arc<Hotkey>>>,
     /// Every plan `execute_correction` carried out, when a replay asks for them.
     pub executed: Option<Vec<ExecutedPlan>>,
@@ -393,10 +395,15 @@ impl EngineCore {
             corrected_word: None,
             layout_erased: None,
             term_tables: RefCell::new(None),
+            prefix_terms: std::cell::OnceCell::new(),
             hotkey_cache: RefCell::new(HashMap::new()),
             executed: None,
         };
         core.typo_corrector()?;
+        // A prefix model that reads the term lists has them built before the first key, not on it.
+        if core.prefix_model.as_ref().is_some_and(|model| model.needs_terms()) {
+            core.prefix_terms();
+        }
         core.technical_session_event("engine_initialized");
         if core.learning.migrated() != 0 {
             technical_event!(core.shared, "learning_rules_migrated", "rules": core.learning.migrated());

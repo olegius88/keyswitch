@@ -6,6 +6,7 @@ use ks_cast::To as _;
 use crate::corpus::{CorpusRow, DEVELOPMENT, checksum, load_rows, read_json};
 use crate::physical::{PhysicalKey, hex, hex_digest, key_of};
 use crate::replay::{Mode, Plan, Replayer, prefix_indexes};
+use crate::replay_cache::ReplayCache;
 use crate::sequence_report::{AllPairs, Block, Case, EarlyOff, FirstBlock, FirstGates, Gated, Gates, Documents, InstalledReference, PairCounts, Profile, Profiles, Report, Selection, Unsupported};
 use crate::tools::{Lexicons, Tools, reference_models};
 use ks_context::VersionedPrefixModel;
@@ -500,6 +501,15 @@ enum Part {
     First,
 }
 
+impl Part {
+    fn as_str(self) -> &'static str {
+        match self {
+            Part::Sequence => "sequence",
+            Part::First => "first",
+        }
+    }
+}
+
 /// One pair's replay of one part of the plans, in one profile and settings mode.
 #[derive(Clone, Copy)]
 struct Task<'a> {
@@ -510,9 +520,30 @@ struct Task<'a> {
     part: Part,
 }
 
+/// The SHA-256 of each model of an evaluation, by the names a task gives them: what a cached replay is named by.
+struct PairDigests {
+    context: BTreeMap<&'static str, String>,
+    prefix: BTreeMap<&'static str, String>,
+}
+
+impl PairDigests {
+    fn of(pairs: &Pairs) -> Result<PairDigests, String> {
+        let names = ["candidate", "baseline", INSTALLED];
+        let context = [&pairs.candidate, &pairs.baseline, &pairs.installed];
+        let prefix = [&pairs.prefix_candidate, &pairs.prefix_baseline, &pairs.prefix_installed];
+        let digests = |paths: [&PathBuf; 3]| -> Result<BTreeMap<&'static str, String>, String> { names.iter().zip(paths).map(|(name, path)| Ok((*name, checksum(path)?))).collect() };
+        Ok(PairDigests { context: digests(context)?, prefix: digests(prefix)? })
+    }
+
+    fn key(&self, cache: &ReplayCache, task: &Task<'_>) -> String {
+        let named = |table: &BTreeMap<&'static str, String>, name: &str| table.get(name).cloned().unwrap_or_default();
+        cache.key(&named(&self.context, task.context), &named(&self.prefix, task.prefix), task.part.as_str(), PROFILES[task.profile], task.mode.as_str())
+    }
+}
+
 /// `score_sequences`: every pair replayed in both settings modes, and the first plans in the default mode; acceptance
-/// needs every gate in every mode and profile.
-pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize) -> Result<Replayed, String> {
+/// needs every gate in every mode and profile. With a cache, a pair's replay already kept there is read back.
+pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize, cache: Option<&ReplayCache>) -> Result<Replayed, String> {
     let selected = select_rows(rows);
     let SequencePlans { sequence: plans, first: first_plans, first_ineligible } = sequence_plans(&selected);
     let distinct = |group: Option<i64>| -> i64 {
@@ -562,13 +593,22 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let next = AtomicUsize::new(0);
     let done: Mutex<Vec<Option<Scored>>> = Mutex::new((0..tasks.len()).map(|_| None).collect());
     let failure: Mutex<Option<String>> = Mutex::new(None);
+    let digests = cache.map(|_| PairDigests::of(pairs)).transpose()?;
+    let read_back = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for worker in 0..jobs.max(1).min(tasks.len()) {
             let (tasks, order, next, done, failure, plans_of, shared, indexes, load_context) = (&tasks, &order, &next, &done, &failure, &plans_of, &shared, &indexes, &load_context);
             let (prefix_candidate, prefix_baseline, prefix_installed) = (&prefix_candidate, &prefix_baseline, &prefix_installed);
+            let (digests, read_back) = (&digests, &read_back);
             scope.spawn(move || {
                 while let Some(index) = order.get(next.fetch_add(1, Ordering::Relaxed)).copied() {
                     let task = tasks[index];
+                    let cached = cache.zip(digests.as_ref()).map(|(cache, digests)| (cache, digests.key(cache, &task)));
+                    if let Some(found) = cached.as_ref().and_then(|(cache, key)| cache.read(key)) {
+                        read_back.fetch_add(1, Ordering::Relaxed);
+                        done.lock().expect("a worker finished")[index] = Some(found);
+                        continue;
+                    }
                     let path = match task.context {
                         "candidate" => &pairs.candidate,
                         INSTALLED => &pairs.installed,
@@ -591,6 +631,12 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
                     let mut replayer = Replayer::new(tools, models, shared.clone(), folder.clone(), model, Some(prefix_model), indexes[task.profile].clone());
                     let scored = score_pair(plans_of(task.part), &mut replayer, task.mode);
                     let _ = std::fs::remove_dir_all(folder);
+                    if let Some((cache, key)) = &cached
+                        && let Err(error) = cache.write(key, &scored.0, &scored.1)
+                    {
+                        *failure.lock().expect("a worker finished") = Some(error);
+                        break;
+                    }
                     done.lock().expect("a worker finished")[index] = Some(scored);
                 }
             });
@@ -598,6 +644,9 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     });
     if let Some(error) = failure.into_inner().expect("the workers finished") {
         return Err(error);
+    }
+    if cache.is_some() {
+        println!("replay cache: {} of {} replays read back", read_back.into_inner(), tasks.len());
     }
     let mut scored = done.into_inner().expect("the workers finished").into_iter();
     let mut next_scored = || scored.next().flatten().ok_or("a task was not scored");
@@ -877,6 +926,15 @@ pub fn validate_prefix_seal(root: &Path, artifact: &Path, seal_path: &Path, requ
     if seal.get("model_version").and_then(Value::as_str) != Some(model.version()) || seal.get("threshold").and_then(Value::as_f64) != Some(model.model.conversion_threshold) {
         return Err("prefix model identity differs from seal".to_owned());
     }
+    /// The thresholds of the two directions a seal names, when its model has them.
+    #[derive(Deserialize)]
+    struct Directions {
+        thresholds: Option<[f64; 2]>,
+    }
+    let named: Directions = crate::artifact::typed(&seal).map_err(|error| format!("the thresholds of the prefix seal: {error}"))?;
+    if named.thresholds != model.thresholds {
+        return Err("prefix model thresholds differ from seal".to_owned());
+    }
     Ok(seal)
 }
 
@@ -894,6 +952,9 @@ pub struct EvaluationRequest<'a> {
     pub jobs: usize,
     /// A development diagnostic of models that were not fitted by this tree: the seals are not read.
     pub unsealed: bool,
+    /// A folder of replays kept by what they read (`ReplayCache`): a development replay reads back a pair it already
+    /// typed. A sealed test refuses one.
+    pub cache: Option<&'a Path>,
 }
 
 /// The inputs of a replay are still the ones its identity named before it started.
@@ -920,23 +981,27 @@ pub fn installed_unchanged_since(root: &Path, reference: &InstalledReference) ->
 /// `evaluate`: the report of a development diagnostic, or of the sealed test, read once.
 pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
     let split = request.split;
-    if split != DEVELOPMENT && split != "test" {
+    let test = split == "test";
+    if split != DEVELOPMENT && !test {
         return Err("sequence evaluator accepts development or sealed test only".to_owned());
     }
-    if request.unsealed && split == "test" {
+    if request.unsealed && test {
         return Err("a sealed test needs seals".to_owned());
+    }
+    if request.cache.is_some() && test {
+        return Err("a sealed test is replayed whole, without a cache".to_owned());
     }
     let (root, models_dir) = (request.root, request.resource_dir.join("models"));
     if !request.unsealed {
         validate_candidate_seal(root, request.artifact, request.seal, request.corpus, &models_dir)?;
-        validate_prefix_seal(root, request.prefix, request.prefix_seal, split == "test")?;
+        validate_prefix_seal(root, request.prefix, request.prefix_seal, test)?;
     }
     let identity = if request.unsealed {
         Identity { value: json!({"unsealed": true}), key: String::new() }
     } else {
         evaluation_identity(request)?
     };
-    if split == "test" {
+    if test {
         claim_test_access(request.ledger, &identity)?;
     }
     // No test file, decompression, model scoring or row selection occurs above the access claim.
@@ -970,7 +1035,8 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
         execution_error: None,
         scope: None,
     };
-    let scored = score_sequences(root, &resources, &tools, &spelling, &rows, &pairs, request.jobs);
+    let cache = request.cache.map(|folder| ReplayCache::open(folder, root, request.resource_dir, &request.corpus.join(format!("{split}.jsonl.gz")))).transpose()?;
+    let scored = score_sequences(root, &resources, &tools, &spelling, &rows, &pairs, request.jobs, cache.as_ref());
     let write_report = |report: &Report| -> Result<(), String> {
         std::fs::create_dir_all(request.output.parent().ok_or("a report outside a folder")?).map_err(|error| error.to_string())?;
         std::fs::write(request.output, crate::artifact::canonical_of(report)).map_err(|error| error.to_string())
@@ -983,7 +1049,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
         }
         Err(error) => {
             report.execution_error = Some(error.clone());
-            if split == "test" {
+            if test {
                 immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
             }
             write_report(&report)?;
@@ -994,7 +1060,7 @@ pub fn evaluate(request: &EvaluationRequest<'_>) -> Result<Report, String> {
         unchanged_since(request, &identity)?;
     }
     installed_unchanged_since(root, &reference)?;
-    if split == "test" {
+    if test {
         immutable_record(&request.ledger.join(format!("{}.outcome.json", identity.key)), &report)?;
     } else {
         report.promotion_passed = false;

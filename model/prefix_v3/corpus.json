@@ -1,0 +1,154 @@
+{
+ "config_sha256": "4c21529b30a595be285e93c82143c14bdac1b900ad121ff379740111460bf587",
+ "counts": {
+  "calibration": {
+   "convert_words": 2831,
+   "families": 815,
+   "hard_keep_words": 1058,
+   "keep_words": 4311,
+   "rows": 12933,
+   "words": 4311,
+   "words_by_class": {
+    "en:address": 75,
+    "en:frequent": 249,
+    "en:name": 131,
+    "en:rare": 600,
+    "en:short_term": 405,
+    "en:sign_led": 400,
+    "en:term": 600,
+    "en:unknown": 400,
+    "ru:english_keys": 122,
+    "ru:frequent": 198,
+    "ru:name": 131,
+    "ru:rare": 600,
+    "ru:unknown": 400
+   }
+  },
+  "development": {
+   "convert_words": 2792,
+   "families": 835,
+   "hard_keep_words": 995,
+   "keep_words": 4196,
+   "rows": 12588,
+   "words": 4196,
+   "words_by_class": {
+    "en:address": 20,
+    "en:frequent": 249,
+    "en:name": 132,
+    "en:rare": 600,
+    "en:short_term": 384,
+    "en:sign_led": 400,
+    "en:term": 600,
+    "en:unknown": 400,
+    "ru:english_keys": 79,
+    "ru:frequent": 195,
+    "ru:name": 137,
+    "ru:rare": 600,
+    "ru:unknown": 400
+   }
+  },
+  "train": {
+   "convert_words": 9755,
+   "families": 4306,
+   "hard_keep_words": 4005,
+   "keep_words": 14007,
+   "rows": 42021,
+   "words": 14007,
+   "words_by_class": {
+    "en:address": 252,
+    "en:frequent": 1500,
+    "en:name": 750,
+    "en:rare": 1500,
+    "en:short_term": 1000,
+    "en:sign_led": 1500,
+    "en:term": 1500,
+    "en:unknown": 750,
+    "ru:english_keys": 755,
+    "ru:frequent": 1500,
+    "ru:name": 750,
+    "ru:rare": 1500,
+    "ru:unknown": 750
+   }
+  }
+ },
+ "families": {
+  "calibration": 815,
+  "development": 835,
+  "train": 4306
+ },
+ "family_overlap": 0,
+ "generator_sha256": "c4bc4e7a5212b6b73d8f7e807f6c9d207cc3fc648d534e2612f2c62a3186a8a0",
+ "held_out": {
+  "aliases": 25895,
+  "file": "held-out.json.gz",
+  "files": 35,
+  "sha256": "61d07a298f4c8e9f35337aef831149ec6f9a624e88f8b5b5f9e863081ea1cb09",
+  "words": 8368
+ },
+ "kind": "prefix-words",
+ "labels": "made by the trainer from each row: a paired word typed as meant is kept at every length; typed in the other layout it converts from the recipe's number of letters, and waits before it, while the typed prefix continues a word of the typed layout's lexicon or a known term; every other row is kept",
+ "rows": {
+  "calibration": 12933,
+  "development": 12588,
+  "train": 42021
+ },
+ "schema_version": 2,
+ "scope": "Words of pinned public sources typed in the other layout and as meant, and real tokens typed as meant, for the prefix model. Words come from the training split of the frozen base corpus (UD treebanks and Debian commands; their families are in every later holdout's base exclusions) and from the CC0 Tatoeba snapshot (previously exposed to every holdout); terms from the tree's identifier lexicon, protected tokens and the Latin column of the term table. The focus words of the development samples held out at the freeze are left out by their physical aliases. Physical families (first three keys) split by hash into train, development and calibration; there is no test split: the pair's sealed test is the holdout freeze. Epoch selected on development, threshold on calibration.",
+ "sha256": {
+  "calibration": "40f6f90b7649055a0afc91ffa4297caeaf4cd11738670f062ff5dc06c38cece6",
+  "development": "6f73d66f715fe17203c13893f72b124ce1c478e71eeef56e2072be4157f70261",
+  "train": "7c92f6211c4affb0271da1621a15bc300be04181ea0d32a5312d6222f20ee3ab"
+ },
+ "situations": "each word in three of four situations drawn by hash (an empty field of unknown role, Russian text, English text, a code comment); an address part in its own sentence and two of the four; one application for every row",
+ "sources": [
+  {
+   "gives": "word counts (frequent, rare and unknown words) and the phrases put before a word",
+   "license": "CC0 1.0",
+   "name": "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz",
+   "pin": "Tatoeba CC0 export of 2026-08-29 (model/context_v2/sources/README.md)",
+   "sha256": "1f7df948b946f1d1aed5efd2a83a9a5a09d2b8abcb9224045b40c9ec6720e793"
+  },
+  {
+   "gives": "treebank words and names (PROPN), Debian commands, address parts of UD_English-EWT",
+   "license": "UD_English-EWT and UD_Russian-Taiga CC BY-SA 4.0, UD_Russian-SynTagRus CC BY-NC-SA 4.0 (their LICENSE.txt at the pinned commits); Debian file names: the Contents index states no license",
+   "name": "base corpus keyswitch:context-action-v3:20261001-public-v11, training split",
+   "pin": "train.jsonl.gz of the frozen base; treebanks UD_Russian-Taiga@d1e48cd29c1f19b6aad1aec361d9f724db764f66, UD_English-EWT@b7711cce01cdd4f5fcc0a8199b8a50d951b16c0c, UD_Russian-SynTagRus@6377522610550b696fcc70d39074d2ce03da0e7b; Debian trixie main amd64 Contents",
+   "sha256": "217cb49797665c84a3fcbec376c4a8dd81b607ede6f9bbe6df3c75befaf56532"
+  },
+  {
+   "gives": "terms and short terms",
+   "license": "the Contents index states no license",
+   "name": "resources/identifiers.json",
+   "pin": "Debian trixie main amd64 Contents (its source block)",
+   "sha256": "ee78e0bfd679817fff89894cdeec6c91ffea30a36e19d60479da5efe3b976601"
+  },
+  {
+   "gives": "terms and short terms",
+   "license": "the project's",
+   "name": "resources/protected_tokens.txt",
+   "pin": "this tree",
+   "sha256": "40dc37014ece76bf70a3e68c6e55cdf5a196b99619f29b441b2066df634fd740"
+  },
+  {
+   "gives": "Latin tokens of Russian technical text: terms and short terms",
+   "license": "CC BY-SA 4.0",
+   "name": "resources/models/context-term-frequency.json (latin)",
+   "pin": "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5, training split",
+   "sha256": "4d3afe98dc9382bc6d6e541c613eecd9645f989cd51850e3218479aabbbd6db1"
+  },
+  {
+   "gives": "whether the onboard lexicon knows a form (rare or unknown)",
+   "license": "model/intent_v1/sources/COPYRIGHT.onboard-data",
+   "name": "model/intent_v1/sources/*.lm, resources/lexicon-supplement-ru_RU.json",
+   "pin": "model/intent_v1/config.json",
+   "sha256": "2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd"
+  },
+  {
+   "gives": "which Russian words read like English by their keys",
+   "license": "the project's",
+   "name": "resources/models/ortho_v1.json",
+   "pin": "this tree",
+   "sha256": "beec9eaafcedce6062e27f294a5f7ac4193f2c744c341ea7c303c99d4b1583b5"
+  }
+ ]
+}

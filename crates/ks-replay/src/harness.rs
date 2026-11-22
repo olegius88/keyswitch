@@ -724,6 +724,11 @@ impl Bundle {
         &self.models
     }
 
+    /// Another prefix model for the engines built after this: a replay of a candidate, or a test of a schema.
+    pub fn set_prefix_model(&mut self, model: Option<Arc<VersionedPrefixModel>>) {
+        self.prefix_model = model;
+    }
+
     /// `Field(app, group, text)`: a new engine and a new clock over the shared models.
     pub fn session(&mut self, application: &str, group: i32, text: Vec<char>) -> Session {
         let backend = Arc::new(Backend::new(application, group, text));

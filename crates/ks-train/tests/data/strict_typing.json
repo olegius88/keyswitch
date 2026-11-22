@@ -510,7 +510,7 @@
      "value_tokens": 57
     },
     "src/evaluate.rs": {
-     "literal_compares": 9,
+     "literal_compares": 4,
      "string_key_index": 15,
      "value_tokens": 40
     },
@@ -618,8 +618,8 @@
     },
     "src/prefix.rs": {
      "literal_compares": 5,
-     "string_key_index": 13,
-     "value_tokens": 49
+     "string_key_index": 11,
+     "value_tokens": 48
     },
     "src/prefix_corpus.rs": {
      "string_key_index": 6,
@@ -897,9 +897,9 @@
      "value_tokens": 32
     }
    },
-   "literal_compares": 255,
-   "string_key_index": 2817,
-   "value_tokens": 3723
+   "literal_compares": 250,
+   "string_key_index": 2815,
+   "value_tokens": 3722
   },
   "ks-ui": {
    "expect_roots": 1,

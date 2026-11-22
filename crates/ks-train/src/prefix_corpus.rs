@@ -36,7 +36,7 @@ const CONVERT: i64 = 1;
 const WAIT: i64 = 2;
 const CONFIG: &str = "model/prefix_v1/config.json";
 
-fn family(word: &str, group: i64) -> String {
+pub(crate) fn family(word: &str, group: i64) -> String {
     let physical = if group == 1 { pair().translate(word, "ru", "us").expect("layouts") } else { word.to_owned() };
     pystr::casefold(&physical).replace('`', "t").chars().take(FAMILY_KEY_CHARACTERS).collect()
 }
@@ -48,7 +48,7 @@ fn split_for(signature: &str, namespace: &str) -> &'static str {
 }
 
 /// `WORDS.finditer`: `[^\W_]+(?:['’\-][^\W_]+)*`, as (first character, word).
-fn word_matches(characters: &[char]) -> Vec<(usize, String)> {
+pub(crate) fn word_matches(characters: &[char]) -> Vec<(usize, String)> {
     let letter = |character: char| character != '_' && pystr::isalnum(character.encode_utf8(&mut [0; 4]));
     let mut matches = Vec::new();
     let mut index = 0;

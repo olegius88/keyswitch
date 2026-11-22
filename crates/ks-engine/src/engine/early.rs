@@ -5,6 +5,8 @@ use super::*;
 use ks_backend::constants::FIELD_CONTEXT_MAX_CHARACTERS;
 use ks_context::context_policy::{caret_lag, typed_short_of};
 use ks_context::prefix_model::{PrefixInput, PrefixSide};
+use ks_context::prefix_schema::PrefixReaders;
+use ks_context::prefix_terms::PrefixTerms;
 use ks_context::typo_correction::{corrected_keys, known_elsewhere, written_section};
 use ks_lang::early_switch::{early_switch_decision, EarlySwitchDecision, EarlySwitchPolicy, PrefixScorer};
 use serde_json::json;
@@ -228,8 +230,11 @@ impl EngineCore {
             && self.in_models(0)
             && self.in_models(1)
             && self.prefix_indexes.len() > 1;
-        let (Some(model), Some(field), true) = (self.prefix_model.as_ref(), field, supported) else {
-            let reason = if self.prefix_model.is_none() { "prefix_model_unavailable" } else { "prefix_input_unsupported" };
+        // A schema that reads the keys with the orthotactic models, or the term lists, answers only beside them.
+        let terms = self.prefix_model.as_ref().filter(|model| model.needs_terms()).and_then(|_| self.prefix_terms());
+        let usable = self.prefix_model.as_ref().filter(|model| prefix_model_usable(model, self.context_policy.ortho.is_some(), terms.is_some()));
+        let (Some(model), Some(field), true) = (usable, field, supported) else {
+            let reason = if usable.is_none() { "prefix_model_unavailable" } else { "prefix_input_unsupported" };
             let result = if mode == "assist" { EarlySwitchDecision { should_switch: false, reason: reason.to_owned(), ..baseline } } else { baseline };
             return Ok((result, EARLY_SWITCH_CONFIDENCE));
         };
@@ -243,10 +248,11 @@ impl EngineCore {
             source_group: baseline.source_group,
             field: field.clone(),
         };
-        let prediction = model.predict(&item, [&sides[0], &sides[1]])?;
+        let readers = PrefixReaders { ortho: self.context_policy.ortho.as_deref(), terms: terms.as_deref() };
+        let prediction = model.predict_with_readers(&item, [&sides[0], &sides[1]], readers)?;
         let action = prediction.action.as_str();
         technical_event!(
-            self.shared, "prefix_decision", "action": action, "score": logged(prediction.probability),
+            self.shared, "prefix_decision", "action": action, "score": logged(prediction.probability), "threshold": logged(model.threshold_for(baseline.source_group)),
             "model_version": prediction.model_version, "mode": mode, "baseline_convert": baseline.should_switch,
             "policy_applied": mode == "assist", "decision_source": if mode == "assist" { "prefix_model" } else { "prefix_index" },
             "final_action": if mode == "assist" { action } else if baseline.should_switch { "convert" } else { "wait" },
@@ -259,6 +265,20 @@ impl EngineCore {
         }
         let reason = format!("префиксная модель: {action}");
         Ok((EarlySwitchDecision { should_switch: action == "convert", reason, ..baseline }, prediction.probability))
+    }
+
+    /// The term lists a prefix model of schema four reads: the identifier lexicon, the protected tokens and the term table,
+    /// without the tokens whose keys read as a word of the other layout's lexicon; none without the lexicon or the table.
+    pub fn prefix_terms(&self) -> Option<Arc<PrefixTerms>> {
+        self.prefix_terms
+            .get_or_init(|| {
+                let tables = self.term_frequency().ok()?;
+                let identifiers = self.context_policy.shared_identifiers()?;
+                let models = (self.models.first()?, self.models.get(1)?);
+                let known = |word: &str, group: i64| if group == 1 { models.1.frequencies.contains(word) } else { models.0.frequencies.contains(word) };
+                Some(Arc::new(PrefixTerms::build(identifiers.identifiers.iter(), self.detector.protected_tokens.iter(), tables.term("latin"), tables.term("cyrillic"), known)))
+            })
+            .clone()
     }
 
     /// Extend a scheduled early switch with letters typed before release.
@@ -632,9 +652,16 @@ impl EngineCore {
     }
 }
 
+/// Whether a prefix model answers with what the engine has: a schema that reads the orthotactic models or the term lists
+/// answers only beside them.
+fn prefix_model_usable(model: &VersionedPrefixModel, ortho: bool, terms: bool) -> bool {
+    (!model.needs_ortho() || ortho) && (!model.needs_terms() || terms)
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use super::*;
     use std::io::{Error, ErrorKind};
 
     #[test]
@@ -646,16 +673,15 @@ mod tests {
             (ErrorKind::IsADirectory, "IsADirectoryError"),
             (ErrorKind::TimedOut, "OSError"),
         ] {
-            assert_eq!(super::os_error_name(&Error::from(kind)), name);
+            assert_eq!(os_error_name(&Error::from(kind)), name);
         }
     }
 
     #[test]
     fn a_kept_field_is_the_one_a_read_at_more_letters_would_give() {
-        use super::{EarlyField, FieldContext};
         let mut field = FieldContext::new("app", "1");
         field.before = "abcdef".to_owned();
-        let kept = |full| EarlyField { first: std::sync::Arc::new(ks_backend::KeyEvent::default()), field: field.clone(), letters: 4, full };
+        let kept = |full| EarlyField { first: Arc::new(KeyEvent::default()), field: field.clone(), letters: 4, full };
         // Text before the word that filled what a read keeps loses a character at its start for every letter typed since.
         assert_eq!(kept(true).at(6).map(|field| field.before).as_deref(), Some("cdef"));
         assert_eq!(kept(true).at(4).map(|field| field.before).as_deref(), Some("abcdef"));
@@ -663,5 +689,19 @@ mod tests {
         assert_eq!(kept(false).at(6).map(|field| field.before).as_deref(), Some("abcdef"));
         // A word shorter than at the read would show text that was not kept: it is read again.
         assert!(kept(true).at(3).is_none());
+    }
+
+    /// A model of a schema whose only weight is the bias.
+    fn model(feature_version: i64) -> VersionedPrefixModel {
+        let weights = ks_context::flat_table::WeightTable::from_entries(vec![("bias", [0.0, 1.0, 0.0, 0.0])]);
+        let model = ks_context::prefix_model::PrefixModel { weights, version: format!("prefix-v{feature_version}-000000000000"), conversion_threshold: 0.99 };
+        VersionedPrefixModel { model, feature_version, thresholds: None }
+    }
+
+    #[test]
+    fn a_prefix_model_answers_only_beside_what_its_schema_reads() {
+        assert!(prefix_model_usable(&model(2), false, false));
+        assert!(!prefix_model_usable(&model(3), false, true) && prefix_model_usable(&model(3), true, false));
+        assert!(!prefix_model_usable(&model(4), true, false) && !prefix_model_usable(&model(4), false, true) && prefix_model_usable(&model(4), true, true));
     }
 }
