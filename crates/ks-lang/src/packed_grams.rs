@@ -5,10 +5,18 @@
 //! model's dicts; here the channels are built packed from the start, so `pack_channels` has nothing left to do. The
 //! artifact stores integers and a scale, and a value is `raw / scale` computed when asked, the very float the dict
 //! held, so a gram costs five bytes of key and two of value instead of a float and an object.
+//!
+//! The first codes of a key are not stored either: they number the bucket the key lies in, and the start of each
+//! bucket among the sorted keys is kept instead. A key of five codes costs three bytes so, and the binary search runs
+//! inside its bucket.
 
 use ks_cast::To as _;
 use crate::constants::{PACKED_GRAM_KEY_BYTES, PACKED_GRAM_LAST_CODE, PACKED_GRAM_MAX_CHARACTERS, PACKED_GRAM_MIN_ENTRIES};
 use crate::tables::{TableBuilder, WordTable};
+
+/// How many leading codes of a key at most number its bucket instead of being stored. Declared here and not in
+/// `constants.rs`: that file is pinned by the seals of the intent, boundary and orthotactic models.
+const BUCKET_CODES: usize = 2;
 
 #[derive(Clone, Debug)]
 enum GramValues {
@@ -23,9 +31,38 @@ pub struct PackedGrams {
     /// Sorted; every character the table holds has a code from 1, its position plus one.
     alphabet: Vec<char>,
     width: usize,
+    /// How many leading codes of a key number its bucket.
+    lead: usize,
+    /// `starts[bucket]..starts[bucket + 1]` are the entries of a bucket; a bucket is the number its leading codes
+    /// write in base `alphabet.len() + 1`.
+    starts: Vec<u32>,
+    /// The codes after the leading ones, `width - lead` of them per entry, in the order of the full keys.
     keys: Vec<u8>,
     values: GramValues,
     scale: f64,
+}
+
+/// Sorted full keys of `width` codes split into the buckets of their leading codes and the codes after them. As many
+/// leading codes number the bucket as there are entries for buckets of that size, up to `BUCKET_CODES`.
+fn bucketed(alphabet_len: usize, width: usize, full: &[u8]) -> (usize, Vec<u32>, Vec<u8>) {
+    let count = full.len() / width;
+    let base = alphabet_len + 1;
+    let mut lead = 0;
+    while lead < BUCKET_CODES.min(width) && base.pow((lead + 1).to::<u32>()) <= count {
+        lead += 1;
+    }
+    let buckets = base.pow(lead.to::<u32>());
+    let mut starts = vec![0_u32; buckets + 1];
+    let mut keys = Vec::with_capacity(count * (width - lead));
+    for key in full.chunks_exact(width) {
+        let bucket = key[..lead].iter().fold(0, |number, &code| number * base + usize::from(code));
+        starts[bucket + 1] += 1;
+        keys.extend_from_slice(&key[lead..]);
+    }
+    for bucket in 0..buckets {
+        starts[bucket + 1] += starts[bucket];
+    }
+    (lead, starts, keys)
 }
 
 /// The sorted keys of a table and, for each, the position of the entry that holds it (the last of equal grams).
@@ -120,7 +157,15 @@ impl PackedGrams {
             return None;
         }
         let values = sorted.winners.iter().map(|&index| table[index.to::<usize>()].1).collect();
-        Some(PackedGrams { alphabet: sorted.alphabet, width: sorted.width, keys: sorted.keys, values: GramValues::Float(values), scale: 1.0 })
+        Some(PackedGrams::new(sorted, GramValues::Float(values)))
+    }
+
+    /// The table of sorted keys and the values of their entries, its keys split into buckets.
+    fn new(sorted: SortedKeys, values: GramValues) -> PackedGrams {
+        let (lead, starts, mut keys) = bucketed(sorted.alphabet.len(), sorted.width, &sorted.keys);
+        drop(sorted.keys);
+        keys.shrink_to_fit();
+        PackedGrams { alphabet: sorted.alphabet, width: sorted.width, lead, starts, keys, values, scale: 1.0 }
     }
 
     fn get_index(&self, gram: &[char]) -> Option<usize> {
@@ -132,11 +177,14 @@ impl PackedGrams {
         for (byte, c) in key[start..self.width].iter_mut().zip(gram) {
             *byte = (self.alphabet.binary_search(c).ok()?).to::<u8>() + 1;
         }
-        let key = &key[..self.width];
-        let (mut low, mut high) = (0, self.len());
+        let base = self.alphabet.len() + 1;
+        let bucket = key[..self.lead].iter().fold(0, |number, &code| number * base + usize::from(code));
+        let rest = &key[self.lead..self.width];
+        let size = self.width - self.lead;
+        let (mut low, mut high) = (self.starts[bucket].to::<usize>(), self.starts[bucket + 1].to::<usize>());
         while low < high {
             let middle = low + (high - low) / 2;
-            match self.keys[middle * self.width..(middle + 1) * self.width].cmp(key) {
+            match self.keys[middle * size..(middle + 1) * size].cmp(rest) {
                 std::cmp::Ordering::Less => low = middle + 1,
                 std::cmp::Ordering::Greater => high = middle,
                 std::cmp::Ordering::Equal => return Some(middle),
@@ -166,19 +214,29 @@ impl PackedGrams {
     /// `len(table)`.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.keys.len() / self.width
+        self.starts.last().map_or(0, |&count| count.to::<usize>())
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
+        self.len() == 0
     }
 
     /// The grams in the order of their keys (shorter ones first), with their values.
     pub fn iter(&self) -> impl Iterator<Item = (String, f64)> + '_ {
-        self.keys.chunks_exact(self.width).enumerate().map(|(index, key)| {
-            let gram = key.iter().filter(|&&code| code != 0).map(|&code| self.alphabet[code.to::<usize>() - 1]).collect();
-            (gram, self.value(index))
+        let (base, size) = (self.alphabet.len() + 1, self.width - self.lead);
+        (0..self.starts.len() - 1).flat_map(move |bucket| {
+            let mut leading = vec![0_u8; self.lead];
+            let mut number = bucket;
+            for code in leading.iter_mut().rev() {
+                *code = (number % base).to::<u8>();
+                number /= base;
+            }
+            (self.starts[bucket].to::<usize>()..self.starts[bucket + 1].to::<usize>()).map(move |index| {
+                let rest = &self.keys[index * size..(index + 1) * size];
+                let gram = leading.iter().chain(rest).filter(|&&code| code != 0).map(|&code| self.alphabet[code.to::<usize>() - 1]).collect();
+                (gram, self.value(index))
+            })
         })
     }
 
@@ -201,7 +259,7 @@ impl GramTable {
             } else {
                 GramValues::Int(picked.collect())
             };
-            GramTable::Packed(PackedGrams { alphabet: sorted.alphabet, width: sorted.width, keys: sorted.keys, values, scale: 1.0 })
+            GramTable::Packed(PackedGrams::new(sorted, values))
         } else {
             let mut builder = TableBuilder::new();
             let mut longest = 0;
@@ -320,6 +378,41 @@ mod tests {
         seven.push(("abcdefg", -2.5));
         assert_eq!(PackedGrams::pack(&seven).unwrap().get("abcdefg"), Some(-2.5));
         assert!(PackedGrams::pack(&[]).is_none());
+    }
+
+    #[test]
+    fn keys_split_into_buckets_answer_as_whole_keys() {
+        // Eight letters: grams of one to three letters, 584 of them, more than the 81 buckets of two leading codes.
+        let letters: Vec<char> = ('a'..='h').collect();
+        let mut grams: Vec<String> = letters.iter().map(char::to_string).collect();
+        for &a in &letters {
+            for &b in &letters {
+                grams.push(format!("{a}{b}"));
+                for &c in &letters {
+                    grams.push(format!("{a}{b}{c}"));
+                }
+            }
+        }
+        let raw: Vec<i32> = (0..grams.len().to::<i32>()).map(|value| value * 3 - 700).collect();
+        let table = GramTable::from_raw(grams.iter().map(String::as_str), &raw);
+        let packed = table.packed().unwrap();
+        assert_eq!((packed.lead, packed.len()), (2, grams.len()));
+        for (gram, &value) in grams.iter().zip(&raw) {
+            assert_eq!(table.get(gram), Some(f64::from(value)), "{gram}");
+        }
+        for gram in ["i", "ai", "abi", "abcd", "ia", "\u{1d41a}"] {
+            assert_eq!(table.get(gram), None, "{gram}");
+        }
+        // The grams come back in the order of their keys: shorter ones first, then by letters.
+        let mut wanted: Vec<(String, f64)> = grams.iter().cloned().zip(raw.iter().map(|&value| f64::from(value))).collect();
+        wanted.sort_by(|a, b| a.0.chars().count().cmp(&b.0.chars().count()).then_with(|| a.0.cmp(&b.0)));
+        assert_eq!(packed.iter().collect::<Vec<_>>(), wanted);
+        // Fewer grams than buckets of one leading code: one bucket holds the whole keys.
+        let single = GramTable::from_raw(["b", "a", "c"].into_iter(), &[1, 2, 3]);
+        let packed = single.packed().unwrap();
+        assert_eq!((packed.lead, packed.width, packed.len()), (0, 1, 3));
+        assert_eq!((single.get("a"), single.get("c"), single.get("d")), (Some(2.0), Some(3.0), None));
+        assert_eq!(packed.iter().map(|entry| entry.0).collect::<Vec<_>>(), ["a", "b", "c"]);
     }
 
     #[test]

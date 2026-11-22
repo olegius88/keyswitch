@@ -55,8 +55,34 @@ fn trim_heap() -> bool {
     unsafe { libc::malloc_trim(0) != 0 }
 }
 
-/// The clock and system description of the log.
+/// Fixes the size from which glibc maps a block of the heap on its own (`HEAP_MMAP_THRESHOLD_BYTES`): left to itself it
+/// moves the threshold up while the models are read, and the heap of a running program stays larger.
+fn fix_mmap_threshold() {
+    // SAFETY: `mallopt` takes two integers and only sets a parameter of the allocator, under the allocator's own lock.
+    unsafe { libc::mallopt(libc::M_MMAP_THRESHOLD, crate::constants::HEAP_MMAP_THRESHOLD_BYTES) };
+}
+
+/// GTK opens OpenGL together with the display, to choose the visual of its windows, though the program spends most of
+/// its life with no window at all: on a desktop with the nvidia driver `gtk::init` alone took 15 MiB of private memory
+/// and mapped 85 MiB of GL libraries. The windows are drawn by GTK's cairo renderer instead, unless the user switched
+/// OpenGL themselves or chose a renderer that needs it.
+fn keep_gtk_off_opengl() {
+    use crate::constants::{GTK_GL_OFF, GTK_GL_OFF_BEFORE_SWITCH, GTK_GL_SWITCH_MINOR_VERSION, GTK_RENDERER_VARIABLE, GTK_RENDERER_WITHOUT_GL};
+    let chosen = [GTK_GL_OFF.0, GTK_GL_OFF_BEFORE_SWITCH.0].iter().any(|name| std::env::var_os(name).is_some());
+    let renderer_needs_gl = std::env::var(GTK_RENDERER_VARIABLE).is_ok_and(|renderer| renderer != GTK_RENDERER_WITHOUT_GL);
+    if chosen || renderer_needs_gl {
+        return;
+    }
+    let (name, value) = if gtk::minor_version() >= GTK_GL_SWITCH_MINOR_VERSION { GTK_GL_OFF } else { GTK_GL_OFF_BEFORE_SWITCH };
+    // SAFETY: called from `install`, at the start of `main`, before the program starts a thread that could read the
+    // environment.
+    unsafe { std::env::set_var(name, value) };
+}
+
+/// The clock and system description of the log, the heap's mapping threshold and GTK's OpenGL.
 pub fn install() {
+    fix_mmap_threshold();
+    keep_gtk_off_opengl();
     ks_config::memory_release::set_trim_hook(trim_heap);
     logsetup::set_local_clock(local_time);
     logsetup::set_platform_description(&platform_description());
