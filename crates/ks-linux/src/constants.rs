@@ -71,3 +71,9 @@ pub const XKB_RULES_NAMES_ATOM: &[u8] = b"_XKB_RULES_NAMES";
 pub const XKB_RULES_NAMES_MAX_WORDS: u32 = 1024;
 pub const GNOME_INPUT_SOURCES_SCHEMA: &str = "org.gnome.desktop.input-sources";
 pub const GNOME_XKB_OPTIONS_KEY: &str = "xkb-options";
+
+/// Blocks of the C heap from this size up are mapped on their own and handed back to the system when freed. glibc
+/// starts with this threshold and raises it to the size of each larger block freed (`man 3 mallopt`), so the tables a
+/// start reads and drops pushed later model tables into the heap, where they stayed as holes; set once, the threshold
+/// no longer moves.
+pub const HEAP_MMAP_THRESHOLD_BYTES: i32 = 128 * 1024;

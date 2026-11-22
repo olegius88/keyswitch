@@ -55,8 +55,16 @@ fn trim_heap() -> bool {
     unsafe { libc::malloc_trim(0) != 0 }
 }
 
-/// The clock and system description of the log.
+/// Fixes the size from which glibc maps a block of the heap on its own (`HEAP_MMAP_THRESHOLD_BYTES`): left to itself it
+/// moves the threshold up while the models are read, and the heap of a running program stays larger.
+fn fix_mmap_threshold() {
+    // SAFETY: `mallopt` takes two integers and only sets a parameter of the allocator, under the allocator's own lock.
+    unsafe { libc::mallopt(libc::M_MMAP_THRESHOLD, crate::constants::HEAP_MMAP_THRESHOLD_BYTES) };
+}
+
+/// The clock and system description of the log, and the heap's mapping threshold.
 pub fn install() {
+    fix_mmap_threshold();
     ks_config::memory_release::set_trim_hook(trim_heap);
     logsetup::set_local_clock(local_time);
     logsetup::set_platform_description(&platform_description());
