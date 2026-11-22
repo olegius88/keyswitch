@@ -342,14 +342,57 @@ pub fn layout_direction(source_group: i64, target_group: i64) -> Result<LayoutDi
     }
 }
 
+/// The weights of the buckets with the zeros left out: a bit per bucket says whether its weight is other than zero,
+/// those weights lie in the order of their buckets, and the count of them before each word of bits finds a bucket's
+/// place among them. Two of three weights of the packaged model are zero: its two million buckets take 1.7 MiB so, and
+/// 4 MiB as the file holds them. A bucket answers the weight the file holds for it.
+struct SparseWeights {
+    present: Vec<u64>,
+    before: Vec<u32>,
+    values: Vec<i16>,
+}
+
+impl SparseWeights {
+    /// The weights of a payload that opens with `dimension` little-endian `i16`s.
+    fn new(payload: &[u8], dimension: usize) -> SparseWeights {
+        let word_bits = u64::BITS.to::<usize>();
+        let mut present = vec![0_u64; dimension.div_ceil(word_bits)];
+        let mut before = Vec::with_capacity(present.len());
+        let mut values = Vec::new();
+        for (bucket, bytes) in payload[..dimension * KSLM_WEIGHT_ENTRY_BYTES].as_chunks::<KSLM_WEIGHT_ENTRY_BYTES>().0.iter().enumerate() {
+            if bucket % word_bits == 0 {
+                before.push(values.len().to::<u32>());
+            }
+            let weight = i16::from_le_bytes(*bytes);
+            if weight != 0 {
+                present[bucket / word_bits] |= 1 << (bucket % word_bits);
+                values.push(weight);
+            }
+        }
+        values.shrink_to_fit();
+        SparseWeights { present, before, values }
+    }
+
+    /// The weight of a bucket below the dimension.
+    fn get(&self, bucket: usize) -> i16 {
+        let word_bits = u64::BITS.to::<usize>();
+        let (word, bit) = (bucket / word_bits, bucket % word_bits);
+        let bits = self.present[word];
+        if bits >> bit & 1 == 0 {
+            return 0;
+        }
+        self.values[self.before[word].to::<usize>() + (bits & ((1 << bit) - 1)).count_ones().to::<usize>()]
+    }
+}
+
 /// Immutable KSLM v4 model with direction-calibrated inference.
 pub struct LinearNgramModel {
     pub dimension: i64,
-    /// The whole file: the weights and the fingerprints are read from `payload_start` on, in place.
-    data: Vec<u8>,
-    manifest_start: usize,
-    payload_start: usize,
-    fingerprint_count: usize,
+    /// The manifest as the file holds it: `metadata` is parsed from it on demand.
+    manifest: Vec<u8>,
+    weights: SparseWeights,
+    /// The supported fingerprints, sorted.
+    fingerprints: Vec<u64>,
     pub weight_scale: f64,
     pub bias: f64,
     /// By `LayoutDirection::index`.
@@ -382,34 +425,19 @@ impl LinearNgramModel {
     /// `metadata`: training diagnostics, parsed from the manifest on demand.
     #[must_use]
     pub fn metadata(&self) -> Value {
-        let manifest: Value = serde_json::from_slice(&self.data[self.manifest_start..self.payload_start]).expect("the manifest was validated");
+        let manifest: Value = serde_json::from_slice(&self.manifest).expect("the manifest was validated");
         manifest.get("metadata").cloned().unwrap_or_else(|| Value::Object(serde_json::Map::new()))
     }
 
     /// `weights[bucket]`.
     #[must_use]
     pub fn weight(&self, bucket: usize) -> i16 {
-        let at = self.payload_start + bucket * KSLM_WEIGHT_ENTRY_BYTES;
-        i16::from_le_bytes([self.data[at], self.data[at + 1]])
-    }
-
-    fn fingerprint(&self, index: usize) -> u64 {
-        let at = self.payload_start + self.dimension.to::<usize>() * KSLM_WEIGHT_ENTRY_BYTES + index * KSLM_FINGERPRINT_ENTRY_BYTES;
-        u64::from_le_bytes(self.data[at..at + KSLM_FINGERPRINT_ENTRY_BYTES].try_into().expect("eight bytes"))
+        self.weights.get(bucket)
     }
 
     /// `bisect_left` and an equality test.
     fn is_supported(&self, fingerprint: u64) -> bool {
-        let (mut low, mut high) = (0, self.fingerprint_count);
-        while low < high {
-            let middle = usize::midpoint(low, high);
-            if self.fingerprint(middle) < fingerprint {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-        low < self.fingerprint_count && self.fingerprint(low) == fingerprint
+        self.fingerprints.binary_search(&fingerprint).is_ok()
     }
 
     pub fn predict(&self, evidence: &IntentModelInput<'_>) -> Result<LinearPrediction, LoadError> {
@@ -606,6 +634,9 @@ fn decode_container(data: Vec<u8>, source_path: Option<PathBuf>) -> Result<Linea
     if (1..fingerprint_count).any(|index| entry(index - 1) >= entry(index)) {
         return Err(format_error("KSLM supported fingerprints must be sorted and unique"));
     }
+    let fingerprints: Vec<u64> = (0..fingerprint_count).map(entry).collect();
+    let weights = SparseWeights::new(payload, dimension);
+    let manifest = manifest_bytes.to_vec();
 
     let checksum = sha256_hex(&data);
     let mut thresholds = [[0.0; 2]; 6];
@@ -616,10 +647,9 @@ fn decode_container(data: Vec<u8>, source_path: Option<PathBuf>) -> Result<Linea
     }
     Ok(LinearNgramModel {
         dimension: dimension.to::<i64>(),
-        data,
-        manifest_start,
-        payload_start,
-        fingerprint_count,
+        manifest,
+        weights,
+        fingerprints,
         weight_scale,
         bias,
         platt_calibration: platt,
