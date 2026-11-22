@@ -259,6 +259,29 @@ fn an_installed_pair_changed_during_a_replay_stops_its_report() {
     assert!(installed_unchanged_since(&root, &reference).is_err());
 }
 
+/// A prefix seal names the thresholds of the two directions its model has, and no others.
+#[test]
+fn a_prefix_seal_names_the_thresholds_its_model_has() {
+    let folder = scratch("evaluate-seal-thresholds");
+    let weights = r#"{"bias":[0,1,0,0]}"#;
+    let sum = digest(weights.as_bytes());
+    let version = format!("prefix-v2-{}", sum.get(..12).expect("a digest"));
+    let model = folder.join("model.json");
+    let text = format!(
+        r#"{{"actions":["keep","convert","wait","suggest"],"conversion_threshold":0.99,"feature_version":2,"kind":"keyswitch.prefix-policy","prefix_feature_version":2,"version":"{version}","weights":{weights},"weights_sha256":"{sum}"}}"#
+    );
+    std::fs::write(&model, text).expect("a model");
+    let artifact = digest(&std::fs::read(&model).expect("the model"));
+    let seal = |thresholds: &str| {
+        let path = folder.join("seal.json");
+        let text = format!(r#"{{"schema_version":1,"promotion_accepted":false,"independent_test_evaluated":false,"candidate_sha256":"{artifact}","provenance":{{}},"model_version":"{version}","threshold":0.99{thresholds}}}"#);
+        std::fs::write(&path, text).expect("a seal");
+        ks_train::evaluate::validate_prefix_seal(&tree(), &model, &path, false)
+    };
+    assert!(seal("").is_ok());
+    assert!(seal(r#","thresholds":[0.99,0.99]"#).unwrap_err().contains("prefix model thresholds differ from seal"));
+}
+
 /// A prefix candidate of schema four is replayed with the term lists its engines read, built once for each profile.
 #[test]
 fn a_prefix_candidate_of_schema_four_is_replayed_with_its_term_lists() {
@@ -326,4 +349,12 @@ fn a_development_replay_read_back_from_its_cache_writes_the_same_report() {
         .expect("the trainer starts");
     assert!(!sealed.status.success() && String::from_utf8_lossy(&sealed.stderr).contains("without a cache"), "{}", String::from_utf8_lossy(&sealed.stderr));
     assert!(!folder.join("ledger").exists());
+    // A cache that cannot keep a replay stops the evaluation.
+    let locked = scratch("evaluate-cache-locked");
+    let shut = locked.join("cache");
+    std::fs::create_dir_all(&shut).expect("a folder");
+    std::fs::set_permissions(&shut, std::os::unix::fs::PermissionsExt::from_mode(0o555)).expect("read only");
+    let answer = development_replay(&tree(), &locked, &rows, None, &["--cache", &shut.display().to_string()]);
+    std::fs::set_permissions(&shut, std::os::unix::fs::PermissionsExt::from_mode(0o755)).expect("writable again");
+    assert!(!answer.status.success() && String::from_utf8_lossy(&answer.stderr).contains("partial"), "{}", String::from_utf8_lossy(&answer.stderr));
 }

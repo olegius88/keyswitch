@@ -142,6 +142,19 @@ fn own_file(path: &Path, bytes: &[u8]) {
     std::fs::write(path, bytes).expect("a file");
 }
 
+/// A prefix model of a schema whose only weight is the bias, at a value that converts every prefix it is asked about; its
+/// version names itself.
+fn eager_model(path: &Path, feature_version: u8) -> String {
+    let weights = r#"{"bias":[0,40,0,0]}"#;
+    let sum = digest(weights.as_bytes());
+    let version = format!("prefix-v{feature_version}-{}", sum.get(..12).expect("a digest"));
+    let text = format!(
+        r#"{{"actions":["keep","convert","wait","suggest"],"conversion_threshold":0.985,"feature_version":{feature_version},"kind":"keyswitch.prefix-policy","prefix_feature_version":{feature_version},"version":"{version}","weights":{weights},"weights_sha256":"{sum}"}}"#
+    );
+    std::fs::write(path, text).expect("a model");
+    version
+}
+
 const ENGLISH: [&str; 8] = ["people", "garden", "window", "summer", "market", "doctor", "school", "friend"];
 const RUSSIAN: [&str; 8] = ["погода", "дорога", "машина", "работа", "солнце", "письмо", "страна", "голова"];
 
@@ -255,6 +268,12 @@ fn an_installed_prefix_candidate_is_reused_only_when_its_seal_pins_this_tree() {
             assert!(!output.exists());
         }
     }
+    // A seal whose fields are not of their types is no seal of this tree's either.
+    let text = String::from_utf8(std::fs::read(&seal_path).expect("the seal")).expect("text").replacen("\"calibration_passed\":", "\"calibration_passed\":5,\"was\":", 1);
+    own_file(&seal_path, text.as_bytes());
+    let output = scratch("prefix-reuse-untyped").join("out");
+    refused(&prefix_fit(&small, &path, &output, true), "");
+    assert!(!output.exists());
 }
 
 #[test]
@@ -349,6 +368,19 @@ mod words {
         splits: BTreeMap<&'static str, BaseSplit>,
     }
 
+    /// The same, read back to be changed.
+    #[derive(Serialize, Deserialize)]
+    struct ReadManifest {
+        namespace: String,
+        splits: BTreeMap<String, ReadSplit>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct ReadSplit {
+        path: String,
+        sha256: String,
+    }
+
     /// A base corpus of one training split: treebank words, a name, a Debian command and an address.
     fn base(folder: &Path) {
         let row = |original: &'static str, upos: &'static str, source: &'static str, before: &'static str| BaseRow { original, upos, source, before, split: "train", after: "" };
@@ -359,6 +391,19 @@ mod words {
             row("погодой", "NOUN", "UD_Russian-SynTagRus", "Под "),
             row("Тимчука", "PROPN", "UD_Russian-SynTagRus", "у "),
             row("aafire", "X", "Debian-trixie-main-amd64", ""),
+            // Rows that give no word: a command of no lower Latin letters or none at all, a source of no treebank, a word
+            // too short, names not written as names (no capital, a capital inside, a capital of two letters), a word of
+            // no one layout; and an address whose short part is too short.
+            row("Xvfb", "X", "Debian-trixie-main-amd64", ""),
+            row("", "X", "Debian-trixie-main-amd64", ""),
+            row("garden", "NOUN", "Tatoeba", ""),
+            row("an", "DET", "UD_English-EWT", ""),
+            row("kaplan", "PROPN", "UD_English-EWT", ""),
+            row("ДеВито", "PROPN", "UD_Russian-SynTagRus", ""),
+            row("ßtrasse", "PROPN", "UD_English-EWT", ""),
+            row("naïve", "ADJ", "UD_English-EWT", ""),
+            row("http://ab.example.org", "X", "UD_English-EWT", "See "),
+            row("x@yz.com", "X", "UD_English-EWT", "Mail "),
         ];
         std::fs::create_dir_all(folder).expect("a folder");
         let packed = gz(&rows);
@@ -421,12 +466,17 @@ mod words {
     #[test]
     fn a_word_corpus_is_frozen_once_and_verified_byte_for_byte() {
         let small = small_tree("words-freeze", &recipe());
+        // The tree's protected tokens, with a comment and an empty line, which are no tokens.
+        let protected = small.join("resources/protected_tokens.txt");
+        let tokens = std::fs::read_to_string(&protected).expect("the protected tokens");
+        super::own_file(&protected, format!("# a comment\n\n{tokens}").as_bytes());
         let folder = scratch("words-freeze-inputs");
         base(&folder.join("base"));
         let sample = folder.join("development.jsonl.gz");
         std::fs::write(&sample, gz(&[Sample { original: "garden" }])).expect("a sample");
+        // A word listed twice is held out once.
         let list = folder.join("words.txt");
-        std::fs::write(&list, "aafire\n").expect("a list");
+        std::fs::write(&list, "aafire\naafire\n").expect("a list");
         let config_path = folder.join("config.json");
         write(&config_path, &config("model/words-frozen"));
         let on = |extra: &[&str]| {
@@ -463,8 +513,49 @@ mod words {
         let other = scratch("words-freeze-other").join("other");
         refused(&on(&["--hold-out", &sample_text, "--rebuild", &other.display().to_string()]), "the rebuilt word corpus differs from its receipt");
         refused(&on(&["--hold-out", &sample_text, "--freeze", &frozen_text]), "refusing to overwrite");
+        // A freeze into a folder that has its config keeps that one.
+        let kept = small.join("model/words-kept");
+        std::fs::create_dir_all(&kept).expect("a folder");
+        std::fs::write(kept.join("config.json"), "{}").expect("a config");
+        succeeded(&on(&["--hold-out", &sample_text, "--freeze", &kept.display().to_string()]));
+        assert_eq!(std::fs::read_to_string(kept.join("config.json")).expect("the config"), "{}");
         std::fs::write(frozen.join("development.jsonl.gz"), gz(&[Sample { original: "" }])).expect("a split");
         refused(&on(&[]), "1 files of the word corpus differ");
+        assert!(ks_train::prefix_words::read_split(&frozen, "development").unwrap_err().contains("checksum mismatch"));
+        assert!(ks_train::prefix_words::read_split(&frozen, "test").unwrap_err().contains("no such split"));
+        let receipt_bytes = std::fs::read(frozen.join("corpus.json")).expect("the receipt");
+        std::fs::write(frozen.join("corpus.json"), [receipt_bytes.as_slice(), b"\n"].concat()).expect("a receipt");
+        let answer = on(&[]);
+        refused(&answer, "2 files of the word corpus differ");
+        assert!(String::from_utf8_lossy(&answer.stdout).contains("corpus.json: DIFFERS"));
+        // A config of no word corpus, or one without its sign keys.
+        for other in [WordConfig { kind: "other".to_owned(), ..config("model/words-other") }, WordConfig { schema_version: 5, ..config("model/words-other") }] {
+            write(&config_path, &other);
+            refused(&on(&["--hold-out", &sample_text, "--freeze", &small.join("model/words-other").display().to_string()]), "not a word corpus config");
+        }
+        write(&config_path, &WordConfig { sign_leaders: String::new(), ..config("model/words-signs") });
+        refused(&on(&["--hold-out", &sample_text, "--freeze", &small.join("model/words-signs").display().to_string()]), "a word corpus needs sign leaders");
+        // A base whose training split is not the one its manifest names, or holds a row of another split.
+        write(&config_path, &config("model/words-bases"));
+        for (name, digest_changed) in [("changed", true), ("mixed", false)] {
+            let other = folder.join(name);
+            base(&other);
+            let mut manifest: ReadManifest = read(&other.join("manifest.json"));
+            let train = manifest.splits.get_mut("train").expect("a training split");
+            if digest_changed {
+                train.sha256 = "0".repeat(64);
+            } else {
+                let rows = [BaseRow { original: "garden", upos: "NOUN", source: "UD_English-EWT", before: "", split: "development", after: "" }];
+                let packed = gz(&rows);
+                std::fs::write(other.join("train.jsonl.gz"), &packed).expect("a split");
+                train.sha256 = digest(&packed);
+            }
+            write(&other.join("manifest.json"), &manifest);
+            let mut command = trainer();
+            command.arg("prefix-corpus").arg("--tree").arg(&small).arg("--config").arg(&config_path).arg("--base").arg(&other);
+            let answer = command.args(["--hold-out", &sample_text, "--freeze", &small.join("model/words-bases").display().to_string()]).output().expect("the trainer starts");
+            refused(&answer, if digest_changed { "differs from its manifest" } else { "a row of another split" });
+        }
         // A config of schema three names its hard words and its acceptance split, and one of schema two neither.
         write(&config_path, &WordConfig { acceptance_per_mille: None, ..config("model/words-half") });
         refused(&on(&["--hold-out", &sample_text, "--freeze", &small.join("model/words-half").display().to_string()]), "and only one");
@@ -788,6 +879,62 @@ mod words {
         let recipe_path = word_recipe(&small, "words-small-cell", &[("epochs", "2")]);
         let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(scratch("words-unread").join("out")).arg("--development-only").output().expect("the trainer starts");
         refused(&answer, "only a fit by the mean key leaves calibration unread");
+        // A floor no epoch reaches: a model that converts every prefix at its fourth key.
+        let eager = small.join("eager-floor.json");
+        let version = format!("\"{}\"", super::eager_model(&eager, 2));
+        let recipe_path = key_recipe(&small, "words-small-cell", &[("floor_model", "\"eager-floor.json\""), ("floor_model_version", &version), ("learning_rate", "0.0"), ("epochs", "2")]);
+        refused(&fit(&recipe_path, "words-floor-eager"), "no epoch is as early as the installed model in both directions");
+    }
+
+    /// The frames of schemas three and four, read with the orthotactic models and the term lists, closed to a share of the
+    /// training families; the probe of such a model and of one fitted on the prefix-v1 corpus; and what a word corpus, a
+    /// list of known terms and an installed seal may not be.
+    #[test]
+    fn schemas_three_and_four_read_the_orthotactic_models_and_the_term_lists_in_a_fit_and_a_probe() {
+        let small = small_tree("words-schemas", &recipe());
+        small_word_corpus(&small, "words-schemas", false);
+        let recipe_path = word_recipe(&small, "words-schemas", &[("runtime_feature_version", "4"), ("closed_term_families_per_mille", "1000"), ("epochs", "1"), ("minimum_feature_mass", "1.0"), ("support", "\"engine\"")]);
+        let output = scratch("words-schemas-fit").join("out");
+        // Whether its epochs find a threshold or not, the fit makes the frames of schema four, every training family's
+        // without the term lists.
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).args(["--jobs", "2"]).output().expect("the trainer starts");
+        let said = String::from_utf8_lossy(&answer.stdout);
+        assert!(said.contains("train: ") && said.contains("prefix-v2 epoch 1"), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        // Models that convert every prefix: whatever is typed as meant, each word converted once.
+        let list = scratch("words-schemas-list").join("words.txt");
+        std::fs::write(&list, "garden\nпогода\n").expect("a list");
+        for schema in [3, 4] {
+            let model = scratch("words-schemas-models").join(format!("eager-{schema}.json"));
+            super::eager_model(&model, schema);
+            let probed = scratch("words-schemas-probe").join(format!("probe-{schema}.json"));
+            succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&model).arg("--recipe").arg(&recipe_path).arg("--words").arg(&list).arg("--numbers-only").arg("--output").arg(&probed).output().expect("the trainer starts"));
+            let found: Probe = read(&probed);
+            assert_eq!((found.false_words, found.false_texts.len()), ([1, 1], 0), "{schema}");
+        }
+        // A probe of a recipe that names no word corpus reads the prefix-v1 corpus.
+        let plain = scratch("words-schemas-plain").join("probe.json");
+        let installed = small.join("resources/models/prefix_policy_v1.json");
+        succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(small.join("model/prefix_v2/recipe.json")).arg("--split").arg("development").arg("--output").arg(&plain).output().expect("the trainer starts"));
+        refused(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(&recipe_path).arg("--output").arg(&plain).output().expect("the trainer starts"), "one of --split and --words is required");
+        // The parents of a word corpus: of its fitting splits only, and hard when their row says so.
+        let corpus = small.join("model/words-schemas");
+        assert!(ks_train::prefix::load_word_parents(&corpus, "acceptance").unwrap_err().contains("only exposed train/development/calibration"));
+        let hard = small.join("model/words-hard");
+        std::fs::create_dir_all(&hard).expect("a folder");
+        let packed = gz(&[WordRow { hard: true, ..word("погода", 1, Class::Rare, Situation::Empty, "pog") }]);
+        std::fs::write(hard.join("train.jsonl.gz"), &packed).expect("a split");
+        write(&hard.join("corpus.json"), &Pins { kind: "prefix-words", sha256: [("train", digest(&packed))].into_iter().collect() });
+        assert!(ks_train::prefix::load_word_parents(&hard, "train").expect("the parents").iter().all(|parent| parent.hard));
+        // Known terms leave out comments and empty lines of the protected tokens.
+        let resources = scratch("words-schemas-terms");
+        std::fs::write(resources.join("identifiers.json"), r#"{"identifiers": ["Kubectl"]}"#).expect("identifiers");
+        std::fs::write(resources.join("protected_tokens.txt"), "# a comment\n\ngit\n").expect("tokens");
+        assert_eq!(ks_train::prefix::known_terms(&resources).expect("the terms"), ["git", "kubectl"]);
+        // A report of no fit, and an inventory of the corpora named.
+        refused(&trainer().arg("prefix-report").arg("--fit").arg(scratch("words-schemas-nothing")).arg("--output").arg(scratch("words-schemas-report").join("r.json")).output().expect("the trainer starts"), "scores.json.gz");
+        let inventory = scratch("words-schemas-inventory").join("inventory.json");
+        succeeded(&trainer().args(["base", "inventory"]).arg("--tree").arg(&small).arg("--corpus").arg(&corpus).arg("--output").arg(&inventory).output().expect("the trainer starts"));
+        assert!(inventory.is_file());
     }
 }
 
@@ -870,13 +1017,7 @@ mod acceptance {
 
     /// A prefix model of schema four whose only weight is the bias, at a value that converts every prefix it is asked about.
     fn eager_model(path: &Path) {
-        let weights = r#"{"bias":[0,40,0,0]}"#;
-        let sum = digest(weights.as_bytes());
-        let version = format!("prefix-v4-{}", sum.get(..12).expect("a digest"));
-        let text = format!(
-            r#"{{"actions":["keep","convert","wait","suggest"],"conversion_threshold":0.985,"feature_version":4,"kind":"keyswitch.prefix-policy","prefix_feature_version":4,"version":"{version}","weights":{weights},"weights_sha256":"{sum}"}}"#
-        );
-        std::fs::write(path, text).expect("a model");
+        super::eager_model(path, 4);
     }
 
     /// The entry of a key a report must have.

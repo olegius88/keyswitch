@@ -79,6 +79,11 @@ fn schema_four_reads_the_lists_both_readings_scores_and_a_word_at_the_start() {
     let compound = features(&item("gitcntk", "пшесте", 0));
     assert!(compound.keys().any(|name| ["head:term:3", "head:word:3"].contains(&name.as_str())), "{compound:?}");
     assert!(compound.contains_key("head:tail:4") && compound.contains_key("head:tail_term"));
+    // A tail that only begins a term, and a term of a list without counts.
+    let begun = features(&item("gitgith", "пшепшер", 0));
+    assert!(begun.contains_key("head:tail_term"), "{begun:?}");
+    let listed = features(&item("kubectl", "лгиусед", 0));
+    assert!(listed.contains_key("term:typed:exact:identifier") && !listed.contains_key("term:typed:exact:count"), "{listed:?}");
     // An English word at the start, whose tail goes on as English words do.
     let word = features(&item("homework", "рщьуцщкл", 0));
     assert!(word.contains_key("head:word:4") && word.contains_key("head:tail_continues"), "{word:?}");

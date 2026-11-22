@@ -674,7 +674,8 @@ fn packed_rows(split: &SplitFrames, names: &[String], cfg: &Value, mean_one: boo
     // A family's weight is a share of one unit, about a thousandth of a row: AdaGrad's accumulators start at 1 and such
     // gradients never move them, so the optimiser is plain descent with a tiny step. A recipe may scale the split's
     // importance to a mean of one; without the key the importance is the family share, as every sealed recipe has it.
-    if mean_one && !packed.importance.is_empty() {
+    // A split without frames has no mean and nothing to scale.
+    if mean_one {
         let mean = fsum(&packed.importance).expect("finite importance") / packed.importance.len().to::<f64>();
         for value in &mut packed.importance {
             *value /= mean;
@@ -2075,6 +2076,10 @@ mod tests {
         // A direction without words to keep in a profile has no threshold.
         let lacking: Vec<Sequence> = calibration().into_iter().filter(|value| value.desired || value.source == 0 || value.profile == 0).collect();
         assert_eq!(clean_threshold(&lacking, &grid, 1), None);
+        // Nor one without words to convert: calibration then has no threshold for it either.
+        let wanting: Vec<Sequence> = calibration().into_iter().filter(|value| !value.desired || value.source == 0 || value.profile == 0).collect();
+        assert_eq!(clean_threshold(&wanting, &grid, 1), None);
+        assert_eq!((calibrated_direction(&wanting, &grid, 1, 0.985, 0.7), calibrated_direction(&lacking, &grid, 1, 0.985, 0.7)), (None, None));
     }
 
     #[test]

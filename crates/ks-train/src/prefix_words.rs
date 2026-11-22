@@ -457,8 +457,9 @@ pub fn address_parts(token: &str) -> Vec<(String, String)> {
         while index < characters.len() && inside(characters[index]) {
             index += 1;
         }
+        // The part opens with a letter, so the signs that end it are cut before they reach its start.
         let mut end = index;
-        while end > start && !characters[end - 1].is_ascii_alphabetic() {
+        while !characters[end - 1].is_ascii_alphabetic() {
             end -= 1;
         }
         parts.push((characters[start..end].iter().collect(), characters[..start].iter().collect()));
@@ -657,9 +658,8 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
         let mut means: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
         let named = pools.names.keys().map(|(text, group)| (text.as_str(), *group));
         for (text, group) in named.chain(pools.tatoeba.keys().chain(pools.treebank_words.keys()).map(|(text, group)| (text.as_str(), *group))) {
-            if let Some(mean) = own_keys_mean(&ortho, text, group, rule.characters) {
-                means[usize::from(group == 1)].push(mean);
-            }
+            // Every word here has letters, so it has a mean.
+            means[usize::from(group == 1)].extend(own_keys_mean(&ortho, text, group, rule.characters));
         }
         low.cuts = means.map(|mut found| low_keys_cut(&mut found, rule.per_mille));
     }
@@ -720,7 +720,8 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
             continue;
         }
         let class = if term.chars().count() <= 4 { Class::ShortTerm } else { Class::Term };
-        add(Candidate { text: term.clone(), group: 0, class, source: source.clone(), natural: None, hard: class.hard(0) || low.is_low(term, 0) }, &mut chosen);
+        // Typed in Latin, a term of either length is hard as a class.
+        add(Candidate { text: term.clone(), group: 0, class, source: source.clone(), natural: None, hard: class.hard(0) }, &mut chosen);
     }
     for (token, before, source) in &pools.addresses {
         for (part, inside) in address_parts(token) {
@@ -939,9 +940,8 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
             overlap += usize::from(held != *split);
         }
     }
-    if overlap != 0 {
-        return Err("physical families overlap between splits".to_owned());
-    }
+    // A family's split is a draw of its name: no family can be of two.
+    assert_eq!(overlap, 0, "physical families overlap between splits");
     let mut content = BTreeMap::new();
     let mut counts = BTreeMap::new();
     let mut digests = BTreeMap::new();

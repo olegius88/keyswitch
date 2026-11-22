@@ -21,9 +21,7 @@ use flate2::write::GzEncoder;
 use ks_context::VersionedPrefixModel;
 use ks_context::context_model::ContextModel;
 use ks_context::prefix_terms::PrefixTerms;
-use ks_engine::engine::EngineCore;
 use ks_lang::Resources;
-use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_text::{Indent, JsonOptions, pystr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -326,12 +324,10 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
     let counts = sample_counts(&rows);
     let minimums = request.minimums;
     for direction in 0..2 {
-        let (paired, as_meant, other) = (counts[Sample::A1.as_str()].words[direction], &counts[Sample::N2.as_str()], &counts[Sample::N1.as_str()]);
-        if paired < minimums.paired || as_meant.words[direction] < minimums.plain || as_meant.engine[direction] < minimums.engine_plain || other.engine[direction] < minimums.engine_plain {
-            return Err(format!(
-                "typed in layout group {direction}: A1 holds {paired} words, N2 {} ({} for the engine), N1 {} for the engine; the samples ask for {}, {} ({}) and {}",
-                as_meant.words[direction], as_meant.engine[direction], other.engine[direction], minimums.paired, minimums.plain, minimums.engine_plain, minimums.engine_plain
-            ));
+        let (paired, as_meant, other) = (&counts[Sample::A1.as_str()], &counts[Sample::N2.as_str()], &counts[Sample::N1.as_str()]);
+        let sizes = [("A1", paired.words, minimums.paired), ("N2", as_meant.words, minimums.plain), ("N2 for the engine", as_meant.engine, minimums.engine_plain), ("N1 for the engine", other.engine, minimums.engine_plain)];
+        if let Some((name, found, asked)) = sizes.iter().find(|(_, found, asked)| found[direction] < *asked) {
+            return Err(format!("typed in layout group {direction}: {name} holds {} words, the samples ask for {asked}", found[direction]));
         }
     }
     let lines: String = rows.iter().map(|row| ks_text::json::dumps(row, &compact()) + "\n").collect();
@@ -622,7 +618,8 @@ fn pair_report(rows: &[AcceptanceRow], replayed: &[Replayed], untyped: usize) ->
     let mut report = PairReport { untyped_rows: untyped, ..PairReport::default() };
     for sample in [Sample::A1, Sample::N1] {
         let by_direction = [0, 1].map(|direction| {
-            let found: Vec<(WordKey, Observed)> = replayed.iter().filter(|item| rows[item.row].sample == sample && rows[item.row].other && rows[item.row].direction() == direction).map(|item| (key_of(item), item.observed.clone())).collect();
+            // Every row of A1 and N1 is typed in the other layout.
+            let found: Vec<(WordKey, Observed)> = replayed.iter().filter(|item| rows[item.row].sample == sample && rows[item.row].direction() == direction).map(|item| (key_of(item), item.observed.clone())).collect();
             earliness(&found)
         });
         report.earliness.insert(sample.as_str().to_owned(), by_direction);
@@ -711,13 +708,14 @@ pub fn gates(candidate: &PairReport, reference: &PairReport, kind: KeyKind) -> G
         gates.s2_corruption.insert(cell.clone(), ours.corrupted.words <= theirs.corrupted.words);
     }
     let errors = |report: &PairReport| report.untyped_rows + report.safety.get(SAFETY_CELLS[2]).map_or(0, |cell| cell.execution_errors) + report.earliness.values().flatten().map(|cell| cell.execution_errors).sum::<usize>();
-    gates.execution = errors(candidate) == 0 && errors(reference) == 0;
-    gates.all_held = gates.execution
-        && gates.e1.values().flatten().all(|gate| gate.mean_key_lower && gate.switched_by_key_not_fewer && gate.inside_word_not_fewer)
-        && gates.e2.values().flatten().all(|held| *held)
-        && gates.s1.values().all(|gate| gate.false_early_not_more && gate.stays_not_more)
-        && gates.s2_corruption.values().all(|held| *held)
-        && gates.s2_exact.values().flatten().all(|held| *held);
+    gates.execution = errors(candidate) + errors(reference) == 0;
+    let mut held: Vec<bool> = vec![gates.execution];
+    held.extend(gates.e1.values().flatten().flat_map(|gate| [gate.mean_key_lower, gate.switched_by_key_not_fewer, gate.inside_word_not_fewer]));
+    held.extend(gates.e2.values().flatten().copied());
+    held.extend(gates.s1.values().flat_map(|gate| [gate.false_early_not_more, gate.stays_not_more]));
+    held.extend(gates.s2_corruption.values().copied());
+    held.extend(gates.s2_exact.values().flatten().copied());
+    gates.all_held = !held.contains(&false);
     gates
 }
 
@@ -766,14 +764,7 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
     let spelling = reference_models(request.root, &resources, true)?;
     let tools = Tools::new(request.root, resources.clone(), portable.clone(), BTreeSet::new())?;
     let lexicons: [&Lexicons; 2] = [&portable, &spelling];
-    let known = EngineCore::known_of(&portable);
-    let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), Some(resources.packaged_identifier()), known, Some(resources.clone())) {
-        Ok(model) => {
-            let version = model.version.clone();
-            (Some(Arc::new(model)), version)
-        }
-        Err(error) => (None, format!("unavailable: {}", error.name)),
-    };
+    let shared = crate::evaluate::shared_ortho(&resources, &portable);
     let indexes = [prefix_indexes(&portable), prefix_indexes(&spelling)];
     let models_dir = resources.resource_dir().join("models");
     let prefixes: Vec<Arc<VersionedPrefixModel>> = request.pairs.iter().map(|pair| VersionedPrefixModel::load(&pair.prefix).map(Arc::new).map_err(|error| format!("{}: {}", pair.prefix.display(), error.name))).collect::<Result<_, _>>()?;
@@ -918,6 +909,9 @@ mod tests {
         // A first correction after the last letter is no early switch that went wrong.
         let late = Observed::of(&row(true), &case("gjujlf ", &[(7, 1, "early")]));
         assert!(late.undone_by.is_none() && late.key(KeyKind::Any) == 7);
+        // Right in the end by a correction after the last letter: the key after it.
+        let boundary = Observed::of(&row(true), &case("погода ", &[(7, 1, "boundary")]));
+        assert!(boundary.right && boundary.key(KeyKind::Any) == 7 && !boundary.inside_word());
         let never = Observed::of(&row(true), &case("gjujlf ", &[]));
         assert!(never.first_into.is_none() && never.key(KeyKind::Any) == 7 && !never.right);
         let unclear = Case { error: Some("ValueError".to_owned()), ..case("погода ", &[]) };
@@ -973,6 +967,8 @@ mod tests {
         // A row left untyped stops the gates.
         let untyped = PairReport { untyped_rows: 1, ..report(5.0, 4, 1) };
         assert!(!gates(&untyped, &reference, KeyKind::Early).execution);
+        let failed = PairReport { untyped_rows: 1, ..reference.clone() };
+        assert!(!gates(&report(5.0, 4, 1), &failed, KeyKind::Early).all_held);
     }
 
     #[test]

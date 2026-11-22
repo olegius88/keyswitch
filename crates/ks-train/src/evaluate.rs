@@ -548,6 +548,18 @@ impl PairDigests {
     }
 }
 
+/// The orthotactic model every replay of a process shares, bound to the first profile's dictionaries, or why there is none.
+pub(crate) fn shared_ortho(resources: &Arc<Resources>, first: &Lexicons) -> ks_context::context_policy::SharedOrtho {
+    let known = EngineCore::known_of(first);
+    match OrthoModel::load(&artifact_path(resources.resource_dir()), Some(resources.packaged_identifier()), known, Some(resources.clone())) {
+        Ok(model) => {
+            let version = model.version.clone();
+            (Some(Arc::new(model)), version)
+        }
+        Err(error) => (None, format!("unavailable: {}", error.name)),
+    }
+}
+
 /// `score_sequences`: every pair replayed in both settings modes, and the first plans in the default mode; acceptance
 /// needs every gate in every mode and profile. With a cache, a pair's replay already kept there is read back.
 pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, spelling: &Lexicons, rows: &[CorpusRow], pairs: &Pairs, jobs: usize, cache: Option<&ReplayCache>) -> Result<Replayed, String> {
@@ -567,14 +579,7 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
         first_ineligible: first_ineligible.iter().map(|identifier| (*identifier).to_owned()).collect(),
     };
     let first = &tools.portable;
-    let known = EngineCore::known_of(first);
-    let shared = match OrthoModel::load(&artifact_path(resources.resource_dir()), Some(resources.packaged_identifier()), known, Some(resources.clone())) {
-        Ok(model) => {
-            let version = model.version.clone();
-            (Some(Arc::new(model)), version)
-        }
-        Err(error) => (None, format!("unavailable: {}", error.name)),
-    };
+    let shared = shared_ortho(resources, first);
     let models_dir = resources.resource_dir().join("models");
     let load_context = |path: &Path| ContextModel::load_artifact(path, &models_dir).map_err(|error| format!("{}: {}", path.display(), error.name));
     let load_prefix = |path: &Path| VersionedPrefixModel::load(path).map(Arc::new).map_err(|error| format!("{}: {}", path.display(), error.name));
