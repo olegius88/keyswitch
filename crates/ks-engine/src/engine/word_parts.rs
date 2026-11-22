@@ -18,6 +18,15 @@ fn words_begun_with(model: &LanguageModel, start: &str) -> usize {
     words.lower_bound(&format!("{start}{}", char::MAX)).saturating_sub(words.lower_bound(&format!("{start}\0")))
 }
 
+/// The table of prose counts of the language a layout types, by the layout's name; None for a layout with no prose.
+fn prose_of(layout: &str) -> Option<&'static str> {
+    match layout {
+        "us" => Some("english"),
+        "ru" => Some("russian"),
+        _ => None,
+    }
+}
+
 impl EngineCore {
     // Resolve a key that is punctuation here but a letter in another layout.
     //
@@ -598,7 +607,8 @@ impl EngineCore {
     }
 
     /// The start of a word still being typed: `PAUSE_WORD_START_LETTERS` to `PAUSE_WORD_START_MAX_LETTERS` letters that
-    /// many words of their own language begin with. A pause after them is a pause to think, and the word is decided at
+    /// many words of their own language begin with, or few words that its prose is full of (`ес` for `есть` and `если`),
+    /// the letters being no word themselves. A pause after them is a pause to think, and the word is decided at
     /// its boundary: after a word left in the same layout, whatever the letters read in the other one; with none before
     /// them, when they are two whose other reading is no word of the other language's prose. `иг` is the start of `игру`
     /// and `bu` no English word, while `ша` typed for `if` is.
@@ -610,12 +620,22 @@ impl EngineCore {
     /// typed into a browser.
     pub fn word_begun(&self, original: &str, group: i64, alternative: &str, target: i64, application: &str) -> EngineResult<bool> {
         let letters = pystr::len(original);
-        if !(PAUSE_WORD_START_LETTERS..=PAUSE_WORD_START_MAX_LETTERS).contains(&letters)
-            || !pystr::isalpha(original)
-            || !self.in_models(group)
-            || words_begun_with(self.model(group), &pystr::casefold(original)) < PAUSE_WORD_START_MIN_WORDS.to::<usize>()
-        {
+        if !(PAUSE_WORD_START_LETTERS..=PAUSE_WORD_START_MAX_LETTERS).contains(&letters) || !pystr::isalpha(original) || !self.in_models(group) {
             return Ok(false);
+        }
+        let start = pystr::casefold(original);
+        if words_begun_with(self.model(group), &start) < PAUSE_WORD_START_MIN_WORDS.to::<usize>() {
+            // Few words begin so, and they may be among the most frequent of the language: `ес` begins `есть` and `если`.
+            // Letters that are a word themselves (`что`, which begins `чтобы`) are judged at the pause as a word.
+            let Some(prose) = prose_of(&self.layout_name(group)).filter(|_| !self.model(group).frequencies.contains(&start)) else {
+                return Ok(false);
+            };
+            let table = self.term_frequency()?;
+            let table = table.term(prose);
+            let met: u64 = table.words().filter(|word| word.starts_with(start.as_str())).map(|word| table.count(word)).sum();
+            if met < PAUSE_WORD_START_PROSE_MIN_COUNT {
+                return Ok(false);
+            }
         }
         if self.context_for(application).1 == Some(group) {
             return Ok(true);
@@ -623,10 +643,8 @@ impl EngineCore {
         if letters != PAUSE_WORD_START_LETTERS {
             return Ok(false);
         }
-        let prose = match self.layout_name(target).as_str() {
-            "us" => "english",
-            "ru" => "russian",
-            _ => return Ok(false),
+        let Some(prose) = prose_of(&self.layout_name(target)) else {
+            return Ok(false);
         };
         Ok(self.term_frequency()?.term(prose).count(&pystr::casefold(alternative)) < CONTEXT_TERM_FREQUENCY_BUCKET_BOUNDS[0].to::<u64>())
     }

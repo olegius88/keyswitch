@@ -721,7 +721,7 @@ fn base_weights(names: &[String], base: &ContextModel) -> Vec<f64> {
     let mut weights = vec![0.0; names.len() * ACTIONS];
     for (index, name) in names.iter().enumerate() {
         if let Some(values) = base.weights.get(name) {
-            weights[index * ACTIONS..(index + 1) * ACTIONS].copy_from_slice(values);
+            weights[index * ACTIONS..(index + 1) * ACTIONS].copy_from_slice(&values);
         }
     }
     weights

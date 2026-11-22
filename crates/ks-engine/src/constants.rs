@@ -50,10 +50,14 @@ pub const WHOLE_TOKEN_WORD_MIN_LETTERS: usize = 4;
 pub const NATURAL_SOURCE_BOUNDARY_NGRAM_FLOOR: f64 = -0.25;
 pub const PAUSE_TRAILING_MAX_KEYS: usize = 8;
 /// The longest run of letters a pause takes for the start of a word still being typed (`word_begun`); the shortest is
-/// `PAUSE_WORD_START_LETTERS`, and as many words begin with either: `PAUSE_WORD_START_MIN_WORDS`.
+/// `PAUSE_WORD_START_LETTERS`, and as many words begin with either: `PAUSE_WORD_START_MIN_WORDS`, or fewer words that
+/// the table of prose counts of the language holds `PAUSE_WORD_START_PROSE_MIN_COUNT` times together: `ес` begins 49 of
+/// its words, met 675 158 times (`есть`, `если`), and `оши` 62 words met 159 972 times, while `сс` begins 95 met 79 167
+/// times and `смы` 32 met 22 128 times.
 pub const PAUSE_WORD_START_MAX_LETTERS: usize = 3;
 pub const PAUSE_WORD_START_LETTERS: usize = 2;
 pub const PAUSE_WORD_START_MIN_WORDS: u32 = 100;
+pub const PAUSE_WORD_START_PROSE_MIN_COUNT: u64 = 100_000;
 pub const REPLAYED_SIGNS_MIN_STEM_LETTERS: usize = 2;
 pub const STRANDED_TERM_MAX_WORDS: usize = 3;
 pub const TRUSTED_SHORT_WORD_MAX_LENGTH: usize = 2;

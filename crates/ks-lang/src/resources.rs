@@ -113,13 +113,16 @@ impl Resources {
         place
     }
 
-    /// The frequencies of `LanguageModel.load(locale)`: the file and the fallback words, no supplement.
-    fn plain_frequencies(&self, locale: &str) -> Arc<WordTable> {
+    /// The frequencies of `LanguageModel.load(locale)`: the file and the fallback words, no supplement. Where the model
+    /// asked about holds the very same table (a locale without a supplement), its table is shared, not held twice.
+    fn plain_frequencies(&self, model: &LanguageModel) -> Arc<WordTable> {
+        let locale = model.locale.as_str();
         let mut tables = self.plain_frequencies.lock().expect("the lock is not poisoned");
         if let Some(found) = tables.iter().find(|entry| entry.0 == locale) {
             return found.1.clone();
         }
-        let table = Arc::new(LanguageModel::load_tables(locale, std::iter::empty::<&str>(), &self.model_roots()).frequencies);
+        let read = LanguageModel::load_tables(locale, std::iter::empty::<&str>(), &self.model_roots()).frequencies;
+        let table = if read == *model.frequencies { model.frequencies.clone() } else { Arc::new(read) };
         tables.push((locale.to_string(), table.clone()));
         table
     }
@@ -133,7 +136,7 @@ impl Resources {
         if let Some(found) = indexes.iter().find(|entry| entry.0 == key) {
             return found.1.clone();
         }
-        let index = Arc::new(PrefixIndex::from_lexicon(self.plain_frequencies(&model.locale), &model.source));
+        let index = Arc::new(PrefixIndex::from_lexicon(self.plain_frequencies(model), &model.source));
         indexes.push((key, index.clone()));
         index
     }
@@ -216,7 +219,20 @@ mod tests {
     #[test]
     fn what_was_read_once_is_kept() {
         let shipped = Resources::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
-        let first = shipped.plain_frequencies("en_US");
-        assert!(Arc::ptr_eq(&first, &shipped.plain_frequencies("en_US")));
+        let english = shipped.engine_language_model("en_US").unwrap();
+        let first = shipped.plain_frequencies(&english);
+        assert!(Arc::ptr_eq(&first, &shipped.plain_frequencies(&english)));
+    }
+
+    #[test]
+    fn a_table_the_model_holds_already_is_shared() {
+        let shipped = Resources::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
+        // English has no supplement: its model holds the plain table itself. Russian adds the supplement's words.
+        let english = shipped.engine_language_model("en_US").unwrap();
+        assert!(Arc::ptr_eq(&shipped.plain_frequencies(&english), &english.frequencies));
+        let russian = shipped.engine_language_model("ru_RU").unwrap();
+        let plain = shipped.plain_frequencies(&russian);
+        assert!(!Arc::ptr_eq(&plain, &russian.frequencies));
+        assert_eq!(*plain, LanguageModel::load_tables("ru_RU", std::iter::empty::<&str>(), &shipped.model_roots()).frequencies);
     }
 }

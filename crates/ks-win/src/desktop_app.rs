@@ -782,7 +782,7 @@ fn engine_builder(
         let factory: ReaderFactory = Arc::new(|| {
             WindowsFieldReader::new().map(|reader| -> Box<dyn ks_backend::ManagedFieldReader> { Box::new(reader) })
         });
-        KeySwitchEngine::new(
+        let built = KeySwitchEngine::new(
             settings,
             history,
             backend,
@@ -792,8 +792,24 @@ fn engine_builder(
             Some(factory),
             &resources,
             ks_context::input_context::monotonic_clock(),
-        )
+        );
+        release_free_heap();
+        built
     })
+}
+
+/// Asks Windows to decommit what the heaps of the process hold free once the models are built: reading them frees tens
+/// of megabytes of buffers, which the heap would otherwise keep committed for the next allocations
+/// (`HeapSetInformation` with `HeapOptimizeResources` and no heap: every heap with the low-fragmentation front end;
+/// Windows 8.1 and later, an earlier system refuses the call and nothing changes).
+fn release_free_heap() {
+    use windows_sys::Win32::System::Memory::{HeapOptimizeResources, HeapSetInformation};
+    use windows_sys::Win32::System::SystemServices::{HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION, HEAP_OPTIMIZE_RESOURCES_INFORMATION};
+    let information = HEAP_OPTIMIZE_RESOURCES_INFORMATION { Version: HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION, Flags: 0 };
+    // SAFETY: the structure is initialised as the call requires and lives through it; a null heap means every heap.
+    unsafe {
+        HeapSetInformation(null_mut(), HeapOptimizeResources, (&raw const information).cast(), size_of::<HEAP_OPTIMIZE_RESOURCES_INFORMATION>());
+    }
 }
 
 /// `run_windows_application`: build everything, run the loop until the window is destroyed, and return the status.

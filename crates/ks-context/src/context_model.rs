@@ -21,10 +21,11 @@ use crate::constants::{
 };
 use crate::context_action_features::{extract_action_features, FeatureMap};
 use crate::flat_table::{load_artifact, load_term_frequency, CountTable, CountTables, WeightSpec, WeightTable, ACTION_COUNT};
+use ks_lang::tables::{WordList, WordTable};
 use ks_lang::{py_sum, LanguageModel, LoadError, WordScore};
 use ks_text::{pystr, ucd};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -326,46 +327,45 @@ struct CapitalsFile {
 /// How often a token is spelled in capitals: in Russian web and news text (the Leipzig word lists) and in Russian
 /// technical text (ru.stackoverflow 2023), each for Cyrillic and Latin tokens apart; whether a Latin token is a currency
 /// code of ISO 4217; whether the Russian lexicon writes a Cyrillic one in capitals. A token is looked up by its capital
-/// spelling; one the file does not hold is counted nought times.
+/// spelling; one the file does not hold is counted nought times. The tokens lie in sorted tables of one arena each,
+/// not in maps of `String`s: 14 000 tokens take a quarter of the memory so.
 #[derive(Default)]
 pub struct CapitalCounts {
-    web: HashMap<String, u64>,
-    technical: HashMap<String, u64>,
-    currencies: HashSet<String>,
-    lexicon: HashSet<String>,
+    web: WordTable,
+    technical: WordTable,
+    currencies: WordList,
+    lexicon: WordList,
 }
 
 impl CapitalCounts {
     /// How often Russian web and news text spells the token so.
     #[must_use]
     pub fn web(&self, capitals: &str) -> u64 {
-        self.web.get(capitals).copied().unwrap_or(0)
+        self.web.get(capitals).map_or(0, ks_cast::To::to::<u64>)
     }
 
     /// How often Russian technical text spells the token so.
     #[must_use]
     pub fn technical(&self, capitals: &str) -> u64 {
-        self.technical.get(capitals).copied().unwrap_or(0)
+        self.technical.get(capitals).map_or(0, ks_cast::To::to::<u64>)
     }
 
     /// Whether the token is a currency code of ISO 4217.
     #[must_use]
     pub fn currency(&self, capitals: &str) -> bool {
-        self.currencies.contains(capitals)
+        self.currencies.contains_sorted(capitals)
     }
 
     /// The currency codes of ISO 4217, in order.
     #[must_use]
     pub fn currencies(&self) -> Vec<&str> {
-        let mut codes: Vec<&str> = self.currencies.iter().map(String::as_str).collect();
-        codes.sort_unstable();
-        codes
+        self.currencies.iter().collect()
     }
 
     /// Whether the Russian lexicon writes the token in capitals.
     #[must_use]
     pub fn lexicon(&self, capitals: &str) -> bool {
-        self.lexicon.contains(capitals)
+        self.lexicon.contains_sorted(capitals)
     }
 
     /// The file read and checked: every token letters of one script in capitals, every count at least the file's
@@ -379,25 +379,27 @@ impl CapitalCounts {
         let bytes = std::fs::read(path).map_err(|error| LoadError::os(&error, path))?;
         let file: CapitalsFile = ks_text::json::loads(&bytes).map_err(|error| LoadError { name: "JSONDecodeError", message: error.to_string() })?;
         let spelled = |token: &str, latin: bool| pystr::isalpha(token) && pystr::isupper(token) && (if latin { token.is_ascii() } else { !token.chars().any(|c| c.is_ascii()) });
-        let mut counts = CapitalCounts::default();
+        let (mut web, mut technical): (Vec<(&str, i64)>, Vec<(&str, i64)>) = (Vec::new(), Vec::new());
         for (table, latin, into_web) in [(&file.web_cyrillic, false, true), (&file.web_latin, true, true), (&file.technical_cyrillic, false, false), (&file.technical_latin, true, false)] {
             for (token, &count) in table {
                 if !spelled(token, latin) || count < file.minimum_count.max(1) {
                     return Err(invalid());
                 }
-                let target = if into_web { &mut counts.web } else { &mut counts.technical };
-                target.insert(token.clone(), count);
+                let target = if into_web { &mut web } else { &mut technical };
+                target.push((token, count.to::<i64>()));
             }
         }
-        for (list, latin, target) in [(&file.iso4217, true, &mut counts.currencies), (&file.lexicon_capitals, false, &mut counts.lexicon)] {
+        let (mut currencies, mut lexicon) = (WordList::new(), WordList::new());
+        for (list, latin, target) in [(&file.iso4217, true, &mut currencies), (&file.lexicon_capitals, false, &mut lexicon)] {
             for token in list {
                 if !spelled(token, latin) {
                     return Err(invalid());
                 }
-                target.insert(token.clone());
+                target.push(token);
             }
         }
-        Ok(counts)
+        // A token given twice keeps its last count, as the map it was inserted into did (`from_pairs`).
+        Ok(CapitalCounts { web: WordTable::from_pairs(web), technical: WordTable::from_pairs(technical), currencies: currencies.sorted_unique(), lexicon: lexicon.sorted_unique() })
     }
 }
 
