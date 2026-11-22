@@ -77,3 +77,12 @@ pub const GNOME_XKB_OPTIONS_KEY: &str = "xkb-options";
 /// start reads and drops pushed later model tables into the heap, where they stayed as holes; set once, the threshold
 /// no longer moves.
 pub const HEAP_MMAP_THRESHOLD_BYTES: i32 = 128 * 1024;
+
+/// How GTK is told not to open OpenGL with the display (https://docs.gtk.org/gtk4/running.html): `GDK_DISABLE=gl` from
+/// GTK 4.16 on, `GDK_DEBUG=gl-disable` before it. Left alone when the user set either variable, or chose a renderer
+/// other than cairo (the only one that draws without OpenGL) in `GSK_RENDERER`.
+pub const GTK_GL_SWITCH_MINOR_VERSION: u32 = 16;
+pub const GTK_GL_OFF: (&str, &str) = ("GDK_DISABLE", "gl");
+pub const GTK_GL_OFF_BEFORE_SWITCH: (&str, &str) = ("GDK_DEBUG", "gl-disable");
+pub const GTK_RENDERER_VARIABLE: &str = "GSK_RENDERER";
+pub const GTK_RENDERER_WITHOUT_GL: &str = "cairo";
