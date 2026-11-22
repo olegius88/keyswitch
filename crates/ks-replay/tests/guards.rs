@@ -497,6 +497,28 @@ fn a_pause_after_the_first_letters_of_a_word_decides_nothing() {
         assert!(!core.word_begun("рез", 1, "htp", 0, "another").expect("no failure"), "three letters with nothing typed there");
         bundle.give_back(session);
     }
+    // Few words begin with `ес` or `оши`, and those that do are met often in prose (`есть`, `если`, `ошибка`): such
+    // letters wait too. They became `tc` and `jib` at the pause, and the rest of the word was typed in the layout that
+    // left.
+    for (before, start, other, rest) in [("вот ", "ес", "tc", "ли "), ("если ", "оши", "jib", "бка ")] {
+        let mut session = bundle.session("app", 1, Vec::new());
+        for character in before.chars().chain(start.chars()) {
+            press_as_laid_out(&mut session, character);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), format!("{before}{start}"), "at the pause");
+        for character in rest.chars() {
+            press_as_laid_out(&mut session, character);
+        }
+        session.idle(1.0);
+        assert_eq!(session.backend.text().iter().collect::<String>(), format!("{before}{start}{rest}"), "the word typed on");
+        let core = &session.core;
+        assert!(core.word_begun(start, 1, other, 0, "app").expect("no failure"), "{start}");
+        assert!(!core.word_begun("афи", 1, "fab", 0, "app").expect("no failure"), "few words, and prose seldom has them");
+        assert!(!core.word_begun("что", 1, "xnj", 0, "app").expect("no failure"), "a word itself, though it begins `чтобы`");
+        assert!(!core.word_begun("fab", 2, "афи", 1, "app").expect("no failure"), "few words of a layout with no prose");
+        bundle.give_back(session);
+    }
     // With no word before them two letters wait only when their other reading is no word of English prose (`иг` for `bu`
     // waits, `ша` for `if` does not), and three letters are judged as before: two letters and a wait are as often a whole
     // word, an address typed into a browser.
