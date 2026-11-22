@@ -23,33 +23,32 @@ fn name_hash(name: &str) -> u32 {
     hash
 }
 
-/// Names in one arena in the order of the file, and an index of them sorted by hash. The values of a table lie in
-/// arrays in the order of the file, beside the arena: nothing is copied into a second order, which would double the
-/// memory the parse needs.
+/// Names in one arena in the order of their hashes, and the hashes sorted beside them: the `i`-th name is the one of
+/// the `i`-th hash, so no table from hash to name is needed. The values of a table lie in arrays in the same order.
+/// The arena is copied once into that order while the file is read: the peak of the read holds the names twice, the
+/// table keeps four bytes a name less for good.
 #[derive(Default)]
 pub struct NameIndex {
     arena: String,
-    /// `ends[i]` is the end of the `i`-th name of the file; it starts where the one before ends.
+    /// `ends[i]` is the end of the `i`-th name; it starts where the one before ends.
     ends: Vec<u32>,
-    /// The hashes of the names in the index, sorted.
+    /// The hashes of the names, sorted. A name given twice is indexed once, with its last value.
     hashes: Vec<u32>,
-    /// For each hash its entry in the file. A name given twice is indexed once, at its last place.
-    order: Vec<u32>,
 }
 
 impl NameIndex {
     /// How many names the table holds (`len(dict)`).
     #[must_use]
     pub fn len(&self) -> usize {
-        self.order.len()
+        self.hashes.len()
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
+        self.hashes.is_empty()
     }
 
-    /// The name of an entry of the file.
+    /// The name of an entry.
     #[must_use]
     pub fn name(&self, entry: usize) -> &str {
         let start = if entry == 0 { 0 } else { (self.ends[entry - 1]).to::<usize>() };
@@ -62,9 +61,8 @@ impl NameIndex {
         let hash = name_hash(name);
         let mut at = self.hashes.partition_point(|&found| found < hash);
         while at < self.hashes.len() && self.hashes[at] == hash {
-            let entry = self.order[at].to::<usize>();
-            if self.name(entry) == name {
-                return Some(entry);
+            if self.name(at) == name {
+                return Some(at);
             }
             at += 1;
         }
@@ -73,9 +71,15 @@ impl NameIndex {
 
     /// The names the table holds, in no particular order.
     pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.order.iter().map(|&entry| self.name(entry.to::<usize>()))
+        (0..self.len()).map(|entry| self.name(entry))
     }
 
+}
+
+/// The values of the entries of a file put in the order of an index: `places[i]` is the entry of the file the `i`-th
+/// name of the index came from, and `width` values belong to each entry.
+fn in_index_order<T: Copy>(values: &[T], places: &[u32], width: usize) -> Vec<T> {
+    places.iter().flat_map(|&place| values[place.to::<usize>() * width..(place.to::<usize>() + 1) * width].iter().copied()).collect()
 }
 
 /// Names in the order of the file, as they are read.
@@ -101,8 +105,9 @@ impl Names {
         self.arena.get(start..self.ends[entry].to::<usize>()).unwrap_or_default()
     }
 
-    /// The index sorted by hash. A name given twice keeps its last value, as `dict` does.
-    fn index(self) -> NameIndex {
+    /// The index sorted by hash, and for each of its names the entry of the file it came from (`in_index_order` puts
+    /// the values in the same order). A name given twice keeps its last value, as `dict` does.
+    fn index(self) -> (NameIndex, Vec<u32>) {
         let mut keyed: Vec<(u32, u32)> = (0..self.len()).map(|entry| (name_hash(self.name(entry)), entry.to::<u32>())).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| self.name(a.1.to::<usize>()).cmp(self.name(b.1.to::<usize>()))).then(a.1.cmp(&b.1)));
         let mut kept: Vec<(u32, u32)> = Vec::with_capacity(keyed.len());
@@ -113,10 +118,14 @@ impl Names {
             }
         }
         drop(keyed);
-        let Names { mut arena, mut ends } = self;
-        arena.shrink_to_fit();
-        ends.shrink_to_fit();
-        NameIndex { arena, ends, hashes: kept.iter().map(|entry| entry.0).collect(), order: kept.iter().map(|entry| entry.1).collect() }
+        let mut arena = String::with_capacity(kept.iter().map(|&(_, entry)| self.name(entry.to::<usize>()).len()).sum());
+        let mut ends = Vec::with_capacity(kept.len());
+        for &(_, entry) in &kept {
+            arena.push_str(self.name(entry.to::<usize>()));
+            ends.push(arena.len().to::<u32>());
+        }
+        drop(self);
+        (NameIndex { arena, ends, hashes: kept.iter().map(|entry| entry.0).collect() }, kept.iter().map(|entry| entry.1).collect())
     }
 }
 
@@ -257,8 +266,9 @@ impl<'de> Deserialize<'de> for Counts {
                         }
                     }
                 }
-                let index = builder.names.index();
-                Ok(Counts(Some((CountTable { index, counts: builder.counts }, builder.valid))))
+                let (index, places) = builder.names.index();
+                let counts = in_index_order(&builder.counts, &places, 1);
+                Ok(Counts(Some((CountTable { index, counts }, builder.valid))))
             }
             fn visit_unit<E: de::Error>(self) -> Result<Counts, E> {
                 Ok(Counts(None))
@@ -463,7 +473,7 @@ impl WeightTable {
     /// A table with no features: a model whose answers come from elsewhere.
     #[must_use]
     pub fn empty() -> WeightTable {
-        WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new(), order: Vec::new() }, values: WeightValues::default() }
+        WeightTable { index: NameIndex { arena: String::new(), ends: Vec::new(), hashes: Vec::new() }, values: WeightValues::default() }
     }
 }
 
@@ -499,7 +509,8 @@ impl WeightTable {
             names.push(name);
             values.extend(weights);
         }
-        WeightTable { index: names.index(), values: WeightValues::new(&values) }
+        let (index, places) = names.index();
+        WeightTable { index, values: WeightValues::new(&in_index_order(&values, &places, ACTION_COUNT)) }
     }
 
 }
@@ -659,8 +670,9 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
                     }
                     integers.push(mask);
                 }
-                let index = names.index();
-                let digest = checksum(&index, &values, &integers);
+                let (index, places) = names.index();
+                let values = in_index_order(&values, &places, ACTION_COUNT);
+                let digest = checksum(&index, &values, &in_index_order(&integers, &places, 1));
                 let table = WeightTable { index, values: WeightValues::new(&values) };
                 drop(values);
                 let entries = table.len();
@@ -697,7 +709,7 @@ impl<'de> DeserializeSeed<'de> for WeightsSeed<'_> {
 /// no escaping of non-ASCII letters.
 fn checksum(index: &NameIndex, values: &[f64], integers: &[u8]) -> String {
     use std::fmt::Write as _;
-    let mut order: Vec<u32> = index.order.clone();
+    let mut order: Vec<u32> = (0..index.len().to::<u32>()).collect();
     order.sort_unstable_by(|&a, &b| index.name(a.to::<usize>()).cmp(index.name(b.to::<usize>())));
     let mut hasher = Sha256::new();
     let mut text = String::with_capacity(1 << 16);
@@ -898,7 +910,9 @@ mod tests {
         for name in ["b", "a"] {
             names.push(name);
         }
-        let digest = checksum(&names.index(), &[0.0, 0.5, 1e-5, -2.0, 1.0, 1.0, 1.0, 1.0], &[0b0001, 0b1111]);
+        let (index, places) = names.index();
+        let values = in_index_order(&[0.0, 0.5, 1e-5, -2.0, 1.0, 1.0, 1.0, 1.0], &places, ACTION_COUNT);
+        let digest = checksum(&index, &values, &in_index_order(&[0b0001, 0b1111], &places, 1));
         let text = r#"{"a":[1,1,1,1],"b":[0,0.5,1e-05,-2.0]}"#;
         let wanted: String = Sha256::digest(text.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
         assert_eq!(digest, wanted);
