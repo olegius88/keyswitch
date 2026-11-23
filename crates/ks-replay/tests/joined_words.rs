@@ -6,7 +6,7 @@
 use ks_backend::KeyEvent;
 use ks_backend::constants::SHIFT_MASK;
 use ks_config::config::SettingsStore;
-use ks_config::constants::{DETECTION_CONTEXT_READ_FIELD, DETECTION_CORRECT_ON_SPACE, EXCLUSIONS_APPLICATIONS};
+use ks_config::constants::{DETECTION_CONTEXT_READ_FIELD, DETECTION_CORRECT_ON_SPACE, DIAGNOSTICS_TECHNICAL_LOGGING, EXCLUSIONS_APPLICATIONS};
 use ks_replay::harness::{Bundle, KEYS, PAUSE_KEYCODE, Session};
 
 /// The key that types `english` in the US layout, pressed in whatever layout is on.
@@ -128,8 +128,70 @@ fn a_term_typed_in_the_russian_layout_before_a_russian_word_converts_alone() {
     // `here`).
     assert_eq!(typed(&mut bundle, 1, "gctdlj-yfexysq ", None, as_shipped), "псевдо-научный ");
     assert_eq!(typed(&mut bundle, 1, "here-yjue ", None, as_shipped), "руку-ногу ");
-    // Two signs: the parts stay whole.
+    // Two signs, and a Russian word typed right in the part before the last of them: the model, asked about `зкщ-тарифу`
+    // alone, only suggests converting it, and the token stays.
     assert_eq!(typed(&mut bundle, 1, "pro-nfhbae-rkbtyn ", None, as_shipped), "зкщ-тарифу-клиент ");
+    bundle.clean();
+}
+
+/// What stands in the field of `application` after `english` was typed from an empty field in the layout `group`.
+fn typed_in(bundle: &mut Bundle, application: &str, group: i32, english: &str) -> String {
+    let mut session = bundle.session(application, group, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    keys(&mut session, english);
+    let shown = session.backend.text().iter().collect();
+    bundle.give_back(session);
+    shown
+}
+
+#[test]
+fn a_term_of_several_parts_typed_in_the_russian_layout_before_a_russian_word_converts_alone() {
+    let mut bundle = Bundle::load(None);
+    // The model converts `Цш-Аш-роутер` whole (`Wi-Fi-hjenth`) and, asked about `Цш-Аш` alone, converts it: the part
+    // before the last hyphen converts alone, the word after it is typed again as it was and the Russian layout stays.
+    let mut session = bundle.session("firefox", 1, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    // With the technical log on, which records the question about the head of two parts and that the whole had converted.
+    session.core.settings.write(DIAGNOSTICS_TECHNICAL_LOGGING, true, false).expect("in memory");
+    keys(&mut session, "Wi-Fi-hjenth ");
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "Wi-Fi-роутер ");
+    assert_eq!(session.backend.group(), 1, "the layout the word after the sign was typed in");
+    // The undo hotkey puts the token back as typed.
+    session.core.schedule_undo_hotkey(i64::from(PAUSE_KEYCODE));
+    session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "Цш-Аш-роутер ");
+    bundle.give_back(session);
+    // Kept whole in a sentence, and with a part of one letter; converted whole with three parts before the word, and with
+    // one; in a browser field and in an editor.
+    for application in ["firefox", "code"] {
+        for (english, shown) in [
+            ("regbk yjdsq Wi-Fi-hjenth dxthf ", "купил новый Wi-Fi-роутер вчера "),
+            ("e-mail-hfccskrf ", "e-mail-рассылка "),
+            ("end-to-end-ntcns ", "end-to-end-тесты "),
+            ("regbk pro-hjenth ", "купил pro-роутер "),
+        ] {
+            assert_eq!(typed_in(&mut bundle, application, 1, english), shown, "{application}: {english}");
+        }
+    }
+    // Must stay as they were: a token typed all in the Russian layout whose part after the sign reads a Russian word
+    // while its other reading is an English one (`ВО`, `DJ`), Russian words joined by hyphens typed right, a token of two
+    // kinds of joining signs, and a part before the sign of one letter in a token the model converts whole.
+    assert_eq!(typed_in(&mut bundle, "firefox", 1, "pro-DJ "), "pro-DJ ");
+    assert_eq!(typed_in(&mut bundle, "firefox", 1, "Hjcnjd-yf-Ljye "), "Ростов-на-Дону ");
+    assert_eq!(typed_in(&mut bundle, "firefox", 1, "Wi-Fi+hjenth "), "Цш-Аш+роутер ");
+    assert_eq!(typed_in(&mut bundle, "firefox", 0, "d-nhtnmb[ "), "в-третьих ");
+    // Pause asks no model about the head and converts the whole token, as before.
+    let mut session = bundle.session("firefox", 1, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    session.core.settings.write(DETECTION_CORRECT_ON_SPACE, false, false).expect("in memory");
+    keys(&mut session, "Wi-Fi-hjenth ");
+    session.core.schedule_manual_conversion(i64::from(PAUSE_KEYCODE));
+    session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "Wi-Fi-hjenth ");
+    bundle.give_back(session);
     bundle.clean();
 }
 
