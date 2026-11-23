@@ -1,0 +1,268 @@
+{
+  "minimum_count": 5,
+  "scope": "Tokens of 3 letters or more, all Latin or all Cyrillic, written with 2 capitals at their start and lowercase letters after them, that the Leipzig word lists of Russian news, web and Wikipedia text, which keep a word's case, write at least 5 times and at least as often as the same word with only its first letter a capital: written counts the token as it stands, capitalised the word with one capital. Russian text writes such a token so on purpose (`ВКонтакте`, `CMake`, units as `МВт`); Shift held one letter too long writes a word far less often so than with one capital (`ЧТо`, `КАк`), and such a word is not here. The engine keeps a word of the table as typed where it fixes the case of one typed with Shift held one letter too long (ks-train capitals).",
+  "sources": {
+    "web": {
+      "license": "CC BY (the Leipzig Corpora Collection's terms for downloaded corpora)",
+      "origin": "Leipzig Corpora Collection, Russian corpora of 1M sentences each: news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019, Wikipedia 2021",
+      "word_lists_sha256": {
+        "rus-ru_web-public_2019_1M-words.txt": "e95f26f781dd1a76c51e23b4932d1a1d66799f28e41db50bc14b81a03726397a",
+        "rus_news_2019_1M-words.txt": "c477009bdd5646cf4f4e8eb88032fe21d938ce906953cb82010f8b995888afc3",
+        "rus_news_2020_1M-words.txt": "45475dca2c08f6d247000cf44fb7719a99cf03c031977eb8a1b4ebb9cb6d639a",
+        "rus_news_2021_1M-words.txt": "cba6c29dbe61e55de6e36a5017d6c3aa53f5a2ac4a0e5ce203991f5d4fc4cd7e",
+        "rus_news_2022_1M-words.txt": "7e89b527c407e80f4adb9c5dddb235ac3b1857f2ef0baec1bd464d7f4412215a",
+        "rus_news_2023_1M-words.txt": "bb1b750c6cfc9f65bb302be97e49bd7e7267afb3508f71ef38d96d7d01be7fc3",
+        "rus_news_2024_1M-words.txt": "e0e569d9a93bb9ca93823fcfaf09902a19891fa31eda472f53cd7ae3d4d24785",
+        "rus_newscrawl-public_2018_1M-words.txt": "6e18eaab0e96c0e428f0a3294e05ce148b9b1d6c4af2d897ad6d56f727bf496d",
+        "rus_web_2002_1M-words.txt": "0a725db2d8faff7e78cbfe23b60695212d5b3896c462faedbbe345197e642f9d",
+        "rus_wikipedia_2021_1M-words.txt": "6499543b85a886af061c6e2e6519650bd409e061e49e49c7aad44336990f0f7f"
+      }
+    }
+  },
+  "tokens": {
+    "AMarkets": {
+      "capitalised": 3,
+      "written": 26
+    },
+    "ATi": {
+      "capitalised": 1,
+      "written": 5
+    },
+    "BNews": {
+      "capitalised": 1,
+      "written": 7
+    },
+    "CCleaner": {
+      "capitalised": 0,
+      "written": 9
+    },
+    "CMake": {
+      "capitalised": 1,
+      "written": 14
+    },
+    "CNews": {
+      "capitalised": 5,
+      "written": 44
+    },
+    "CPython": {
+      "capitalised": 0,
+      "written": 6
+    },
+    "DTrace": {
+      "capitalised": 1,
+      "written": 5
+    },
+    "EHang": {
+      "capitalised": 1,
+      "written": 11
+    },
+    "ESforce": {
+      "capitalised": 1,
+      "written": 8
+    },
+    "EUobserver": {
+      "capitalised": 6,
+      "written": 14
+    },
+    "FFmpeg": {
+      "capitalised": 0,
+      "written": 7
+    },
+    "GBox": {
+      "capitalised": 1,
+      "written": 12
+    },
+    "GHz": {
+      "capitalised": 1,
+      "written": 8
+    },
+    "IPad": {
+      "capitalised": 6,
+      "written": 6
+    },
+    "IPhone": {
+      "capitalised": 32,
+      "written": 47
+    },
+    "IPsec": {
+      "capitalised": 0,
+      "written": 7
+    },
+    "JLo": {
+      "capitalised": 0,
+      "written": 5
+    },
+    "KGinform": {
+      "capitalised": 0,
+      "written": 9
+    },
+    "KWin": {
+      "capitalised": 3,
+      "written": 7
+    },
+    "LDz": {
+      "capitalised": 1,
+      "written": 34
+    },
+    "MHz": {
+      "capitalised": 2,
+      "written": 5
+    },
+    "NMi": {
+      "capitalised": 0,
+      "written": 17
+    },
+    "OAuth": {
+      "capitalised": 0,
+      "written": 7
+    },
+    "OSell": {
+      "capitalised": 16,
+      "written": 25
+    },
+    "QAnon": {
+      "capitalised": 1,
+      "written": 28
+    },
+    "REvil": {
+      "capitalised": 0,
+      "written": 45
+    },
+    "TAdviser": {
+      "capitalised": 0,
+      "written": 8
+    },
+    "TJournal": {
+      "capitalised": 1,
+      "written": 12
+    },
+    "UAnimals": {
+      "capitalised": 1,
+      "written": 19
+    },
+    "UPark": {
+      "capitalised": 0,
+      "written": 8
+    },
+    "VMware": {
+      "capitalised": 0,
+      "written": 40
+    },
+    "VTimes": {
+      "capitalised": 0,
+      "written": 16
+    },
+    "XDefiant": {
+      "capitalised": 0,
+      "written": 7
+    },
+    "XLight": {
+      "capitalised": 7,
+      "written": 9
+    },
+    "XOne": {
+      "capitalised": 1,
+      "written": 7
+    },
+    "XWayland": {
+      "capitalised": 3,
+      "written": 11
+    },
+    "ВКонтакте": {
+      "capitalised": 495,
+      "written": 4350
+    },
+    "ГВт": {
+      "capitalised": 0,
+      "written": 200
+    },
+    "ГВтч": {
+      "capitalised": 0,
+      "written": 11
+    },
+    "ГГц": {
+      "capitalised": 8,
+      "written": 541
+    },
+    "ГПа": {
+      "capitalised": 0,
+      "written": 12
+    },
+    "ИПшники": {
+      "capitalised": 0,
+      "written": 7
+    },
+    "КВт": {
+      "capitalised": 4,
+      "written": 19
+    },
+    "МВт": {
+      "capitalised": 12,
+      "written": 926
+    },
+    "МВтч": {
+      "capitalised": 0,
+      "written": 28
+    },
+    "МГц": {
+      "capitalised": 12,
+      "written": 438
+    },
+    "МДж": {
+      "capitalised": 0,
+      "written": 6
+    },
+    "МПа": {
+      "capitalised": 6,
+      "written": 65
+    },
+    "ОБр": {
+      "capitalised": 1,
+      "written": 6
+    },
+    "ПДн": {
+      "capitalised": 0,
+      "written": 22
+    },
+    "РУз": {
+      "capitalised": 3,
+      "written": 55
+    },
+    "СПб": {
+      "capitalised": 25,
+      "written": 444
+    },
+    "ТВт": {
+      "capitalised": 0,
+      "written": 6
+    },
+    "ТВтч": {
+      "capitalised": 0,
+      "written": 8
+    },
+    "ТГц": {
+      "capitalised": 0,
+      "written": 5
+    },
+    "УРов": {
+      "capitalised": 1,
+      "written": 5
+    },
+    "УРы": {
+      "capitalised": 2,
+      "written": 5
+    },
+    "ЧСтные": {
+      "capitalised": 0,
+      "written": 6
+    },
+    "ЮТэйр": {
+      "capitalised": 20,
+      "written": 38
+    },
+    "ЯКласс": {
+      "capitalised": 2,
+      "written": 6
+    }
+  }
+}

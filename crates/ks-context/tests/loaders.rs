@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ks_context::constants::{
     MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_MODEL_BYTES, MAX_CONTEXT_MODEL_FEATURES, MAX_PREFIX_WEIGHTS, TYPO_ALPHABETS, TYPO_COUNT_LOG_SCALE, TYPO_FREQUENCY_SCHEMA_VERSION,
 };
-use ks_context::context_model::{BeforeOrigin, CapitalCounts, ContextModel, TermTables, CAPITALS_FREQUENCY_FILE};
-use ks_context::constants::{COMMON_FEATURE_PREFIX, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES, UPPER_FEATURE_PREFIX};
+use ks_context::context_model::{BeforeOrigin, CapitalCounts, ContextModel, TermTables, WrittenCapitals, CAPITALS_FREQUENCY_FILE, DOUBLE_CAPITALS_FREQUENCY_FILE};
+use ks_context::constants::{COMMON_FEATURE_PREFIX, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES, MAX_DOUBLE_CAPITALS_FREQUENCY_BYTES, UPPER_FEATURE_PREFIX};
 use ks_context::flat_table::{WeightSpec, load_artifact};
 use ks_context::prefix_schema::{VersionedPrefixModel, prefix_diagnostics};
 use ks_context::typo_correction::{TypoLexicon, keyboard_neighbours, packaged_lexicon};
@@ -445,6 +445,74 @@ fn a_table_of_capitals_answers_by_source_and_refuses_another_shape() {
     let large = capitals_table(|table| table.scope = " ".repeat(MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES));
     assert_eq!(CapitalCounts::load(&large).err().expect("refused").message, "capitals frequency table is too large");
     assert_eq!(CapitalCounts::load(&PathBuf::from("/nonexistent/table.json")).err().expect("refused").name, "FileNotFoundError");
+}
+
+/// Counts of a word the table of two capitals at a word's start holds; `extra` stands for a field the loader does not know.
+#[derive(serde::Serialize)]
+struct Written {
+    written: i64,
+    capitalised: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<i64>,
+}
+
+/// A table of words written with two capitals at their start, of the shape `ks-train capitals` writes, with one change.
+#[derive(serde::Serialize)]
+struct DoubleCapitalsTable {
+    scope: String,
+    sources: BTreeMap<String, String>,
+    minimum_count: u64,
+    tokens: BTreeMap<String, Written>,
+}
+
+fn double_capitals_table(change: impl FnOnce(&mut DoubleCapitalsTable)) -> PathBuf {
+    let counts = |written: i64, capitalised: i64| Written { written, capitalised, extra: None };
+    let mut table = DoubleCapitalsTable {
+        scope: "a test".to_owned(),
+        sources: BTreeMap::from([("web".to_owned(), "a test".to_owned())]),
+        minimum_count: 5,
+        tokens: BTreeMap::from([("ВКонтакте".to_owned(), counts(4350, 495)), ("CMake".to_owned(), counts(14, 1)), ("IPad".to_owned(), counts(6, 6))]),
+    };
+    change(&mut table);
+    written(ks_text::json::dumps(&table, &ks_text::JsonOptions::default()).as_bytes())
+}
+
+/// The table with the counts of `token` set.
+fn word(table: &mut DoubleCapitalsTable, token: &str, written: i64, capitalised: i64) {
+    table.tokens.insert(token.to_owned(), Written { written, capitalised, extra: None });
+}
+
+#[test]
+fn a_table_of_two_capitals_holds_the_words_written_so_and_refuses_another_shape() {
+    let table = WrittenCapitals::load(&double_capitals_table(|_| ())).expect("it loads");
+    assert!(table.contains("ВКонтакте") && table.contains("CMake") && table.contains("IPad"));
+    assert!(!table.contains("Вконтакте") && !table.contains("ЧТо") && !table.contains("cmake"));
+    let refused = |change: fn(&mut DoubleCapitalsTable)| WrittenCapitals::load(&double_capitals_table(change)).err().expect("refused").message;
+    // A word written less often than the minimum, less often than with one capital, a word with a digit, a word of two
+    // scripts.
+    let changes: [fn(&mut DoubleCapitalsTable); 4] =
+        [|table| word(table, "ЧТо", 4, 0), |table| word(table, "КАк", 6, 132_974), |table| word(table, "QR2", 9, 0), |table| word(table, "ЮMoney", 16, 0)];
+    for change in changes {
+        assert_eq!(refused(change), "invalid double capitals frequency table");
+    }
+    // A table whose minimum is nought keeps every word written at least once.
+    assert!(WrittenCapitals::load(&double_capitals_table(|table| table.minimum_count = 0)).is_ok());
+    assert_eq!(refused(|table| { table.minimum_count = 0; word(table, "ЧТо", 0, 0); }), "invalid double capitals frequency table");
+    assert!(refused(|table| {
+        table.tokens.insert("CMake".to_owned(), Written { written: 14, capitalised: 1, extra: Some(1) });
+    })
+    .contains("unknown field"));
+    assert!(refused(|table| word(table, "CMake", -1, 0)).contains("invalid value"));
+    let large = double_capitals_table(|table| table.scope = " ".repeat(MAX_DOUBLE_CAPITALS_FREQUENCY_BYTES));
+    assert_eq!(WrittenCapitals::load(&large).err().expect("refused").message, "double capitals frequency table is too large");
+    assert_eq!(WrittenCapitals::load(&PathBuf::from("/nonexistent/table.json")).err().expect("refused").name, "FileNotFoundError");
+    // The table the program ships holds the name its lexicon knows in lowercase, and no slip.
+    let shipped = WrittenCapitals::load(&models().join(DOUBLE_CAPITALS_FREQUENCY_FILE)).expect("the shipped table");
+    assert!(shipped.contains("ВКонтакте") && !shipped.contains("ЧТо") && !shipped.contains("КАк"));
+    // The term tables read it on first use, and one that does not load is no answer.
+    let tables = TermTables::load(&models_with_capitals(None)).expect("the term tables");
+    assert!(tables.written_capitals().is_err());
+    assert!(TermTables::load(&models()).expect("the term tables").written_capitals().expect("the shipped table").contains("ВКонтакте"));
 }
 
 /// A folder of models whose capitals table is `table`: the packaged term tables beside it.

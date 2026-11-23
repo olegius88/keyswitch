@@ -16,7 +16,7 @@
 //! `ks-train engine boundary|prefix --tree <root> [--verify|--refresh-runtime|--output <file>] [--jobs N]`
 //! `ks-train messages --out <dir> [--so <zst> --tatoeba <dir>] [--taiga <dir>]`, `terms --messages <dir> --out <file>`, `alnum --messages <dir> [--members <file>...] --out <file>`,
 //! `short --leipzig <dir> --out <file>`, `sources --manifest <file> --messages <dir> --tatoeba <dir>`,
-//! `capitals --leipzig <dir> --messages <dir> [--members <file>...] --iso4217 <xml> --minimum-count N --out <file>`,
+//! `capitals --leipzig <dir> --messages <dir> [--members <file>...] --iso4217 <xml> --minimum-count N --out <file> --double-capitals-out <file>`,
 //! `select --messages <file>|--leipzig <dir> [--members <file>...] --class <name> --development-share R --out <dir> [--prefix P] [--only-ids <file>]`,
 //! `devchat-messages --comments <dir> --dump <zst> --out <dir> [--earlier <file>...]` (each with `--tree <root>`)
 //! `ks-train typo-frequency --tree <root> [--private <folder>] [--verify]`

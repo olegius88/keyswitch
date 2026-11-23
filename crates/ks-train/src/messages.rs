@@ -13,6 +13,7 @@ use indexmap::IndexMap;
 use ks_context::constants::{ALNUM_HEAD_MAX_CHARACTERS, OPENING_SHORT_MAX_LETTERS, RESUME_LEADING_SIGNS, UPPER_HEAD_MAX_LETTERS, UPPER_HEAD_MIN_LETTERS};
 use ks_context::context_action_features::{common_shape, dotted_question, letters_and_digits, sign_token_asked, words_of};
 use ks_context::context_model::TermTables;
+use ks_engine::constants::{DOUBLE_CAPITALS, DOUBLE_CAPITALS_MIN_LETTERS};
 use ks_lang::short_words::TRUSTED_SINGLE_LETTER_WORDS;
 use ks_lang::Resources;
 use ks_text::{Indent, JsonOptions, json_dumps, pystr};
@@ -65,6 +66,9 @@ const ISO_4217_RETRIEVED: &str = "2026-11-10";
 /// number (a corpus holds a million sentences).
 const LEIPZIG_QUESTION_STRIDE: i64 = 10_000_000;
 const LEIPZIG_KIND: &str = "prose";
+/// The Leipzig word lists the tables of capitals count, as their sources name them.
+const LEIPZIG_ORIGIN: &str = "Leipzig Corpora Collection, Russian corpora of 1M sentences each: news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019, Wikipedia 2021";
+const LEIPZIG_LICENSE: &str = "CC BY (the Leipzig Corpora Collection's terms for downloaded corpora)";
 const LEXICON_PATH: &str = "model/intent_v1/sources/ru_RU.lm";
 
 fn regex(pattern: &str) -> Regex {
@@ -853,11 +857,7 @@ pub fn build_capitals(request: &CapitalsRequest<'_>) -> Result<CapitalsTable, St
     Ok(CapitalsTable {
         scope,
         sources: CapitalsSources {
-            web: WebSource {
-                origin: "Leipzig Corpora Collection, Russian corpora of 1M sentences each: news 2019-2024, newscrawl-public 2018, web 2002, ru web-public 2019, Wikipedia 2021".to_owned(),
-                license: "CC BY (the Leipzig Corpora Collection's terms for downloaded corpora)".to_owned(),
-                word_lists_sha256: word_files,
-            },
+            web: WebSource { origin: LEIPZIG_ORIGIN.to_owned(), license: LEIPZIG_LICENSE.to_owned(), word_lists_sha256: word_files },
             technical: TechnicalSource {
                 origin: "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5, the training split of ks-train messages".to_owned(),
                 license: "CC BY-SA 4.0 (ru.stackoverflow.com texts: CC BY-SA 2.5, 3.0 or 4.0 by publication date)".to_owned(),
@@ -892,12 +892,18 @@ pub struct CapitalsWritten {
     pub technical_latin: usize,
     pub iso4217: usize,
     pub lexicon_capitals: usize,
+    /// How many words the table of two capitals at a word's start holds.
+    pub double_capitals: usize,
 }
 
-/// `capitals` of the command: the table `build_capitals` makes, written to `out` as the other tables of the command are.
-pub fn write_capitals(request: &CapitalsRequest<'_>, out: &Path) -> Result<CapitalsWritten, String> {
+/// `capitals` of the command: the table `build_capitals` makes, written to `out`, and the words the same word lists write
+/// with two capitals at their start on purpose (`build_double_capitals`), written to `double_out`, as the other tables of
+/// the command are.
+pub fn write_capitals(request: &CapitalsRequest<'_>, out: &Path, double_out: &Path) -> Result<CapitalsWritten, String> {
     let table = build_capitals(request)?;
+    let double = build_double_capitals(request.leipzig, request.minimum)?;
     std::fs::write(out, ks_text::json::dumps(&table, &indented_json()) + "\n").map_err(|error| error.to_string())?;
+    std::fs::write(double_out, ks_text::json::dumps(&double, &indented_json()) + "\n").map_err(|error| error.to_string())?;
     Ok(CapitalsWritten {
         web_cyrillic: table.web_cyrillic.len(),
         web_latin: table.web_latin.len(),
@@ -905,6 +911,117 @@ pub fn write_capitals(request: &CapitalsRequest<'_>, out: &Path) -> Result<Capit
         technical_latin: table.technical_latin.len(),
         iso4217: table.iso4217.len(),
         lexicon_capitals: table.lexicon_capitals.len(),
+        double_capitals: double.tokens.len(),
+    })
+}
+
+/// The table of words Russian text writes with two capitals at their start on purpose (`double-capitals-frequency.json`):
+/// the engine keeps such a word as typed where it fixes Shift held one letter too long.
+#[derive(Serialize, Debug)]
+pub struct DoubleCapitalsTable {
+    pub scope: String,
+    pub sources: DoubleCapitalsSources,
+    pub minimum_count: i64,
+    pub tokens: BTreeMap<String, WrittenCounts>,
+}
+
+/// Where the words of the table of two capitals are counted.
+#[derive(Serialize, Debug)]
+pub struct DoubleCapitalsSources {
+    pub web: WebSource,
+}
+
+/// How often the word lists write a word with two capitals at its start, and with only its first letter a capital.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct WrittenCounts {
+    pub written: i64,
+    pub capitalised: i64,
+}
+
+/// A token of the shape of Shift held one letter too long, spelled as written: `DOUBLE_CAPITALS_MIN_LETTERS` letters or
+/// more, all Latin or all Cyrillic, the first `DOUBLE_CAPITALS` of them capitals and the rest lowercase (`ВКонтакте`,
+/// `ЧТо`).
+fn double_capitals_token(token: &str) -> bool {
+    let split = token.char_indices().nth(DOUBLE_CAPITALS).map_or(token.len(), |(index, _)| index);
+    let (capitals, rest) = token.split_at(split);
+    token.chars().count() >= DOUBLE_CAPITALS_MIN_LETTERS
+        && pystr::isalpha(token)
+        && (pystr::isascii(token) || token.chars().all(is_cyrillic_letter))
+        && pystr::isupper(capitals)
+        && pystr::islower(rest)
+}
+
+/// `token` with only its first letter a capital: the word Shift held one letter too long would have typed.
+fn capitalised_form(token: &str) -> String {
+    let (first, rest) = token.split_at(token.chars().next().map_or(0, char::len_utf8));
+    format!("{first}{}", pystr::lower(rest))
+}
+
+/// Each row of a Leipzig word list, its word and its count as written, handed to `each` in the order of the list.
+fn leipzig_rows(path: &Path, each: &mut dyn FnMut(&str, &str) -> Result<(), String>) -> Result<(), String> {
+    let text = String::from_utf8_lossy(&std::fs::read(path).map_err(|error| error.to_string())?).into_owned();
+    for line in universal_lines(&text) {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= LEIPZIG_WORDS_COLUMNS {
+            each(parts[1], parts[2])?;
+        }
+    }
+    Ok(())
+}
+
+/// A count of a Leipzig word list.
+fn leipzig_count(text: &str) -> Result<i64, String> {
+    text.trim().parse::<i64>().map_err(|_| "a count".to_owned())
+}
+
+/// `capitals`, the second table: the tokens of the shape of Shift held one letter too long (`double_capitals_token`) that
+/// the Leipzig word lists unpacked under the directory write at least `minimum` times and at least as often as the same
+/// word with only its first letter a capital, each with both counts. Prose writes such a token so on purpose
+/// (`ВКонтакте`, `CMake`, `МВт`); a slip is written far less often than the word it slipped from (`ЧТо`, `КАк`). The word
+/// lists keep a word's case. The words with one capital are counted in a second reading of the lists: there are millions
+/// of them, and only the ones of the tokens found are kept.
+pub fn build_double_capitals(leipzig: &Path, minimum: i64) -> Result<DoubleCapitalsTable, String> {
+    let paths = leipzig_files(leipzig, "-words.txt", false)?;
+    let mut written: BTreeMap<String, i64> = BTreeMap::new();
+    let mut word_files = BTreeMap::new();
+    for path in &paths {
+        leipzig_rows(path, &mut |token, count| {
+            if double_capitals_token(token) {
+                *written.entry(token.to_owned()).or_insert(0) += leipzig_count(count)?;
+            }
+            Ok(())
+        })?;
+        word_files.insert(path.file_name().map_or_default(|name| name.to_string_lossy().into_owned()), checksum(path)?);
+    }
+    let mut capitalised: BTreeMap<String, i64> = written.keys().map(|token| (capitalised_form(token), 0)).collect();
+    for path in &paths {
+        leipzig_rows(path, &mut |token, count| {
+            if let Some(total) = capitalised.get_mut(token) {
+                *total += leipzig_count(count)?;
+            }
+            Ok(())
+        })?;
+    }
+    let tokens = written
+        .into_iter()
+        .filter_map(|(token, written)| {
+            let capitalised = capitalised.get(&capitalised_form(&token)).copied().unwrap_or_default();
+            (written >= minimum && written >= capitalised).then_some((token, WrittenCounts { written, capitalised }))
+        })
+        .collect();
+    let scope = format!(
+        "Tokens of {DOUBLE_CAPITALS_MIN_LETTERS} letters or more, all Latin or all Cyrillic, written with {DOUBLE_CAPITALS} capitals at their start and \
+         lowercase letters after them, that the Leipzig word lists of Russian news, web and Wikipedia text, which keep a word's case, write at least \
+         {minimum} times and at least as often as the same word with only its first letter a capital: written counts the token as it stands, \
+         capitalised the word with one capital. Russian text writes such a token so on purpose (`ВКонтакте`, `CMake`, units as `МВт`); Shift held one \
+         letter too long writes a word far less often so than with one capital (`ЧТо`, `КАк`), and such a word is not here. The engine keeps a word \
+         of the table as typed where it fixes the case of one typed with Shift held one letter too long (ks-train capitals)."
+    );
+    Ok(DoubleCapitalsTable {
+        scope,
+        sources: DoubleCapitalsSources { web: WebSource { origin: LEIPZIG_ORIGIN.to_owned(), license: LEIPZIG_LICENSE.to_owned(), word_lists_sha256: word_files } },
+        minimum_count: minimum,
+        tokens,
     })
 }
 
@@ -1491,7 +1608,7 @@ pub fn command(arguments: &[String], root: &Path, resources: &std::sync::Arc<Res
         Some("capitals") => {
             let minimum: i64 = required("--minimum-count")?.to_string_lossy().parse().map_err(|_| "--minimum-count is a number")?;
             let request = CapitalsRequest { root, leipzig: &required("--leipzig")?, messages: &required("--messages")?, members: &repeated("--members"), iso4217: &required("--iso4217")?, iso4217_sha256: ISO_4217_LIST_SHA256, minimum };
-            Ok(json!(write_capitals(&request, &required("--out")?)?))
+            Ok(json!(write_capitals(&request, &required("--out")?, &required("--double-capitals-out")?)?))
         }
         Some("sources") => build_sources(&required("--manifest")?, &required("--messages")?, &required("--tatoeba")?),
         Some("select") => {

@@ -515,13 +515,16 @@ fn the_table_of_capitals_counts_each_source_apart() {
     assert_eq!(table.sources.iso4217.published, "2026-01-01");
     assert_eq!((table.sources.technical.questions_left_out, table.sources.web.word_lists_sha256.len()), (1, 2));
     assert!(table.scope.contains("under 2 is cut"));
-    // The command writes the table as it writes the others, and says how many tokens each section holds.
-    let written = sources.folder.join("capitals-written.json");
-    let counts = ks_train::messages::write_capitals(&request, &written).expect("a table written");
-    let expected = ks_train::messages::CapitalsWritten { web_cyrillic: 2, web_latin: 1, technical_cyrillic: 0, technical_latin: 1, iso4217: 2, lexicon_capitals: 2 };
+    // The command writes the table as it writes the others, the table of two capitals at a word's start beside it, and says
+    // how many tokens each section holds.
+    let (written, double) = (sources.folder.join("capitals-written.json"), sources.folder.join("capitals-double.json"));
+    let counts = ks_train::messages::write_capitals(&request, &written, &double).expect("a table written");
+    let expected = ks_train::messages::CapitalsWritten { web_cyrillic: 2, web_latin: 1, technical_cyrillic: 0, technical_latin: 1, iso4217: 2, lexicon_capitals: 2, double_capitals: 0 };
     assert_eq!(counts, expected);
     let text = std::fs::read_to_string(&written).expect("the table");
     assert!(text.ends_with("}\n") && text.contains("\n  \"iso4217\": [\n    \"KZT\",") && text.contains("США"), "{text}");
+    let text = std::fs::read_to_string(&double).expect("the table of two capitals");
+    assert!(text.ends_with("}\n") && text.contains("\n  \"tokens\": {}") && text.contains("\"minimum_count\": 2"), "{text}");
     // The list is the pinned one, the counts are counts, and the list says when it was published.
     assert!(build_capitals(&CapitalsRequest { iso4217_sha256: "0", ..request }).unwrap_err().contains("differs"));
     let undated = sources.folder.join("capitals-undated.xml");
@@ -540,7 +543,44 @@ fn the_table_of_capitals_counts_each_source_apart() {
     arguments.pop();
     arguments.push("2".as_ref());
     let output = tool("capitals", &arguments);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--double-capitals-out is required"), "{}", String::from_utf8_lossy(&output.stderr));
+    arguments.push("--double-capitals-out".as_ref());
+    arguments.push(double.as_os_str());
+    let output = tool("capitals", &arguments);
     assert!(String::from_utf8_lossy(&output.stderr).contains("differs from the pinned one"), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn the_table_of_two_capitals_holds_the_words_prose_writes_so_more_often_than_with_one() {
+    use ks_train::messages::{WrittenCounts, build_double_capitals};
+    let leipzig = leipzig_folder(
+        "double-capitals-leipzig",
+        [
+            // The second list counts some of the words again: the counts of both are summed.
+            "1\tВКонтакте\t7\n2\tВконтакте\t3\n3\tЧТо\t2\n4\tЧто\t50\n5\tCMake\t4\n6\tcmake\t9\n7\tКАк\t1\n8\tXBox\t3\n9\tXbox\t2\n10\tIPad\t2\n11\tIpad\t2\nкороткая\n",
+            // Other shapes: capitals throughout, one capital, two letters, a digit, two scripts, a Latin letter beyond
+            // ASCII, a third capital.
+            "1\tВКонтакте\t1\n2\tXbox\t2\n3\tМВт\t5\n4\tВКО\t9\n5\tВКо1\t9\n6\tВК\t9\n7\tЮMoney\t9\n8\tÉTat\t9\n9\tВКОнтакте\t9\n10\tВко\t9\n",
+        ],
+        ["", ""],
+    );
+    let table = build_double_capitals(&leipzig, 2).expect("a table");
+    let counted = |written: i64, capitalised: i64| WrittenCounts { written, capitalised };
+    // `ЧТо` is written less often than `Что`, `XBox` than `Xbox` over both lists, `КАк` less often than the minimum; `CMake`
+    // is weighed against `Cmake`, never written, not against `cmake`, and `IPad` is written as often as `Ipad`.
+    let expected: BTreeMap<String, WrittenCounts> =
+        [("CMake", counted(4, 0)), ("IPad", counted(2, 2)), ("МВт", counted(5, 0)), ("ВКонтакте", counted(8, 3))].into_iter().map(|(token, counts)| (token.to_owned(), counts)).collect();
+    assert_eq!(table.tokens, expected);
+    assert_eq!((table.minimum_count, table.sources.web.word_lists_sha256.len()), (2, 2));
+    assert!(table.scope.contains("at least 2 times") && table.scope.contains("3 letters or more"), "{}", table.scope);
+    assert!(table.sources.web.license.starts_with("CC BY"));
+    // A count that is no number fails the reading in which it is read: of a word of the shape, or of the same word with one
+    // capital.
+    for words in ["1\tВКонтакте\tmany\n", "1\tВКонтакте\t3\n2\tВконтакте\tmany\n"] {
+        let broken = leipzig_folder("double-capitals-broken", [words, ""], ["", ""]);
+        assert_eq!(build_double_capitals(&broken, 2).err().as_deref(), Some("a count"), "{words}");
+    }
+    assert!(build_double_capitals(&SOURCES.folder.join("nonexistent"), 2).is_err());
 }
 
 /// A message `select` wrote: the fields a Leipzig sentence is given.
