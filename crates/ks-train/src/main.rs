@@ -3,7 +3,7 @@
 //! `ks-train prefix-report --fit <folder> --output <file>`
 //! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--frames-cache <folder>] --output <file> [--jobs N]`
 //! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
-//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>... --reference <name> [--key early|any] --output <file> [--jobs N]`
+//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>... --reference <name> --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
 //! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
@@ -459,7 +459,7 @@ fn all_of<'a>(arguments: &'a [String], name: &str) -> Vec<&'a str> {
 
 /// `prefix-acceptance build|run`: the acceptance samples of a prefix candidate, and their one replay.
 fn acceptance_command(arguments: &[String]) -> i32 {
-    use ks_train::prefix_acceptance::{self, BuildRequest, KeyKind, Minimums, NamedPair, RunRequest};
+    use ks_train::prefix_acceptance::{self, BuildRequest, Minimums, NamedPair, RunRequest};
     let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let paths = |name: &str| all_of(arguments, name).into_iter().map(PathBuf::from).collect::<Vec<_>>();
     let number = |name: &str, default: usize| option(arguments, name).map_or(default, |value| value.parse().unwrap_or_else(|_| panic!("{name} is a number")));
@@ -482,15 +482,10 @@ fn acceptance_command(arguments: &[String]) -> i32 {
                     NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix) }
                 })
                 .collect();
-            let key_kind = match option(arguments, "--key") {
-                None | Some("early") => KeyKind::Early,
-                Some("any") => KeyKind::Any,
-                Some(other) => panic!("--key is early or any, not {other}"),
-            };
             let (root, samples, output) = (required("--tree"), required("--samples"), required("--output"));
             let resource_dir = root.join("resources");
             let reference = option(arguments, "--reference").expect("--reference is required");
-            let request = RunRequest { root: &root, resource_dir: &resource_dir, samples: &samples, pairs: &pairs, reference, key_kind, jobs: number("--jobs", 1), output: &output };
+            let request = RunRequest { root: &root, resource_dir: &resource_dir, samples: &samples, pairs: &pairs, reference, jobs: number("--jobs", 1), output: &output };
             prefix_acceptance::run(&request).map(|report| {
                 let held: Vec<String> = report.gates.iter().map(|(name, gates)| format!("{name}: gates held {}", gates.all_held)).collect();
                 held.join("\n")

@@ -255,6 +255,11 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
         if matches!(event_name(expected_line).as_str(), "typo_correction_planned" | "typo_correction_declined") {
             right.as_object_mut().map(|object| (object.remove("written_order"), object.remove("written_margin")));
         }
+        // The Python engine converted a prefix at the model's one threshold and logged none with its decision; the port logs
+        // the threshold of the layout the keys were typed in, which a model of one threshold has in both.
+        if event_name(expected_line) == "prefix_decision" {
+            right.as_object_mut().map(|object| object.remove("threshold"));
+        }
         // An exception's class is the Python's; the port has its own names for the same failure.
         if left["event"] == "history_write_failed" {
             left.as_object_mut().map(|object| object.remove("error"));

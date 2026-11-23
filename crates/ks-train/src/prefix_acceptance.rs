@@ -34,6 +34,10 @@ use std::sync::{Arc, Mutex};
 /// The rows of every sample, the words of N2 for the count without the engine, and what the samples were made of.
 pub const ROWS_FILE: &str = "rows.jsonl.gz";
 pub const PLAIN_AS_MEANT_FILE: &str = "n2-words.txt";
+/// The words of N2 the development documents of the bases hold: the source the samples of plain text first had.
+pub const PLAIN_DEVELOPMENT_FILE: &str = "n2-development-words.txt";
+/// The names of the sources of plain text, as the receipt counts them.
+const SOURCE_TEXT: &str = "text";
 pub const RECEIPT_FILE: &str = "receipt.json";
 pub const SAMPLES_KIND: &str = "prefix-acceptance-samples";
 pub const REPORT_KIND: &str = "prefix-acceptance-report";
@@ -165,6 +169,11 @@ pub struct SamplesReceipt {
     pub held_out_aliases: usize,
     pub minimums: Minimums,
     pub counts: BTreeMap<String, SampleCount>,
+    /// The rows left out because the replay cannot type them (a key the layout has not), by sample and by direction.
+    pub untyped: BTreeMap<String, [usize; 2]>,
+    /// The words of N2 by where they were found (`development`, `calibration` of the bases, `text`), by direction; a word
+    /// found in more than one source counts in each.
+    pub plain_by_source: BTreeMap<String, [usize; 2]>,
     pub sha256: BTreeMap<String, String>,
     pub scope: String,
 }
@@ -238,13 +247,15 @@ fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 /// The words of a sample of plain text, typed as meant (N2) or in the other layout (N1), those the engine types drawn by
 /// hash in each direction.
-fn plain_rows(words: &BTreeSet<(String, i64)>, sample: Sample, namespace: &str, engine: usize) -> Vec<AcceptanceRow> {
+fn plain_rows(words: &BTreeSet<(String, i64)>, sample: Sample, namespace: &str, engine: usize, untyped: &mut BTreeMap<String, [usize; 2]>) -> Vec<AcceptanceRow> {
     let other = sample == Sample::N1;
-    let mut rows: Vec<AcceptanceRow> = words
+    let rows: Vec<AcceptanceRow> = words
         .iter()
         .filter(|(text, group)| !other || letters_both_ways(text, *group))
         .map(|(text, group)| AcceptanceRow { sample, text: text.clone(), group: *group, class: PLAIN_CLASS.to_owned(), other, engine: false })
         .collect();
+    // A row the replay cannot type is left out before the engine's share is drawn.
+    let mut rows = typable(rows, untyped);
     for direction in 0..2 {
         let mut drawn: Vec<&mut AcceptanceRow> = rows.iter_mut().filter(|row| row.direction() == direction).collect();
         drawn.sort_by_cached_key(|row| (draw(&format!("{namespace}:engine:{}:{}:{}", sample.as_str(), row.group, row.text)), row.text.clone()));
@@ -253,6 +264,19 @@ fn plain_rows(words: &BTreeSet<(String, i64)>, sample: Sample, namespace: &str, 
         }
     }
     rows
+}
+
+/// The rows the replay can type, every key of them a key of a layout; the others are counted by sample and direction.
+fn typable(rows: Vec<AcceptanceRow>, untyped: &mut BTreeMap<String, [usize; 2]>) -> Vec<AcceptanceRow> {
+    rows.into_iter()
+        .filter(|row| {
+            let typed = row_plan(0, row).unsupported.is_empty();
+            if !typed {
+                untyped.entry(row.sample.as_str().to_owned()).or_default()[row.direction()] += 1;
+            }
+            typed
+        })
+        .collect()
 }
 
 /// The splits of a base corpus whose texts are plain text: development, and calibration when asked.
@@ -283,17 +307,19 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         let entry = words.entry((row.text, row.group)).or_insert((row.class, hard));
         entry.1 |= hard;
     }
-    let mut rows: Vec<AcceptanceRow> = Vec::new();
+    let mut drawn: Vec<AcceptanceRow> = Vec::new();
     for ((text, group), (class, hard)) in &words {
         let row = |sample: Sample, other: bool| AcceptanceRow { sample, text: text.clone(), group: *group, class: class.as_str().to_owned(), other, engine: true };
         if class.paired() {
-            rows.push(row(Sample::A1, true));
-            rows.push(row(Sample::A2, false));
+            drawn.push(row(Sample::A1, true));
+            drawn.push(row(Sample::A2, false));
         }
         if !class.paired() || *hard {
-            rows.push(row(Sample::A3, false));
+            drawn.push(row(Sample::A3, false));
         }
     }
+    let mut untyped: BTreeMap<String, [usize; 2]> = BTreeMap::new();
+    let mut rows = typable(drawn, &mut untyped);
     // N1 and N2: plain text, without every word a prefix selection, a held-out sample or the acceptance split holds.
     let mut held: HashSet<String> = HashSet::new();
     for path in request.inventories {
@@ -304,23 +330,32 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
     for (text, _) in words.keys() {
         held.extend(aliases_of(text));
     }
-    let mut plain: BTreeSet<(String, i64)> = BTreeSet::new();
+    // The words of each source, and their union.
+    let mut by_source: BTreeMap<&'static str, BTreeSet<(String, i64)>> = BTreeMap::new();
     let splits = base_splits(request.base_calibration);
     for base in request.bases {
         for split in splits {
             for row in load_rows(base, split)? {
                 let (before, after, _, _) = trimmed_window(&row);
-                words_of(&format!("{before}{}{after}", row.original), &mut plain);
+                words_of(&format!("{before}{}{after}", row.original), by_source.entry(split).or_default());
             }
         }
     }
     for path in request.texts {
-        words_of(&read_text(path)?, &mut plain);
+        words_of(&read_text(path)?, by_source.entry(SOURCE_TEXT).or_default());
     }
+    let mut plain: BTreeSet<(String, i64)> = by_source.values().flatten().cloned().collect();
     plain.retain(|(text, _)| !aliases_of(text).any(|alias| held.contains(&alias)));
-    rows.extend(plain_rows(&plain, Sample::N1, request.namespace, request.minimums.engine_plain));
-    rows.extend(plain_rows(&plain, Sample::N2, request.namespace, request.minimums.engine_plain));
+    rows.extend(plain_rows(&plain, Sample::N1, request.namespace, request.minimums.engine_plain, &mut untyped));
+    rows.extend(plain_rows(&plain, Sample::N2, request.namespace, request.minimums.engine_plain, &mut untyped));
     rows.sort();
+    let in_source = |source: &str, row: &AcceptanceRow| by_source.get(source).is_some_and(|found| found.contains(&(row.text.clone(), row.group)));
+    let mut plain_by_source: BTreeMap<String, [usize; 2]> = BTreeMap::new();
+    for row in rows.iter().filter(|row| row.sample == Sample::N2) {
+        for source in by_source.keys().filter(|source| in_source(source, row)) {
+            plain_by_source.entry((*source).to_owned()).or_default()[row.direction()] += 1;
+        }
+    }
     let counts = sample_counts(&rows);
     let minimums = request.minimums;
     for direction in 0..2 {
@@ -333,9 +368,11 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
     let lines: String = rows.iter().map(|row| ks_text::json::dumps(row, &compact()) + "\n").collect();
     let packed = gzip(lines.as_bytes())?;
     let as_meant: String = rows.iter().filter(|row| row.sample == Sample::N2).map(|row| format!("{}\n", row.text)).collect();
+    let of_development: String = rows.iter().filter(|row| row.sample == Sample::N2 && in_source(DEVELOPMENT, row)).map(|row| format!("{}\n", row.text)).collect();
     std::fs::create_dir_all(request.output).map_err(|error| error.to_string())?;
     std::fs::write(request.output.join(ROWS_FILE), &packed).map_err(|error| error.to_string())?;
     std::fs::write(request.output.join(PLAIN_AS_MEANT_FILE), as_meant.as_bytes()).map_err(|error| error.to_string())?;
+    std::fs::write(request.output.join(PLAIN_DEVELOPMENT_FILE), of_development.as_bytes()).map_err(|error| error.to_string())?;
     let receipt = SamplesReceipt {
         kind: SAMPLES_KIND.to_owned(),
         namespace: request.namespace.to_owned(),
@@ -347,8 +384,10 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         held_out_aliases: held.len(),
         minimums,
         counts,
-        sha256: [(ROWS_FILE.to_owned(), hex(&Sha256::digest(&packed))), (PLAIN_AS_MEANT_FILE.to_owned(), hex(&Sha256::digest(as_meant.as_bytes())))].into_iter().collect(),
-        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads; N1 and N2 from the development split (and, when asked, the calibration split) of frozen base corpora and files of plain text, without the words any prefix selection, held-out sample or the acceptance split holds, by their physical aliases. A row is one token typed first in an empty text field and followed by a space; only counts are read.".to_owned(),
+        untyped,
+        plain_by_source,
+        sha256: [(ROWS_FILE, packed.as_slice()), (PLAIN_AS_MEANT_FILE, as_meant.as_bytes()), (PLAIN_DEVELOPMENT_FILE, of_development.as_bytes())].into_iter().map(|(name, bytes)| (name.to_owned(), hex(&Sha256::digest(bytes)))).collect(),
+        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads; N1 and N2 from the development split (and, when asked, the calibration split) of frozen base corpora and files of plain text, without the words any prefix selection, held-out sample or the acceptance split holds, by their physical aliases; N2 counted by source, the words of the development documents also listed apart. A row is one token typed first in an empty text field and followed by a space; a row the replay cannot type is left out and counted; only counts are read.".to_owned(),
     };
     std::fs::write(request.output.join(RECEIPT_FILE), ks_text::json::dumps(&receipt, &readable()) + "\n").map_err(|error| error.to_string())?;
     Ok(receipt)
@@ -377,8 +416,8 @@ pub struct NamedPair {
     pub prefix: PathBuf,
 }
 
-/// Which corrections give a row typed in the other layout its key: the pre-registration's wording reads as an early one,
-/// the council's as any.
+/// Which corrections give a row typed in the other layout its key in the mean: one of kind early, or one of any kind.
+/// The gate holds both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum KeyKind {
@@ -394,7 +433,6 @@ pub struct RunRequest<'a> {
     pub pairs: &'a [NamedPair],
     /// The pair the others are held against: the installed one.
     pub reference: &'a str,
-    pub key_kind: KeyKind,
     pub jobs: usize,
     pub output: &'a Path,
 }
@@ -457,8 +495,9 @@ impl Observed {
         self.right && self.first_into.is_some_and(|(key, early)| early && key <= SWITCH_KEY)
     }
 
+    /// Switched inside the word: a first correction of kind early at a key not above the word's letters.
     fn inside_word(&self) -> bool {
-        self.right && self.first_into.is_some_and(|(key, early)| early && key < self.letters)
+        self.right && self.first_into.is_some_and(|(key, early)| early && key <= self.letters)
     }
 }
 
@@ -481,8 +520,8 @@ pub struct Earliness {
     pub any_key_sum: usize,
     pub early_mean_key: f64,
     pub any_mean_key: f64,
-    /// A first correction into the layout meant of kind early by `SWITCH_KEY`, and before the word's last letter, with the
-    /// first word right in the end.
+    /// A first correction into the layout meant of kind early by `SWITCH_KEY`, and not after the word's last letter, with
+    /// the first word right in the end.
     pub switched_by_key: Count,
     pub inside_word: Count,
     pub first_word_wrong: Count,
@@ -597,8 +636,6 @@ pub struct PairReport {
     pub context_sha256: String,
     pub prefix_sha256: String,
     pub prefix_version: String,
-    /// Rows a plan cannot type: a glyph neither layout has.
-    pub untyped_rows: usize,
     /// A1 and N1, by direction.
     pub earliness: BTreeMap<String, [Earliness; 2]>,
     /// A2, A3 with the lists open and closed, and N2 together, by direction (`latin`, `cyrillic`) and in all.
@@ -613,9 +650,9 @@ pub struct PairReport {
 pub const SAFETY_CELLS: [&str; 3] = ["latin", "cyrillic", "all"];
 
 /// A pair's report from its replayed rows.
-fn pair_report(rows: &[AcceptanceRow], replayed: &[Replayed], untyped: usize) -> PairReport {
+fn pair_report(rows: &[AcceptanceRow], replayed: &[Replayed]) -> PairReport {
     let key_of = |item: &Replayed| (rows[item.row].text.clone(), rows[item.row].group);
-    let mut report = PairReport { untyped_rows: untyped, ..PairReport::default() };
+    let mut report = PairReport::default();
     for sample in [Sample::A1, Sample::N1] {
         let by_direction = [0, 1].map(|direction| {
             // Every row of A1 and N1 is typed in the other layout.
@@ -650,9 +687,26 @@ fn pair_report(rows: &[AcceptanceRow], replayed: &[Replayed], untyped: usize) ->
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EarlierGate {
-    pub mean_key_lower: bool,
-    pub switched_by_key_not_fewer: bool,
-    pub inside_word_not_fewer: bool,
+    /// The mean key lower, from corrections of kind early and from corrections of any kind.
+    pub early_mean_key_lower: bool,
+    pub any_mean_key_lower: bool,
+    /// Switched by key 4, and switched inside the word: not fewer, by rows and by distinct words.
+    pub switched_by_key_not_fewer: CountGate,
+    pub inside_word_not_fewer: CountGate,
+}
+
+/// A count of rows and of distinct words, each held to the reference's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CountGate {
+    pub rows: bool,
+    pub words: bool,
+}
+
+impl CountGate {
+    fn not_fewer(ours: Count, theirs: Count) -> CountGate {
+        CountGate { rows: ours.rows >= theirs.rows, words: ours.words >= theirs.words }
+    }
 }
 
 /// S1 for one cell.
@@ -663,6 +717,15 @@ pub struct SafetyGate {
     pub stays_not_more: bool,
 }
 
+impl SafetyGate {
+    fn of(ours: &Safety, theirs: &Safety) -> SafetyGate {
+        SafetyGate { false_early_not_more: ours.false_early.words <= theirs.false_early.words, stays_not_more: ours.stays.words <= theirs.stays.words }
+    }
+}
+
+/// The samples S1 and S2 also hold alone, in each direction: a gain on the tokens of A3 pays for no loss on ordinary words.
+pub const SAMPLES_ALONE: [Sample; 2] = [Sample::A2, Sample::N2];
+
 /// The gates of a pair held against the reference.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -672,11 +735,15 @@ pub struct Gates {
     pub e2: BTreeMap<String, [bool; 2]>,
     /// Started right, ended wrong, distinct words: not more; gated only for a pair with the M1 head.
     pub e2_started_right_ended_wrong: BTreeMap<String, [bool; 2]>,
+    /// By cell (`latin`, `cyrillic`, `all`), and on A2 alone and N2 alone in each direction.
     pub s1: BTreeMap<String, SafetyGate>,
-    /// Corruption by cell: not more; exact restorations of A1 and N1, distinct words, by direction: not fewer.
+    pub s1_alone: BTreeMap<String, [SafetyGate; 2]>,
+    /// Corruption by cell and on A2 alone and N2 alone in each direction: not more.
     pub s2_corruption: BTreeMap<String, bool>,
-    pub s2_exact: BTreeMap<String, [bool; 2]>,
-    /// No row of either pair failed to replay, and none was left untyped.
+    pub s2_corruption_alone: BTreeMap<String, [bool; 2]>,
+    /// Exact restorations of A1 and N1, in each direction, by rows and by distinct words: not fewer.
+    pub s2_exact: BTreeMap<String, [CountGate; 2]>,
+    /// No row of either pair failed to replay.
     pub execution: bool,
     /// E1, E2's first sentence, S1, S2 and the execution.
     pub all_held: bool,
@@ -684,7 +751,7 @@ pub struct Gates {
 
 /// A pair against the reference.
 #[must_use]
-pub fn gates(candidate: &PairReport, reference: &PairReport, kind: KeyKind) -> Gates {
+pub fn gates(candidate: &PairReport, reference: &PairReport) -> Gates {
     let mut gates = Gates::default();
     for (sample, ours) in &candidate.earliness {
         let theirs = &reference.earliness[sample];
@@ -692,29 +759,40 @@ pub fn gates(candidate: &PairReport, reference: &PairReport, kind: KeyKind) -> G
         let earlier = [0, 1].map(|direction| {
             let (ours, theirs) = (&ours[direction], &theirs[direction]);
             EarlierGate {
-                mean_key_lower: ours.mean_key(kind) < theirs.mean_key(kind),
-                switched_by_key_not_fewer: ours.switched_by_key.rows >= theirs.switched_by_key.rows,
-                inside_word_not_fewer: ours.inside_word.rows >= theirs.inside_word.rows,
+                early_mean_key_lower: ours.mean_key(KeyKind::Early) < theirs.mean_key(KeyKind::Early),
+                any_mean_key_lower: ours.mean_key(KeyKind::Any) < theirs.mean_key(KeyKind::Any),
+                switched_by_key_not_fewer: CountGate::not_fewer(ours.switched_by_key, theirs.switched_by_key),
+                inside_word_not_fewer: CountGate::not_fewer(ours.inside_word, theirs.inside_word),
             }
         });
         gates.e1.insert(sample.clone(), earlier);
         gates.e2.insert(sample.clone(), by(&|ours, theirs| ours.first_word_wrong.words <= theirs.first_word_wrong.words));
         gates.e2_started_right_ended_wrong.insert(sample.clone(), by(&|ours, theirs| ours.started_right_ended_wrong.words <= theirs.started_right_ended_wrong.words));
-        gates.s2_exact.insert(sample.clone(), by(&|ours, theirs| ours.exact.words >= theirs.exact.words));
+        gates.s2_exact.insert(sample.clone(), [0, 1].map(|direction| CountGate::not_fewer(ours[direction].exact, theirs[direction].exact)));
     }
     for (cell, ours) in &candidate.safety {
         let theirs = &reference.safety[cell];
-        gates.s1.insert(cell.clone(), SafetyGate { false_early_not_more: ours.false_early.words <= theirs.false_early.words, stays_not_more: ours.stays.words <= theirs.stays.words });
+        gates.s1.insert(cell.clone(), SafetyGate::of(ours, theirs));
         gates.s2_corruption.insert(cell.clone(), ours.corrupted.words <= theirs.corrupted.words);
     }
-    let errors = |report: &PairReport| report.untyped_rows + report.safety.get(SAFETY_CELLS[2]).map_or(0, |cell| cell.execution_errors) + report.earliness.values().flatten().map(|cell| cell.execution_errors).sum::<usize>();
+    let none = [Safety::default(), Safety::default()];
+    for sample in SAMPLES_ALONE.map(Sample::as_str) {
+        let (ours, theirs) = (candidate.safety_by_sample.get(sample).unwrap_or(&none), reference.safety_by_sample.get(sample).unwrap_or(&none));
+        gates.s1_alone.insert(sample.to_owned(), [0, 1].map(|direction| SafetyGate::of(&ours[direction], &theirs[direction])));
+        gates.s2_corruption_alone.insert(sample.to_owned(), [0, 1].map(|direction| ours[direction].corrupted.words <= theirs[direction].corrupted.words));
+    }
+    let errors = |report: &PairReport| report.safety.get(SAFETY_CELLS[2]).map_or(0, |cell| cell.execution_errors) + report.earliness.values().flatten().map(|cell| cell.execution_errors).sum::<usize>();
     gates.execution = errors(candidate) + errors(reference) == 0;
     let mut held: Vec<bool> = vec![gates.execution];
-    held.extend(gates.e1.values().flatten().flat_map(|gate| [gate.mean_key_lower, gate.switched_by_key_not_fewer, gate.inside_word_not_fewer]));
+    let counted = |gate: CountGate| [gate.rows, gate.words];
+    held.extend(gates.e1.values().flatten().flat_map(|gate| [[gate.early_mean_key_lower, gate.any_mean_key_lower], counted(gate.switched_by_key_not_fewer), counted(gate.inside_word_not_fewer)]).flatten());
     held.extend(gates.e2.values().flatten().copied());
-    held.extend(gates.s1.values().flat_map(|gate| [gate.false_early_not_more, gate.stays_not_more]));
+    let safe = |gate: &SafetyGate| [gate.false_early_not_more, gate.stays_not_more];
+    held.extend(gates.s1.values().flat_map(safe));
+    held.extend(gates.s1_alone.values().flatten().flat_map(safe));
     held.extend(gates.s2_corruption.values().copied());
-    held.extend(gates.s2_exact.values().flatten().copied());
+    held.extend(gates.s2_corruption_alone.values().flatten().copied());
+    held.extend(gates.s2_exact.values().flatten().copied().flat_map(counted));
     gates.all_held = !held.contains(&false);
     gates
 }
@@ -727,7 +805,6 @@ pub struct AcceptanceReport {
     pub samples_receipt_sha256: String,
     pub counts: BTreeMap<String, SampleCount>,
     pub reference: String,
-    pub key_kind: KeyKind,
     pub pairs: BTreeMap<String, PairReport>,
     pub gates: BTreeMap<String, Gates>,
 }
@@ -757,8 +834,12 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
     let (receipt, all_rows) = read_samples(request.samples)?;
     let rows: Vec<AcceptanceRow> = all_rows.into_iter().filter(|row| row.engine).collect();
     let plans: Vec<Plan> = rows.iter().enumerate().map(|(index, row)| row_plan(index, row)).collect();
-    let typed: Vec<usize> = (0..rows.len()).filter(|index| plans[*index].unsupported.is_empty()).collect();
-    let untyped = rows.len() - typed.len();
+    // The samples leave out every row the replay cannot type: one left in fails the run.
+    let untyped = plans.iter().filter(|plan| !plan.unsupported.is_empty()).count();
+    if untyped != 0 {
+        return Err(format!("{untyped} rows of the samples cannot be typed"));
+    }
+    let typed: Vec<usize> = (0..rows.len()).collect();
     let resources: Arc<Resources> = Resources::with_speller(request.resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
     let portable = reference_models(request.root, &resources, false)?;
     let spelling = reference_models(request.root, &resources, true)?;
@@ -832,20 +913,19 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
             found.extend(again);
         }
         found.sort_by_key(|item| (item.part, item.profile, item.row));
-        let mut report = pair_report(&rows, found, untyped);
+        let mut report = pair_report(&rows, found);
         report.context_sha256 = checksum(&pair.context)?;
         report.prefix_sha256 = checksum(&pair.prefix)?;
         prefixes[index].version().clone_into(&mut report.prefix_version);
         pairs.insert(pair.name.clone(), report);
     }
     let reference = &pairs[request.reference];
-    let gates = pairs.iter().filter(|(name, _)| *name != request.reference).map(|(name, report)| (name.clone(), gates(report, reference, request.key_kind))).collect();
+    let gates = pairs.iter().filter(|(name, _)| *name != request.reference).map(|(name, report)| (name.clone(), gates(report, reference))).collect();
     let report = AcceptanceReport {
         kind: REPORT_KIND.to_owned(),
         samples_receipt_sha256: checksum(&request.samples.join(RECEIPT_FILE))?,
         counts: receipt.counts,
         reference: request.reference.to_owned(),
-        key_kind: request.key_kind,
         pairs,
         gates,
     };
@@ -897,6 +977,9 @@ mod tests {
         let switched = Observed::of(&row(true), &case("погода ", &[(4, 1, "early")]));
         assert_eq!((switched.first_into, switched.right, switched.key(KeyKind::Early), switched.key(KeyKind::Any)), (Some((4, true)), true, 4, 4));
         assert!(switched.switched_by_key() && switched.inside_word() && switched.undone_by.is_none());
+        // Early at the last letter: inside the word, not by key 4.
+        let last = Observed::of(&row(true), &case("погода ", &[(6, 1, "early")]));
+        assert!(last.inside_word() && !last.switched_by_key() && last.key(KeyKind::Early) == 6);
         // At the last letter and by a pause: the key counts only when any kind does.
         let paused = Observed::of(&row(true), &case("погода ", &[(6, 1, "pause")]));
         assert_eq!((paused.key(KeyKind::Early), paused.key(KeyKind::Any)), (7, 6));
@@ -955,20 +1038,28 @@ mod tests {
         let report = |key: f64, switched: usize, false_early: usize| PairReport {
             earliness: [("A1".to_owned(), [earliness(key, switched, 1), earliness(key, switched, 1)])].into_iter().collect(),
             safety: SAFETY_CELLS.iter().map(|cell| ((*cell).to_owned(), safe(false_early))).collect(),
+            safety_by_sample: [("A2".to_owned(), [safe(false_early), safe(false_early)])].into_iter().collect(),
             ..PairReport::default()
         };
         let reference = report(6.0, 3, 1);
-        let earlier = gates(&report(5.0, 4, 1), &reference, KeyKind::Early);
-        assert!(earlier.all_held && earlier.execution && earlier.e2["A1"] == [true, true]);
-        // As early is not earlier; one more false switch is too many.
-        assert!(!gates(&report(6.0, 4, 1), &reference, KeyKind::Any).all_held);
-        let riskier = gates(&report(5.0, 4, 2), &reference, KeyKind::Early);
+        let earlier = gates(&report(5.0, 4, 1), &reference);
+        assert!(earlier.all_held && earlier.execution && earlier.e2["A1"] == [true, true] && earlier.s1_alone["N2"][1].false_early_not_more);
+        // As early is not earlier; one more false switch is too many, on a sample alone as in the cells.
+        assert!(!gates(&report(6.0, 4, 1), &reference).all_held);
+        let riskier = gates(&report(5.0, 4, 2), &reference);
         assert!(!riskier.all_held && !riskier.s1["latin"].false_early_not_more && !riskier.s2_corruption["all"]);
-        // A row left untyped stops the gates.
-        let untyped = PairReport { untyped_rows: 1, ..report(5.0, 4, 1) };
-        assert!(!gates(&untyped, &reference, KeyKind::Early).execution);
-        let failed = PairReport { untyped_rows: 1, ..reference.clone() };
-        assert!(!gates(&report(5.0, 4, 1), &failed, KeyKind::Early).all_held);
+        assert!(!riskier.s1_alone["A2"][0].false_early_not_more && !riskier.s2_corruption_alone["A2"][1]);
+        // Earlier by the mean key of any kind of correction only, or by fewer distinct words switched, is no gain.
+        let any_only = PairReport { earliness: [("A1".to_owned(), [Earliness { early_mean_key: 6.0, ..earliness(5.0, 4, 1) }, earliness(5.0, 4, 1)])].into_iter().collect(), ..report(5.0, 4, 1) };
+        let held = gates(&any_only, &reference);
+        assert!(!held.all_held && held.e1["A1"][0].any_mean_key_lower && !held.e1["A1"][0].early_mean_key_lower);
+        let fewer_words = PairReport { earliness: [("A1".to_owned(), [Earliness { inside_word: Count { rows: 4, words: 2 }, ..earliness(5.0, 4, 1) }, earliness(5.0, 4, 1)])].into_iter().collect(), ..report(5.0, 4, 1) };
+        let held = gates(&fewer_words, &reference);
+        assert!(!held.all_held && held.e1["A1"][0].inside_word_not_fewer == CountGate { rows: true, words: false });
+        // A row that failed to replay, of either pair, stops the gates.
+        let failed = |report: PairReport| PairReport { earliness: [("A1".to_owned(), [Earliness { execution_errors: 1, ..report.earliness["A1"][0].clone() }, report.earliness["A1"][1].clone()])].into_iter().collect(), ..report };
+        assert!(!gates(&failed(report(5.0, 4, 1)), &reference).execution);
+        assert!(!gates(&report(5.0, 4, 1), &failed(reference.clone())).all_held);
     }
 
     #[test]

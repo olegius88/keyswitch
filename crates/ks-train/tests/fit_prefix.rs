@@ -944,7 +944,7 @@ mod acceptance {
     use flate2::Compression;
     use flate2::read::MultiGzDecoder;
     use flate2::write::GzEncoder;
-    use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, KeyKind, Sample, SamplesReceipt};
+    use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, Sample, SamplesReceipt};
     use ks_train::prefix_words::{Class, Situation, WordRow};
     use serde::Serialize;
     use std::collections::BTreeMap;
@@ -1001,6 +1001,8 @@ mod acceptance {
             word("машина", 1, Class::Rare, true),
             word("kubectl", 0, Class::Term, false),
             word("<window", 0, Class::SignLed, false),
+            // A letter no layout has a key for: the replay cannot type it, and the samples leave it out.
+            word("café", 0, Class::Rare, false),
             // A word in a second situation is the same word.
             WordRow { situation: Situation::Comment, before: "// ".to_owned(), ..word("garden", 0, Class::Rare, false) },
         ];
@@ -1113,8 +1115,16 @@ mod acceptance {
         assert!(rows.iter().filter(|row| row.sample != Sample::N1 && row.sample != Sample::N2).all(|row| row.engine));
         let listed = std::fs::read_to_string(output.join("n2-words.txt")).expect("the words of N2");
         assert_eq!(listed.lines().count(), at(&receipt.counts, "N2").words.iter().sum::<usize>());
-        // The development and calibration splits of the base, never its training or test split.
+        // The development and calibration splits of the base, never its training or test split; N2 by its sources, the
+        // words of the base's development documents also in a list of their own.
         assert_eq!((receipt.bases.len(), receipt.texts.len(), receipt.inventories.len(), receipt.hold_out.len()), (2, 2, 1, 1));
+        let of_development = std::fs::read_to_string(output.join("n2-development-words.txt")).expect("the words of N2 of the development documents");
+        assert_eq!(of_development.lines().count(), at(&receipt.plain_by_source, "development").iter().sum::<usize>());
+        assert!(["calibration", "text"].iter().all(|source| at(&receipt.plain_by_source, source).iter().sum::<usize>() > 0));
+        assert!(of_development.lines().all(|word| listed.lines().any(|found| found == word)));
+        // The word of a letter no layout has is in no sample: counted in A1, typed in Cyrillic, and in A2, typed in Latin.
+        assert!(!rows.iter().any(|row| row.text.contains('é')));
+        assert_eq!((at(&receipt.untyped, "A1"), at(&receipt.untyped, "A2")), (&[0, 1], &[1, 0]));
         refused(&build(&inputs, &output, ["2", "3", "2"]), "refusing to overwrite");
         refused(&build(&inputs, &scratch("acceptance-small").join("samples"), ["2", "100000", "2"]), "the samples ask for");
 
@@ -1140,7 +1150,6 @@ mod acceptance {
         assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager"]);
         let (reference, candidate) = (at(&report.pairs, "installed"), at(&report.pairs, "eager"));
         for pair in [reference, candidate] {
-            assert_eq!(pair.untyped_rows, 0);
             assert!(pair.safety_by_sample.contains_key("N2") && pair.safety_by_profile.len() == 2);
             assert_eq!(at(&pair.safety_by_sample, "A3_closed")[0].rows, at(&pair.safety_by_sample, "A3")[0].rows);
             assert_eq!(at(&pair.earliness, "A1")[0].rows, 2 * at(&receipt.counts, "A1").words[0]);
@@ -1150,17 +1159,23 @@ mod acceptance {
         assert!(at(&candidate.safety, "all").false_early.words > at(&reference.safety, "all").false_early.words);
         let held = at(&report.gates, "eager");
         assert!(!at(&held.s1, "all").false_early_not_more && !held.all_held && held.execution);
+        assert!(!at(&held.s1_alone, "A2")[0].false_early_not_more && held.s1_alone.contains_key("N2") && held.s2_corruption_alone.len() == 2);
         // The report names no text of a sample.
         let written = std::fs::read_to_string(&report_path).expect("the report");
         assert!(!["garden", "мама", "kubectl", "quick"].iter().any(|text| written.contains(text)));
-        // The mean key of any first correction, as a run may ask.
-        let any = scratch("acceptance-any").join("report.json");
-        succeeded(&run(&[&installed], "installed", &any, &["--key", "any"]));
-        let named: AcceptanceReport = read(&any);
-        assert_eq!(named.key_kind, KeyKind::Any);
         refused(&run(&[&installed], "installed", &report_path, &[]), "refusing to overwrite");
         refused(&run(&[&installed], "nobody", &scratch("acceptance-nobody").join("report.json"), &[]), "no pair is named nobody");
-        refused(&run(&[&installed], "installed", &scratch("acceptance-late").join("report.json"), &["--key", "late"]), "--key is early or any, not late");
+        // Samples that hold a row the replay cannot type fail the run.
+        let untypable = scratch("acceptance-untypable").join("samples");
+        std::fs::create_dir_all(&untypable).expect("a folder");
+        let packed = gz(&lines(&[AcceptanceRow { sample: Sample::A2, text: "café".to_owned(), group: 0, class: "rare".to_owned(), other: false, engine: true }]));
+        std::fs::write(untypable.join("rows.jsonl.gz"), &packed).expect("rows");
+        let mut pinned: SamplesReceipt = read(&output.join("receipt.json"));
+        pinned.sha256.insert("rows.jsonl.gz".to_owned(), digest(&packed));
+        std::fs::write(untypable.join("receipt.json"), ks_text::json::dumps(&pinned, &ks_text::JsonOptions::default())).expect("a receipt");
+        let mut command = trainer();
+        command.arg("prefix-acceptance").arg("run").arg("--tree").arg(&inputs.small).arg("--samples").arg(&untypable).arg("--pair").arg(&installed);
+        refused(&command.args(["--reference", "installed"]).arg("--output").arg(scratch("acceptance-untyped").join("report.json")).output().expect("the trainer starts"), "1 rows of the samples cannot be typed");
         // A pair whose context model is none.
         let broken = format!("broken={},{}", eager.display(), models.join("prefix_policy_v1.json").display());
         refused(&run(&[&broken], "broken", &scratch("acceptance-broken").join("report.json"), &[]), &eager.display().to_string());
