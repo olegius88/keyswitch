@@ -7,7 +7,7 @@
 use ks_cast::To as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -111,7 +111,8 @@ pub fn installed_application_choices() -> Vec<ApplicationChoice> {
         RawChoice {
             desktop_id: desktop_id.strip_suffix(".desktop").unwrap_or(&desktop_id).to_owned(),
             startup_class: application.downcast_ref::<gio_unix::DesktopAppInfo>().and_then(gio_unix::DesktopAppInfo::startup_wm_class).map_or_default(|class| class.to_string()),
-            executable: application.executable().file_name().map_or_default(|name| name.to_string_lossy().into_owned()),
+            // An application with no executable (a `.desktop` file that names none) has no name of one either.
+            executable: application.executable().as_deref().and_then(Path::file_name).map_or_default(|name| name.to_string_lossy().into_owned()),
             display_name: application.display_name().to_string(),
             name: application.name().to_string(),
             icon: application.icon(),
@@ -293,7 +294,7 @@ thread_local! {
     static SHOWING_ENGINE: Cell<bool> = const { Cell::new(false) };
 }
 
-fn install_css(resource_dir: &std::path::Path) {
+fn install_css(resource_dir: &Path) {
     if CSS_INSTALLED.with(|flag| flag.replace(true)) {
         return;
     }

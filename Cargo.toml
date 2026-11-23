@@ -22,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 indexmap = "2"
 sha2 = "0.10"
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 flate2 = "1"
 windows-sys = "0.61"
 
