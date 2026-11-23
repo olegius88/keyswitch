@@ -157,6 +157,10 @@ fn capitals_before_a_hyphen_belong_to_their_part() {
     assert_eq!(typed(&mut bundle, 0, "UJCN-cnfylfhn ", None, as_shipped), "ГОСТ-стандарт ");
     // A token all in capitals is judged whole as typed, as before.
     assert_eq!(typed(&mut bundle, 0, "MONGO-CTHDBCF ", None, as_shipped), "MONGO-CTHDBCF ");
+    // A name of two capitalised parts typed in the English layout stays: its head is not asked about alone (`Vue` reads
+    // `Мгу`, which the model takes), at the start of a field and after an English word.
+    assert_eq!(typed(&mut bundle, 0, "Vue-Router ", None, as_shipped), "Vue-Router ");
+    assert_eq!(typed(&mut bundle, 0, "use Vue-Router ", None, as_shipped), "use Vue-Router ");
     bundle.clean();
 }
 

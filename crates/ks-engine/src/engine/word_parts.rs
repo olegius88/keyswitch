@@ -290,6 +290,16 @@ impl EngineCore {
         self.detector.is_protected_token(&if pystr::isupper(token) { token.to_owned() } else { pystr::casefold(token) })
     }
 
+    /// Whether the code guard keeps the part before the sign of a token the model kept whole from being asked about
+    /// alone (`decide_joined_head`). A token typed in the Russian layout is guarded with the case of its letters left to
+    /// its parts (`joined_token_guarded`): its capitals are an abbreviation's or a name's (`ЕСЗ-сервер`,
+    /// `ПшеРги-репозиторий`). One typed in the English layout is guarded as typed, as before: a name of two capitalised
+    /// English parts is right as it stands, and its head, asked about alone, has a Russian reading the model may take
+    /// (`Vue-Router` became `Мгу-Router`). The part after the sign of such a token is still asked about (`joined_head`).
+    fn joined_head_guarded(&self, token: &str, source_group: i64) -> bool {
+        if source_group == JOINED_HEAD_KEPT_GROUP { self.detector.is_protected_token(token) } else { self.joined_token_guarded(token) }
+    }
+
     /// The part after the last joining sign asked as a word of its own (`joined_head`).
     ///
     /// Returns the head's length and the part's decision when the model converts the part and the
@@ -407,7 +417,7 @@ impl EngineCore {
             || !lettered(tail)
             || !pystr::isalpha(&text_for_group(head, target))
             || !self.context_asks_parts()
-            || self.joined_token_guarded(&text_for_group(strokes, source_group))
+            || self.joined_head_guarded(&text_for_group(strokes, source_group), source_group)
             || !self.head_segment_settled(tail, source_group, target, false)
             || !self.word_of_its_language(source_group, &text_for_group(tail, source_group))?
             || (self.model(source_group).score(&text_for_group(head, source_group)).known && !self.model(target).score(&text_for_group(head, target)).known)
