@@ -394,34 +394,51 @@ impl EngineCore {
     /// a space became `pro`. When the part after the sign is a word of its language as typed (`word_of_its_language`:
     /// the lexicon holds no `репозиторий`, which Russian prose uses, and `ПшеРги-репозиторий` stayed for
     /// `GitHub-репозиторий`) and settled so (`head_segment_settled`, and not `сервисаююю`, `сервиса...` typed in the
-    /// Russian layout), the model is asked about the part before it alone, in
-    /// the field before the token, with the sign as its boundary: the lexicons do not know most terms (`ыущ`, the model's
-    /// `seo`). A part before the sign that is a word of its own lexicon while its other reading is none (`по` of
-    /// `по-разному`) is not asked about. Converted, the part is typed in the other layout, and the sign and the word
-    /// after it again as they were, in the layout that stays (`kept_tail`). Only a token of one sign ended by a space,
-    /// and only a part whose other reading is letters too: `экс` of `экс-чемпион` reads `'rc`, which the model converted
-    /// alone.
+    /// Russian layout), and its other reading is no word of the other language (the guard settles an abbreviation as
+    /// typed, and `ВО` of `зкщ-ВО`, `pro-DJ` typed all in the Russian layout, reads `DJ`), the model is asked about the
+    /// part before the last sign alone, in the field before the token, with the sign as its boundary: the lexicons do not
+    /// know most terms (`ыущ`, the model's `seo`). A part before the sign that is a word of its own lexicon while its other
+    /// reading is none (`по` of `по-разному`) is not asked about. Converted, the part is typed in the other layout, and the
+    /// sign and the word after it again as they were, in the layout that stays (`kept_tail`). Only a token ended by a
+    /// space, and only a part whose other reading is letters too: `экс` of `экс-чемпион` reads `'rc`, which the model
+    /// converted alone.
     ///
-    /// The caller asks only about a token kept whole, typed in a layout of the language models (`commit_word`).
+    /// The part before the last sign may be parts joined by the same sign, a term of several words (`Цш-Аш` of
+    /// `Цш-Аш-роутер` is `Wi-Fi`, `у-ьфшд` of `у-ьфшд-рассылка` is `e-mail`): each is letters whose other reading is
+    /// letters, together at least `JOINED_PART_MIN_LETTERS` of them, and the model is asked about them as one, as the term
+    /// is written. Such a head is not asked about when every part of it is a word of its own lexicon whose other reading
+    /// is none (`Ростов-на` of `Ростов-на-Дону`), as a head of one part is not.
+    ///
+    /// The caller asks about a token kept whole and about one the model converted whole (`whole_converted`), typed in a
+    /// layout of the language models (`commit_word`). The model converted `Цш-Аш-роутер` whole, to `Wi-Fi-hjenth`
+    /// (p=0.995), though `роутер` is a word typed right: when the model, asked about the part before the last sign alone,
+    /// converts it, that part converts alone instead. Otherwise the whole conversion stands.
     pub fn decide_joined_head(
-        &mut self, strokes: &[Stroke], boundary: &Stroke, source_group: i64, target: i64, application: &str,
+        &mut self, strokes: &[Stroke], boundary: &Stroke, source_group: i64, target: i64, application: &str, whole_converted: bool,
     ) -> EngineResult<Option<PlanRef>> {
         let joins: Vec<usize> = strokes.iter().enumerate().filter(|(_, stroke)| Self::joins_parts(stroke)).map(|(index, _)| index).collect();
-        let [join] = joins[..] else {
+        let Some(&join) = joins.last() else {
             return Ok(None);
         };
         let (head, tail) = (&strokes[..join], &strokes[join + 1..]);
-        let lettered = |part: &[Stroke]| part.len() >= JOINED_PART_MIN_LETTERS && part.iter().all(|stroke| pystr::isalpha(&stroke.character) || Self::is_layout_letter(stroke));
+        let parts: Vec<&[Stroke]> = head.split(|stroke| Self::joins_parts(stroke)).collect();
+        let letters = |part: &[Stroke]| !part.is_empty() && part.iter().all(|stroke| pystr::isalpha(&stroke.character) || Self::is_layout_letter(stroke));
+        let own_word = |part: &[Stroke]| {
+            self.model(source_group).score(&text_for_group(part, source_group)).known && !self.model(target).score(&text_for_group(part, target)).known
+        };
         // A space is never kept back (only Enter and Tab are, `KeyDisposition::Defer`).
         if boundary.character != " "
-            || !lettered(head)
-            || !lettered(tail)
-            || !pystr::isalpha(&text_for_group(head, target))
+            || joins.iter().any(|index| strokes[*index].character != strokes[join].character)
+            || head.len() + 1 - joins.len() < JOINED_PART_MIN_LETTERS
+            || tail.len() < JOINED_PART_MIN_LETTERS
+            || !letters(tail)
+            || !parts.iter().all(|part| letters(part) && pystr::isalpha(&text_for_group(part, target)))
             || !self.context_asks_parts()
             || self.joined_head_guarded(&text_for_group(strokes, source_group), source_group)
             || !self.head_segment_settled(tail, source_group, target, false)
             || !self.word_of_its_language(source_group, &text_for_group(tail, source_group))?
-            || (self.model(source_group).score(&text_for_group(head, source_group)).known && !self.model(target).score(&text_for_group(head, target)).known)
+            || self.word_of_its_language(target, &text_for_group(tail, target))?
+            || parts.iter().all(|part| own_word(part))
         {
             return Ok(None);
         }
@@ -437,7 +454,8 @@ impl EngineCore {
             ..WordOptions::default()
         })?;
         technical_event!(
-            self.shared, "joined_head_asked", "head_characters": head.len(), "part_characters": tail.len(), "converted": decision.should_convert,
+            self.shared, "joined_head_asked", "head_characters": head.len(), "head_parts": parts.len(), "part_characters": tail.len(),
+            "whole_converted": whole_converted, "converted": decision.should_convert,
         );
         self.context_result = result;
         self.last_baseline = baseline;

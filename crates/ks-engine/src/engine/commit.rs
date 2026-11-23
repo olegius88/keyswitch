@@ -252,8 +252,10 @@ impl EngineCore {
                     }
                 }
                 // A token a layout picked by hand protects up to its sign has a head (`protected_joined_part`): not unsplit.
-                if !matched && waiting.is_none() && unsplit && inside.is_none() && !decided.should_convert {
-                    alone = self.decide_joined_head(&strokes, boundary, source_group, alternatives[0].0, &application)?;
+                // A token the model converted whole may be a term typed in the wrong layout before a word typed right
+                // (`Цш-Аш-роутер`), unless an early switch converted a part of it while it was typed.
+                if !matched && waiting.is_none() && unsplit && inside.is_none() && (!decided.should_convert || early_switch_origin.is_none()) {
+                    alone = self.decide_joined_head(&strokes, boundary, source_group, alternatives[0].0, &application, decided.should_convert)?;
                     if alone.is_some() {
                         // Only the part before the sign converts (`pro-тарифу`); the words before it go along no more.
                         kept = Vec::new();
@@ -282,10 +284,12 @@ impl EngineCore {
                     }));
                 }
             }
-            if joint.is_none() && settled {
+            // A token whose head converts alone instead of the whole is no word gone the other way, nor one to take the
+            // words before it along.
+            if joint.is_none() && settled && !head_alone {
                 joint = self.revert_with_next_word(provisional.as_ref(), &strokes, Some(boundary), &decided, &application)?;
             }
-            if joint.is_none() && head == 0 && decided.should_convert {
+            if joint.is_none() && head == 0 && decided.should_convert && !head_alone {
                 let base = self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary");
                 let base = base.replaced_with(|plan| plan.trailing.clone_from(&trailing));
                 let base = self.with_signs(&base, &signs);
@@ -320,7 +324,7 @@ impl EngineCore {
                 self.learning_prompt_after = None;
                 self.pending_trigger_keycode = i64::from(boundary.keycode);
                 decided = DetectionDecision { should_convert: true, ..found };
-            } else if decided.should_convert {
+            } else if decided.should_convert && !head_alone {
                 let whole = begun_in.and_then(|origin| self.whole_token_from(&stem, &signs, head, boundary, &opened, origin, &decided, &application));
                 let base = whole.clone().unwrap_or_else(|| self.plan_from_decision(&strokes, Some(boundary), &application, &decided, "boundary"));
                 let quotation_closed = mention.first().is_some_and(|first| Self::quotation_closed(first, &trailing, Some(boundary)));
