@@ -614,7 +614,7 @@ impl ContextPolicy {
         // `f` in `seek() , f там`, and a Latin `x` before Russian text. One with the Cyrillic-letter head has learned a
         // Latin letter whose Cyrillic reading is a Russian word of one letter, after Russian text (cyrletter_question):
         // `в` typed `d` in `разрабатывал и d документ`, and `C` meant in `язык C`. One with the digit-dot head has learned
-        // digits with `ю` typed in the Russian layout (digit_dot_question): `2ю` for `2.`.
+        // digits with `ю` typed in the Russian layout (digit_dot_question): `2ю` for `2.`, `1ю5ю3` for `1.5.3`.
         let source_model = detector.model(baseline.source_group);
         if trigger == "pause"
             && is_short_word_override(&baseline)

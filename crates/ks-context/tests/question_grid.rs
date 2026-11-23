@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 const TOKENS: &[(&str, &str)] = &[
     ("", ""), ("a", "ф"), ("я", "z"), ("A", "Ф"), ("Я", "Z"), ("ab", "фи"), ("аб", "f,"), ("AB", "ФИ"), ("АБ", "F<"), ("Ab", "Фи"), ("hello", "руддщ"), ("руддщ", "hello"), ("NASA", "ТФЫФ"), ("ТФЫФ", "NASA"),
-    ("v67", "м67"), ("м67", "v67"), ("V67", "М67"), ("a1b2c3d4e5f6g7h8", "ф1и2с3в4у5а6п7р8"), ("А1Б2В3Г4Д5Е6Ж7", "F1<2D3U4L5T6:7"), ("1a", "1ф"), ("1", "1"), ("12", "12"), ("2.", "2ю"), ("2ю", "2."), ("2ю5", "2.5"), ("2.5", "2ю5"),
+    ("v67", "м67"), ("м67", "v67"), ("V67", "М67"), ("a1b2c3d4e5f6g7h8", "ф1и2с3в4у5а6п7р8"), ("А1Б2В3Г4Д5Е6Ж7", "F1<2D3U4L5T6:7"), ("1a", "1ф"), ("1", "1"), ("12", "12"), ("2.", "2ю"), ("2ю", "2."), ("2ю5", "2.5"), ("2.5", "2ю5"), ("1ю5ю3", "1.5.3"), ("1ю2ю", "1.2."),
     ("2,", "2б"), ("x.", "чю"), ("1x", "1."), ("12x", "1.x"), ("--force", "--ащксу"), ("--FORCE", "--АЩКСУ"), ("--Force", "--Ащксу"), ("-v", "-м"), ("-V", "-М"), ("-1", "-1"), ("-", "-"), ("--", "--"),
     ("\"hello", "\"руддщ"), ("\"HELLO", "\"РУДДЩ"), ("\"Hello", "\"Руддщ"), ("\"Я", "@Z"), ("@Z", "\"Я"), ("@media", "\"ьувшф"), ("\"1", "@1"), ("\"", "@"), ("@", "\""), ("a.b", "ф.и"), ("a.b.c", "ф.и.с"), ("user.name", "гыук.тфьу"),
     ("ф.и", "a.b"), ("a-b", "ф-и"), ("кто-то", "rnj-nj"), ("rnj-nj", "кто-то"), ("mongo-cthdbcf", "ьщтпщ-сервиса"), ("a_b", "ф_и"), ("x64", "ч64"), ("ч64", "x64"), ("1с", "1c"), ("1c", "1с"), ("100мс", "100vc"), ("b[", "их"), ("их", "b["),
@@ -179,6 +179,26 @@ fn questions_about_a_sign_in_a_number_read_every_character() {
     assert!(!digit_dot_question("1ю", "1x", "space"));
     assert!(!digit_dot_question("1ю", "2.", "space"));
     assert!(!digit_dot_question("1ю2", "1.3", "space"));
+    // A version, an address and a numbered point: every sign between digits, the last one with no digits after it.
+    assert!(digit_dot_question("1ю5ю3", "1.5.3", "space"));
+    assert!(digit_dot_question("192ю168ю1ю1", "192.168.1.1", "space"));
+    assert!(digit_dot_question("1ю2ю", "1.2.", "space"));
+    // Each sign must read as a dot and each digit as itself; two signs side by side, a sign first and a letter are no number.
+    for (original, alternative, trigger) in [
+        ("1ю5ю3", "1.5.4", "space"),
+        ("1ю5ю3", "1.5x3", "space"),
+        ("1ю5ю3", "1.5.3", "pause"),
+        ("1юю2", "1..2", "space"),
+        ("1аю2", "1f.2", "space"),
+        ("12", "12", "space"),
+        ("ю1ю2", ".1.2", "space"),
+        ("1ю2юа", "1.2.f", "space"),
+        ("1ю2б3", "1.2,3", "space"),
+        ("м1ю5ю4", "v1.5.4", "space"),
+        ("1ю5ю3", "1.5.3.", "space"),
+    ] {
+        assert!(!digit_dot_question(original, alternative, trigger), "{original}");
+    }
     // A word of many runs of letters and digits, of letters of any case.
     let tables = tables();
     for token in ["a1b2c3d4e5f6g7h8i9j0", "A1B2", "a1b2", "A1b2", "ф1и2", "Ф1И2", "Ф1и2"] {

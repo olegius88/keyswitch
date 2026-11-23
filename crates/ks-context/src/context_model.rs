@@ -601,7 +601,8 @@ pub struct ContextModel {
     /// Whether the Cyrillic-letter head has weights here: a Latin letter whose Cyrillic reading is a Russian word of one
     /// letter, after Russian text, is its class.
     pub answers_cyrletter: bool,
-    /// Whether the digit-dot head has weights here: digits with `ю` or `б` typed in the Russian layout are its class.
+    /// Whether the digit-dot head has weights here: digits with one `ю` or more between them typed in the Russian layout
+    /// (`2ю`, `1ю5ю3`) are its class.
     pub answers_digit_dot: bool,
     pub tables: std::sync::Arc<TermTables>,
     /// Answers in place of the weights: a replay asks the model's questions of a recorded run.
