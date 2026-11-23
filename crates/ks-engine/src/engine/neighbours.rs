@@ -74,6 +74,7 @@ impl EngineCore {
                 baseline: self.last_baseline.clone(),
                 converted: fallback,
                 asked_at_pause: false,
+                after_caret_move: false,
             });
             // The pause that settles this wait (settle_context_wait_after_pause) is
             // counted from its boundary. The commit has just cleared the word timer,
@@ -84,6 +85,41 @@ impl EngineCore {
             return true;
         }
         false
+    }
+
+    /// Let the first word typed after the caret was moved wait for the word after it.
+    ///
+    /// Where the field cannot be read, that word is not decided alone: what stands around it is not known
+    /// (`caret_unknown`). It was dropped for good, and the word after it, converted, left it as typed: End after a fix
+    /// earlier in the line, then `b ghjdthm` for `и проверь`, gave `b проверь`. The word after it shows the layout the
+    /// person is typing in, so the word waits for it as a word the model wanted a neighbour for does, and is settled
+    /// with that word alone (`resolve_context_wait`): no pause settles it, and beside a word that stays it stays too
+    /// (`WaitingContextWord::after_caret_move`). The text the engine remembers from before the move is no context of
+    /// it: the field it is asked in holds what was typed since.
+    pub fn wait_after_caret_move(&mut self, plan: &PlanRef, application: &str, trigger: CorrectionTrigger, boundary: &Stroke) -> EngineResult<()> {
+        // A space is never kept back (only Enter and Tab are).
+        if boundary.character != " " || Self::reads_alike(plan) || !self.context_assists() {
+            return Ok(());
+        }
+        let alternatives = vec![(plan.target_group, plan.replacement.clone())];
+        let decision = self.baseline_decision(&plan.original, &alternatives, plan.source_group, application, trigger, None)?;
+        self.context_wait_sequence += 1;
+        self.context_waiting = Some(WaitingContextWord {
+            plan: plan.clone(),
+            decision,
+            field: self.context_policy.stream.snapshot(&format!("{}{}", plan.original, boundary.character)),
+            window: self.focus_or_zero(),
+            deadline: self.monotonic() + CONTEXT_TTL,
+            diagnostic_id: self.context_wait_sequence,
+            settles_on_pause: false,
+            baseline: None,
+            converted: false,
+            asked_at_pause: false,
+            after_caret_move: true,
+        });
+        self.last_word_input_at = Some(self.monotonic());
+        self.log_context_wait("context_wait_started", self.context_waiting.as_ref(), "caret_moved", &[]);
+        Ok(())
     }
 
     /// Whether the context model may settle words with their neighbours (`detection.context_policy` is `assist`).
@@ -781,6 +817,13 @@ impl EngineCore {
             if !passed {
                 let baseline = match &word.baseline {
                     Some(baseline) => baseline.clone(),
+                    // The first word after the caret moved was not decided at its space, and the words the engine
+                    // remembers from before the move are not its neighbours: the detector reads it beside the converted
+                    // word after it, as it reads a word that waited for that word (`resolve_context_wait`).
+                    None if word.after_caret_move => self.planned_baseline(
+                        &previous.original, &vec![(previous.target_group, previous.replacement.clone())], previous.source_group, &next_replacement,
+                        previous.target_group,
+                    )?,
                     None => self.baseline_decision(
                         &previous.original, &vec![(previous.target_group, previous.replacement.clone())], previous.source_group, application,
                         CorrectionTrigger::Space, None,

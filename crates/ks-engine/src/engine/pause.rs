@@ -369,14 +369,7 @@ impl EngineCore {
                 // with the sign alone split off, `я cgtie ljvjq/` was left `я cgtie домой.` (Tatoeba
                 // development sentences typed as the sealed protocol types them, 23.10.2026).
                 if let Some(waited) = waiting.as_ref().filter(|_| !trailing.is_empty() || !signs.is_empty()) {
-                    kept.push(Arc::new(KeptWord {
-                        plan: waited.plan.clone(),
-                        baseline: Some(waited.decision.clone()),
-                        field: Some(waited.field.clone()),
-                        window: waited.window,
-                        deadline: waited.deadline,
-                        segmentation_open: false,
-                    }));
+                    kept.push(Arc::new(KeptWord::of_waiting(waited)));
                 }
                 let base = self.plan_from_decision(&strokes, None, &application, &decision, "pause");
                 let base = base.replaced_with(|plan| plan.trailing.clone_from(&trailing));

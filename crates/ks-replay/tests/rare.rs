@@ -1230,6 +1230,7 @@ fn words_kept_for_later_go_along_only_while_the_model_can_be_asked() {
         window: 0,
         deadline: f64::MAX,
         segmentation_open,
+        after_caret_move: false,
     });
     let next = plan("ghbdtn", "привет", Some(' '));
     for segmentation_open in [false, true] {
@@ -1445,6 +1446,7 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
                             window: core.focus_or_zero(),
                             deadline: f64::MAX,
                             segmentation_open,
+                            after_caret_move: false,
                         })];
                         let _ = core.take_along(&kept, &next, 6, "firefox", false);
                         // The same at a pause, with the word not ended yet.
@@ -1467,7 +1469,7 @@ fn every_kept_word_is_asked_again_beside_a_converted_one() {
     // With no model to ask, the baseline answers: the word goes along with its neighbour.
     let model = core.context_policy.model.take();
     let baseline = DetectionDecision::new(true, "lf", "да", 0, 1, 0.9, SHORT_WORD_REASONS[0], score.clone(), score.clone());
-    let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: false })];
+    let kept = [Arc::new(KeptWord { plan: plan("lf", "да", Some(' ')), baseline: Some(baseline), field: Some(field("", "")), window: core.focus_or_zero(), deadline: f64::MAX, segmentation_open: false, after_caret_move: false })];
     "lf ghbdtn ".clone_into(&mut core.context_policy.stream.text);
     let along = core.take_along(&kept, &next, 6, "firefox", false).expect("no failure");
     assert_eq!(along.original, "lf ghbdtn");

@@ -317,6 +317,11 @@ pub struct WaitingContextWord {
     pub converted: bool,    // A pause has asked about the word and left it waiting for its next word (hold_context_wait_past_pause): later pauses
     // ask nothing more.
     pub asked_at_pause: bool,
+    // The first word typed after the caret was moved in a field that cannot be read (`EngineCore::caret_unknown`): it
+    // was not decided at its space, for what stands around it is not known, and waits for the word after it, which
+    // shows the layout the person is typing in. It is settled with that word only: never at a pause and never alone
+    // beside a word that stays (`baseline` is None).
+    pub after_caret_move: bool,
 }
 
 // The baseline reason of the question a converted word is asked again (revert_with_next_word).
@@ -340,6 +345,9 @@ pub struct ProvisionalWord {
 /// boundary model could not split it (`dc\``: `всё` or `вс` and a backtick), or split a
 /// sign off a word that only reads as one with it (`t\``: `её`). A token the code guard,
 /// an exclusion or a rule kept from segmentation is undecided without being open.
+/// `after_caret_move` marks the first word typed after the caret was moved in a field that cannot be
+/// read (`EngineCore::caret_unknown`): it was not decided either, for what stands around it is not
+/// known, and it is asked beside a converted next word as a word waiting for that word is.
 #[derive(Clone, Debug)]
 pub struct KeptWord {
     pub plan: PlanRef,
@@ -348,6 +356,24 @@ pub struct KeptWord {
     pub window: i64,
     pub deadline: f64,
     pub segmentation_open: bool,
+    pub after_caret_move: bool,
+}
+
+impl KeptWord {
+    /// A word that waited for its next word and was not settled with it, kept for a later word: with the decision it
+    /// waited with, or undecided as it was when it waited after a caret move.
+    #[must_use]
+    pub fn of_waiting(waited: &WaitingContextWord) -> KeptWord {
+        KeptWord {
+            plan: waited.plan.clone(),
+            baseline: (!waited.after_caret_move).then(|| waited.decision.clone()),
+            field: Some(waited.field.clone()),
+            window: waited.window,
+            deadline: waited.deadline,
+            segmentation_open: false,
+            after_caret_move: waited.after_caret_move,
+        }
+    }
 }
 
 /// The rule a double press of the conversion hotkey offers to set up.

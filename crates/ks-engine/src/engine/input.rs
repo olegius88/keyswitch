@@ -739,7 +739,9 @@ impl EngineCore {
         // opened an empty field, which is the one thing it is least likely to be: the
         // caret is usually moved back *into* text, to finish or fix a word. Feeding
         // that invented emptiness to the models is worse than saying nothing, so the
-        // word is left alone and Pause still converts it by hand.
+        // word is not decided alone and Pause still converts it by hand. It waits for
+        // the word after it, which shows the layout the person is typing in, and goes
+        // with that word when the model converts the pair (`wait_after_caret_move`).
         //
         // When the active field can be read, the surroundings are not a guess and the
         // rule does not apply - the models get the real text before the caret.

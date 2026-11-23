@@ -274,14 +274,7 @@ impl EngineCore {
                     // the wait, and the waiting word is asked with it as a kept word (`tot ghbdtn,`),
                     // as is one whose sign the model converted without (`Ша тщеб` is `If not,`: the
                     // waiting word was dropped, and the English sentence kept `Ша`).
-                    kept.push(Arc::new(KeptWord {
-                        plan: waited.plan.clone(),
-                        baseline: Some(waited.decision.clone()),
-                        field: Some(waited.field.clone()),
-                        window: waited.window,
-                        deadline: waited.deadline,
-                        segmentation_open: false,
-                    }));
+                    kept.push(Arc::new(KeptWord::of_waiting(waited)));
                 }
             }
             // A token whose head converts alone instead of the whole is no word gone the other way, nor one to take the
@@ -433,6 +426,7 @@ impl EngineCore {
                             window: self.focus_or_zero(),
                             deadline: self.monotonic() + ks_context::input_context::CONTEXT_TTL,
                             segmentation_open: false,
+                            after_caret_move: false,
                         }))
                     };
                     self.keep_for_next_word(kept, word, boundary);
@@ -458,6 +452,7 @@ impl EngineCore {
                         window: self.focus_or_zero(),
                         deadline: self.monotonic() + ks_context::input_context::CONTEXT_TTL,
                         segmentation_open: true,
+                        after_caret_move: false,
                     });
                     self.keep_for_next_word(kept, Some(word), boundary);
                 } else if !trailing.is_empty() && stays {
@@ -516,7 +511,10 @@ impl EngineCore {
             }
             // A token the boundary model could not split was not decided at all;
             // the next word may still show what it was (`dc\`` before `тот`).
-            if enabled && trigger_enabled && !manual_layout_protected && !caret_unknown && !segmentation_certain && !excluded && head == 0 {
+            // A word that is on, not protected and not excluded came here unanalysed for one of two reasons (`analyzable`):
+            // the boundary model could not split it, or the caret had moved.
+            let undecided = enabled && trigger_enabled && !manual_layout_protected && !excluded && head == 0;
+            if undecided && !caret_unknown {
                 let word = Arc::new(KeptWord {
                     plan: plan.clone(),
                     baseline: None,
@@ -524,8 +522,14 @@ impl EngineCore {
                     window: self.focus_or_zero(),
                     deadline: self.monotonic() + ks_context::input_context::CONTEXT_TTL,
                     segmentation_open: abstained,
+                    after_caret_move: false,
                 });
                 self.keep_for_next_word(kept, Some(word), boundary);
+            } else if undecided && segmentation_certain && trailing.is_empty() && mention.is_empty() {
+                // The caret had moved. A word waits for the word after it, a sign the other layout types as a letter
+                // with it (`nfr/` is `так.`); a mention head is not shown where the caret is unknown
+                // (`show_mention_head`), so there is none to put back.
+                self.wait_after_caret_move(&plan, &application, trigger, boundary)?;
             }
         }
         self.log_word_evaluation(WordEvaluation {

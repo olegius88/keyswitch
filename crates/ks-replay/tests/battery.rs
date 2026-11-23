@@ -10,7 +10,10 @@
 //! and `КЗ` in capitals, and the words they stand by (10). Wrong now by its labels: `ща` opening a text that goes on in
 //! English typed in the Russian layout, which the common-reading head keeps where the label wants `of`, with the words
 //! after it (10), and `DKRCV`, which the upper-case head converts to `ВЛКСМ` where the label keeps the keys (2). The
-//! rest (13) change the reading a word was typed in, not whether it ends right.
+//! rest (13) change the reading a word was typed in, not whether it ends right. Written again on 23.11.2026, when the
+//! first word typed after a caret move came to wait for the word after it: one row differs in either mode, the first
+//! word of a stream that opens after a caret move, typed in the English layout before Russian words typed so too, which
+//! stayed as typed and is now converted with the word after it, as its label has it.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;
