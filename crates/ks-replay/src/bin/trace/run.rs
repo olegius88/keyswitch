@@ -260,6 +260,13 @@ fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
         if event_name(expected_line) == "prefix_decision" {
             right.as_object_mut().map(|object| object.remove("threshold"));
         }
+        // The Python engine typed every correction in one burst and said nothing of it; the port says whether a backend typed
+        // the keys one at a time (`InputBackend::typed_key_by_key`), which no backend of a trace does.
+        if matches!(event_name(expected_line).as_str(), "correction_applied") {
+            for side in [&mut left, &mut right] {
+                side.as_object_mut().map(|object| object.remove("paced"));
+            }
+        }
         // An exception's class is the Python's; the port has its own names for the same failure.
         if left["event"] == "history_write_failed" {
             left.as_object_mut().map(|object| object.remove("error"));

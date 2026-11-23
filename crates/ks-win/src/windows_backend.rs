@@ -41,6 +41,8 @@ use ks_backend::{
     BackendError, BackendProbe, FocusInfo, HookGap, InputBackend, InputDelay, InputDelayReport, Injection, KeyDisposition,
     KeyEvent, KeyFilter, KeyListener, RefusalReason, ScreenAnchor, SelectedText, SelectionError, SelectionRefused,
 };
+use ks_config::config::SettingsStore;
+use ks_config::constants::{APPLICATIONS_REMOTE_KEY_INTERVAL_MS, DEFAULT_REMOTE_KEY_INTERVAL_MS};
 use ks_config::selection_commands::caret_steps;
 use ks_text::pystr;
 use ks_text::russian_text::{SECONDS, quantity};
@@ -49,7 +51,8 @@ use crate::constants::{
     ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK,
     ENGINE_HOLD_MAX_MS, HELD_KEY_RETRY_POLL_SECONDS, HELD_KEY_RETRY_SECONDS, HOOK_SILENCE_MS, KEY_IN_FLIGHT_POLL_SECONDS, KEY_IN_FLIGHT_WAIT_SECONDS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
-    LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS, TRANSLATIONS_KEPT_MAX,
+    LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS, REMOTE_INPUT_APPLICATIONS,
+    REMOTE_KEY_INTERVAL_MAX_MS, TRANSLATIONS_KEPT_MAX,
     KEYPAD_SLASH_KEY_NAME, KEYS_TYPED_BY_VIRTUAL_KEY, PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
     UNOWNED_HOLD_MAX_MS, UNSEEN_INPUT_MIN_TIMES, VK_0, VK_9, VK_A, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F24,
@@ -361,6 +364,15 @@ pub fn key_name_exists(name: &str) -> bool {
     (0..=VK_LAST).any(|virtual_key| pystr::casefold(&key_name(virtual_key)) == name)
 }
 
+/// Whether `application`, the process name of a window as `active_application` gives it, is a client that sends the keys
+/// typed into it on to another computer (`REMOTE_INPUT_APPLICATIONS`): its casefolded name contains one of the list, as
+/// the name of a program the user excluded is matched.
+#[must_use]
+pub fn remote_input_application(application: &str) -> bool {
+    let name = pystr::casefold(application);
+    REMOTE_INPUT_APPLICATIONS.iter().any(|client| name.contains(client))
+}
+
 /// A thread the system refused.
 fn spawn_failed(error: std::io::Error) -> WindowsBackendError {
     failed(error.to_string())
@@ -615,6 +627,10 @@ struct Inner {
     /// Atomic: the next layout switch was chosen in the tray menu (`aim_next_switch_at_work_window`). The window's thread
     /// sets it, the engine's thread takes it.
     menu_switch: AtomicBool,
+    /// The settings the typing reads (`typing_pace`), set once the program has them (`WindowsBackend::use_settings`).
+    settings: Slot<Arc<SettingsStore>>,
+    /// Atomic: the last correction was typed key by key (`typing_pace`). The engine's thread sets it and reads it back.
+    typed_key_by_key: AtomicBool,
 }
 
 /// Observe global Win32 keyboard events and inject physical corrections.
@@ -674,8 +690,16 @@ impl WindowsBackend {
                 translations: Mutex::new(Translations::new()),
                 work_window: AtomicI64::new(0),
                 menu_switch: AtomicBool::new(false),
+                settings: Slot::new(),
+                typed_key_by_key: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// The settings the backend reads as it types (`applications.remote_key_interval_ms`); until they are given, it types
+    /// as their defaults say.
+    pub fn use_settings(&self, settings: Arc<SettingsStore>) {
+        self.inner.settings.set(Some(settings));
     }
 
     #[must_use]
@@ -774,6 +798,10 @@ impl InputBackend for WindowsBackend {
 
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError> {
         self.inner.inject_correction(&injection)
+    }
+
+    fn typed_key_by_key(&self) -> bool {
+        self.inner.typed_key_by_key.load(Ordering::Relaxed)
     }
 
     fn take_unseen_input(&self) -> Result<Option<i64>, BackendError> {
@@ -1192,6 +1220,8 @@ impl Inner {
         let mut give_up_at = None;
         // The keys this call has typed down again and not up.
         let mut down = KeySet::default();
+        // Asked at the first key typed again: most calls find nothing held.
+        let mut pace: Option<Option<f64>> = None;
         let outcome = loop {
             let item = {
                 let mut guard = lock(&self.hold);
@@ -1237,6 +1267,11 @@ impl Inner {
                     down.insert(item.virtual_key);
                 } else {
                     down.remove(item.virtual_key);
+                }
+                // Into a window that sends the keys on to another computer the held keys follow the correction as its
+                // own keys went, one after a pause; the user's keys pressed meanwhile join the queue behind them.
+                if let Some(pause) = *pace.get_or_insert_with(|| self.typing_pace()) {
+                    self.clock.sleep(pause);
                 }
                 continue;
             };
@@ -1733,10 +1768,8 @@ impl Inner {
         }
         let final_group = if kept_tail != 0 { rendered_source_group } else { target_group };
         let delete_count = erased.unwrap_or(strokes.len()) + literal.len() + late.len();
-        let mut delete_inputs = Vec::with_capacity(delete_count * 2);
-        for _ in 0..delete_count {
-            delete_inputs.extend([NativeInput::key(true, VK_BACK), NativeInput::key(false, VK_BACK)]);
-        }
+        let delete_inputs: Vec<Vec<NativeInput>> =
+            (0..delete_count).map(|_| vec![NativeInput::key(true, VK_BACK), NativeInput::key(false, VK_BACK)]).collect();
         let (converted, kept) = strokes.split_at(strokes.len() - kept_tail);
         let replay_inputs = self.strokes_inputs(converted.iter(), true, Some(target_group));
         let kept_inputs = self.strokes_inputs(kept.iter(), true, Some(final_group));
@@ -1752,6 +1785,9 @@ impl Inner {
         let mut late_deleted = false;
         let mut late_typed = false;
         let mut failure: Option<WindowsBackendError> = None;
+        // Into a window that sends the keys on to another computer, one key to a call (`typing_pace`).
+        let pace = self.typing_pace();
+        self.typed_key_by_key.store(pace.is_some(), Ordering::Relaxed);
         let held_count = {
             let _inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
@@ -1763,8 +1799,10 @@ impl Inner {
                     return Err(failed("Нажат Ctrl, Alt или Win; текст не изменён"));
                 }
                 // The layout is switched first so that the deletion and the replacement travel in one SendInput call:
-                // Windows keeps the events of a single call together, but lets the user's keys slip in between separate
-                // calls.
+                // Windows keeps the events of a single call together ("These events are not interspersed with other
+                // keyboard or mouse input events", SendInput, Microsoft Learn), while between separate calls the hold
+                // keeps only the user's keys back, not a click. A window that sends the keys on to another computer gets
+                // them one key to a call all the same (`type_keys`), each call looking for such a click first.
                 // Another window may have come to the front since the keys were held (an Enter kept back holds them for
                 // as long as its key is down): its layout is not this correction's to switch. Looked at only after the
                 // switch, the text was left alone and the layout of that window was changed all the same.
@@ -1779,7 +1817,7 @@ impl Inner {
                 if switched {
                     // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS); the
                     // user's keys are held meanwhile (hold_input).
-                    self.send_exact(&delete_inputs)?;
+                    self.type_keys(&delete_inputs, pace)?;
                     late_deleted = true;
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                 }
@@ -1791,7 +1829,7 @@ impl Inner {
                 if !preserve_boundary_layout && kept_tail == 0 {
                     batch.extend_from_slice(&boundary_inputs);
                 }
-                self.send_exact(&batch)?;
+                self.type_keys(&batch, pace)?;
                 late_deleted = true;
                 if kept_tail != 0 {
                     // The kept word is typed in its own layout, and the text goes on there.
@@ -1799,23 +1837,23 @@ impl Inner {
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                     let mut batch = kept_inputs.clone();
                     batch.extend_from_slice(&boundary_inputs);
-                    self.send_exact(&batch)?;
+                    self.type_keys(&batch, pace)?;
                 } else if preserve_boundary_layout {
                     self.switch_group_inner(literal_group)?;
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
-                    self.send_exact(&boundary_inputs)?;
+                    self.type_keys(&boundary_inputs, pace)?;
                     self.switch_group_inner(target_group)?;
                 }
                 // A partial send is not an all-or-nothing failure; retrying this whole batch could duplicate an already
                 // delivered prefix.
                 late_typed = true;
-                self.send_exact(&late_inputs)
+                self.type_keys(&late_inputs, pace)
             })();
             if let Err(error) = typed {
                 failure = Some(error);
             }
-            let restore: &[NativeInput] = if late_deleted && !late_typed { &late_inputs } else { &[] };
-            match self.send_exact(restore).and_then(|()| self.release_input_inner()) {
+            let restore: &[Vec<NativeInput>] = if late_deleted && !late_typed { &late_inputs } else { &[] };
+            match self.type_keys(restore, pace).and_then(|()| self.release_input_inner()) {
                 Ok(count) => count,
                 Err(error) => {
                     // The primary failure explains more than a failed restore.
@@ -1830,14 +1868,50 @@ impl Inner {
         }
     }
 
+    /// The keys of `strokes`, each the events of one stroke (`stroke_inputs`).
     fn strokes_inputs<'a>(
         &self,
         strokes: impl Iterator<Item = &'a KeyEvent>,
         synthetic: bool,
         group: Option<i32>,
-    ) -> Vec<NativeInput> {
+    ) -> Vec<Vec<NativeInput>> {
         let held = self.held_shift();
-        strokes.flat_map(|stroke| self.stroke_inputs(stroke, synthetic, group, held)).collect()
+        strokes.map(|stroke| self.stroke_inputs(stroke, synthetic, group, held)).collect()
+    }
+
+    /// The pause after each key typed now, in seconds, or None to type in one burst. The window in front sends the keys
+    /// typed into it on to another computer (`REMOTE_INPUT_APPLICATIONS`) and `applications.remote_key_interval_ms` is not
+    /// 0: typed in one call, a correction reached a Linux desktop controlled through TeamViewer with letters lost and a later
+    /// one repeated. A value of the setting past its range is taken as its nearest end, one that is no number as the default.
+    fn typing_pace(&self) -> Option<f64> {
+        let interval_ms = self
+            .settings
+            .get()
+            .and_then(|settings| settings.read(APPLICATIONS_REMOTE_KEY_INTERVAL_MS))
+            .unwrap_or(DEFAULT_REMOTE_KEY_INTERVAL_MS)
+            .clamp(0, REMOTE_KEY_INTERVAL_MAX_MS);
+        if interval_ms == 0 || !remote_input_application(&self.api.active_application()) {
+            return None;
+        }
+        Some(interval_ms.to::<f64>() / MILLISECONDS_PER_SECOND)
+    }
+
+    /// Types `keys`, each the events of one key: all in one `SendInput` call, or with `pace` one key to a call and that pause
+    /// after each. Between two calls the hook keeps the user's keys back (`hold_input`), which a click is not: a press of
+    /// the pointer or another place in front since the hold began stops the typing before the next key, which would land
+    /// where the click put the caret.
+    fn type_keys(&self, keys: &[Vec<NativeInput>], pace: Option<f64>) -> Result<(), WindowsBackendError> {
+        let Some(pause) = pace else {
+            return self.send_exact(&keys.concat());
+        };
+        for key in keys {
+            if self.typing_place_left() {
+                return Err(failed("Место ввода изменилось во время замены; набрана только её часть"));
+            }
+            self.send_exact(key)?;
+            self.clock.sleep(pause);
+        }
+        Ok(())
     }
 
     /// The Shift the user holds now by the hook's books, as the scan code of its key. The key-up of a Shift let go while a
@@ -2067,21 +2141,28 @@ impl Inner {
     ) -> Result<bool, SelectionError> {
         let clipboard = self.api.selection_api();
         let field = self.input_place();
-        let mut typed = Vec::new();
-        for unit in replacement.encode_utf16() {
-            let unit = u32::from(unit);
-            typed.push(NativeInput { scan_code: unit, unicode: true, ..NativeInput::new(true) });
-            typed.push(NativeInput { scan_code: unit, unicode: true, ..NativeInput::new(false) });
-        }
+        // A key a character: both halves of a surrogate pair go together.
+        let mut typed: Vec<Vec<NativeInput>> = replacement
+            .chars()
+            .map(|character| {
+                let mut buffer = [0; 2];
+                character
+                    .encode_utf16(&mut buffer)
+                    .iter()
+                    .flat_map(|&unit| {
+                        [true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) })
+                    })
+                    .collect()
+            })
+            .collect();
         let steps = caret_steps(replacement);
         let mut reselect = Vec::new();
         if let Some(steps) = steps {
-            reselect.push(NativeInput::key(true, VK_SHIFT));
+            reselect.push(vec![NativeInput::key(true, VK_SHIFT)]);
             for _ in 0..steps {
-                reselect.push(NativeInput::extended_key(true, VK_LEFT));
-                reselect.push(NativeInput::extended_key(false, VK_LEFT));
+                reselect.push(vec![NativeInput::extended_key(true, VK_LEFT), NativeInput::extended_key(false, VK_LEFT)]);
             }
-            reselect.push(NativeInput::key(false, VK_SHIFT));
+            reselect.push(vec![NativeInput::key(false, VK_SHIFT)]);
         }
         let _inject_inner = lock(&self.inject_lock);
         if let Some((hold_pointer_epoch, hold_window)) = self.holding_place()
@@ -2095,11 +2176,12 @@ impl Inner {
                 && SLOW_INPUT_FIELD_CLASSES.contains(&clipboard.window_class(field).as_str())
         });
         let reselected = if let Some(clipboard) = pasted_into {
-            self.pasted_selection(clipboard, field, replacement, &reselect)?
+            self.pasted_selection(clipboard, field, replacement, &reselect.concat())?
         } else {
-            // One SendInput call keeps the events together: the user's keys cannot land among them.
-            typed.extend_from_slice(&reselect);
-            self.send_exact(&typed)?;
+            // One SendInput call keeps the events together: the user's keys cannot land among them. A window that sends
+            // the keys on to another computer gets one key to a call, as a correction does (`type_keys`).
+            typed.extend(reselect);
+            self.type_keys(&typed, self.typing_pace())?;
             steps.is_some()
         };
         if let Some(final_group) = final_group {

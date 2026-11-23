@@ -830,6 +830,8 @@ fn run_application(hidden: bool, no_engine: bool, quit_after_ms: Option<u32>) ->
             return 1;
         }
     };
+    // The pause between the keys typed into a remote-control window is read from them at each correction.
+    backend.use_settings(settings.clone());
     let learning = match default_learning_store(&settings, &history) {
         Ok(store) => Arc::new(store),
         Err(error) => {

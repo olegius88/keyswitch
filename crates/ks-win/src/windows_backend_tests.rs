@@ -3239,10 +3239,10 @@ fn a_shift_the_user_holds_is_neither_pressed_again_for_a_capital_nor_left_down_f
     assert_eq!(subject.inner.held_shift(), None);
     // With no Shift held, a capital gets a Shift of its own, as a keyboard sends it, and a small letter none.
     assert_eq!(
-        keys(&subject.inner.strokes_inputs([&capital].into_iter(), true, Some(1))),
+        keys(&subject.inner.strokes_inputs([&capital].into_iter(), true, Some(1)).concat()),
         [(true, SCAN_CODE_LEFT_SHIFT), (true, key), (false, key), (false, SCAN_CODE_LEFT_SHIFT)]
     );
-    assert_eq!(keys(&subject.inner.strokes_inputs([&small].into_iter(), true, Some(1))), [(true, key), (false, key)]);
+    assert_eq!(keys(&subject.inner.strokes_inputs([&small].into_iter(), true, Some(1)).concat()), [(true, key), (false, key)]);
 }
 
 /// The scan code of the left Ctrl.
@@ -4098,4 +4098,186 @@ fn a_hold_the_engine_never_lets_go_of_is_ended_at_the_next_key_past_its_bound() 
     assert_eq!(api.sent(), [[replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)], [replayed_key(true, VK_X, INJECTED_KEY_SCAN_CODE)]]);
     let hold = subject.inner.hold.lock().unwrap();
     assert!(!hold.holding && hold.held.is_empty());
+}
+
+// ------------------------------------------------------------------- the keys typed into a remote-control window
+
+/// A window of TeamViewer's in front, a clock that moves only by its pauses, and settings that say `interval_ms`
+/// (None: no settings given, the defaults).
+fn remote_backend(interval_ms: Option<i64>) -> (Arc<FakeWindowsAPI>, Arc<FakeClock>, WindowsBackend) {
+    let api = FakeWindowsAPI::with_clipboard();
+    "TeamViewer".clone_into(&mut api.state().application);
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    if let Some(interval_ms) = interval_ms {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let name = format!("ks-win-remote-{}-{}.json", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+        // Never written: the value lives in memory only.
+        let settings = Arc::new(SettingsStore::new(Some(std::env::temp_dir().join(name))));
+        settings.write(APPLICATIONS_REMOTE_KEY_INTERVAL_MS, interval_ms, false).unwrap();
+        subject.use_settings(settings);
+    }
+    (api, clock, subject)
+}
+
+/// The pause after each key at the shipped setting.
+fn default_pause() -> f64 {
+    DEFAULT_REMOTE_KEY_INTERVAL_MS.to::<f64>() / MILLISECONDS_PER_SECOND
+}
+
+fn pauses(clock: &FakeClock, pause: f64) -> usize {
+    clock.sleeps.lock().unwrap().iter().filter(|&&slept| slept.to_bits() == pause.to_bits()).count()
+}
+
+#[test]
+fn the_programs_that_send_the_keys_on_to_another_computer_are_known_by_their_process_name() {
+    for application in ["TeamViewer", "TEAMVIEWER_Desktop", "AnyDesk", "rustdesk", "parsecd", "vncviewer", "tvnviewer", "mstsc", "msrdc", "vmconnect", "VirtualBoxVM", "vmware", "vmplayer"] {
+        assert!(remote_input_application(application), "{application}");
+    }
+    for application in ["Notepad", "msedge", "Code", "Telegram", ""] {
+        assert!(!remote_input_application(application), "{application}");
+    }
+}
+
+#[test]
+fn a_correction_goes_into_a_remote_control_window_key_by_key_with_the_keys_of_the_burst() {
+    let stroke = KeyEvent { state: SHIFT_MASK, ..key_event() };
+    let boundary = key_with(SCAN_CODE_SEMICOLON, ";", [";", "ж"], 0);
+    let strokes = [stroke];
+    let correction = || Injection { boundary: Some(&boundary), source_group: Some(0), ..injection(&strokes, 1) };
+    // In Notepad: the deletion, the word and the boundary go as three calls, the word in one.
+    let local = FakeWindowsAPI::plain();
+    let burst = backend(&local);
+    burst.inject_correction(correction()).unwrap();
+    assert!(!burst.typed_key_by_key());
+    assert_eq!(local.sent().iter().map(Vec::len).collect::<Vec<_>>(), [4, 4, 2]);
+    // In TeamViewer: the same keys in the same order, one key to a call, each followed by the pause.
+    let (api, clock, subject) = remote_backend(None);
+    subject.inject_correction(correction()).unwrap();
+    assert!(subject.typed_key_by_key());
+    assert_eq!(api.sent().concat(), local.sent().concat());
+    let back = vec![NativeInput::key(true, VK_BACK), NativeInput::key(false, VK_BACK)];
+    let capital = vec![
+        NativeInput::scan(true, SCAN_CODE_LEFT_SHIFT),
+        NativeInput::scan(true, SCAN_CODE_A),
+        NativeInput::scan(false, SCAN_CODE_A),
+        NativeInput::scan(false, SCAN_CODE_LEFT_SHIFT),
+    ];
+    let semicolon = vec![NativeInput::scan(true, SCAN_CODE_SEMICOLON), NativeInput::scan(false, SCAN_CODE_SEMICOLON)];
+    assert_eq!(api.sent(), [back.clone(), back, capital, semicolon]);
+    assert_eq!(pauses(&clock, default_pause()), 4);
+    // The layouts are asked for as before, and the window has had each key's allowance by the time it is asked.
+    assert_eq!(api.requests(), local.requests());
+    // A correction in another window afterwards goes in one burst again, and the log hears so.
+    "Notepad".clone_into(&mut api.state().application);
+    api.state().sent.clear();
+    api.state().current_layout = ENGLISH_HKL;
+    subject.inject_correction(correction()).unwrap();
+    assert!(!subject.typed_key_by_key());
+    assert_eq!(api.sent(), local.sent());
+}
+
+#[test]
+fn a_pause_of_nothing_types_the_burst_and_the_setting_keeps_to_its_range() {
+    let strokes = [key_event()];
+    let (api, clock, subject) = remote_backend(Some(0));
+    api.state().current_layout = RUSSIAN_HKL;
+    subject.inject_correction(injection(&strokes, 1)).unwrap();
+    assert!(!subject.typed_key_by_key());
+    assert_eq!(api.sent().len(), 1);
+    assert!(clock.sleeps.lock().unwrap().is_empty());
+    // A value past either end is taken as that end: below none is a burst, above the longest is the longest.
+    assert_eq!(remote_backend(Some(-3)).2.inner.typing_pace(), None);
+    let longest = REMOTE_KEY_INTERVAL_MAX_MS.to::<f64>() / MILLISECONDS_PER_SECOND;
+    assert_eq!(remote_backend(Some(REMOTE_KEY_INTERVAL_MAX_MS * 10)).2.inner.typing_pace(), Some(longest));
+    assert_eq!(remote_backend(Some(25)).2.inner.typing_pace(), Some(0.025));
+    // No settings given: the shipped value.
+    assert_eq!(remote_backend(None).2.inner.typing_pace(), Some(default_pause()));
+}
+
+#[test]
+fn the_window_reads_each_paced_key_before_the_next_and_a_layout_asked_after_them_waits_for_none() {
+    let (api, clock, subject) = remote_backend(None);
+    let keys: Vec<Vec<NativeInput>> = (0..3).map(|_| vec![NativeInput::scan(true, SCAN_CODE_A), NativeInput::scan(false, SCAN_CODE_A)]).collect();
+    subject.inner.type_keys(&keys, subject.inner.typing_pace()).unwrap();
+    assert_eq!(api.sent().len(), 3);
+    // Each key has its allowance from its own call (two events, 10 ms), and the pause after it is longer.
+    let typed_until = f64::from_bits(subject.inner.typed_until.load(Ordering::Relaxed));
+    let now = *clock.now.lock().unwrap();
+    assert!(typed_until < now, "{typed_until} {now}");
+    assert!(subject.inner.switch_group_inner(1).unwrap());
+    assert_eq!(pauses(&clock, default_pause()), clock.sleeps.lock().unwrap().len());
+}
+
+#[test]
+fn keys_the_user_presses_between_paced_keys_are_held_and_follow_the_correction_paced() {
+    let (api, clock, subject) = remote_backend(None);
+    api.state().current_layout = RUSSIAN_HKL;
+    subject.start(collecting(&collected())).unwrap();
+    let hook = api.hook();
+    subject.hold_input();
+    // The user presses and lets go a key just after the first key of the correction is sent.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let pressing = Arc::clone(&calls);
+    let pressed_hook = hook.clone();
+    api.state().on_send = Some(Arc::new(move |_: &[NativeInput]| {
+        if pressing.fetch_add(1, Ordering::Relaxed) == 0 {
+            assert!(pressed_hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)), "kept back");
+            assert!(pressed_hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)), "kept back");
+        }
+    }));
+    let strokes = [key_event()];
+    assert_eq!(subject.inject_correction(injection(&strokes, 1)).unwrap(), 2);
+    let sent = api.sent();
+    // The deletion and the letter, then the held key, its press and its release apart.
+    assert_eq!(sent.len(), 4);
+    assert!(sent[..2].iter().flatten().all(|item| item.synthetic));
+    assert_eq!(sent[2..], [vec![replayed_key(true, VK_D, HELD_KEY_SCAN_CODE)], vec![replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)]]);
+    assert_eq!(pauses(&clock, default_pause()), 4);
+    subject.stop();
+}
+
+#[test]
+fn a_click_between_paced_keys_stops_the_correction_where_it_is() {
+    let (api, _clock, subject) = remote_backend(None);
+    api.state().current_layout = RUSSIAN_HKL;
+    subject.start(collecting(&collected())).unwrap();
+    let hook = api.hook();
+    subject.hold_input();
+    let clicking = hook.clone();
+    api.state().on_send = Some(Arc::new(move |_: &[NativeInput]| {
+        // A press of the pointer, which no hold keeps back.
+        assert!(!clicking(native(true, 0, 0, false, 10)));
+    }));
+    let strokes = [key_event(), key_event()];
+    let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+    assert!(message(&error).contains("во время замены"), "{error}");
+    assert_eq!(api.sent().len(), 1);
+    // A key the system did not take ends the paced typing as it ends a burst.
+    api.state().on_send = None;
+    api.state().send_count = Some(0);
+    subject.hold_input();
+    let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+    assert!(message(&error).starts_with("SendInput отправил 0 из 2"), "{error}");
+    subject.stop();
+}
+
+#[test]
+fn a_selection_result_goes_into_a_remote_control_window_a_key_a_character() {
+    let (api, clock, subject) = remote_backend(None);
+    assert!(subject.replace_selection(&selected_by(SOURCE_UIA, "ghbdtn"), "пр", Some(1)).unwrap());
+    let character = |unit: char| [true, false].map(|pressed| NativeInput { scan_code: unit.to::<u32>(), unicode: true, ..NativeInput::new(pressed) }).to_vec();
+    let left = vec![NativeInput::extended_key(true, VK_LEFT), NativeInput::extended_key(false, VK_LEFT)];
+    assert_eq!(
+        api.sent(),
+        [character('п'), character('р'), vec![NativeInput::key(true, VK_SHIFT)], left.clone(), left, vec![NativeInput::key(false, VK_SHIFT)]]
+    );
+    assert_eq!(pauses(&clock, default_pause()), 6);
+    assert_eq!(api.requests(), [RUSSIAN_HKL]);
+    // A character beyond the basic plane is one key of its two units.
+    api.state().sent.clear();
+    assert!(!subject.replace_selection(&selected_by(SOURCE_UIA, "x"), "😀", None).unwrap());
+    let units: Vec<u32> = "😀".encode_utf16().map(u32::from).collect();
+    let expected: Vec<NativeInput> = units.iter().flat_map(|&unit| [true, false].map(|pressed| NativeInput { scan_code: unit, unicode: true, ..NativeInput::new(pressed) })).collect();
+    assert_eq!(api.sent(), [expected]);
 }
