@@ -134,6 +134,81 @@ fn a_term_typed_in_the_russian_layout_before_a_russian_word_converts_alone() {
 }
 
 #[test]
+fn capitals_before_a_hyphen_belong_to_their_part() {
+    let mut bundle = Bundle::load(None);
+    // An abbreviation or a name before the hyphen and the Russian word after it typed on in the English layout: the
+    // capitals made the whole token look like an identifier, the part after the hyphen was never asked about, and the
+    // model judged the token whole (`ЫЙД-запрос`, `ПшеРги-репозиторий`; `JSON-afqk` stayed).
+    assert_eq!(typed(&mut bundle, 0, "SQL-pfghjc ", None, as_shipped), "SQL-запрос ");
+    assert_eq!(typed(&mut bundle, 0, "JSON-afqk ", None, as_shipped), "JSON-файл ");
+    assert_eq!(typed(&mut bundle, 0, "GitHub-htgjpbnjhbq ", None, as_shipped), "GitHub-репозиторий ");
+    // The same typed in the layout picked by hand for the term: the token stayed whole as typed.
+    assert_eq!(typed(&mut bundle, 1, "jnrhjq ", Some((0, "SQL-pfghjc ")), as_shipped), "открой SQL-запрос ");
+    // The whole token typed in the Russian layout: the term before the hyphen is asked about alone, and converts alone.
+    // `репозиторий` is no word of the lexicon, but Russian prose uses it.
+    assert_eq!(typed(&mut bundle, 1, "HTTP-pfghjc ", None, as_shipped), "HTTP-запрос ");
+    assert_eq!(typed(&mut bundle, 1, "ye;ty PDF-afqk ", None, as_shipped), "нужен PDF-файл ");
+    assert_eq!(typed(&mut bundle, 1, "vjq GitLab-htgjpbnjhbq ", None, as_shipped), "мой GitLab-репозиторий ");
+    // Must stay as they were: an identifier whatever its letters, a Russian abbreviation typed right, one typed in the
+    // English layout (the model converts the whole token, and its head too when asked alone).
+    assert_eq!(typed(&mut bundle, 0, "my_afqk ", None, as_shipped), "my_afqk ");
+    assert_eq!(typed(&mut bundle, 1, "UJCN-cnfylfhn ", None, as_shipped), "ГОСТ-стандарт ");
+    assert_eq!(typed(&mut bundle, 1, "VAW-wtynh ", None, as_shipped), "МФЦ-центр ");
+    assert_eq!(typed(&mut bundle, 0, "UJCN-cnfylfhn ", None, as_shipped), "ГОСТ-стандарт ");
+    // A token all in capitals is judged whole as typed, as before.
+    assert_eq!(typed(&mut bundle, 0, "MONGO-CTHDBCF ", None, as_shipped), "MONGO-CTHDBCF ");
+    bundle.clean();
+}
+
+#[test]
+fn tokens_right_or_wrong_as_a_whole_end_as_the_python_left_them() {
+    let mut bundle = Bundle::load(None);
+    // The tokens of the Python engine's recorded test of this kind, which the engine now asks one question more about:
+    // the part after the hyphen of `BB-fccbcntyn`, whose capitals no longer guard the whole token. They end as before.
+    for (group, english, shown) in [
+        (0, "rfrjq-nj ", "какой-то "),
+        (0, "BB-fccbcntyn ", "ИИ-ассистент "),
+        (1, "ssh-agent ", "ssh-agent "),
+        (1, "xnj-nj ", "что-то "),
+        (1, "gj-hfpyjve ", "по-разному "),
+        (0, "e-mail ", "e-mail "),
+        (0, "node-telegram ", "node-telegram "),
+        (0, "state-of-the-art ", "state-of-the-art "),
+        (0, "10-chat-export ", "10-chat-export "),
+        (0, "foo=bar ", "foo=bar "),
+        (0, "a--b ", "a--b "),
+    ] {
+        assert_eq!(typed(&mut bundle, group, english, None, as_shipped), shown, "{english}");
+    }
+    bundle.clean();
+}
+
+#[test]
+fn a_part_before_a_hyphen_the_lexicon_cannot_judge_is_left_to_the_model() {
+    let mut bundle = Bundle::load(None);
+    // A part of one letter (`C` reads the Russian `С`), and a word of both lexicons (`key` reads `лун`): the head looked
+    // typed in the wrong layout, and the token converted whole (`Ензу-С-кабель`) or, in the layout picked for the term,
+    // stayed (`key-afqk`).
+    assert_eq!(typed(&mut bundle, 0, "Type-C-rf,tkm ", None, as_shipped), "Type-C-кабель ");
+    assert_eq!(typed(&mut bundle, 1, "ye;ty ", Some((0, "Type-C-rf,tkm ")), as_shipped), "нужен Type-C-кабель ");
+    assert_eq!(typed(&mut bundle, 1, "ye;ty ", Some((0, "key-afqk ")), as_shipped), "нужен key-файл ");
+    // The model converts these whole and, asked about the head alone, converts it too: the whole token stands.
+    assert_eq!(typed(&mut bundle, 0, "d-nhtnmb[ ", None, as_shipped), "в-третьих ");
+    assert_eq!(typed(&mut bundle, 0, "Re-re ", None, as_shipped), "Ку-ку ");
+    // Pause asks no model about the head, and converts the whole token as before.
+    let mut session = bundle.session("firefox", 0, Vec::new());
+    session.core.settings.write(DETECTION_CONTEXT_READ_FIELD, true, false).expect("in memory");
+    session.core.settings.write(DETECTION_CORRECT_ON_SPACE, false, false).expect("in memory");
+    keys(&mut session, "f-kz ");
+    session.core.schedule_manual_conversion(i64::from(PAUSE_KEYCODE));
+    session.handle(KeyEvent { pressed: false, keycode: PAUSE_KEYCODE, key_name: "Pause".to_owned(), ..KeyEvent::default() });
+    session.idle(1.0);
+    assert_eq!(session.backend.text().iter().collect::<String>(), "а-ля ");
+    bundle.give_back(session);
+    bundle.clean();
+}
+
+#[test]
 fn undo_after_an_early_switch_inside_a_joined_token_puts_back_every_key_as_typed() {
     let mut bundle = Bundle::load(None);
     // `ьщтпщ-сервиса` typed in the Russian layout: the early switch makes `ьщтп` `mong` while it is typed, the rest comes in

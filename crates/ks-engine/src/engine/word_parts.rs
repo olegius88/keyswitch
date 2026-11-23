@@ -18,6 +18,19 @@ fn words_begun_with(model: &LanguageModel, start: &str) -> usize {
     words.lower_bound(&format!("{start}{}", char::MAX)).saturating_sub(words.lower_bound(&format!("{start}\0")))
 }
 
+/// How the parts before the last joining sign of a token are taken when the part after it is asked alone
+/// (`split_at_last_join`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HeadParts {
+    /// Pause converts the part after the sign with nothing asked about the head: the token as typed is no identifier
+    /// (`is_protected_token`) and each part before the sign is settled as typed (`head_segment_settled`).
+    Settled,
+    /// The model is asked about the part after the sign (`joined_head`), and about the head alone when it converts the
+    /// whole token: the guard judges the token with the case of its letters left to its parts (`joined_token_guarded`),
+    /// and a part the lexicon cannot judge is left to the model (`head_segment_settled` of a joined part).
+    Asked,
+}
+
 /// The table of prose counts of the language a layout types, by the layout's name; None for a layout with no prose.
 fn prose_of(layout: &str) -> Option<&'static str> {
     match layout {
@@ -191,7 +204,7 @@ impl EngineCore {
         for stroke in &strokes[..head] {
             if stroke.character != "/" {
                 segment.push(stroke.clone());
-            } else if !segment.is_empty() && !self.head_segment_settled(&segment, source_group, targets[0]) {
+            } else if !segment.is_empty() && !self.head_segment_settled(&segment, source_group, targets[0], false) {
                 return 0;
             } else {
                 segment = Vec::new();
@@ -211,29 +224,38 @@ impl EngineCore {
     /// in both layouts joins parts the same way (_`joins_parts`); a slash has its own rule
     /// (`literal_head`). A token the code guard protects stays whole, as before: an identifier, an
     /// assignment or an address (`user_name`, `foo=bar`, `user@host`) is not prose whose words were
-    /// typed in two layouts. As after a slash, the head is never replaced, a head segment that itself
-    /// looks like a word in the wrong layout abstains (one span cannot fix two words), and only
-    /// the contextual model is asked.
+    /// typed in two layouts (`joined_token_guarded`). As after a slash, the head is never replaced, a head
+    /// segment that itself looks like a word in the wrong layout abstains (one span cannot fix two words;
+    /// `HeadParts::Asked` says which do), and only the contextual model is asked.
     pub fn joined_head(&self, strokes: &[Stroke], source_group: i64) -> usize {
-        if !self.flag("detection.context_aware", true)
-            || !self.context_assists()
-            || self.context_policy.model.is_none()
-        {
+        if !self.context_asks_parts() {
             return 0;
         }
-        self.joined_split(strokes, source_group)
+        self.split_at_last_join(strokes, source_group, HeadParts::Asked)
+    }
+
+    /// Whether the contextual model is there to ask about the parts of a token.
+    fn context_asks_parts(&self) -> bool {
+        self.flag("detection.context_aware", true) && self.context_assists() && self.context_policy.model.is_some()
     }
 
     /// The strokes up to the last joining sign, when the token is parts joined by it and every part before
-    /// it is settled as typed (`joined_head`); 0 otherwise. Pause converts the part after them alone, whatever
+    /// it is settled as typed; 0 otherwise. Pause converts the part after them alone, whatever
     /// decides automatic corrections (`schedule_manual_conversion`).
     pub fn joined_split(&self, strokes: &[Stroke], source_group: i64) -> usize {
+        self.split_at_last_join(strokes, source_group, HeadParts::Settled)
+    }
+
+    /// `joined_split`, with the parts before the last joining sign taken as `parts` says.
+    fn split_at_last_join(&self, strokes: &[Stroke], source_group: i64, parts: HeadParts) -> usize {
         let last_join = strokes.iter().rposition(|stroke| Self::joins_parts(stroke));
         let targets = self.other_groups(source_group);
         let Some(last_join) = last_join else {
             return 0;
         };
-        if !self.in_models(source_group) || targets.is_empty() || self.detector.is_protected_token(&text_for_group(strokes, source_group)) {
+        let token = text_for_group(strokes, source_group);
+        let guarded = if parts == HeadParts::Settled { self.detector.is_protected_token(&token) } else { self.joined_token_guarded(&token) };
+        if !self.in_models(source_group) || targets.is_empty() || guarded {
             return 0;
         }
         let head = last_join + 1;
@@ -248,7 +270,7 @@ impl EngineCore {
                 segment.push(stroke.clone());
             } else if !segment.is_empty() {
                 // Signs in a row (`C++-`) join as one; each run of letters must be settled as typed.
-                if !self.head_segment_settled(&segment, source_group, targets[0]) {
+                if !self.head_segment_settled(&segment, source_group, targets[0], parts == HeadParts::Asked) {
                     return 0;
                 }
                 lettered = true;
@@ -256,6 +278,16 @@ impl EngineCore {
             }
         }
         if lettered { head } else { 0 }
+    }
+
+    /// Whether the code guard keeps a token of parts joined by a sign whole: an identifier, an assignment or an address
+    /// (`user_name`, `foo=bar`, `user@host`). The case of its letters is not the token's unless all of them are capitals:
+    /// a capital belongs to the part it is in, and each part is judged on its own (`head_segment_settled`; the part after
+    /// the sign as any word). Judged whole, the capitals of an abbreviation or a name before the sign looked like an
+    /// identifier's (`POST-pfghjc`, `HR-lbhtrnjh`, `GitHub-htgjpbnjhbq`), and the part after the sign was never asked
+    /// about. A token all in capitals is guarded as typed, as before: `MONGO-CTHDBCF` stays whole.
+    fn joined_token_guarded(&self, token: &str) -> bool {
+        self.detector.is_protected_token(&if pystr::isupper(token) { token.to_owned() } else { pystr::casefold(token) })
     }
 
     /// The part after the last joining sign asked as a word of its own (`joined_head`).
@@ -348,8 +380,10 @@ impl EngineCore {
     ///
     /// An English term typed in the Russian layout before a Russian word is no word whole: `зкщ-тарифу` is `pro-тарифу`,
     /// its whole other reading `pro-nfhbae` is no word either, and the model kept the token (p=0.986), while `зкщ` before
-    /// a space became `pro`. When the part after the sign is a word of its lexicon as typed (`head_segment_settled`, and
-    /// not `сервисаююю`, `сервиса...` typed in the Russian layout), the model is asked about the part before it alone, in
+    /// a space became `pro`. When the part after the sign is a word of its language as typed (`word_of_its_language`:
+    /// the lexicon holds no `репозиторий`, which Russian prose uses, and `ПшеРги-репозиторий` stayed for
+    /// `GitHub-репозиторий`) and settled so (`head_segment_settled`, and not `сервисаююю`, `сервиса...` typed in the
+    /// Russian layout), the model is asked about the part before it alone, in
     /// the field before the token, with the sign as its boundary: the lexicons do not know most terms (`ыущ`, the model's
     /// `seo`). A part before the sign that is a word of its own lexicon while its other reading is none (`по` of
     /// `по-разному`) is not asked about. Converted, the part is typed in the other layout, and the sign and the word
@@ -372,12 +406,10 @@ impl EngineCore {
             || !lettered(head)
             || !lettered(tail)
             || !pystr::isalpha(&text_for_group(head, target))
-            || !self.flag("detection.context_aware", true)
-            || !self.context_assists()
-            || self.context_policy.model.is_none()
-            || self.detector.is_protected_token(&text_for_group(strokes, source_group))
-            || !self.head_segment_settled(tail, source_group, target)
-            || !self.model(source_group).score(&text_for_group(tail, source_group)).known
+            || !self.context_asks_parts()
+            || self.joined_token_guarded(&text_for_group(strokes, source_group))
+            || !self.head_segment_settled(tail, source_group, target, false)
+            || !self.word_of_its_language(source_group, &text_for_group(tail, source_group))?
             || (self.model(source_group).score(&text_for_group(head, source_group)).known && !self.model(target).score(&text_for_group(head, target)).known)
         {
             return Ok(None);
@@ -462,13 +494,23 @@ impl EngineCore {
     }
 
     /// A head segment is settled when nothing suggests it needs conversion.
-    fn head_segment_settled(&self, segment: &[Stroke], source_group: i64, target: i64) -> bool {
+    ///
+    /// A segment whose other reading is a word of its lexicon is not, unless it is a part before a joining sign that the
+    /// model is asked about (`joined_part`, `HeadParts::Asked`) and the lexicon cannot judge: a word of its own lexicon
+    /// too, whose two readings the detector weighs as it weighs a segment whose other reading is no word, or a part of
+    /// fewer letters than `JOINED_PART_MIN_LETTERS`, which tells nothing of its layout. `key` of `key-afqk` reads `лун`,
+    /// a Russian word, and `C` of `USB-C-rf,tkm` reads the Russian `С`: both tokens converted whole (`лун-файл`,
+    /// `ГЫИ-С-кабель`) with no question about the part after the sign. Such a head stays only by the model
+    /// (`decide_joined_part`): a token the model converts whole is converted whole unless the model, asked about the head
+    /// alone, keeps it (and only a head typed in the English layout is asked), and a token it keeps whole was judged with
+    /// its head.
+    fn head_segment_settled(&self, segment: &[Stroke], source_group: i64, target: i64, joined_part: bool) -> bool {
         let original = text_for_group(segment, source_group);
-        if self.detector.is_protected_token(&original) {
+        if self.detector.is_protected_token(&original) || (joined_part && segment.len() < JOINED_PART_MIN_LETTERS) {
             return true;
         }
         let alternative = text_for_group(segment, target);
-        if self.model(target).score(&alternative).known {
+        if self.model(target).score(&alternative).known && !(joined_part && self.model(source_group).score(&original).known) {
             return false;
         }
         let alternatives = [(target, alternative)];
