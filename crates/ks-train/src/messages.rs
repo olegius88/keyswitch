@@ -81,7 +81,7 @@ static PARAGRAPH: LazyLock<Regex> = LazyLock::new(|| regex(r"\n[\s\x1c-\x1f]*\n|
 static CHARREF: LazyLock<Regex> = LazyLock::new(|| regex(r"&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[^\t\n\x0c <&#;]{1,32};?)"));
 static LATIN_PAIR: LazyLock<Regex> = LazyLock::new(|| regex(r"[A-Za-z]{2}"));
 static DASH_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^-{1,2}(?:[A-Za-z]+|[а-яёА-ЯЁ]+)[0-9]*$"));
-static DIGIT_DOT_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9]+[.,][0-9]*$"));
+static DIGIT_DOT_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9]+(?:[.,][0-9]+)*[.,][0-9]*$"));
 static DIGIT_LETTER_TOKEN: LazyLock<Regex> = LazyLock::new(|| regex(r"^[0-9]+б$"));
 static CURRENCY_CODE: LazyLock<Regex> = LazyLock::new(|| regex(r"<Ccy>([A-Z]{3})</Ccy>"));
 static PUBLISHED: LazyLock<Regex> = LazyLock::new(|| regex(r#"<ISO_4217 Pblshd="([0-9-]+)""#));

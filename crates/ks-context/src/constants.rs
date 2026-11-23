@@ -481,9 +481,11 @@ pub const DASH_HEAD_TRIGGERS: &[&str] = &["space", "punctuation", "enter"];
 // Digits with `ю` typed in the Russian layout, digits after it allowed, have evidence of their own under this prefix: the
 // digit-dot head (context_action_features.digit_dot_question). A person used to the English layout presses its dot key in
 // Russian text too, and the Russian layout prints `ю` there: `2ю` for `2.`, `5ю2` for `5.2` (the owner's typing, five such
-// tokens of the field batteries stayed). The engine replaces the sign and leaves the Russian layout on
-// (engine.plan_from_decision). The comma's key prints `б`, and digits with `б` are written as meant too (`класс 5б`): fitted
-// with them, candidate v81 e3 left every token of the class a suggestion, so they stay out of the class.
+// tokens of the field batteries stayed). A version or an address has more than one: `1ю5ю3` for `1.5.3`, `192ю168ю1ю1`
+// for `192.168.1.1`, `1ю2ю` for `1.2.`; outside the class they were left a suggestion. The engine replaces the signs and
+// leaves the Russian layout on (engine.plan_from_decision). The comma's key prints `б`, and digits with `б` are written as
+// meant too (`класс 5б`): fitted with them, candidate v81 e3 left every token of the class a suggestion, so they stay out
+// of the class.
 pub const DIGIT_DOT_FEATURE_PREFIX: &str = "digitdot|";
 
 // A token of `@` and Latin letters whose other reading is `"` and Cyrillic letters, or the other way round, has evidence of

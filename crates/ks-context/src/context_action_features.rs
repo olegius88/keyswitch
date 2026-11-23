@@ -634,7 +634,7 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
             update(&mut kept, evidence);
         }
         if digit_dot_question(&item.original, &item.alternative, &item.trigger) {
-            // Nor digits with `ю` or `б` waiting before a word kept as typed (`2ю потом`): the digit-dot head answers
+            // Nor digits with `ю` waiting before a word kept as typed (`2ю потом`, `1ю5ю3 и`): the digit-dot head answers
             // there too.
             let evidence = digit_dot_evidence(item, direction, &kept, tables);
             update(&mut kept, evidence);
@@ -664,8 +664,9 @@ fn heads(item: &ContextEvidence, direction: &str, features: FeatureMap, tables: 
         update(&mut result, cyrletter_evidence(item, direction, &features, tables));
     }
     if digit_dot_question(&item.original, &item.alternative, &item.trigger) {
-        // Digits with `ю` or `б` typed in the Russian layout: a lone letter to the frozen model, which waited on `2ю` at
-        // p=0.999 where `2.` was meant (the owner's typing). The digit-dot head answers it.
+        // Digits with `ю` typed in the Russian layout: a lone letter to the frozen model, which waited on `2ю` at p=0.999
+        // where `2.` was meant (the owner's typing), and left `1ю5ю3` a suggestion, its reading `1.5.3` holding no letter the
+        // weights know. The digit-dot head answers it.
         update(&mut result, digit_dot_evidence(item, direction, &features, tables));
     }
     if quote_question(&item.original, &item.alternative, &item.trigger) {
@@ -1492,26 +1493,22 @@ fn cyrletter_evidence(item: &ContextEvidence, direction: &str, features: &Featur
     pairs
 }
 
-/// Digits, then `ю` typed in the Russian layout (`DIGIT_DOT_SIGN_LETTERS`), digits after it allowed, whose other reading has
-/// the dot there (`DIGIT_DOT_SIGNS`), at a space (`DIGIT_DOT_HEAD_TRIGGERS)`: `2ю` for `2.` and `5ю2` for `5.2` where a person
-/// used to the English layout pressed its dot key in Russian text.
+/// Digits, then one or more groups of `ю` typed in the Russian layout (`DIGIT_DOT_SIGN_LETTERS`) and digits, the last group's
+/// digits allowed to be none, whose other reading has the dot in place of each sign (`DIGIT_DOT_SIGNS`), at a space
+/// (`DIGIT_DOT_HEAD_TRIGGERS)`: `2ю` for `2.`, `5ю2` for `5.2`, `1ю5ю3` for `1.5.3`, `192ю168ю1ю1` for `192.168.1.1` and
+/// `1ю2ю` for `1.2.` where a person used to the English layout pressed its dot key in Russian text. Two signs side by side
+/// (`1юю2`) and a token that opens with a sign are no number.
 #[must_use]
 pub fn digit_dot_question(original: &str, alternative: &str, trigger: &str) -> bool {
-    if !DIGIT_DOT_HEAD_TRIGGERS.contains(&trigger) || count(original) != count(alternative) {
+    if !DIGIT_DOT_HEAD_TRIGGERS.contains(&trigger) || count(original) != count(alternative) || leading_digits(original) == 0 {
         return false;
     }
-    let head = leading_digits(original);
-    let original: Vec<char> = original.chars().collect();
-    let alternative: Vec<char> = alternative.chars().collect();
-    if !(0 < head && head < original.len()) {
-        return false;
-    }
-    let rest = &original[head + 1..];
-    DIGIT_DOT_SIGN_LETTERS.contains(original[head])
-        && DIGIT_DOT_SIGNS.contains(alternative[head])
-        && alternative[..head] == original[..head]
-        && alternative[head + 1..] == *rest
-        && (rest.is_empty() || (rest.iter().all(|&c| ucd::isdigit(c))))
+    let groups: Vec<&str> = original.split(|c| DIGIT_DOT_SIGN_LETTERS.contains(c)).collect();
+    let (last, inner) = groups.split_last().expect("split gives a part");
+    !inner.is_empty()
+        && inner.iter().all(|group| !group.is_empty() && group.chars().all(ucd::isdigit))
+        && last.chars().all(ucd::isdigit)
+        && original.chars().zip(alternative.chars()).all(|(typed, other)| if DIGIT_DOT_SIGN_LETTERS.contains(typed) { DIGIT_DOT_SIGNS.contains(other) } else { other == typed })
 }
 
 fn leading_digits(token: &str) -> usize {
@@ -1519,9 +1516,10 @@ fn leading_digits(token: &str) -> usize {
 }
 
 /// The digit-dot head's evidence: the features it is asked with once more under its own names, and evidence of its own:
-/// the sign letter, how many digits stand before it and whether digits follow it, how often the word before it occurs, the
-/// script of the word after it and how it was given, and whether the text before holds signs of code or Latin letters; the
-/// sign letter is read with the rest. `пункт 2ю` and `версии 5ю2` are a dot.
+/// the sign letter, how many digits stand before the first sign and whether anything follows it, how often the word before
+/// it occurs, the script of the word after it and how it was given, and whether the text before holds signs of code or Latin
+/// letters; the sign letter is read with the rest. `пункт 2ю`, `версии 5ю2` and `версии 1ю5ю3` are dots. How many signs the
+/// token holds is no evidence: every frame of the class typed from public text is a dot, whatever the count.
 fn digit_dot_evidence(item: &ContextEvidence, direction: &str, features: &FeatureMap, tables: &TermTables) -> Pairs {
     let head = leading_digits(&item.original);
     let sign = format!("sign:{}", pystr::slice(&item.original, Some(head.to::<i64>()), Some(head.to::<i64>() + 1)));

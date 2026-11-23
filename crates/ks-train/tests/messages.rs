@@ -333,6 +333,16 @@ fn a_class_selects_its_messages() {
     assert_eq!((said.messages.train, said.messages.dev), (1, 0));
     let no_tables = trainer().arg("select").arg("--tree").arg(sources.folder.join("no-tree")).args(["--class", "common", "--development-share", "0.0"]).arg("--messages").arg(&common).arg("--out").arg(&out).output().expect("the trainer starts");
     assert!(!no_tables.status.success());
+    // The digit-dot class: digits with one dot or comma after a Russian word, or with more of them between digits (a
+    // version, an address, a numbered point); two signs side by side and a sign before the digits are no number.
+    let numbers = sources.folder.join("numbers.jsonl.gz");
+    let lines = ["пункт 2. тут", "версии 5.2 тут", "версии 1.5.3 тут", "адрес 192.168.1.1 тут", "пункт 1.2. тут", "версии 1..2 тут", "версии .5 тут", "это 1.5.3"];
+    let rows: Vec<String> = lines.iter().enumerate().map(|(index, text)| format!("{{\"qid\": {index}, \"text\": \"{text}\"}}")).collect();
+    gz_write(&numbers, (rows.join("\n") + "\n").as_bytes());
+    let output = tool("select", &["--messages".as_ref(), numbers.as_os_str(), "--class".as_ref(), "digitdot".as_ref(), "--development-share".as_ref(), "0.0".as_ref(), "--out".as_ref(), out.as_os_str(), "--prefix".as_ref(), "numbers".as_ref()]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let said: SelectSummary = ks_text::json::loads(&output.stdout).expect("json");
+    assert_eq!((said.messages.train, said.messages.dev), (6, 0));
     // With a list of the questions allowed, and with some of them left out.
     let list = sources.folder.join("allowed.txt.xz");
     let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 1);
