@@ -24,7 +24,20 @@ pub const PAUSE_DELAY_SETTING_MAX_SECONDS: f64 = 5.0;
 pub const PAUSE_DELAY_SETTING_MIN_SECONDS: f64 = 0.3;
 pub const SELECTION_HOTKEYS: [&str; 3] = ["selection_layout", "selection_case", "selection_transliterate"];
 pub const DOUBLE_CAPITALS: usize = 2;
-pub const DOUBLE_CAPITALS_MIN_LETTERS: usize = 4;
+/// The shortest word whose capitals `fix_double_capitals` fixes: three letters, where Shift is held too long most often
+/// (`КАк`, `ТАк`, `ANd`).
+pub const DOUBLE_CAPITALS_MIN_LETTERS: usize = 3;
+/// From this many letters the frequency lexicon alone decides that a word is fixed; a shorter one must also be among the
+/// words the prose of its language is full of (`DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT`).
+pub const DOUBLE_CAPITALS_LEXICON_MIN_LETTERS: usize = 4;
+/// How often the prose of its language uses a word of fewer than `DOUBLE_CAPITALS_LEXICON_MIN_LETTERS` letters, at
+/// least, for its capitals to be fixed. Three letters are as often an abbreviation with an ending, a unit or a plural of
+/// an abbreviation, and the lexicon knows many of them in lowercase. In the Russian word lists of the Leipzig corpora
+/// (ten corpora of a million sentences each) every three-letter token of the shape whose fixed form the prose counts
+/// reach this often was a slip: 21 of them, from `ЧТо` (`что`, 671 941) to `ВНе` (5 094); those written so on purpose
+/// stay below a half of it: `ОСи` for operating systems (`оси`, 1 835), `СШа` (591), units (`МГц` 56, `МВт` 0) and plurals
+/// of abbreviations (`IDs` 5, `PCs` 0).
+pub const DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT: u64 = 5000;
 pub const EARLY_SWITCH_CONFIDENCE: f64 = 15.0;
 pub const ENGINE_EVENT_QUEUE_MAX_SIZE: usize = 4096;
 pub const JOINED_PART_MIN_LETTERS: usize = 2;

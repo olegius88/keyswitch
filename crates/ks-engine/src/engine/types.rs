@@ -152,8 +152,9 @@ pub struct CorrectionPlan {
     // those back. Empty: `strokes` are the keys on screen, as for every other correction.
     pub replaced_strokes: Strokes,
     // The keys of the text this plan replaces, when they are not `strokes`: a case fix types the keys
-    // of the word with one letter's Shift changed (fix_double_capitals), and undo types these back.
-    // Empty when the plan replaces `strokes` themselves, as every conversion does.
+    // of the word with one letter's Shift changed (fix_double_capitals), and so does a conversion that fixes
+    // the case of its word (fix_converted_capitals); undo types these back. Empty when the plan replaces
+    // `strokes` themselves, as every other conversion does.
     pub replaced: Strokes,
     // The last strokes of `strokes` that are the text typed after the word an undo puts back (undo_across_words): typed
     // again as they were, in the layout they were typed in, they leave that text as it stood. 0 for every other plan.
@@ -192,10 +193,11 @@ impl CorrectionPlan {
         }
     }
 
-    /// The plan changes the case of letters in their own layout: a case fix, or its undo.
+    /// The plan changes the case of letters in their own layout: a case fix, or its undo. A conversion that fixes the
+    /// case of its word as well changes the layout first of all.
     #[must_use]
     pub fn case_fix(&self) -> bool {
-        !self.replaced.is_empty()
+        !self.replaced.is_empty() && self.source_group == self.target_group
     }
 
     /// `dataclasses.replace(plan, ...)`.

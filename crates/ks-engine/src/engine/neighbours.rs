@@ -609,7 +609,9 @@ impl EngineCore {
             self.shared, "converted_word_reverted", "previous_characters": pystr::len(&applied.original),
             "next_characters": pystr::len(&decision.original),
         );
-        let mut keys = applied.strokes.clone();
+        // A conversion that fixed the case of its word typed other keys than the user's (`replaced`): the word goes back as
+        // typed, with its two capitals.
+        let mut keys = if applied.replaced.is_empty() { applied.strokes.clone() } else { applied.replaced.clone() };
         keys.push(applied_boundary.clone());
         keys.extend(strokes.iter().cloned());
         let replacement = format!("{}{}{}", applied.original, applied_boundary.character, decision.replacement);
