@@ -47,6 +47,9 @@ pub const MAX_CONTEXT_SHORT_FREQUENCY_BYTES: usize = 2_097_152;
 // Largest table of tokens spelled in capitals that the upper-case head reads.
 pub const MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES: usize = 4_194_304;
 
+// Largest table of words written with two capitals at their start on purpose that the engine reads.
+pub const MAX_DOUBLE_CAPITALS_FREQUENCY_BYTES: usize = 262_144;
+
 // ---- constants/models.py
 
 // The context model's features. Feature schema 3 (context_action_features) and the frozen feature

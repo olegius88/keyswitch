@@ -16,7 +16,7 @@ use crate::constants::{
     DIGIT_DOT_FEATURE_PREFIX, KEPT_FEATURE_PREFIX, LETTER_FEATURE_PREFIX, MAX_CONTEXT_ACTION_MODEL_BYTES,
     MAX_CONTEXT_ACTION_MODEL_FEATURES, MAX_CONTEXT_ALNUM_FREQUENCY_BYTES, MAX_CONTEXT_CAPITALS_FREQUENCY_BYTES,
     MAX_CONTEXT_FEATURE_NAME_CHARACTERS, MAX_CONTEXT_MODEL_BYTES, MAX_CONTEXT_MODEL_VERSION_CHARACTERS, MAX_CONTEXT_SHORT_FREQUENCY_BYTES,
-    MAX_CONTEXT_TERM_FREQUENCY_BYTES, MAX_CONTEXT_WEIGHT_MAGNITUDE, MIN_CONTEXT_CONVERSION_THRESHOLD, RESUME_FEATURE_PREFIX,
+    MAX_CONTEXT_TERM_FREQUENCY_BYTES, MAX_CONTEXT_WEIGHT_MAGNITUDE, MAX_DOUBLE_CAPITALS_FREQUENCY_BYTES, MIN_CONTEXT_CONVERSION_THRESHOLD, RESUME_FEATURE_PREFIX,
     SHORT_FEATURE_PREFIX, UPPER_FEATURE_PREFIX, VARIABLE_FEATURE_PREFIX,
 };
 use crate::context_action_features::{extract_action_features, FeatureMap};
@@ -103,6 +103,10 @@ pub const ALNUM_FREQUENCY_FILE: &str = "context-alnum-frequency.json";
 pub const SHORT_FREQUENCY_FILE: &str = "context-short-frequency.json";
 /// The table of tokens spelled in capitals the upper-case head reads, in the `models` folder.
 pub const CAPITALS_FREQUENCY_FILE: &str = "context-capitals-frequency.json";
+/// The table of words Russian text writes with two capitals at their start on purpose (`ВКонтакте`), in the `models`
+/// folder: the engine keeps such a word as typed where it fixes Shift held one letter too long. The context model does
+/// not read it.
+pub const DOUBLE_CAPITALS_FREQUENCY_FILE: &str = "double-capitals-frequency.json";
 pub const ARTIFACT_FILE: &str = "context_policy_v1.json";
 /// The schema of the frozen baseline model the sealed tests compare a candidate with.
 pub const BASELINE_FEATURE_VERSION: i64 = 2;
@@ -403,6 +407,65 @@ impl CapitalCounts {
     }
 }
 
+/// The file of words written with two capitals at their start (`DOUBLE_CAPITALS_FREQUENCY_FILE`), as `ks-train capitals`
+/// writes it: each word with its counts in the Leipzig word lists. Its scope and its sources are read and set aside.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DoubleCapitalsFile {
+    #[serde(rename = "scope")]
+    _scope: String,
+    #[serde(rename = "sources")]
+    _sources: serde::de::IgnoredAny,
+    minimum_count: u64,
+    tokens: BTreeMap<String, WrittenCounts>,
+}
+
+/// How often the Leipzig word lists write a word as the table holds it, and with only its first letter a capital.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WrittenCounts {
+    written: u64,
+    capitalised: u64,
+}
+
+/// The words Russian text writes with two capitals at their start on purpose: each written so at least the table's
+/// minimum count of times and at least as often as with only its first letter a capital (`ВКонтакте` against
+/// `Вконтакте`). Shift held one letter too long writes a word far less often so than with one capital (`ЧТо`, `КАк`),
+/// and such a word is not in the table.
+#[derive(Default)]
+pub struct WrittenCapitals {
+    words: WordList,
+}
+
+impl WrittenCapitals {
+    /// Whether Russian text writes `word`, as it stands, with its two capitals on purpose.
+    #[must_use]
+    pub fn contains(&self, word: &str) -> bool {
+        self.words.contains_sorted(word)
+    }
+
+    /// The file read and checked: every word letters of one script, written at least the file's minimum count of times
+    /// and at least as often as with one capital; a word that is not is refused with the rest.
+    pub fn load(path: &Path) -> Result<WrittenCapitals, LoadError> {
+        let length = std::fs::metadata(path).map_err(|error| LoadError::os(&error, path))?.len();
+        if length > MAX_DOUBLE_CAPITALS_FREQUENCY_BYTES.to::<u64>() {
+            return Err(LoadError::value("double capitals frequency table is too large"));
+        }
+        let bytes = std::fs::read(path).map_err(|error| LoadError::os(&error, path))?;
+        let file: DoubleCapitalsFile = ks_text::json::loads(&bytes).map_err(|error| LoadError { name: "JSONDecodeError", message: error.to_string() })?;
+        let mut words = WordList::new();
+        for (word, counts) in &file.tokens {
+            let one_script = word.is_ascii() || !word.chars().any(|character| character.is_ascii());
+            if !(pystr::isalpha(word) && one_script) || counts.written < file.minimum_count.max(1) || counts.written < counts.capitalised {
+                return Err(LoadError::value("invalid double capitals frequency table"));
+            }
+            words.push(word);
+        }
+        // The words come sorted and once each, as the keys of the map they were read into.
+        Ok(WrittenCapitals { words })
+    }
+}
+
 /// How often plain words occur (schemas 7 and 3), read as a model that counts them loads: `latin` and `cyrillic` count
 /// words inside Russian text, `english` and `russian` words in text of their own language. The letters-and-digits,
 /// short-token and capitals tables are read on first use, as the Python reads them.
@@ -412,6 +475,7 @@ pub struct TermTables {
     alnum: OnceLock<Result<CountTables, LoadError>>,
     short: OnceLock<Result<CountTables, LoadError>>,
     capitals: OnceLock<Result<CapitalCounts, LoadError>>,
+    written: OnceLock<Result<WrittenCapitals, LoadError>>,
     endings: OnceLock<AffixCounts>,
     starts: OnceLock<AffixCounts>,
 }
@@ -420,7 +484,16 @@ impl TermTables {
     /// `term_frequency()`: read at once, before the keyboard hook starts.
     pub fn load(models_dir: &Path) -> Result<TermTables, LoadError> {
         let term = load_term_frequency(&models_dir.join(TERM_FREQUENCY_FILE), &TERM_ALPHABETS, MAX_CONTEXT_TERM_FREQUENCY_BYTES)?;
-        Ok(TermTables { dir: models_dir.to_path_buf(), term, alnum: OnceLock::new(), short: OnceLock::new(), capitals: OnceLock::new(), endings: OnceLock::new(), starts: OnceLock::new() })
+        Ok(TermTables {
+            dir: models_dir.to_path_buf(),
+            term,
+            alnum: OnceLock::new(),
+            short: OnceLock::new(),
+            capitals: OnceLock::new(),
+            written: OnceLock::new(),
+            endings: OnceLock::new(),
+            starts: OnceLock::new(),
+        })
     }
 
     /// `term_frequency()[alphabet]`.
@@ -447,6 +520,12 @@ impl TermTables {
     /// The capitals table (`CAPITALS_FREQUENCY_FILE`), read on the first token in capitals the upper-case head is asked about.
     pub fn capitals(&self) -> Result<&CapitalCounts, LoadError> {
         self.capitals.get_or_init(|| CapitalCounts::load(&self.dir.join(CAPITALS_FREQUENCY_FILE))).as_ref().map_err(Clone::clone)
+    }
+
+    /// The table of words written with two capitals at their start on purpose (`DOUBLE_CAPITALS_FREQUENCY_FILE`), read on
+    /// the first word whose case the engine would fix: a program that never fixes one never reads it.
+    pub fn written_capitals(&self) -> Result<&WrittenCapitals, LoadError> {
+        self.written.get_or_init(|| WrittenCapitals::load(&self.dir.join(DOUBLE_CAPITALS_FREQUENCY_FILE))).as_ref().map_err(Clone::clone)
     }
 
     /// `_russian_endings()`: built on the first term the head is asked about.

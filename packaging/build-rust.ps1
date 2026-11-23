@@ -108,7 +108,8 @@ foreach ($Name in "identifiers.json", "protected_tokens.txt", "lexicon-supplemen
     Copy-Item -LiteralPath (Join-Path $Source $Name) -Destination $ResourceStage
 }
 foreach ($Name in "layout_intent_v1.ksm", "context_policy_v1.json", "context-term-frequency.json", "context-alnum-frequency.json",
-                  "context-short-frequency.json", "context-capitals-frequency.json", "prefix_policy_v1.json", "boundary-v2.json", "ortho_v1.json") {
+                  "context-short-frequency.json", "context-capitals-frequency.json", "double-capitals-frequency.json", "prefix_policy_v1.json",
+                  "boundary-v2.json", "ortho_v1.json") {
     Copy-Item -LiteralPath (Join-Path $Source "models\$Name") -Destination $ModelStage
 }
 Copy-Item -LiteralPath (Join-Path $FrozenDirectory "en_US.lm") -Destination $ModelStage

@@ -604,8 +604,10 @@ impl EngineCore {
     /// `glib`, which would make `GLib` a `Glib`. Terms of this shape (`VMware`, `OAuth`, `JUnit`, `MBps`)
     /// are no words of the lexicon and stay as typed. A word of three letters is fixed only when it is one of the words
     /// the prose of its language is full of (`КАк`, `ANd`): the lexicon knows many abbreviations with an ending, units
-    /// and plurals of abbreviations in lowercase (`ОСи`, `МВт`, `PCs`), and those stay. So does a word the user excluded
-    /// or one a rule of theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too long.
+    /// and plurals of abbreviations in lowercase (`ОСи`, `МВт`, `PCs`), and those stay. A name Russian text writes with
+    /// two capitals on purpose stays too (`ВКонтакте`, whose lowercase the lexicon knows). So does a word the user
+    /// excluded or one a rule of theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too
+    /// long.
     pub fn fix_double_capitals(&mut self, plan: &PlanRef, boundary: &Stroke) -> PlanRef {
         let group = plan.source_group;
         let Some((fixed, strokes)) = self.double_capitals_case(plan, group, &plan.original) else {
@@ -706,8 +708,14 @@ impl EngineCore {
 
     /// `word`, two capitals and lowercase letters, with its second letter lowercase when the lexicon of `group` decides
     /// so (`fix_double_capitals`), or why it stays: Hunspell knows it as typed, the frequency lexicon does not hold the
-    /// fixed word, or the word is short and the prose of its language does not use it at least
-    /// `DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT` times.
+    /// fixed word, the word is short and the prose of its language does not use it at least
+    /// `DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT` times, or Russian text writes it as typed on purpose.
+    ///
+    /// The lexicon holds words without their case, so it cannot tell a slip from a name written with two capitals: it
+    /// knows `вконтакте`, and `ВКонтакте` would become `Вконтакте`. The table of such words
+    /// (`DOUBLE_CAPITALS_FREQUENCY_FILE`, `ks-train capitals`) holds those the Leipzig word lists write so at least as
+    /// often as with only their first letter a capital; it is asked last, so it is read on the first word that would be
+    /// fixed and never before. A table that cannot be read keeps nothing.
     fn double_capitals_fixed(&self, word: &str, group: i64) -> Result<String, &'static str> {
         let model = self.model(group);
         let first_end = word.chars().next().map_or(0, char::len_utf8);
@@ -719,6 +727,8 @@ impl EngineCore {
             Err("fixed_word_unknown")
         } else if pystr::len(word) < DOUBLE_CAPITALS_LEXICON_MIN_LETTERS && self.prose_count(group, &fixed) < DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT {
             Err("fixed_word_rare")
+        } else if self.term_frequency().is_ok_and(|tables| tables.written_capitals().is_ok_and(|written| written.contains(word))) {
+            Err("written_as_typed")
         } else {
             Ok(fixed)
         }
