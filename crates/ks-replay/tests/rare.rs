@@ -1045,7 +1045,9 @@ fn a_hotkey_and_a_plan_answer_for_themselves() {
     );
     let word = plan("hello", "Hello", None);
     assert!(!word.case_fix());
-    assert!(Arc::new(CorrectionPlan { replaced: keys("hello"), ..(*word).clone() }).case_fix());
+    assert!(Arc::new(CorrectionPlan { replaced: keys("hello"), target_group: word.source_group, ..(*word).clone() }).case_fix());
+    // A conversion that fixes the case of its word too changes the layout first of all.
+    assert!(!Arc::new(CorrectionPlan { replaced: keys("hello"), ..(*word).clone() }).case_fix());
     assert!(EngineCore::is_boundary(&named("KP_Enter")));
 }
 

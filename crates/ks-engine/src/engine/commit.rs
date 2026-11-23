@@ -374,6 +374,12 @@ impl EngineCore {
                         self.pending = Some(typo);
                     }
                 }
+                if !waits {
+                    // Converted with Shift held one letter too long: the case is fixed in the same injection (`VFibyf`
+                    // is `Машина`). A word that waits for its neighbour may yet be taken back with it, as typed.
+                    let pending = self.pending.clone().expect("just set");
+                    self.pending = Some(self.fix_converted_capitals(&pending));
+                }
             } else {
                 if let Some(alone) = alone.clone() {
                     self.log_pending_dropped("superseded_by_boundary");
@@ -403,12 +409,13 @@ impl EngineCore {
                     self.learning_prompt_after = None;
                     self.pending_trigger_keycode = i64::from(boundary.keycode);
                 }
+                // The word stays in its layout for good: only now may its case be fixed. A word going with another
+                // correction may yet be converted, and a conversion types the keys as they were typed.
+                let stays = alone.is_none() && self.pending.is_none() && early_switch_origin.is_none() && mention.is_empty() && shown.is_none();
                 if inside.is_none() && trailing.is_empty() && head == 0 {
                     let field = self.context_result.as_ref().and_then(|result| result.field.clone());
-                    if !waits && alone.is_none() && self.pending.is_none() && early_switch_origin.is_none() && mention.is_empty() && shown.is_none() {
-                        // The word stays in its layout for good: only now may its case be fixed. A word
-                        // still waiting for its neighbour, or going with another correction, may yet be
-                        // converted, and a conversion types the keys as they were typed.
+                    if !waits && stays {
+                        // A word still waiting for its neighbour may yet be converted with it.
                         plan = self.fix_double_capitals(&plan, boundary);
                     }
                     // A word waiting for its neighbour joins the kept words only if the wait fails.
@@ -449,6 +456,10 @@ impl EngineCore {
                         segmentation_open: true,
                     });
                     self.keep_for_next_word(kept, Some(word), boundary);
+                } else if !trailing.is_empty() && stays {
+                    // The word stays for good with the signs split off its end (`NOt.`): its case is fixed, and the signs
+                    // are typed again as they were.
+                    self.fix_double_capitals(&plan, boundary);
                 }
             }
             decision = Some(decided);
@@ -580,68 +591,35 @@ impl EngineCore {
     /// Schedule the case fix of a word typed with two capitals at its start; return the word as it will stand.
     ///
     /// `ПРивет` and `HEllo` are Shift held down one letter too long. A word kept in its layout gets its second
-    /// letter lowercase at its boundary when all of it has that shape: at least `DOUBLE_CAPITALS_MIN_LETTERS`
-    /// letters, two capitals, then lowercase letters only. An abbreviation (`ПК`, `IT`, `URLs`), a word in
-    /// capitals, a CamelCase name and a token with digits or signs have other shapes and are never touched.
+    /// letter lowercase at its boundary when it has that shape (`double_capitals_shape`): at least
+    /// `DOUBLE_CAPITALS_MIN_LETTERS` letters, two capitals, then lowercase letters only, maybe parts a hyphen joins in
+    /// lowercase (`КТо-то`) and signs after it (`ТАк!`, `NOt.`, whose sign stays as typed). An abbreviation (`ПК`,
+    /// `IT`, `URLs`), a word in capitals, a CamelCase name and a token with digits have other shapes and are never touched.
     ///
-    /// The lexicon decides the rest. It holds words without their case, so a word it knows is known in
-    /// lowercase, with a capital first and in capitals, and the shape typed is none of these; only a
+    /// The lexicon decides the rest (`double_capitals_fixed`). It holds words without their case, so a word it knows is
+    /// known in lowercase, with a capital first and in capitals, and the shape typed is none of these; only a
     /// case-aware dictionary - Hunspell, where the system has one - can know a word so written (`HBase`,
     /// `XEmacs`), and such a word stays. The fixed word must be one the frequency lexicon of its layout
     /// holds, not one Hunspell alone accepts: that lexicon is the same on every system, and Hunspell knows
     /// `glib`, which would make `GLib` a `Glib`. Terms of this shape (`VMware`, `OAuth`, `JUnit`, `MBps`)
-    /// are no words of the lexicon and stay as typed. So does a word the user excluded or one a rule of
-    /// theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too long.
+    /// are no words of the lexicon and stay as typed. A word of three letters is fixed only when it is one of the words
+    /// the prose of its language is full of (`КАк`, `ANd`): the lexicon knows many abbreviations with an ending, units
+    /// and plurals of abbreviations in lowercase (`ОСи`, `МВт`, `PCs`), and those stay. So does a word the user excluded
+    /// or one a rule of theirs names, and a word typed under Caps Lock, where its capitals were not Shift held too long.
     pub fn fix_double_capitals(&mut self, plan: &PlanRef, boundary: &Stroke) -> PlanRef {
-        let word = plan.original.as_str();
         let group = plan.source_group;
-        let split = word.char_indices().nth(DOUBLE_CAPITALS).map_or(word.len(), |(index, _)| index);
-        let (capitals, rest) = word.split_at(split);
-        let length = pystr::len(word);
-        if !(self.in_models(group) && self.flag("detection.fix_double_capitals", true) && length >= DOUBLE_CAPITALS_MIN_LETTERS && length == plan.strokes.len() && pystr::isalpha(word) && pystr::isupper(capitals) && pystr::islower(rest))
-        {
-            return plan.clone();
-        }
-        let model = self.model(group).clone();
-        let first_end = capitals.chars().next().map_or(0, char::len_utf8);
-        let fixed = format!("{}{}{rest}", capitals.get(..first_end).unwrap_or_default(), pystr::lower(capitals.get(first_end..).unwrap_or_default()));
-        let lowered = self.unshifted(&plan.strokes[1..DOUBLE_CAPITALS], group);
-        // The early switch or a pause converted the word while it was typed: its keys are another
-        // layout's, and a conversion's keys are typed back as they were.
-        let reason = if plan.strokes.iter().any(|stroke| i64::from(stroke.group) != group) {
-            "converted_while_typed"
-        } else if self.insertion.as_ref().is_some_and(InsertionPoint::inside_word) {
-            // Letters typed into a word: the word is longer than the keys the engine holds.
-            "inside_word"
-        } else if self.words_setting("exclusions.words").iter().any(|item| LanguageDetector::token_key(item) == LanguageDetector::token_key(word)) {
-            "user_exclusion"
-        } else if self.forced_target_group(group, word).is_some() || !self.rejected_targets(group, word).is_empty() {
-            "user_rule"
-        } else if plan.strokes.iter().any(|stroke| stroke.caps_lock()) {
-            "caps_lock"
-        } else if model.speller.check(word) {
-            "known_as_typed"
-        } else if !model.score(&fixed).exact {
-            "fixed_word_unknown"
-        } else if lowered.is_none() {
-            "key_unknown"
-        } else {
-            ""
-        };
-        let Some(lowered) = lowered.filter(|_| reason.is_empty()) else {
-            technical_event!(
-                self.shared, "double_capitals_kept", "reason": reason, "source_group": group, "letters": length,
-                "application": plan.application,
-            );
+        let Some((fixed, strokes)) = self.double_capitals_case(plan, group, &plan.original) else {
             return plan.clone();
         };
-        let strokes = strokes_of(&[&plan.strokes[..1], &lowered, &plan.strokes[DOUBLE_CAPITALS..]]);
-        // Enter and Tab are held back until the fix is typed and are delivered after it, as after a conversion.
+        let length = pystr::len(&plan.original);
+        // Enter and Tab are held back until the fix is typed and are delivered after it, as after a conversion. Signs
+        // the boundary model split off the word's end are deleted with it and typed again as they were.
         self.pending = Some(Arc::new(CorrectionPlan {
             mode: "case",
             replaced: plan.strokes.clone(),
+            trailing: plan.trailing.clone(),
             ..CorrectionPlan::new(
-                strokes.clone(), (!boundary.deferred).then(|| boundary.clone()), group, group, word.to_owned(), fixed.clone(),
+                strokes.clone(), (!boundary.deferred).then(|| boundary.clone()), group, group, plan.original.clone(), fixed.clone(),
                 UNSCORED_CORRECTION_CONFIDENCE, &plan.application,
             )
         }));
@@ -661,11 +639,132 @@ impl EngineCore {
         })
     }
 
+    /// The conversion `plan` with the case of its word fixed as well, when the word it types has two capitals at its
+    /// start the way `fix_double_capitals` fixes them: `VFibyf` is `Машина`, not `МАшина`, and `ФТв` is `And`.
+    ///
+    /// The keys the conversion types are the keys as typed, Shift held one letter too long included; the fix lets go of
+    /// that Shift in the same injection. The plan keeps the keys typed as the ones it replaces (`replaced`): undo types
+    /// them back in the layout they were typed in, and the text is what it was (`VFibyf`). A conversion that types a
+    /// mention head with its word, a typo correction that types keys of its own and the correction of a whole token that
+    /// keeps its end in the layout it was begun in (`kept_tail`) stay as they are.
+    pub fn fix_converted_capitals(&mut self, plan: &PlanRef) -> PlanRef {
+        if !plan.head.is_empty() || !plan.replaced_strokes.is_empty() || plan.kept_tail != 0 {
+            return plan.clone();
+        }
+        let Some((fixed, strokes)) = self.double_capitals_case(plan, plan.target_group, &plan.replacement) else {
+            return plan.clone();
+        };
+        // Logged as the fix of a word kept in its layout is, with the layout of the word as it now stands.
+        technical_event!(
+            self.shared, "double_capitals_scheduled", "source_group": plan.target_group, "letters": pystr::len(&plan.replacement),
+            "boundary": plan.boundary.as_ref().map(|boundary| boundary.key_name.as_str()), "application": plan.application,
+        );
+        plan.replaced_with(|plan| {
+            plan.replaced = std::mem::replace(&mut plan.strokes, strokes);
+            plan.replacement = fixed;
+        })
+    }
+
+    /// `text`, what `plan` leaves on screen in `group`, with its case fixed, and the keys that type it; None when it stays
+    /// as it is. A text of another shape stays silently; one the lexicon or the keys keep is logged with the reason.
+    fn double_capitals_case(&mut self, plan: &CorrectionPlan, group: i64, text: &str) -> Option<(String, Strokes)> {
+        let (word, after) = double_capitals_shape(text)?;
+        if !(self.in_models(group) && self.flag("detection.fix_double_capitals", true) && pystr::len(text) == plan.strokes.len()) {
+            return None;
+        }
+        let fixed = self.double_capitals_fixed(word, group);
+        let lowered = self.unshifted(&plan.strokes[1..DOUBLE_CAPITALS], group);
+        // The early switch or a pause converted the word while it was typed: its keys are of two layouts, and a
+        // conversion's keys are typed back as they were.
+        let reason = if plan.strokes.iter().any(|stroke| i64::from(stroke.group) != plan.source_group) {
+            "converted_while_typed"
+        } else if self.insertion.as_ref().is_some_and(InsertionPoint::inside_word) {
+            // Letters typed into a word: the word is longer than the keys the engine holds.
+            "inside_word"
+        } else if self.words_setting("exclusions.words").iter().any(|item| LanguageDetector::token_key(item) == LanguageDetector::token_key(text)) {
+            "user_exclusion"
+        } else if self.forced_target_group(group, text).is_some() || !self.rejected_targets(group, text).is_empty() {
+            "user_rule"
+        } else if plan.strokes.iter().any(|stroke| stroke.caps_lock()) {
+            "caps_lock"
+        } else if let Err(reason) = fixed {
+            reason
+        } else if lowered.is_none() {
+            "key_unknown"
+        } else {
+            ""
+        };
+        let (Ok(fixed), Some(lowered)) = (fixed, lowered.filter(|_| reason.is_empty())) else {
+            technical_event!(
+                self.shared, "double_capitals_kept", "reason": reason, "source_group": group, "letters": pystr::len(text),
+                "application": plan.application,
+            );
+            return None;
+        };
+        Some((format!("{fixed}{after}"), strokes_of(&[&plan.strokes[..1], &lowered, &plan.strokes[DOUBLE_CAPITALS..]])))
+    }
+
+    /// `word`, two capitals and lowercase letters, with its second letter lowercase when the lexicon of `group` decides
+    /// so (`fix_double_capitals`), or why it stays: Hunspell knows it as typed, the frequency lexicon does not hold the
+    /// fixed word, or the word is short and the prose of its language does not use it at least
+    /// `DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT` times.
+    fn double_capitals_fixed(&self, word: &str, group: i64) -> Result<String, &'static str> {
+        let model = self.model(group);
+        let first_end = word.chars().next().map_or(0, char::len_utf8);
+        let (first, rest) = word.split_at(first_end);
+        let fixed = format!("{first}{}", pystr::lower(rest));
+        if model.speller.check(word) {
+            Err("known_as_typed")
+        } else if !model.score(&fixed).exact {
+            Err("fixed_word_unknown")
+        } else if pystr::len(word) < DOUBLE_CAPITALS_LEXICON_MIN_LETTERS && self.prose_count(group, &fixed) < DOUBLE_CAPITALS_SHORT_WORD_PROSE_MIN_COUNT {
+            Err("fixed_word_rare")
+        } else {
+            Ok(fixed)
+        }
+    }
+
+    /// How often the prose of the language `group` types uses `word`; nought for a layout of no prose, or when the
+    /// tables of the counts cannot be read.
+    fn prose_count(&self, group: i64, word: &str) -> u64 {
+        let tables = self.term_frequency();
+        word_parts::prose_of(&self.layout_name(group))
+            .zip(tables.ok())
+            .map_or(0, |(prose, tables)| tables.term(prose).count(&pystr::casefold(word)))
+    }
+
+    /// Whether the letters of `text`, typed in `group`, are a word whose case `fix_double_capitals` fixes; their keys are
+    /// not looked at.
+    fn double_capitals_word(&self, text: &str, group: i64) -> bool {
+        double_capitals_shape(text).is_some_and(|(word, _)| self.flag("detection.fix_double_capitals", true) && self.double_capitals_fixed(word, group).is_ok())
+    }
+
+    /// The token `strokes` typed in `source_group` as the code guard judges it before the boundary model is asked about
+    /// its last `tail` keys, signs here and letters in the other layout (`completed_word`).
+    ///
+    /// A word with Shift held one letter too long is judged as it will stand once its case is fixed: its second capital
+    /// alone looked like an identifier's to the guard, so `NOt.` and `HEllo.` were not decided at all, and the sign after
+    /// them, a letter of the Russian layout, was never split off. The word may be fixed so in the layout it was typed in
+    /// (`NOt` before its sign) or, converted, in the other one (`DCt[` is `ВСех`). A term of that shape stays guarded as
+    /// typed (`PCs.`, `IList.Count`).
+    pub fn guarded_text(&self, strokes: &[Stroke], tail: usize, source_group: i64) -> String {
+        let original = text_for_group(strokes, source_group);
+        let stem = text_for_group(&strokes[..strokes.len() - tail], source_group);
+        if self.double_capitals_word(&stem, source_group)
+            || self.other_groups(source_group).into_iter().any(|target| self.double_capitals_word(&text_for_group(strokes, target), target))
+        {
+            second_lowered(&original)
+        } else {
+            original
+        }
+    }
+
     /// `strokes`, capital letters of `group` typed with Shift, as their keys typed without it; None if unknown.
     ///
     /// Every backend types a stroke again from its key and its Shift, and the engine reads the stroke's text
     /// from `characters`, so both change. In the other layout a key is then the unshifted one of its pair:
-    /// `Б` is `<` in the English layout, and `б` is `,`.
+    /// `Б` is `<` in the English layout, and `б` is `,`. The stroke's own text is the one of the layout it was typed in,
+    /// which is not `group` when a conversion fixes the case of the word it types (`fix_converted_capitals`).
     fn unshifted(&self, strokes: &[Stroke], group: i64) -> Option<Strokes> {
         let pair = ks_text::layouts::LayoutPair::default();
         let mut result = Vec::with_capacity(strokes.len());
@@ -681,7 +780,7 @@ impl EngineCore {
                 characters.push(pair.translate(&letter, source, name).ok()?);
             }
             result.push(key_of(KeyEvent {
-                character: letter,
+                character: characters.get(usize::try_from(stroke.group).ok()?)?.clone(),
                 characters,
                 state: stroke.state & !ks_backend::constants::SHIFT_MASK,
                 ..(**stroke).clone()
@@ -689,4 +788,35 @@ impl EngineCore {
         }
         Some(result)
     }
+}
+
+/// The word a text opens with, and what follows it, when the text has the shape of Shift held one letter too long:
+/// `DOUBLE_CAPITALS_MIN_LETTERS` letters or more, two capitals, then lowercase letters only (`ПРивет`, `КАк`); after the
+/// word only parts a hyphen joins, in lowercase letters (`КТо-то`, `ГДе-нибудь`), then signs with no letter or digit
+/// among them (`ТАк!`, `NOt.`). An abbreviation (`ПК`, `URLs`), a word in capitals, a CamelCase name (`IList.Count`) and
+/// a token with digits have other shapes.
+fn double_capitals_shape(text: &str) -> Option<(&str, &str)> {
+    let letters = |text: &str| text.char_indices().find(|(_, character)| !ks_text::ucd::isalpha(*character)).map_or(text.len(), |(index, _)| index);
+    let (word, after) = text.split_at(letters(text));
+    let (capitals, rest) = word.split_at(word.char_indices().nth(DOUBLE_CAPITALS).map_or(word.len(), |(index, _)| index));
+    if pystr::len(word) < DOUBLE_CAPITALS_MIN_LETTERS || !pystr::isupper(capitals) || !pystr::islower(rest) {
+        return None;
+    }
+    let mut signs = after;
+    while let Some(joined) = signs.strip_prefix('-') {
+        let (part, next) = joined.split_at(letters(joined));
+        if !pystr::islower(part) {
+            return None;
+        }
+        signs = next;
+    }
+    (!signs.chars().any(|character| ks_text::ucd::isalpha(character) || ks_text::ucd::isdigit(character))).then_some((word, after))
+}
+
+/// `text` with its second character lowercase: the text a word of two capitals at its start shows once its case is fixed.
+fn second_lowered(text: &str) -> String {
+    let mut characters = text.chars();
+    let first: String = characters.by_ref().take(1).collect();
+    let second: String = characters.by_ref().take(1).collect();
+    format!("{first}{}{}", pystr::lower(&second), characters.as_str())
 }

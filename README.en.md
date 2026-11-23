@@ -64,6 +64,13 @@ of the release in [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - respect for manual layout selection: the first completed word after the user
   switches languages is left unchanged; this behavior can be disabled;
 - case preservation: `Ghbdtn` becomes `Привет`;
+- Shift held one letter too long is fixed: `ПРивет` becomes `Привет`, `ТАк!`
+  becomes `Так!`, `КТо-то` becomes `Кто-то`, and a word typed in the other
+  layout is converted with its case fixed (`VFibyf` becomes `Машина`). The
+  lexicon of the layout decides: a word of three letters is fixed only when it
+  is one of the commonest of its language, and abbreviations, units and names
+  (`PCs`, `МВт`, `VMware`) stay as typed. The undo hotkey takes the fix back;
+  the setting «Исправлять ДВе заглавные» turns it off;
 - manual conversion with `Pause` of the unfinished word, of symbols typed
   after a word boundary (for example `"` meant as `@`), or of the last word;
   once anything else was typed after it, `Pause` only switches the layout. When

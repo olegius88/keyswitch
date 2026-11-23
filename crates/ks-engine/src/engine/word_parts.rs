@@ -32,7 +32,7 @@ enum HeadParts {
 }
 
 /// The table of prose counts of the language a layout types, by the layout's name; None for a layout with no prose.
-fn prose_of(layout: &str) -> Option<&'static str> {
+pub(super) fn prose_of(layout: &str) -> Option<&'static str> {
     match layout {
         "us" => Some("english"),
         "ru" => Some("russian"),
@@ -133,10 +133,11 @@ impl EngineCore {
         if self.forced_target_group(source_group, &original).is_some() {
             return (whole(), Vec::new(), true, false); // Explicit full-token rule outranks segmentation.
         }
-        // Segmentation cannot turn an excluded token/path into an eligible word.
+        // Segmentation cannot turn an excluded token/path into an eligible word. A word with Shift held one letter too
+        // long is guarded as it will stand once its case is fixed (`guarded_text`).
         let folded = pystr::casefold(&original);
         let rejected = self.rejected_targets(source_group, &original);
-        if (self.flag("detection.protect_code", true) && self.detector.is_protected_token(&original))
+        if (self.flag("detection.protect_code", true) && self.detector.is_protected_token(&self.guarded_text(strokes, tail, source_group)))
             || self.words_setting("exclusions.words").iter().any(|word| pystr::casefold(word) == folded)
             || targets.iter().all(|target| rejected.contains(target))
         {
