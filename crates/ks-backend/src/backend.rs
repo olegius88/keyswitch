@@ -202,6 +202,12 @@ pub trait InputBackend: Send + Sync {
     /// Types a correction and says how many key events it sent.
     fn inject_correction(&self, injection: Injection<'_>) -> Result<i32, BackendError>;
 
+    /// Whether the last correction was typed key by key, with a pause after each key, rather than in one burst: Windows
+    /// types so into a window of a remote-control or virtual-machine client. The technical log says which it was.
+    fn typed_key_by_key(&self) -> bool {
+        false
+    }
+
     /// Whether `inject_correction` can erase another number of characters than it types. A typo
     /// correction types more or fewer keys than the word on screen has (`клвиатура` is `клавиатура`);
     /// a backend that cannot is offered only corrections of the word's own length.

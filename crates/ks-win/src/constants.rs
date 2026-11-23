@@ -80,6 +80,10 @@ pub const SELECTION_CLIPBOARD_POLL_SECONDS: f64 = 0.02;
 /// A selection hotkey's result pasted on Windows (`SLOW_INPUT_FIELD_CLASSES)`: the field takes the text when it handles
 /// Ctrl+V, and the user's clipboard comes back once UI Automation shows the result selected, or after this long.
 pub const SELECTION_PASTE_CONFIRM_SECONDS: f64 = 1.0;
+/// The longest pause `applications.remote_key_interval_ms` sets after each key typed into a remote-control window; a
+/// longer one is taken as this. At it a twelve-letter word with its boundary (26 keys) takes 1.3 s, and the keys of a
+/// correction stay within the bounds of a hold (`ENGINE_HOLD_MAX_MS`, `WITHHELD_ACTION_MAX_MS`) up to 200 keys.
+pub const REMOTE_KEY_INTERVAL_MAX_MS: i64 = 50;
 
 // -------------------------------------------------------------------------------------------------- constants/text.py
 
@@ -247,6 +251,27 @@ pub const CONSOLE_WINDOW_CLASSES: [&str; 2] = ["ConsoleWindowClass", "CASCADIA_H
 /// they replace a selection: `привет мир` typed over one came out as `привет `, and pasted it was whole. A selection
 /// hotkey pastes its result there (`WindowsBackend::pasted_selection`).
 pub const SLOW_INPUT_FIELD_CLASSES: [&str; 1] = ["RichEditD2DPT"];
+/// The programs whose window sends the keys typed into it on to another computer: remote control (TeamViewer, AnyDesk,
+/// RustDesk, Parsec, the VNC viewers of RealVNC, TigerVNC, UltraVNC and TightVNC), Remote Desktop (`mstsc`, and `msrdc`
+/// of the Remote Desktop app), and the consoles of virtual machines (Hyper-V's `vmconnect`, VirtualBox, VMware
+/// Workstation and Player). A correction typed into such a window in one `SendInput` call reached a Linux desktop
+/// controlled through TeamViewer with letters lost and a later one repeated; there it goes key by key, with the pause of
+/// `applications.remote_key_interval_ms` after each key (`typing_pace` in `windows_backend`). Matched as the user's excluded
+/// programs are: the process name of the window in front, casefolded, contains one of these.
+pub const REMOTE_INPUT_APPLICATIONS: [&str; 12] = [
+    "teamviewer",
+    "anydesk",
+    "rustdesk",
+    "parsec",
+    "vncviewer",
+    "tvnviewer",
+    "mstsc",
+    "msrdc",
+    "vmconnect",
+    "virtualbox",
+    "vmware",
+    "vmplayer",
+];
 /// The top-level window of Chrome, Edge and every Electron program. Chromium builds its accessibility tree the first time
 /// a program asks; until it is there, UI Automation answers for the window and not for the field in it, so the first
 /// selection hotkey in such a window found no field and the next one worked.

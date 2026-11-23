@@ -697,6 +697,8 @@ impl EngineCore {
             "replayed_strokes": plan.strokes.len(),
             "boundary_replayed": plan.boundary.is_some(),
             "injection_ms": ms(self.monotonic() - started),
+            // Typed key by key with a pause after each (a remote-control window on Windows), or in one burst.
+            "paced": self.backend.typed_key_by_key(),
             // Legacy field counts presses AND releases, not typed characters.
             "keys_during_injection": typed_events - typed_before,
             "keypresses_during_injection": typed_presses - presses_before,

@@ -168,17 +168,25 @@ pub const HINTS_SETTING: &str = "general.hints";
 pub const NEW_INSTALLATION_LAYOUT_SWITCH_KEY: &str = EITHER_SHIFT_KEY;
 pub const NEW_INSTALLATION_DOUBLE_TAP_CONVERTS: bool = true;
 pub const NEW_INSTALLATION_BOTH_SHIFTS_TOGGLE: bool = true;
+/// `applications.remote_key_interval_ms`: the pause after each key of a correction typed into a window of a remote-control
+/// or virtual-machine client on Windows (`ks_win::constants::REMOTE_INPUT_APPLICATIONS`), in milliseconds; 0 types it in
+/// one burst, as every other window gets it. No settings window shows it. A correction typed in one call reached a Linux
+/// desktop controlled through TeamViewer with letters lost and a later one repeated. 15 ms keeps a twelve-letter word
+/// with its boundary (26 keys) under 0.4 s, and it is about one tick of the default system timer: a shorter pause was
+/// no pause to count on before the high-resolution timer `thread::sleep` uses since Windows 10 1803.
+pub const DEFAULT_REMOTE_KEY_INTERVAL_MS: i64 = 15;
 /// Settings the Python program never had. Each default leaves the engine as the Python's was in what the traces of the
 /// Python's engine type (`detection.remember_retyped` acts only on a word converted, erased and typed again as first
-/// typed, which none of them does), so those traces hold none of these keys and name the defaults without them
-/// (`settings_diagnostics::defaults_sha256`).
-pub const SETTINGS_SINCE_PYTHON: [&str; 6] = [
+/// typed, which none of them does; `applications.remote_key_interval_ms` is read by the Windows backend alone), so those
+/// traces hold none of these keys and name the defaults without them (`settings_diagnostics::defaults_sha256`).
+pub const SETTINGS_SINCE_PYTHON: [&str; 7] = [
     DETECTION_LAYOUT_SWITCH_KEY.path(),
     DETECTION_CONVERT_LAST_KEY.path(),
     DETECTION_DOUBLE_TAP_CONVERTS.path(),
     DETECTION_BOTH_SHIFTS_TOGGLE.path(),
     HINTS_SETTING,
     DETECTION_REMEMBER_RETYPED.path(),
+    APPLICATIONS_REMOTE_KEY_INTERVAL_MS.path(),
 ];
 /// Their defaults are the ones Punto Switcher has for the same commands, so a user coming from it finds them where
 /// the hands expect; none of them is taken by another hotkey here.
@@ -254,6 +262,7 @@ macro_rules! for_each_setting {
             HOTKEYS_SELECTION_CASE, HotkeysSelectionCase, String, "hotkeys.selection_case";
             HOTKEYS_SELECTION_TRANSLITERATE, HotkeysSelectionTransliterate, String, "hotkeys.selection_transliterate";
             APPLICATIONS_TELEGRAM_QUOTE_MENTION, ApplicationsTelegramQuoteMention, bool, "applications.telegram_quote_mention";
+            APPLICATIONS_REMOTE_KEY_INTERVAL_MS, ApplicationsRemoteKeyIntervalMs, i64, "applications.remote_key_interval_ms";
             EXCLUSIONS_APPLICATIONS, ExclusionsApplications, Vec<String>, "exclusions.applications";
             EXCLUSIONS_WORDS, ExclusionsWords, Vec<String>, "exclusions.words";
             APPEARANCE_THEME, AppearanceTheme, String, "appearance.theme";
@@ -275,7 +284,7 @@ mod shipped {
 #![expect(clippy::disallowed_types, clippy::disallowed_macros, clippy::disallowed_methods, reason = "the shipped settings are the literal JSON of the file they seed")]
 use super::{
     DEFAULT_BOTH_SHIFTS_TOGGLE, DEFAULT_DOUBLE_TAP_CONVERTS, DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_CONVERT_LAST_HOTKEY, DEFAULT_CONVERT_LAST_KEY, DEFAULT_EARLY_SWITCH_MIN_LENGTH, DEFAULT_FIELD_CATCH_UP, DEFAULT_HISTORY_LIMIT,
-    DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_SELECTION_CASE_HOTKEY,
+    DEFAULT_LAYOUT_SWITCH_KEY, DEFAULT_MINIMUM_WORD_LENGTH, DEFAULT_PAUSE_DELAY_SECONDS, DEFAULT_REMOTE_KEY_INTERVAL_MS, DEFAULT_SELECTION_CASE_HOTKEY,
     DEFAULT_SELECTION_LAYOUT_HOTKEY, DEFAULT_SELECTION_TRANSLITERATE_HOTKEY, HOTKEY_CONVERT_LAST, HOTKEY_SELECTION_CASE, HOTKEY_SELECTION_LAYOUT,
     HOTKEY_SELECTION_TRANSLITERATE, PAUSE_DELAY_DEFAULT_SCHEMA_VERSION,
 };
@@ -355,6 +364,8 @@ pub static DEFAULT_SETTINGS: LazyLock<Map<String, Value>> = LazyLock::new(|| {
         "applications": {
             // Per-application input conventions; see app_quirks.
             "telegram_quote_mention": true,
+            // The pause after each key of a correction typed into a remote-control window (DEFAULT_REMOTE_KEY_INTERVAL_MS).
+            "remote_key_interval_ms": DEFAULT_REMOTE_KEY_INTERVAL_MS,
         },
         "exclusions": {
             "applications": ["keepassxc", "1password", "bitwarden"],
