@@ -617,10 +617,22 @@ fn the_currency_codes_are_taught_as_written_and_by_their_keys() {
     }
 }
 
-/// Rows whose first words no lexicon knows, and one of a letter no layout types.
+/// Rows whose first words no lexicon knows, and those that are no word of the class: one of a letter no layout types, a
+/// known word, a token with a digit, the keys of a known word of the other language and two commands of the identifier
+/// index.
 fn feel_rows() -> Vec<CorpusRow> {
     let folder = scratch("curricula-feel");
-    let sentences: [(i64, &[&str]); 5] = [(1, &["кракозябра", "сидит"]), (1, &["трулялятор", "и"]), (0, &["zorblaxing", "the"]), (1, &["ñandu", "дом"]), (1, &["дом", "стоит"])];
+    let sentences: [(i64, &[&str]); 9] = [
+        (1, &["кракозябра", "сидит"]),
+        (1, &["трулялятор", "и"]),
+        (0, &["zorblaxing", "the"]),
+        (1, &["ñandu", "дом"]),
+        (1, &["дом", "стоит"]),
+        (0, &["zorb2laxer", "is"]),
+        (1, &["руддщ", "мир"]),
+        (0, &["kubectl", "runs"]),
+        (0, &["journalctl", "shows"]),
+    ];
     let made: Vec<Value> = sentences.iter().enumerate().map(|(index, (group, words))| row("train", index, *group, words, 0)).collect();
     let mut manifest = json!({"splits": {}});
     write_split(&folder, "train", &made, &mut manifest);
@@ -674,9 +686,21 @@ fn the_feel_curriculum_types_words_no_lexicon_knows_both_ways_alone() {
             assert!(kept.iter().any(|frame| frame.original.to_lowercase() == word), "{split}: {word}");
         }
     }
-    // Real words alone, the made-up ones not.
+    // Real words alone, the made-up ones not: the two no lexicon knows, and none of the rows that are no word of the class.
     let only_real = c::feel_curriculum(tools, "train", &rows, &options(0, 5, "model/context_v3/feel-held-out.json")).expect("frames");
     assert!(reported(&only_real) > 0 && reported(&only_real) < 40);
+    let real: BTreeSet<String> = only_real.0.iter().map(|frame| frame.original.to_lowercase()).collect();
+    for word in ["zorb2laxer", "руддщ", "kubectl", "journalctl"] {
+        assert!(!real.contains(word) && !real.contains(&ks_train::physical::reading(word, i64::from(!word.is_ascii()))), "{word}");
+    }
+    // As many made-up words as a fit asks for, from the smaller share of the tables of a development split: some made the
+    // same way twice, and some whose other reading the tables count, are made once and not at all.
+    for split in &SPLITS[..2] {
+        let (frames, _) = c::feel_curriculum(tools, split, &rows, &options(3_000, 3_000, "model/context_v3/feel-held-out.json")).expect("frames");
+        let distinct: BTreeSet<(String, bool, String)> = frames.iter().map(|frame| (frame.original.clone(), frame.action == ContextAction::Keep, frame.trigger.to_string())).collect();
+        assert_eq!(distinct.len(), frames.len(), "{split}");
+        assert!(frames.len() > 4 * 300, "{split}");
+    }
     // The words of the held-out file are left out, in either reading: held as typed and as the other layout reads them, and
     // held only as the other layout reads the word meant (`words` has both forms of a word, `meant` the one kept as typed).
     let folder = scratch("feel-held-out");

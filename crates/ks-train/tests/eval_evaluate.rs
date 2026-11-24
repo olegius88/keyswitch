@@ -248,6 +248,38 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     assert!(!kinds.is_empty() && kinds.iter().all(|kind| !kind.is_empty()), "{kinds:?}");
 }
 
+/// A development replay of the installed pair over enough documents of each layout holds every gate of both profiles:
+/// against the frozen baseline pair, and against the installed pair, which is itself.
+#[test]
+fn a_replay_of_enough_documents_by_the_installed_pair_holds_every_gate() {
+    let folder = scratch("evaluate-every-gate");
+    const ENGLISH: [&str; 34] = [
+        "house", "water", "people", "little", "world", "school", "family", "money", "night", "point", "father", "mother", "friend", "number", "question", "problem", "country", "morning",
+        "window", "garden", "letter", "summer", "winter", "river", "table", "paper", "music", "story", "picture", "doctor", "market", "forest", "street", "village",
+    ];
+    const RUSSIAN: [&str; 34] = [
+        "работа", "погода", "машина", "дорога", "вопрос", "город", "письмо", "минута", "неделя", "ответ", "страна", "школа", "книга", "деньги", "музыка", "собака", "картина", "история",
+        "деревня", "окно", "лето", "зима", "река", "улица", "бумага", "доктор", "рынок", "лес", "сад", "отец", "мама", "друг", "номер", "утро",
+    ];
+    let rows = ENGLISH
+        .iter()
+        .map(|word| (*word, 0, "we talked about the ", " today"))
+        .chain(RUSSIAN.iter().map(|word| (*word, 1, "мы говорили про ", " сегодня")))
+        .enumerate()
+        .map(|(index, (word, group, before, after))| development_row(index, word, Some(group), before, after))
+        .collect::<Vec<_>>();
+    let answer = development_replay(&tree(), &folder, &rows, None, &[]);
+    assert!(answer.status.success(), "{}", String::from_utf8_lossy(&answer.stderr));
+    let report: Report = ks_text::json::loads(std::fs::read(folder.join("report.json")).expect("a report")).expect("a report of the shape the evaluation writes");
+    let profiles = report.profiles.as_ref().expect("profiles");
+    for (name, profile) in profiles.each() {
+        let first = profile.first.as_ref().expect("the first plans");
+        assert!(profile.every_gate_held(), "{name}: {:?} {:?} {:?} {:?}", profile.gates, profile.early_off.gates, first.gates, first.against_installed.as_ref().map(|against| &against.gates));
+    }
+    // A development replay never promotes, whatever its gates.
+    assert!(!report.promotion_passed);
+}
+
 /// The installed pair a replay compares with is named by the digests of its two models, and one changed while the replay
 /// runs stops its report.
 #[test]
