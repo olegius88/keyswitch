@@ -6,9 +6,9 @@ mod support;
 
 use ks_train::corpus::read_json;
 use ks_train::artifact::{tree_of, typed};
-use ks_train::evaluate::{Earliness, FirstFalseEarly, PROTOCOLS, SequenceFalseEarly, SEQUENCE_PROTOCOL_VERSION, protocol_set};
+use ks_train::evaluate::{Earliness, FALSE_EARLY_ALLOWANCE, FIRST_PLANS_VERSION, FirstFalseEarly, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, SequenceFalseEarly, TOP_LEVEL_PROTOCOL_VERSION, against_installed, protocol_set};
 use ks_train::receipt::{validate_evidence, validate_receipt};
-use ks_train::sequence_report::{AllPairs, ByPair, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
+use ks_train::sequence_report::{AllPairs, ByLayout, ByPair, EarlySwitches, FirstGates, Gated, Gates, InstalledReference, PairCounts, PublicFirst, PublicProfile, PublicTest};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
@@ -36,7 +36,7 @@ fn receipt() -> Value {
     for (_, profile) in test.profiles.each_mut() {
         profile.first = None;
     }
-    state(&mut four, SEQUENCE_PROTOCOL_VERSION - 1, &test);
+    state(&mut four, TOP_LEVEL_PROTOCOL_VERSION, &test);
     four
 }
 
@@ -510,10 +510,150 @@ fn version_five() -> Value {
             counts: ByPair { baseline: counts(restored - 10, 1), candidate: counts(restored, 0), installed: counts(restored - 5, 1) },
             earliness: ByPair { baseline: early(restored - 10), candidate: early(restored), installed: early(restored - 5) },
             gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
+            earliness_by_layout: None,
+            against_installed: None,
         });
     }
-    state(&mut five, SEQUENCE_PROTOCOL_VERSION, &test);
+    state(&mut five, FIRST_PLANS_VERSION, &test);
     five
+}
+
+/// The test of the receipt of version 5 as protocol 6 states one: each pair's earliness counted for the rows of each
+/// layout (here every row is a US one), and the early switches of the candidate pair held to the installed pair's. With
+/// `kept` the test names the receipt's own prefix model as the installed pair's; without it the installed pair has
+/// another, and the gate on how early the switch comes applies.
+fn test_of_six(kept: bool) -> PublicTest {
+    let mut test = test_of(&version_five());
+    if kept {
+        test.installed_reference.as_mut().unwrap().prefix_sha256 = ks_train::corpus::checksum(&root().join("resources/models/prefix_policy_v1.json")).unwrap();
+    }
+    for (_, profile) in test.profiles.each_mut() {
+        let first = profile.first.as_mut().unwrap();
+        let apart = |early: &Earliness| ByLayout { us: early.clone(), ru: Earliness::default() };
+        first.earliness_by_layout = Some(ByPair { baseline: apart(&first.earliness.baseline), candidate: apart(&first.earliness.candidate), installed: apart(&first.earliness.installed) });
+        first.against_installed = Some(against_installed(switches_of(&first.earliness.candidate), switches_of(&first.earliness.installed), kept));
+    }
+    test
+}
+
+/// The early switches a pair's earliness counts, every early one of them by the fourth key.
+fn switches_of(early: &Earliness) -> EarlySwitches {
+    let (first, sequence) = (&early.correct_first_plans, &early.correct_sequence_plans);
+    EarlySwitches {
+        inside_word: early.inside_word,
+        early_by_key: early.first_correction_kinds.get("early").copied().unwrap_or_default(),
+        false_early: first.false_early + sequence.false_early,
+        false_early_left: first.false_early_corrupted + sequence.false_early_corrupted,
+    }
+}
+
+/// A receipt stated under the protocol and scope of version 6 with this test: refused in these words, or taken when
+/// `words` is empty.
+fn six_stated(words: &str, test: &PublicTest) {
+    let mut stated = version_five();
+    state(&mut stated, SEQUENCE_PROTOCOL_VERSION, test);
+    match check(&stated) {
+        Ok(()) => assert!(words.is_empty(), "taken: {words}"),
+        Err(said) => assert!(!words.is_empty() && said.contains(words), "{words}: {said}"),
+    }
+}
+
+/// A receipt of version 6 whose first plans of the portable profile are changed as their type.
+fn six_changed(words: &str, edit: impl FnOnce(&mut PublicFirst)) {
+    let mut test = test_of_six(false);
+    edit(first_of(&mut test));
+    six_stated(words, &test);
+}
+
+/// The candidate pair's earliness of a receipt of version 6 changed, with what follows from it: its earliness by layout
+/// and its early switches, the gates as claimed before.
+fn six_with_earliness(words: &str, edit: impl FnOnce(&mut Earliness)) {
+    six_changed(words, |first| {
+        edit(&mut first.earliness.candidate);
+        first.earliness_by_layout.as_mut().unwrap().candidate.us = first.earliness.candidate.clone();
+        first.against_installed.as_mut().unwrap().candidate = switches_of(&first.earliness.candidate);
+    });
+}
+
+/// What protocol 6 adds to a receipt: the earliness by layout adds up, the early switches are those the earliness counts,
+/// and the candidate pair holds every gate against the installed pair.
+#[test]
+fn the_early_switches_of_a_receipt_are_held_to_the_installed_pair() {
+    six_stated("", &test_of_six(false));
+    // A receipt of version 6 holds both blocks; one of version 5 holds neither.
+    const FIELDS: &str = "missing or extra fields: first plans";
+    six_changed(FIELDS, |first| first.earliness_by_layout = None);
+    six_changed(FIELDS, |first| first.against_installed = None);
+    let six = test_of_six(false);
+    for both in [true, false] {
+        refuses_five_typed(FIELDS, |test| {
+            let (first, made) = (first_of(test), six.profiles.portable.first.as_ref().unwrap());
+            first.against_installed = made.against_installed.clone();
+            first.earliness_by_layout = if both { made.earliness_by_layout.clone() } else { None };
+        });
+    }
+    // The earliness by layout: the first plans add up, the protocol-4 plans to no more than the pair's.
+    const LAYOUTS: &str = "inconsistent first-plan earliness by layout";
+    let layouts = |words: &str, edit: &dyn Fn(&mut ByLayout<Earliness>)| six_changed(words, |first| edit(&mut first.earliness_by_layout.as_mut().unwrap().candidate));
+    layouts(LAYOUTS, &|parts| parts.us.never += 1);
+    layouts(LAYOUTS, &|parts| (parts.us.last_letter, parts.ru.last_letter) = (parts.us.last_letter + 1, -1));
+    layouts(LAYOUTS, &|parts| *parts.us.switch_key_histogram.get_mut("4").unwrap() -= 1);
+    layouts(LAYOUTS, &|parts| {
+        *parts.us.first_correction_kinds.get_mut("early").unwrap() += 1;
+        parts.ru.first_correction_kinds.insert("early".to_owned(), -1);
+    });
+    layouts(LAYOUTS, &|parts| {
+        parts.ru.first_correction_kinds.insert("pause".to_owned(), 1);
+    });
+    layouts(LAYOUTS, &|parts| parts.ru.correct_sequence_plans.early_returns += 1);
+    // A protocol-4 row of no layout is in neither part, and a word moved to the other layout is still counted once.
+    layouts("", &|parts| parts.us.correct_sequence_plans.early_returns -= 1);
+    layouts("", &|parts| {
+        (parts.us.never, parts.ru.never) = (parts.us.never - 1, 1);
+    });
+    // The early switches are the ones the earliness counts.
+    const SWITCHES: &str = "inconsistent early switches";
+    let switches = |words: &str, edit: &dyn Fn(&mut EarlySwitches)| six_changed(words, |first| edit(&mut first.against_installed.as_mut().unwrap().candidate));
+    switches(SWITCHES, &|counted| counted.inside_word += 1);
+    switches(SWITCHES, &|counted| counted.early_by_key = -1);
+    switches(SWITCHES, &|counted| counted.early_by_key += 1);
+    switches(SWITCHES, &|counted| counted.false_early += 1);
+    switches(SWITCHES, &|counted| counted.false_early_left += 1);
+    six_changed(SWITCHES, |first| first.against_installed.as_mut().unwrap().installed.false_early -= 1);
+    // The gates are recomputed from the counts, and all hold.
+    const GATES: &str = "installed-pair gates failed";
+    six_changed(GATES, |first| first.against_installed.as_mut().unwrap().gates.false_early_within_allowance = false);
+    six_changed(GATES, |first| first.against_installed.as_mut().unwrap().prefix_is_installed = true);
+    // Fewer rows switched early by the fourth key than the installed pair's: a pair with a prefix model of its own fails.
+    let fewer = |first: &mut PublicFirst| {
+        let against = first.against_installed.as_mut().unwrap();
+        against.candidate.early_by_key = against.installed.early_by_key - 1;
+    };
+    six_changed(GATES, fewer);
+    // A false early switch left in the text of a protocol-4 plan, where the installed pair left none.
+    six_with_earliness(GATES, |early| (early.correct_sequence_plans.false_early_flicker, early.correct_sequence_plans.false_early_corrupted) = (0, 1));
+    // More rows with a false early switch than the installed pair's and the allowance.
+    six_with_earliness(GATES, |early| {
+        early.correct_sequence_plans.false_early += FALSE_EARLY_ALLOWANCE + 1;
+        early.correct_sequence_plans.false_early_flicker += FALSE_EARLY_ALLOWANCE + 1;
+    });
+    six_with_earliness("", |early| {
+        early.correct_sequence_plans.false_early += FALSE_EARLY_ALLOWANCE;
+        early.correct_sequence_plans.false_early_flicker += FALSE_EARLY_ALLOWANCE;
+    });
+    // A pair that keeps the installed prefix model is not held to the first gate: the test names that model as the
+    // installed pair's, and the block says so.
+    let mut kept = test_of_six(true);
+    for (_, profile) in kept.profiles.each_mut() {
+        let first = profile.first.as_mut().unwrap();
+        fewer(first);
+        let against = first.against_installed.as_mut().unwrap();
+        *against = against_installed(against.candidate.clone(), against.installed.clone(), true);
+    }
+    six_stated("", &kept);
+    // The same receipt saying its prefix model is not the installed pair's, against the digests it names.
+    first_of(&mut kept).against_installed.as_mut().unwrap().prefix_is_installed = false;
+    six_stated(GATES, &kept);
 }
 
 fn refuses_five(words: &str, edit: impl FnOnce(&mut Value)) {
@@ -551,7 +691,7 @@ fn first_of(test: &mut PublicTest) -> &mut PublicFirst {
 fn a_receipt_is_checked_by_the_version_of_its_protocol() {
     check(&receipt()).unwrap();
     check(&version_five()).unwrap();
-    refuses("unsupported receipt identity", |value| value["protocol"]["version"] = json!(6));
+    refuses("unsupported receipt identity", |value| value["protocol"]["version"] = json!(SEQUENCE_PROTOCOL_VERSION + 1));
     refuses_five("unsupported receipt identity", |value| value["scope"] = receipt()["scope"].clone());
     refuses_five("unsupported receipt identity", |value| value["protocol"]["first_gates"] = json!("other"));
     let mut with_rows = test_of(&receipt());

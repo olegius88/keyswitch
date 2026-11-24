@@ -121,6 +121,33 @@ pub struct Replayer {
     folder: PathBuf,
 }
 
+/// The settings a plan is typed with in a mode, kept at `path`: the defaults of the program, with what the mode changes.
+/// The defaults are those of an installation made before a new one was given its layout keys (no layout-switch key, no
+/// double tap of it, no chord of both Shifts): a replay calls nothing that would write those keys.
+#[must_use]
+pub fn mode_settings(path: PathBuf, mode: Mode) -> Arc<SettingsStore> {
+    let settings = Arc::new(SettingsStore::new(Some(path)));
+    // The sequences measure the layout decision; the typo correction is measured apart.
+    let mut changes = vec![("detection.correct_typos", json!(false)), ("detection.pause_delay_seconds", json!(SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS))];
+    match mode {
+        Mode::Default => changes.push(("detection.early_switch", json!(true))),
+        Mode::EarlyOff => changes.extend([
+            ("detection.context_policy", json!("assist")),
+            ("detection.context_aware", json!(true)),
+            ("detection.context_read_field", json!(false)),
+            ("detection.early_switch", json!(false)),
+            ("detection.respect_manual_layout", json!(false)),
+            ("detection.learning", json!(false)),
+            ("general.keep_history", json!(false)),
+            ("diagnostics.technical_logging", json!(false)),
+        ]),
+    }
+    for (name, value) in changes {
+        settings.set(name, value, false).expect("in memory");
+    }
+    settings
+}
+
 /// The prefix index of each lexicon, as a replay hands the engine its reference models.
 #[must_use]
 pub fn prefix_indexes(models: &Lexicons) -> Vec<Arc<PrefixIndex>> {
@@ -183,25 +210,7 @@ impl Replayer {
     /// `replay`.
     pub fn replay(&mut self, plan: &Plan, mode: Mode) -> Outcome {
         assert!(plan.unsupported.is_empty(), "unsupported physical sequence cannot be replayed");
-        let settings = Arc::new(SettingsStore::new(Some(self.folder.join("settings.json"))));
-        // The sequences measure the layout decision; the typo correction is measured apart.
-        let mut changes = vec![("detection.correct_typos", json!(false)), ("detection.pause_delay_seconds", json!(SEQUENCE_PROTOCOL_PAUSE_DELAY_SECONDS))];
-        match mode {
-            Mode::Default => changes.push(("detection.early_switch", json!(true))),
-            Mode::EarlyOff => changes.extend([
-                ("detection.context_policy", json!("assist")),
-                ("detection.context_aware", json!(true)),
-                ("detection.context_read_field", json!(false)),
-                ("detection.early_switch", json!(false)),
-                ("detection.respect_manual_layout", json!(false)),
-                ("detection.learning", json!(false)),
-                ("general.keep_history", json!(false)),
-                ("diagnostics.technical_logging", json!(false)),
-            ]),
-        }
-        for (name, value) in changes {
-            settings.set(name, value, false).expect("in memory");
-        }
+        let settings = mode_settings(self.folder.join("settings.json"), mode);
         let backend = Arc::new(Backend::new("TestEditor", plan.initial_group, Vec::new()));
         let clock = FakeClock::new();
         let mut context_policy = self.context_policy.take().expect("one engine at a time");

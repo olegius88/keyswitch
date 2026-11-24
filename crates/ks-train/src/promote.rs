@@ -289,11 +289,15 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
     let (artifact, seal, prefix, prefix_seal) = (request.candidate.join(CONTEXT_ARTIFACT), request.candidate.join(CONTEXT_SEAL), request.prefix_candidate.join(PREFIX_ARTIFACT), request.prefix_candidate.join(PREFIX_SEAL));
     let evaluation = EvaluationRequest { root, resource_dir: &resource_dir, artifact: &artifact, seal: &seal, prefix: &prefix, prefix_seal: &prefix_seal, corpus: request.corpus, split: "test", output: request.report, ledger: request.ledger, jobs: request.jobs, unsealed: false, cache: None };
     let report = if request.report.exists() { typed::<Report, _>(&read_json(request.report)?)? } else { evaluate(&evaluation)? };
-    if !report.promotion_passed {
+    // A report without the first plans of a profile is no test a receipt can be made of: that is said first.
+    let shortfall = restoration_shortfall(&report)?;
+    // A report read back from its file is held to its own gates as well as to what it says of itself: a pair goes in only
+    // when every gate of both profiles holds.
+    let every_gate_held = report.profiles.as_ref().is_some_and(|profiles| profiles.each().iter().all(|(_, profile)| profile.every_gate_held()));
+    if !report.promotion_passed || !every_gate_held {
         println!("the sealed test did not pass; nothing is installed");
         return Ok(1);
     }
-    let shortfall = restoration_shortfall(&report)?;
     if !shortfall.is_empty() {
         println!("the sealed test leaves the candidate short of the release receipt's restoration floors ({}); nothing is installed and the developer-chat test is not read", shortfall.join("; "));
         return Ok(1);
@@ -331,7 +335,7 @@ pub fn promote(request: &PromoteRequest<'_>) -> Result<i32, String> {
 mod tests {
     use super::*;
     use crate::evaluate::Earliness;
-    use crate::sequence_report::{AllPairs, EarlyOff, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile};
+    use crate::sequence_report::{AllPairs, EarlyOff, EarlySwitches, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile};
 
     fn comparison(text: &str) -> Comparison {
         ks_text::json::loads(text).expect("a comparison")
@@ -377,6 +381,8 @@ mod tests {
                     earliness: AllPairs { baseline: Earliness::default(), candidate: Earliness::default(), candidate_context_baseline_prefix: Earliness::default(), installed: Earliness::default() },
                     cases: AllPairs { baseline: Vec::new(), candidate: Vec::new(), candidate_context_baseline_prefix: Vec::new(), installed: Vec::new() },
                     gates: FirstGates { net_restorations_at_least_baseline: true, correct_text_preserved: true, length_preserved: true },
+                    earliness_by_layout: None,
+                    against_installed: None,
                 }),
                 early_off: EarlyOff { counts: control, cases: none(), gates: held() },
             }
@@ -412,6 +418,23 @@ mod tests {
         let mut without = report(counts(6, 6), counts(6, 6));
         without.profiles.as_mut().expect("the profiles").reference_hunspell.first = None;
         assert!(restoration_shortfall(&without).expect_err("no first plans").starts_with("reference_hunspell: the report holds no first plans"));
+        // Every gate of a profile: the two blocks of protocol-4 plans, the first plans and, where the profile states it,
+        // the candidate pair against the installed pair. A profile without first plans holds none.
+        let whole = report(counts(6, 6), counts(6, 6));
+        let gated = &whole.profiles.as_ref().expect("the profiles").portable;
+        assert!(gated.every_gate_held());
+        assert!(!without.profiles.as_ref().expect("the profiles").reference_hunspell.every_gate_held());
+        let held_after = |edit: &dyn Fn(&mut Profile)| {
+            let mut changed = gated.clone();
+            edit(&mut changed);
+            changed.every_gate_held()
+        };
+        assert!(!held_after(&|profile| profile.gates.length_preserved = false));
+        assert!(!held_after(&|profile| profile.early_off.gates.execution_succeeded = false));
+        assert!(!held_after(&|profile| profile.first.as_mut().expect("the first plans").gates.correct_text_preserved = false));
+        let against = |left: i64| crate::evaluate::against_installed(EarlySwitches { false_early_left: left, ..EarlySwitches::default() }, EarlySwitches::default(), true);
+        assert!(held_after(&|profile| profile.first.as_mut().expect("the first plans").against_installed = Some(against(0))));
+        assert!(!held_after(&|profile| profile.first.as_mut().expect("the first plans").against_installed = Some(against(1))));
         // The damage the quality floors allow, by default and with the early switch off.
         let mut floors = DamageFloors { corruptions: 1, next_corruptions: None, execution_errors: 0, length_mismatches: 0, correction_layout_mismatches: 0 };
         let mut spoiled = report(counts(6, 6), counts(6, 6));

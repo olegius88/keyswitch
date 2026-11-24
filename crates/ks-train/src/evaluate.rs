@@ -7,7 +7,10 @@ use crate::corpus::{CorpusRow, DEVELOPMENT, checksum, load_rows, read_json};
 use crate::physical::{PhysicalKey, hex, hex_digest, key_of};
 use crate::replay::{Mode, Plan, Replayer, prefix_indexes};
 use crate::replay_cache::ReplayCache;
-use crate::sequence_report::{AllPairs, Block, Case, EarlyOff, FirstBlock, FirstGates, Gated, Gates, Documents, InstalledReference, PairCounts, Profile, Profiles, Report, Selection, Unsupported};
+use crate::sequence_report::{
+    AgainstInstalled, AllPairs, Block, ByLayout, ByPair, Case, Documents, EarlyOff, EarlySwitches, FirstBlock, FirstGates, Gated, Gates, InstalledGates, InstalledReference, PairCounts, Profile, Profiles, Report, Selection,
+    Unsupported,
+};
 use crate::tools::{Lexicons, Tools, reference_models};
 use ks_context::VersionedPrefixModel;
 use ks_context::context_model::ContextModel;
@@ -34,14 +37,22 @@ const SEALED_BEFORE_TEST: &str = "sealed-before-test";
 /// The file of the audited sequence protocols, every version a receipt may name.
 pub const PROTOCOLS: &str = "model/context_v3/protocols.json";
 /// The version of the sequence protocol this tree evaluates by.
-pub const SEQUENCE_PROTOCOL_VERSION: i64 = 5;
+pub const SEQUENCE_PROTOCOL_VERSION: i64 = 6;
 /// The version whose blocks stand at the top of the protocols file, where receipts of that version were checked; later
 /// versions stand under `versions`, by number.
 pub const TOP_LEVEL_PROTOCOL_VERSION: i64 = 4;
 /// The version from which the default mode also types each focus first in a text of its own (`first_plan`), and the
 /// default mode's restoration floor is taken from those plans.
 pub const FIRST_PLANS_VERSION: i64 = 5;
-/// The tree's installed pair, replayed in the default mode as a reference of how early the switch comes; never gated.
+/// The version from which the candidate pair's early switches are held to the installed pair's (`InstalledGates`), and
+/// the earliness is also reported for the rows of each layout.
+pub const INSTALLED_GATES_VERSION: i64 = 6;
+/// The key by which protocol 6 counts an early switch of a wrong first plan: the first one the early switch can come at.
+pub const EARLY_BY_KEY: usize = 4;
+/// How many more rows with a false early switch than the installed pair's protocol 6 lets the candidate pair have.
+pub const FALSE_EARLY_ALLOWANCE: i64 = 2;
+/// The tree's installed pair, replayed in the default mode: the reference of how early the switch comes and, from
+/// protocol 6, of the false early switches the candidate pair is held to.
 pub const INSTALLED: &str = "installed";
 pub const INSTALLED_CONTEXT: &str = "resources/models/context_policy_v1.json";
 pub const INSTALLED_PREFIX: &str = "resources/models/prefix_policy_v1.json";
@@ -436,23 +447,57 @@ fn switches(case: &Case) -> Result<Vec<Switch<'_>>, String> {
 /// `earliness`: a pair's earliness from its cases: those of its first plans, and those of its protocol-4 plans in the
 /// default mode.
 pub fn earliness(first: &[Case], sequence: &[Case]) -> Result<Earliness, String> {
+    Ok(counted(first.iter(), sequence.iter())?.0)
+}
+
+/// The earliness of some cases, and how many of their wrong first plans were switched early by key `EARLY_BY_KEY`: the
+/// first correction into the row's layout is of kind early and came by that key.
+fn counted<'a>(first: impl Iterator<Item = &'a Case>, sequence: impl Iterator<Item = &'a Case>) -> Result<(Earliness, i64), String> {
     let mut total = Earliness::default();
+    let mut early_by_key = 0;
     for case in first {
         let corrections = switches(case)?;
         if case.initially_wrong {
             let declared = case.group.ok_or("a wrong first case without its layout")?;
             let letters = case.focus_letters.and_then(|letters| usize::try_from(letters).ok()).ok_or("a first case without the letters of its word")?;
             total.add_wrong(declared, letters, &case.expected, &case.actual, &corrections);
+            early_by_key += i64::from(corrections.iter().find(|item| item.target_group == declared).is_some_and(|item| item.kind == EARLY_KIND && item.event <= EARLY_BY_KEY));
         } else {
             let group = case.group.ok_or("a correct first case without its layout")?;
             let letters = case.focus_letters.and_then(|letters| usize::try_from(letters).ok()).ok_or("a first case without the letters of its word")?;
             total.add_correct_first(group, letters, case.exact, &corrections);
         }
     }
-    for case in sequence.iter().filter(|case| !case.initially_wrong) {
+    for case in sequence.filter(|case| !case.initially_wrong) {
         total.add_correct_sequence(case.group, case.exact, &switches(case)?);
     }
-    Ok(total)
+    Ok((total, early_by_key))
+}
+
+/// `earliness_by_layout`: a pair's earliness over the rows of each layout (protocol 6). A protocol-4 row of no layout is
+/// in neither, so the false early switches inside a text may add up to fewer than the pair's.
+pub fn earliness_by_layout(first: &[Case], sequence: &[Case]) -> Result<ByLayout<Earliness>, String> {
+    let of = |group: i64| Ok::<_, String>(counted(first.iter().filter(|case| case.group == Some(group)), sequence.iter().filter(|case| case.group == Some(group)))?.0);
+    Ok(ByLayout { us: of(0)?, ru: of(1)? })
+}
+
+/// `early_switches`: what protocol 6 holds a pair to, from its first plans and its protocol-4 plans of the default mode.
+pub fn early_switches(first: &[Case], sequence: &[Case]) -> Result<EarlySwitches, String> {
+    let (early, early_by_key) = counted(first.iter(), sequence.iter())?;
+    let (opening, inside) = (&early.correct_first_plans, &early.correct_sequence_plans);
+    Ok(EarlySwitches {
+        inside_word: early.inside_word,
+        early_by_key,
+        false_early: opening.false_early + inside.false_early,
+        false_early_left: opening.false_early_corrupted + inside.false_early_corrupted,
+    })
+}
+
+/// `against_installed`: the candidate pair's early switches held to the installed pair's (protocol 6).
+#[must_use]
+pub fn against_installed(candidate: EarlySwitches, installed: EarlySwitches, prefix_is_installed: bool) -> AgainstInstalled {
+    let gates = InstalledGates::of(&candidate, &installed, prefix_is_installed, FALSE_EARLY_ALLOWANCE);
+    AgainstInstalled { prefix_is_installed, candidate, installed, gates }
 }
 
 /// The models of an evaluation.
@@ -673,7 +718,9 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     }
     let mut scored = done.into_inner().expect("the workers finished").into_iter();
     let mut next_scored = || scored.next().flatten().ok_or("a task was not scored");
-    let mut all_passed = true;
+    // The gate on how early the switch comes is for a new prefix model: a pair that keeps the installed one is not held to it.
+    // Both files were read into their models above; the same bytes are the same digest a receipt names.
+    let prefix_is_installed = std::fs::read(&pairs.prefix_candidate).ok() == std::fs::read(&pairs.prefix_installed).ok();
     let mut profiles = Vec::new();
     for _ in PROFILES {
         let (mut control, mut sequences, mut firsts): (Replays<'_>, Replays<'_>, Replays<'_>) = (BTreeMap::new(), BTreeMap::new(), BTreeMap::new());
@@ -691,18 +738,26 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
         let early_off = {
             let (baseline, candidate) = (pulled(&mut control, "baseline")?, pulled(&mut control, "candidate")?);
             let gates = profile_gates(&candidate.0, &baseline.0, &documents);
-            all_passed = all_passed && gates.all_held();
             EarlyOff { counts: Gated { baseline: baseline.0, candidate: candidate.0 }, cases: Gated { baseline: baseline.1, candidate: candidate.1 }, gates }
         };
         // The earliness of each pair reads its first plans and its protocol-4 plans of the default mode.
         let early = AllPairs::build(|name| earliness(&firsts[name].1, &sequences[name].1))?;
+        let layouts = |name: &str| earliness_by_layout(&firsts[name].1, &sequences[name].1);
+        let by_layout = ByPair { baseline: layouts("baseline")?, candidate: layouts("candidate")?, installed: layouts(INSTALLED)? };
+        let switched = |name: &str| early_switches(&firsts[name].1, &sequences[name].1);
+        let against = against_installed(switched("candidate")?, switched(INSTALLED)?, prefix_is_installed);
         let replayed = AllPairs::build(|name| pulled(&mut firsts, name))?;
         let gates = FirstGates::of(&replayed.candidate.0, &replayed.baseline.0);
-        all_passed = all_passed && gates.all_held();
-        let first = FirstBlock { counts: replayed.map(|(counts, _)| counts.clone()), earliness: early, cases: replayed.map(|(_, cases)| cases.clone()), gates };
+        let first = FirstBlock {
+            counts: replayed.map(|(counts, _)| counts.clone()),
+            earliness: early,
+            cases: replayed.map(|(_, cases)| cases.clone()),
+            gates,
+            earliness_by_layout: Some(by_layout),
+            against_installed: Some(against),
+        };
         let (baseline, candidate, installed) = (pulled(&mut sequences, "baseline")?, pulled(&mut sequences, "candidate")?, pulled(&mut sequences, INSTALLED)?);
         let gates = profile_gates(&candidate.0, &baseline.0, &documents);
-        all_passed = all_passed && gates.all_held();
         let ablation: BTreeMap<String, Block> = sequences.into_iter().map(|(name, (counts, cases))| (name.to_owned(), Block { counts, cases })).collect();
         profiles.push(Profile {
             counts: Gated { baseline: baseline.0, candidate: candidate.0 },
@@ -716,7 +771,9 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     }
     let _ = root;
     let [portable, reference_hunspell]: [Profile; 2] = profiles.try_into().map_err(|_| "a profile was not scored")?;
-    Ok(Replayed { selection, profiles: Profiles { portable, reference_hunspell }, promotion_passed: all_passed })
+    // A test passes when every gate of both profiles holds: one place says which gates those are.
+    let promotion_passed = portable.every_gate_held() && reference_hunspell.every_gate_held();
+    Ok(Replayed { selection, profiles: Profiles { portable, reference_hunspell }, promotion_passed })
 }
 
 /// What `score_sequences` makes of an evaluation: what was selected, every profile's blocks, and whether every gate held.
@@ -1272,6 +1329,61 @@ mod tests {
         assert_eq!(read.correct_sequence_plans, SequenceFalseEarly { false_early: 1, false_early_flicker: 1, false_early_corrupted: 0, early_returns: 0 });
     }
 
+    /// Protocol 6 counts a pair's early switches from the same cases: the wrong first plans switched inside the word and
+    /// those switched early by the fourth key, and the false early switches of the correct plans, with those left in the text.
+    #[test]
+    fn the_early_switches_of_a_pair_are_read_from_its_cases() {
+        let into = |event: usize, kind: &str| vec![correction(event, 1, Some(kind))];
+        let away = || vec![correction(4, 0, Some("early"))];
+        let first = [
+            // Early at the fourth key, early at the fifth, a pause correction at the fourth, and one never switched.
+            case(true, Some(6), "привет мир", into(4, "early")),
+            case(true, Some(6), "привет мир", into(5, "early")),
+            case(true, Some(6), "привет мир", into(4, "pause")),
+            case(true, Some(6), "ghbdtn vbh", Vec::new()),
+            // An early switch away undone before the end, and one left in the text.
+            case(false, Some(6), "привет мир", away()),
+            case(false, Some(6), "ghbdtn мир", away()),
+        ];
+        let sequence = [case(false, None, "привет vbh", away()), case(false, None, "привет мир", Vec::new())];
+        let read = early_switches(&first, &sequence).expect("cases that hold");
+        assert_eq!(read, EarlySwitches { inside_word: 3, early_by_key: 1, false_early: 3, false_early_left: 2 });
+        assert!(early_switches(&[case(true, None, "привет мир", Vec::new())], &[]).unwrap_err().contains("letters of its word"));
+        // By layout: the rows of the other layout are counted apart, and a row of no layout in neither.
+        let english = |mut case: Case| {
+            case.group = Some(0);
+            case
+        };
+        let none = Case { group: None, ..case(false, None, "привет мир", away()) };
+        let first = [case(true, Some(6), "привет мир", into(4, "early")), english(case(true, Some(6), "привет мир", vec![correction(7, 0, Some("boundary"))]))];
+        let sequence = [case(false, None, "привет мир", away()), english(case(false, None, "привет мир", into(4, "early"))), none];
+        let (whole, parts) = (earliness(&first, &sequence).expect("cases that hold"), earliness_by_layout(&first, &sequence).expect("cases that hold"));
+        assert_eq!((parts.ru.inside_word, parts.us.inside_word, parts.us.boundary_key, whole.inside_word, whole.boundary_key), (1, 0, 1, 1, 1));
+        assert_eq!((parts.ru.correct_sequence_plans.false_early, parts.us.correct_sequence_plans.false_early, whole.correct_sequence_plans.false_early), (1, 1, 3));
+        assert!(earliness_by_layout(&[case(true, None, "привет мир", Vec::new())], &[]).unwrap_err().contains("letters of its word"));
+        assert!(earliness_by_layout(&[english(case(true, None, "привет мир", Vec::new()))], &[]).unwrap_err().contains("letters of its word"));
+    }
+
+    /// The gates of protocol 6: no fewer early switches than the installed pair's for a new prefix model, no more false
+    /// early switches left in the text, and no more false early switches than its own and two.
+    #[test]
+    fn the_candidate_pair_is_held_to_the_early_switches_of_the_installed_pair() {
+        let switches = |inside_word: i64, early_by_key: i64, false_early: i64, false_early_left: i64| EarlySwitches { inside_word, early_by_key, false_early, false_early_left };
+        let installed = switches(10, 8, 3, 1);
+        let held = against_installed(switches(10, 8, 5, 1), installed.clone(), false);
+        assert!(held.gates.all_held() && !held.prefix_is_installed && held.installed == installed);
+        let gates = |candidate: EarlySwitches, prefix_is_installed: bool| against_installed(candidate, installed.clone(), prefix_is_installed).gates;
+        let failed = |gates: &InstalledGates| (!gates.early_switches_at_least_installed, !gates.false_early_left_at_most_installed, !gates.false_early_within_allowance);
+        // Fewer switched inside the word, or fewer switched early by the fourth key: a new prefix model fails the gate, a
+        // pair that keeps the installed prefix model is not held to it.
+        for later in [switches(9, 8, 3, 1), switches(10, 7, 3, 1)] {
+            assert_eq!(failed(&gates(later.clone(), false)), (true, false, false));
+            assert!(gates(later, true).all_held());
+        }
+        assert_eq!(failed(&gates(switches(10, 8, 3, 2), true)), (false, true, false));
+        assert_eq!(failed(&gates(switches(10, 8, 3 + FALSE_EARLY_ALLOWANCE + 1, 1), true)), (false, false, true));
+    }
+
     #[test]
     fn the_first_plans_are_gated_by_their_balance_their_corruptions_and_their_lengths() {
         let counts = |restored: i64, spoiled: i64, lengths: i64| PairCounts { exactly_restored: restored, correct_text_corruptions: spoiled, length_mismatches: lengths, ..PairCounts::default() };
@@ -1290,21 +1402,29 @@ mod tests {
     fn a_protocol_is_found_by_its_version() {
         let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let protocols = read_json(&tree.join(PROTOCOLS)).expect("the protocols");
-        for version in [TOP_LEVEL_PROTOCOL_VERSION, SEQUENCE_PROTOCOL_VERSION] {
+        for version in [TOP_LEVEL_PROTOCOL_VERSION, FIRST_PLANS_VERSION, SEQUENCE_PROTOCOL_VERSION] {
             let set = protocol_set(&protocols, version).expect("a version the tree keeps");
             assert_eq!(set["receipt"]["version"], json!(version));
             assert_eq!(audited_sequence(&protocols, version).expect("audited")["version"], json!(version));
         }
         assert_eq!(protocol(&tree).expect("the current protocol")["version"], json!(SEQUENCE_PROTOCOL_VERSION));
-        assert!(protocol_set(&protocols, 3).is_none() && protocol_set(&protocols, 6).is_none());
-        assert!(audited_sequence(&protocols, 6).unwrap_err().contains("no sequence protocol of version 6"));
+        let next = SEQUENCE_PROTOCOL_VERSION + 1;
+        assert!(protocol_set(&protocols, 3).is_none() && protocol_set(&protocols, next).is_none());
+        assert!(audited_sequence(&protocols, next).unwrap_err().contains(&format!("no sequence protocol of version {next}")));
+        // The receipt of the current version names what its gates count by.
+        let receipt = &protocol_set(&protocols, SEQUENCE_PROTOCOL_VERSION).expect("the current version")["receipt"];
+        assert_eq!((receipt["early_by_key"].as_u64(), receipt["false_early_allowance"].as_i64()), (Some(EARLY_BY_KEY.to::<u64>()), Some(FALSE_EARLY_ALLOWANCE)));
+        // The key the gate counts by is the first one the engine's early switch can come at.
+        assert!((f64::from(u32::try_from(EARLY_BY_KEY).expect("a small number")) - ks_engine::constants::DEFAULT_EARLY_SWITCH_MIN_LENGTH).abs() < 0.5);
         // A block that names another version than the one it stands under, and one whose words changed after their audit.
+        let current = SEQUENCE_PROTOCOL_VERSION.to_string();
         let mut moved = protocols.clone();
-        moved["versions"]["5"]["sequence"]["version"] = json!(4);
+        moved["versions"][current.as_str()]["sequence"]["version"] = json!(4);
         assert!(protocol_set(&moved, SEQUENCE_PROTOCOL_VERSION).is_none());
         let mut changed = protocols;
-        changed["versions"]["5"]["sequence"]["window"] = json!("other");
+        changed["versions"][current.as_str()]["sequence"]["window"] = json!("other");
         assert!(audited_sequence(&changed, SEQUENCE_PROTOCOL_VERSION).unwrap_err().contains("protocol changed"));
         assert!(audited_sequence(&changed, TOP_LEVEL_PROTOCOL_VERSION).is_ok());
+        assert!(audited_sequence(&changed, FIRST_PLANS_VERSION).is_ok());
     }
 }

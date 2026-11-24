@@ -4,13 +4,13 @@ use ks_cast::To as _;
 use crate::artifact::{tree_of, typed};
 use crate::corpus::{checksum, read_json};
 use crate::evaluate::{
-    Earliness, EvaluationRequest, FIRST_PLANS_VERSION, INSTALLED, PROFILES, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, SWITCH_KEY_HISTOGRAM_KEYS, SWITCH_KEY_HISTOGRAM_LATER, earliness,
-    evaluation_identity, protocol_set, validate_candidate_seal, validate_prefix_seal,
+    EARLY_KIND, Earliness, EvaluationRequest, FALSE_EARLY_ALLOWANCE, FIRST_PLANS_VERSION, INSTALLED, INSTALLED_GATES_VERSION, PROFILES, PROTOCOLS, SEQUENCE_PROTOCOL_VERSION, SWITCH_KEY_HISTOGRAM_KEYS,
+    SWITCH_KEY_HISTOGRAM_LATER, against_installed, earliness, earliness_by_layout, early_switches, evaluation_identity, protocol_set, validate_candidate_seal, validate_prefix_seal,
 };
 use crate::fit::readable;
 use crate::physical::hex_digest;
 use crate::sequence_report::{
-    FirstGates, PairCounts, Profile, Profiles, PublicEarlyOff, PublicFirst, PublicProfile, PublicProfiles, PublicTest, Report, ReportHead, protocol_version,
+    ByLayout, ByPair, Case, FirstGates, InstalledGates, PairCounts, Profile, Profiles, PublicEarlyOff, PublicFirst, PublicProfile, PublicProfiles, PublicTest, Report, ReportHead, protocol_version,
 };
 use ks_context::VersionedPrefixModel;
 use ks_context::context_model::ContextModel;
@@ -69,6 +69,12 @@ struct Ineligible {
 #[derive(Deserialize)]
 struct IneligibleRows {
     first_ineligible: Vec<String>,
+}
+
+/// What the identity of an evaluation says of the candidate pair's prefix model, and nothing else of it.
+#[derive(Deserialize)]
+struct PrefixOfIdentity {
+    prefix_candidate_sha256: String,
 }
 
 fn fields_exact(value: &Value, label: &str, fields: &[&str]) -> Result<(), String> {
@@ -203,7 +209,9 @@ fn validate_gated_block(block: &Value, documents: &BTreeMap<String, i64>) -> Res
     Ok(())
 }
 
-fn validate_test(test: &Value, version: i64) -> Result<(), String> {
+/// The test of a receipt, checked by the version of the protocol it was made by; `prefix_sha256` is the digest of the
+/// pair's prefix model, as the receipt names it.
+fn validate_test(test: &Value, version: i64, prefix_sha256: &str) -> Result<(), String> {
     let first_plans = version >= FIRST_PLANS_VERSION;
     fields_exact(test, "test", if first_plans { &TEST_FIELDS_WITH_FIRST_PLANS } else { &TEST_FIELDS })?;
     // What protocol 5 adds to a test, read as its type: the rows without first plans, the installed reference and the first
@@ -224,10 +232,14 @@ fn validate_test(test: &Value, version: i64) -> Result<(), String> {
     {
         return Err("inconsistent sequence selection".to_owned());
     }
-    if let Some(reference) = added.as_ref().and_then(|added| added.installed_reference.as_ref()) {
+    // From protocol 6 the candidate pair is held to the installed pair the test names; whether its prefix model is that
+    // pair's is read from the two digests.
+    let reference = added.as_ref().and_then(|added| added.installed_reference.as_ref());
+    if let Some(reference) = reference {
         sha_text(&reference.context_sha256)?;
         sha_text(&reference.prefix_sha256)?;
     }
+    let prefix_is_installed = (version >= INSTALLED_GATES_VERSION).then(|| reference.is_some_and(|pair| pair.prefix_sha256 == prefix_sha256));
     fields_exact(&test["profiles"], "test profiles", &PROFILES)?;
     for name in PROFILES {
         let profile = &test["profiles"][name];
@@ -236,7 +248,92 @@ fn validate_test(test: &Value, version: i64) -> Result<(), String> {
         if let Some(added) = &added {
             let first = added.profiles.named(name).and_then(|profile| profile.first.as_ref()).ok_or("missing or extra fields: test profile")?;
             validate_first_block(first, typed_words - ineligible, documents.values().sum())?;
+            validate_against_installed(first, prefix_is_installed)?;
         }
+    }
+    Ok(())
+}
+
+/// The numbers of a pair's earliness, in the order they are declared: those of the wrong and the correct first plans, then
+/// the four of the correct protocol-4 plans.
+fn earliness_scalars(early: &Earliness) -> [i64; 18] {
+    let (first, sequence) = (&early.correct_first_plans, &early.correct_sequence_plans);
+    [
+        early.inside_word,
+        early.last_letter,
+        early.boundary_key,
+        early.later,
+        early.never,
+        early.first_word_correct,
+        early.started_right_ended_wrong,
+        early.switch_key_sum,
+        early.switch_key_rows,
+        first.false_early,
+        first.false_early_on_focus,
+        first.false_early_flicker,
+        first.false_early_corrupted,
+        first.early_returns,
+        sequence.false_early,
+        sequence.false_early_flicker,
+        sequence.false_early_corrupted,
+        sequence.early_returns,
+    ]
+}
+
+/// How many of `earliness_scalars` count the protocol-4 plans: the last ones.
+const SEQUENCE_SCALARS: usize = 4;
+
+/// Whether a pair's earliness by layout adds up to its earliness: every first plan is of one layout or the other, so the
+/// numbers, the bins and the kinds of the first plans are the sums; a protocol-4 row may have no layout, so those of the
+/// protocol-4 plans are at most the pair's.
+fn layouts_add_up(whole: &Earliness, parts: &ByLayout<Earliness>) -> bool {
+    let (us, ru, all) = (earliness_scalars(&parts.us), earliness_scalars(&parts.ru), earliness_scalars(whole));
+    // The numbers of a receipt are whatever its file says: the sums saturate, so that no number stops the check short of
+    // its answer.
+    let tables = |table: fn(&Earliness) -> &BTreeMap<String, i64>| {
+        let mut sum = table(&parts.us).clone();
+        for (name, rows) in table(&parts.ru) {
+            let entry = sum.entry(name.clone()).or_insert(0);
+            *entry = entry.saturating_add(*rows);
+        }
+        table(&parts.us).values().chain(table(&parts.ru).values()).all(|rows| *rows >= 0) && sum == *table(whole)
+    };
+    let opening = all.len() - SEQUENCE_SCALARS;
+    us.iter().chain(&ru).all(|number| *number >= 0)
+        && (0..opening).all(|index| us[index].saturating_add(ru[index]) == all[index])
+        && (opening..all.len()).all(|index| us[index].saturating_add(ru[index]) <= all[index])
+        && tables(|early| &early.switch_key_histogram)
+        && tables(|early| &early.first_correction_kinds)
+}
+
+/// What protocol 6 adds to the first plans of a profile, held to what the block already states: each pair's earliness by
+/// layout adds up to its earliness; the early switches of the candidate pair and of the installed pair are those their
+/// earliness counts; the gates are recomputed from them and all hold. `prefix_is_installed` is whether the pair's prefix
+/// model is the installed pair's, by the digests the receipt names; None for a receipt of protocol 5, which holds neither
+/// block.
+fn validate_against_installed(block: &PublicFirst, prefix_is_installed: Option<bool>) -> Result<(), String> {
+    const FIELDS: &str = "missing or extra fields: first plans";
+    let Some(prefix_is_installed) = prefix_is_installed else {
+        return if block.earliness_by_layout.is_none() && block.against_installed.is_none() { Ok(()) } else { Err(FIELDS.to_owned()) };
+    };
+    let (Some(by_layout), Some(against)) = (&block.earliness_by_layout, &block.against_installed) else { return Err(FIELDS.to_owned()) };
+    if block.earliness.each().into_iter().zip(by_layout.each()).any(|((_, whole), (_, parts))| !layouts_add_up(whole, parts)) {
+        return Err("inconsistent first-plan earliness by layout".to_owned());
+    }
+    for (early, switches) in [(&block.earliness.candidate, &against.candidate), (&block.earliness.installed, &against.installed)] {
+        let (first, sequence) = (&early.correct_first_plans, &early.correct_sequence_plans);
+        if switches.inside_word != early.inside_word
+            || switches.early_by_key < 0
+            || switches.early_by_key > early.first_correction_kinds.get(EARLY_KIND).copied().unwrap_or(0)
+            || switches.false_early != first.false_early + sequence.false_early
+            || switches.false_early_left != first.false_early_corrupted + sequence.false_early_corrupted
+        {
+            return Err("inconsistent early switches".to_owned());
+        }
+    }
+    let gates = InstalledGates::of(&against.candidate, &against.installed, prefix_is_installed, FALSE_EARLY_ALLOWANCE);
+    if against.prefix_is_installed != prefix_is_installed || !gates.all_held() || against.gates != gates {
+        return Err("installed-pair gates failed or contradicted by counts".to_owned());
     }
     Ok(())
 }
@@ -265,26 +362,7 @@ fn validate_earliness(early: &Earliness, counts: &BTreeMap<&'static str, i64>, (
     const INCONSISTENT: &str = "inconsistent first-plan earliness";
     let (wrong, correct) = (counts["initially_wrong"], counts["initially_correct"]);
     let (first, sequence) = (&early.correct_first_plans, &early.correct_sequence_plans);
-    let scalars = [
-        early.inside_word,
-        early.last_letter,
-        early.boundary_key,
-        early.later,
-        early.never,
-        early.first_word_correct,
-        early.started_right_ended_wrong,
-        early.switch_key_sum,
-        early.switch_key_rows,
-        first.false_early,
-        first.false_early_on_focus,
-        first.false_early_flicker,
-        first.false_early_corrupted,
-        first.early_returns,
-        sequence.false_early,
-        sequence.false_early_flicker,
-        sequence.false_early_corrupted,
-        sequence.early_returns,
-    ];
+    let scalars = earliness_scalars(early);
     let bins: BTreeSet<String> = (1..=SWITCH_KEY_HISTOGRAM_KEYS).map(|key| key.to_string()).chain(std::iter::once(SWITCH_KEY_HISTOGRAM_LATER.to_owned())).collect();
     if scalars.iter().chain(early.switch_key_histogram.values()).chain(early.first_correction_kinds.values()).any(|number| *number < 0)
         || early.switch_key_histogram.keys().cloned().collect::<BTreeSet<String>>() != bins
@@ -422,7 +500,8 @@ pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_a
     }
     let prefix_payload = read_json(prefix_artifact)?;
     let prefix = VersionedPrefixModel::load(prefix_artifact).map_err(|error| error.name.to_string())?;
-    if receipt["prefix_artifact_sha256"].as_str() != Some(checksum(prefix_artifact)?.as_str())
+    let prefix_sha256 = checksum(prefix_artifact)?;
+    if receipt["prefix_artifact_sha256"].as_str() != Some(prefix_sha256.as_str())
         || receipt["prefix_feature_version"].as_i64() != Some(prefix.feature_version)
         || receipt["prefix_conversion_threshold"].as_f64() != Some(prefix.model.conversion_threshold)
         || prefix.version() != format!("prefix-v{}-{}", prefix.feature_version, sha(&receipt["prefix_weights_sha256"])?.get(..12).unwrap_or_default())
@@ -434,7 +513,7 @@ pub fn validate_evidence(receipt: &Value, artifact: &Path, root: &Path, prefix_a
     let calibration = &receipt["calibration"];
     validate_calibration_block(calibration, "calibration", policy)?;
     validate_calibration_block(&calibration[OUTSIDE_LONE_WORD], "calibration outside the lone-word class", policy)?;
-    validate_test(&receipt["test"], version)?;
+    validate_test(&receipt["test"], version, &prefix_sha256)?;
     validate_devchat(&receipt[DEVCHAT], receipt)?;
     Ok(())
 }
@@ -538,7 +617,7 @@ fn recounted(cases: &Value, claimed: &Value, selected: &HashSet<&str>, omitted: 
 /// row, opening with as many letters as the case says; the same inputs for every pair and profile; each word once
 /// correct and once wrong, and every word but the ones the selection says opened otherwise; the counts, the earliness and
 /// the gates as the cases give them. `sequence` holds the inputs of the protocol-4 cases.
-fn validate_first_cases(report: &Report, listed: &[String], sequence: &BTreeMap<(String, bool), Inputs>) -> Result<(), String> {
+fn validate_first_cases(report: &Report, listed: &[String], sequence: &BTreeMap<(String, bool), Inputs>, prefix_is_installed: Option<bool>) -> Result<(), String> {
     const OTHER: &str = "first-plan case of a row without first plans, of another document or layout, or of a word it does not open with";
     let ineligible: HashSet<&str> = listed.iter().map(String::as_str).collect();
     let rows: BTreeMap<&str, &Inputs> = sequence.iter().filter(|(key, values)| !key.1 && matches!(values.group, Some(0 | 1))).map(|(key, values)| (key.0.as_str(), values)).collect();
@@ -585,6 +664,22 @@ fn validate_first_cases(report: &Report, listed: &[String], sequence: &BTreeMap<
         }
         if block.gates != FirstGates::of(&block.counts.candidate, &block.counts.baseline) {
             return Err("first-plan gates contradicted by counts".to_owned());
+        }
+        // What protocol 6 adds, as the cases give it; a report of protocol 5 holds neither block.
+        // Every pair named here had its cases read above, the protocol-4 ones among them.
+        let sequences = |pair: &str| profile.sequence_cases(pair).unwrap_or_default();
+        let (by_layout, against) = match prefix_is_installed {
+            Some(prefix_is_installed) => {
+                let layouts = |cases: &[Case], pair: &str| earliness_by_layout(cases, sequences(pair));
+                let switched = |cases: &[Case], pair: &str| early_switches(cases, sequences(pair));
+                let cases = &block.cases;
+                let by_layout = ByPair { baseline: layouts(&cases.baseline, "baseline")?, candidate: layouts(&cases.candidate, "candidate")?, installed: layouts(&cases.installed, INSTALLED)? };
+                (Some(by_layout), Some(against_installed(switched(&cases.candidate, "candidate")?, switched(&cases.installed, INSTALLED)?, prefix_is_installed)))
+            }
+            None => (None, None),
+        };
+        if block.earliness_by_layout != by_layout || block.against_installed != against {
+            return Err("claimed early switches or earliness by layout differ from actual cases".to_owned());
         }
     }
     let reference = reference.ok_or("no first-plan case rows")?;
@@ -651,7 +746,12 @@ pub fn validate_full_report(report: &Value, identity: &Value) -> Result<(), Stri
         // What protocol 5 adds, read as its type once everything protocol 4 holds has been checked of the report.
         let listed: Ineligible = typed(report).map_err(|_| "invalid first-plan selection")?;
         let whole: Report = typed(report).map_err(|error| format!("invalid first-plan block: {error}"))?;
-        validate_first_cases(&whole, &listed.selection.first_ineligible, &reference)?;
+        // From protocol 6: whether the pair's prefix model is the installed pair's, by the digest the identity names of
+        // the one and the report of the other.
+        let installed_gates = whole.protocol_version().is_some_and(|version| version >= INSTALLED_GATES_VERSION);
+        let candidate_prefix = typed::<PrefixOfIdentity, _>(identity).ok().map(|named| named.prefix_candidate_sha256);
+        let prefix_is_installed = installed_gates.then(|| whole.installed_reference.as_ref().map(|pair| &pair.prefix_sha256) == candidate_prefix.as_ref());
+        validate_first_cases(&whole, &listed.selection.first_ineligible, &reference, prefix_is_installed)?;
     }
     Ok(())
 }
@@ -713,7 +813,13 @@ pub fn export_receipt(request: &EvaluationRequest<'_>, report_path: &Path, devch
     let public_profile = |private: &Profile| -> Result<PublicProfile, String> {
         // Of the first plans, the counts and the earliness of the gated pairs and of the installed reference; no case.
         let first = private.first.as_ref().ok_or(NOT_ACCEPTED)?;
-        let first = Some(PublicFirst { counts: first.counts.public(), earliness: first.earliness.public(), gates: first.gates.clone() });
+        let first = Some(PublicFirst {
+            counts: first.counts.public(),
+            earliness: first.earliness.public(),
+            gates: first.gates.clone(),
+            earliness_by_layout: first.earliness_by_layout.clone(),
+            against_installed: first.against_installed.clone(),
+        });
         let early_off = PublicEarlyOff { counts: private.early_off.counts.clone(), gates: private.early_off.gates.clone() };
         Ok(PublicProfile { counts: private.counts.clone(), gates: private.gates.clone(), early_off, first })
     };

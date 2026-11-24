@@ -7,7 +7,7 @@ use ks_context::context_model::ContextModel;
 use ks_lang::Resources;
 use ks_train::corpus::CorpusRow;
 use ks_train::physical::key_of;
-use ks_train::replay::{Mode, Plan, Replayer, prefix_indexes};
+use ks_train::replay::{Mode, Plan, Replayer, mode_settings, prefix_indexes};
 use ks_train::spans::build_span_curriculum;
 use ks_train::tools::{Lexicons, Tools, reference_models};
 use std::collections::BTreeSet;
@@ -55,6 +55,20 @@ fn a_replay_refuses_a_plan_it_cannot_type_as_asked() {
     // A plan typed as asked.
     let outcome = replayer.replay(&Plan::typed("plain".to_owned(), "document".to_owned(), 0, "hello world".to_owned(), keys("hello world", 0), 0), Mode::Default);
     assert!(outcome.error.is_none() && outcome.exact, "{outcome:?}");
+}
+
+/// Protocol 6: the settings a replay is given in either mode (`mode_settings`, the one place `Replayer::replay` takes them
+/// from) are those of an installation made before a new one was given its layout keys, and only the default mode switches
+/// early.
+#[test]
+fn a_replay_types_without_the_layout_keys_of_a_new_installation() {
+    use ks_config::constants::{DETECTION_BOTH_SHIFTS_TOGGLE, DETECTION_DOUBLE_TAP_CONVERTS, DETECTION_EARLY_SWITCH, DETECTION_LAYOUT_SWITCH_KEY};
+    let folder = scratch("replay-settings");
+    for (mode, early) in [(Mode::Default, true), (Mode::EarlyOff, false)] {
+        let settings = mode_settings(folder.join("settings.json"), mode);
+        assert_eq!(settings.read(DETECTION_EARLY_SWITCH), Some(early));
+        assert_eq!((settings.read(DETECTION_LAYOUT_SWITCH_KEY).as_deref(), settings.read(DETECTION_DOUBLE_TAP_CONVERTS), settings.read(DETECTION_BOTH_SHIFTS_TOGGLE)), (Some(""), Some(false), Some(false)));
+    }
 }
 
 fn train_row(identifier: &str, original: &str, group: Option<i64>, family: &str) -> CorpusRow {

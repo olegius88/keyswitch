@@ -3,11 +3,14 @@
 mod support;
 
 use ks_cast::To as _;
-use ks_train::evaluate::{EvaluationRequest, TOP_LEVEL_PROTOCOL_VERSION, audited_sequence, earliness, evaluation_identity, protocol, validate_candidate_seal, validate_prefix_seal};
+use ks_train::evaluate::{
+    EvaluationRequest, FIRST_PLANS_VERSION, SEQUENCE_PROTOCOL_VERSION, TOP_LEVEL_PROTOCOL_VERSION, against_installed, audited_sequence, earliness, earliness_by_layout, early_switches, evaluation_identity, protocol,
+    validate_candidate_seal, validate_prefix_seal,
+};
 use ks_train::artifact::{canonical, tree_of, typed};
 use ks_train::corpus::checksum;
 use ks_train::receipt::{export_receipt, validate_full_report};
-use ks_train::sequence_report::{AllPairs, Case, CorrectionRecord, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile, PublicFirst, PublicTest, Report, protocol_version};
+use ks_train::sequence_report::{AllPairs, ByPair, Case, CorrectionRecord, FirstBlock, FirstGates, Gated, Gates, PairCounts, Profile, PublicFirst, PublicTest, Report, protocol_version};
 use ks_text::json::Kept;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -307,12 +310,13 @@ fn the_membership_of_a_test_is_checked_against_its_manifest() {
 fn a_protocol_changed_after_its_audit_stops_a_report() {
     let folder = scratch("protocol");
     std::fs::create_dir_all(folder.join("model/context_v3")).expect("a folder");
-    let changed = json!({"sequence": {"version": 4}, "audited_sequence_protocol_sha256": "0", "versions": {"5": {"sequence": {"version": 5}, "audited_sequence_protocol_sha256": "0"}}});
+    let current = SEQUENCE_PROTOCOL_VERSION.to_string();
+    let changed = json!({"sequence": {"version": 4}, "audited_sequence_protocol_sha256": "0", "versions": {current: {"sequence": {"version": SEQUENCE_PROTOCOL_VERSION}, "audited_sequence_protocol_sha256": "0"}}});
     std::fs::write(folder.join("model/context_v3/protocols.json"), serde_json::to_vec(&changed).expect("json")).expect("a file");
     assert!(protocol(&folder).unwrap_err().contains("protocol changed"));
     // A file that has no block of the version the tree evaluates by.
     std::fs::write(folder.join("model/context_v3/protocols.json"), serde_json::to_vec(&json!({"sequence": {"version": 4}})).expect("json")).expect("a file");
-    assert!(protocol(&folder).unwrap_err().contains("no sequence protocol of version 5"));
+    assert!(protocol(&folder).unwrap_err().contains(&format!("no sequence protocol of version {SEQUENCE_PROTOCOL_VERSION}")));
 }
 
 #[test]
@@ -428,9 +432,26 @@ fn recounted(report: &mut Report) {
         let counts = AllPairs::build(|pair| Ok::<_, String>(PairCounts::of_cases(first.cases.named(pair).expect("a pair")))).expect("counts of the cases");
         let early = AllPairs::build(|pair| earliness(first.cases.named(pair).expect("a pair"), profile.sequence_cases(pair).expect("cases"))).expect("the earliness of the cases");
         let gates = FirstGates::of(&counts.candidate, &counts.baseline);
+        // What protocol 6 adds, when the report holds it: the earliness by layout and the early switches.
+        let layouts = |pair: &str| earliness_by_layout(first.cases.named(pair).expect("a pair"), profile.sequence_cases(pair).expect("cases")).expect("the earliness of the cases");
+        let by_layout = first.earliness_by_layout.as_ref().map(|_| ByPair { baseline: layouts("baseline"), candidate: layouts("candidate"), installed: layouts("installed") });
+        let switched = |pair: &str| early_switches(first.cases.named(pair).expect("a pair"), profile.sequence_cases(pair).expect("cases")).expect("the early switches of the cases");
+        let against = first.against_installed.as_ref().map(|block| against_installed(switched("candidate"), switched("installed"), block.prefix_is_installed));
         let first = profile.first.as_mut().expect("the first plans");
-        (first.counts, first.earliness, first.gates) = (counts, early, gates);
+        (first.counts, first.earliness, first.gates, first.earliness_by_layout, first.against_installed) = (counts, early, gates, by_layout, against);
     }
+}
+
+/// A report as the sealed test of a pair that keeps the installed prefix model writes it: the installed pair it names has
+/// the candidate's prefix model, every profile says so, and the gates follow.
+fn keeping_the_installed_prefix(report: &Report) -> Report {
+    let mut kept = report.clone();
+    kept.installed_reference.as_mut().expect("the installed pair").prefix_sha256 = checksum(&FITTED.prefix).expect("a checksum");
+    for (_, profile) in kept.profiles.as_mut().expect("the profiles").each_mut() {
+        profile.first.as_mut().expect("the first plans").against_installed.as_mut().expect("the early switches").prefix_is_installed = true;
+    }
+    recounted(&mut kept);
+    kept
 }
 
 /// The same edit of the cases of every block and pair, and the counts that follow from it.
@@ -601,6 +622,34 @@ fn a_report_is_recomputed_from_its_private_cases() {
     refused_typed("claimed first-plan counts differ", &|report| first_block(report).counts.baseline.rows += 1);
     refused_typed("claimed earliness differs", &|report| first_block(report).earliness.candidate.never += 1);
     refused_typed("first-plan gates contradicted", &|report| first_block(report).gates.length_preserved = false);
+    // Protocol 6: the earliness by layout and the early switches held to the installed pair's are recomputed too.
+    const SWITCHES: &str = "claimed early switches or earliness by layout differ";
+    assert_eq!(good_typed.protocol_version(), Some(SEQUENCE_PROTOCOL_VERSION));
+    refused_typed(SWITCHES, &|report| first_block(report).against_installed.as_mut().expect("the early switches").candidate.early_by_key += 1);
+    refused_typed(SWITCHES, &|report| first_block(report).against_installed.as_mut().expect("the early switches").prefix_is_installed ^= true);
+    refused_typed(SWITCHES, &|report| first_block(report).earliness_by_layout.as_mut().expect("the earliness by layout").installed.us.never += 1);
+    refused_typed(SWITCHES, &|report| first_block(report).against_installed = None);
+    refused_typed(SWITCHES, &|report| first_block(report).earliness_by_layout = None);
+    // A report of protocol 5 holds neither block, and is checked as that protocol checked it.
+    let five = |report: &mut Report| {
+        let sequence = audited_sequence(&read(&FITTED.tree.join("model/context_v3/protocols.json")), FIRST_PLANS_VERSION).expect("the protocol of version 5");
+        report.protocol = Report::carry(&sequence).expect("a protocol");
+    };
+    refused_typed(SWITCHES, &five);
+    let mut earlier = good_typed.clone();
+    five(&mut earlier);
+    for (_, profile) in earlier.profiles.as_mut().expect("the profiles").each_mut() {
+        let first = profile.first.as_mut().expect("the first plans");
+        (first.earliness_by_layout, first.against_installed) = (None, None);
+    }
+    validate_full_report(&tree_of(&earlier), &sealed.identity).expect("a report of protocol 5");
+    // The pair of a cycle that keeps the installed prefix model: the report names the candidate's prefix model as the
+    // installed pair's, and the gate on how early the switch comes is held as it is.
+    let kept = keeping_the_installed_prefix(&good_typed);
+    validate_full_report(&tree_of(&kept), &sealed.identity).expect("a pair that keeps the installed prefix model");
+    let against = kept.profiles.as_ref().expect("the profiles").portable.first.as_ref().and_then(|first| first.against_installed.as_ref()).expect("the early switches");
+    assert!(against.prefix_is_installed && against.gates.early_switches_at_least_installed);
+    refused_typed(SWITCHES, &|report| report.installed_reference.as_mut().expect("the installed pair").prefix_sha256 = checksum(&FITTED.prefix).expect("a checksum"));
     refused_typed("different first-plan inputs", &|report| first_cases(report).candidate[first_right].trimmed_right += 1);
     refused_typed("first-plan coverage", &|report| {
         everywhere_first(report, &|cases| {
@@ -712,14 +761,17 @@ fn accept(candidate: &mut [Case], baseline: &mut [Case]) {
 }
 
 /// A report of the sealed test as a passing one: the candidate typed every text right, and the baseline lost one it had
-/// restored, in every block and in the first plans of each profile; every gate holds.
+/// restored, in every block and in the first plans of each profile; the installed pair typed as the candidate did, so
+/// the candidate's early switches are the installed pair's own; every gate holds.
 fn accepted_report(sealed: &Sealed) -> Value {
     let mut report = parsed(&read(&sealed.report));
     for (_, profile) in report.profiles.as_mut().expect("the profiles").each_mut() {
         accept(&mut profile.cases.candidate, &mut profile.cases.baseline);
         accept(&mut profile.early_off.cases.candidate, &mut profile.early_off.cases.baseline);
+        profile.installed.as_mut().expect("the installed pair").cases.clone_from(&profile.cases.candidate);
         let first = profile.first.as_mut().expect("the first plans");
         accept(&mut first.cases.candidate, &mut first.cases.baseline);
+        first.cases.installed.clone_from(&first.cases.candidate);
         let held = Gates {
             correct_text_preserved: true,
             length_preserved: true,
@@ -759,18 +811,33 @@ fn a_receipt_is_exported_only_from_a_report_its_ledger_confirms() {
     let asked = request(fitted, &resources, "test", &report_path, &ledger);
     let receipt = export_receipt(&asked, &report_path, &chat, &output).expect("a receipt");
     assert_eq!(receipt["quality_gates_passed"], json!(true));
-    // A receipt of protocol 5: the first plans' counts, gates and earliness of the gated pairs and the installed one, no case.
-    assert_eq!(protocol_version(&receipt["protocol"]), Some(5));
+    // A receipt of protocol 6: the first plans' counts, gates and earliness of the gated pairs and the installed one, the
+    // earliness by layout and the early switches held to the installed pair's; no case.
+    assert_eq!(protocol_version(&receipt["protocol"]), Some(SEQUENCE_PROTOCOL_VERSION));
     let (public, private): (PublicTest, Report) = (typed(&receipt["test"]).expect("the test block of a receipt"), parsed(&good));
     // Of each profile the receipt holds the counts, the earliness and the gates of the first plans: no case.
     for (name, profile) in private.profiles.as_ref().expect("the profiles").each() {
         let first = profile.first.as_ref().expect("the first plans");
         let published = public.profiles.named(name).and_then(|published| published.first.as_ref()).expect("the first plans of a profile");
-        assert_eq!(*published, PublicFirst { counts: first.counts.public(), earliness: first.earliness.public(), gates: first.gates.clone() });
+        let expected = PublicFirst {
+            counts: first.counts.public(),
+            earliness: first.earliness.public(),
+            gates: first.gates.clone(),
+            earliness_by_layout: first.earliness_by_layout.clone(),
+            against_installed: first.against_installed.clone(),
+        };
+        assert_eq!(*published, expected);
         assert!(published.gates.net_restorations_at_least_baseline);
+        assert!(published.earliness_by_layout.is_some() && published.against_installed.as_ref().is_some_and(|against| against.gates.all_held()));
     }
     assert_eq!(public.installed_reference, private.installed_reference);
     assert_eq!(public.first_ineligible_rows, Some(private.selection.as_ref().expect("the selection").first_ineligible.len().to::<i64>()));
+    // A pair that keeps the installed prefix model, as the pair of a cycle without a new one does: its report names that
+    // model as the installed pair's, and its receipt is exported and holds.
+    let (kept_path, kept_ledger, kept_output) = (folder.join("kept.json"), folder.join("kept-ledger"), folder.join("kept-receipt.json"));
+    sealed_ledger(sealed, &tree_of(&keeping_the_installed_prefix(&private)), &kept_ledger, &kept_path);
+    let kept_asked = request(fitted, &resources, "test", &kept_path, &kept_ledger);
+    export_receipt(&kept_asked, &kept_path, &chat, &kept_output).expect("the receipt of a pair that keeps the installed prefix model");
     // The same again gives the same bytes, and a receipt that differs is not written over.
     export_receipt(&asked, &report_path, &chat, &output).expect("the same receipt");
     std::fs::write(&output, b"other").expect("a file");
@@ -1071,6 +1138,16 @@ fn a_test_that_does_not_pass_installs_nothing() {
     let (held, said) = told(&mut promote(&run));
     assert!(!held && said.contains("did not pass"), "{said}");
     assert_eq!(installed(&run), before);
+    // The report says yes against a gate of its own that does not hold: the candidate pair left a false early switch in a
+    // text where the installed pair left none.
+    let mut against_itself = parsed(&accepted_report(&SEALED));
+    first_block(&mut against_itself).against_installed.as_mut().expect("the early switches").gates.false_early_left_at_most_installed = false;
+    let run = promotion("against-itself", &tree_of(&against_itself));
+    let before = installed(&run);
+    let (held, said) = told(&mut promote(&run));
+    assert!(!held && said.contains("did not pass"), "{said}");
+    assert_eq!(installed(&run), before);
+    assert!(!run.report.with_file_name("devchat-test.json").exists());
     // Passed, and short of the receipt's floors: by the margin, by the share.
     let mut short = accepted_report(&SEALED);
     let cell = &mut short["profiles"]["portable"]["early_off"]["counts"]["baseline"]["exactly_restored"];

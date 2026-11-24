@@ -219,6 +219,73 @@ impl FirstGates {
     }
 }
 
+/// The early switches of a pair in the default mode, as protocol 6 holds the candidate pair's to the installed pair's.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EarlySwitches {
+    /// Wrong first plans switched into their layout before the word's last letter: `Earliness::inside_word`.
+    pub inside_word: i64,
+    /// Wrong first plans whose first correction into their layout is of kind early and came by key `EARLY_BY_KEY`.
+    pub early_by_key: i64,
+    /// Correct first plans and correct protocol-4 plans together: the rows with a false early switch.
+    pub false_early: i64,
+    /// Of those, the rows whose final text is not exact: the false switch stays in the text.
+    pub false_early_left: i64,
+}
+
+/// The gates of protocol 6, the candidate pair against the installed pair.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstalledGates {
+    /// Of the wrong first plans, no fewer switched inside the word and no fewer switched early by key `EARLY_BY_KEY`.
+    /// Held as it is by a pair whose prefix model is the installed one: the gate is for a new prefix model.
+    pub early_switches_at_least_installed: bool,
+    /// No more rows whose false early switch stays in the final text.
+    pub false_early_left_at_most_installed: bool,
+    /// No more rows with a false early switch than the installed pair's and `FALSE_EARLY_ALLOWANCE`.
+    pub false_early_within_allowance: bool,
+}
+
+impl InstalledGates {
+    /// The gates from the early switches of the candidate pair and of the installed pair; `prefix_is_installed` says the
+    /// candidate pair's prefix model is the installed one.
+    #[must_use]
+    pub fn of(candidate: &EarlySwitches, installed: &EarlySwitches, prefix_is_installed: bool, allowance: i64) -> InstalledGates {
+        InstalledGates {
+            early_switches_at_least_installed: prefix_is_installed || (candidate.inside_word >= installed.inside_word && candidate.early_by_key >= installed.early_by_key),
+            false_early_left_at_most_installed: candidate.false_early_left <= installed.false_early_left,
+            false_early_within_allowance: candidate.false_early <= installed.false_early + allowance,
+        }
+    }
+
+    /// Whether every gate holds.
+    #[must_use]
+    pub fn all_held(&self) -> bool {
+        self.early_switches_at_least_installed && self.false_early_left_at_most_installed && self.false_early_within_allowance
+    }
+}
+
+/// What protocol 6 adds to the first plans of a profile: the early switches of the candidate pair and of the installed
+/// pair, whether the candidate pair's prefix model is the installed one, and the gates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgainstInstalled {
+    pub prefix_is_installed: bool,
+    pub candidate: EarlySwitches,
+    pub installed: EarlySwitches,
+    pub gates: InstalledGates,
+}
+
+/// A value for the rows of each layout: the US rows under `0`, the RU rows under `1`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ByLayout<T> {
+    #[serde(rename = "0")]
+    pub us: T,
+    #[serde(rename = "1")]
+    pub ru: T,
+}
+
 /// A value of each of the two pairs a block is gated by.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -315,6 +382,12 @@ pub struct FirstBlock {
     pub earliness: AllPairs<Earliness>,
     pub cases: AllPairs<Vec<Case>>,
     pub gates: FirstGates,
+    /// The earliness of each pair a receipt names, over the rows of each layout (protocol 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earliness_by_layout: Option<ByPair<ByLayout<Earliness>>>,
+    /// The candidate pair's early switches held to the installed pair's (protocol 6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub against_installed: Option<AgainstInstalled>,
 }
 
 /// What a receipt publishes of the first plans: no case.
@@ -324,6 +397,10 @@ pub struct PublicFirst {
     pub counts: ByPair<PairCounts>,
     pub earliness: ByPair<Earliness>,
     pub gates: FirstGates,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub earliness_by_layout: Option<ByPair<ByLayout<Earliness>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub against_installed: Option<AgainstInstalled>,
 }
 
 /// The control without early switching: the gated pairs' counts and cases, and the gates.
@@ -354,6 +431,16 @@ pub struct Profile {
 }
 
 impl Profile {
+    /// Whether every gate of the profile holds: those of the protocol-4 plans in the default mode and in its control, of
+    /// the first plans, and of the candidate pair against the installed pair where the profile states them (protocol 6).
+    /// A profile without first plans holds none.
+    #[must_use]
+    pub fn every_gate_held(&self) -> bool {
+        self.gates.all_held()
+            && self.early_off.gates.all_held()
+            && self.first.as_ref().is_some_and(|first| first.gates.all_held() && first.against_installed.as_ref().is_none_or(|against| against.gates.all_held()))
+    }
+
     /// The protocol-4 cases of a pair in the default mode: those the earliness of its first plans counts false early switches
     /// in. None for a pair the profile has no cases of.
     #[must_use]

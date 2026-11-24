@@ -5,7 +5,7 @@ mod eval_support;
 mod support;
 
 use ks_train::corpus::CorpusRow;
-use ks_train::evaluate::{first_plan, installed_reference, installed_unchanged_since, opening_letters, select_rows, sequence_plan, sequence_plans};
+use ks_train::evaluate::{SEQUENCE_PROTOCOL_VERSION, first_plan, installed_reference, installed_unchanged_since, opening_letters, select_rows, sequence_plan, sequence_plans};
 use ks_train::sequence_report::{Documents, InstalledReference, Report, Unsupported};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -207,8 +207,8 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     assert_eq!((gates.enough_documents_us, gates.enough_documents_ru), (false, false));
     assert!(profiles.portable.ablation.as_ref().is_some_and(|pairs| pairs.contains_key("candidate_context_baseline_prefix")));
     assert!(!folder.join("ledger").exists(), "a development replay claims no test");
-    // Protocol 5: the words that open with a letter of their layout typed first, by every pair of the default mode.
-    assert_eq!(report.protocol_version(), Some(5));
+    // From protocol 5: the words that open with a letter of their layout typed first, by every pair of the default mode.
+    assert_eq!(report.protocol_version(), Some(SEQUENCE_PROTOCOL_VERSION));
     assert_eq!(selection.first_ineligible, ["development:6"]);
     for (name, profile) in profiles.each() {
         let first = profile.first.as_ref().expect("the first plans are of the default mode");
@@ -225,6 +225,17 @@ fn a_development_replay_of_the_installed_pair_reports_what_it_could_not_type() {
     assert_eq!(first.counts.candidate, first.counts.installed);
     assert_eq!(first.earliness.candidate, first.earliness.installed);
     assert_eq!(profile.installed.as_ref().expect("the installed pair").counts, profile.counts.candidate);
+    // Protocol 6: its early switches are held to the installed pair's, which here are its own, and its earliness is also
+    // counted for the two US words and the two RU words apart.
+    let against = first.against_installed.as_ref().expect("the early switches of protocol 6");
+    assert!(against.prefix_is_installed && against.gates.all_held());
+    assert_eq!(against.candidate, against.installed);
+    assert_eq!(against.candidate.inside_word, first.earliness.candidate.inside_word);
+    let by_layout = &first.earliness_by_layout.as_ref().expect("the earliness by layout").candidate;
+    for part in [&by_layout.us, &by_layout.ru] {
+        assert_eq!(part.inside_word + part.last_letter + part.boundary_key + part.later + part.never, 2, "{part:?}");
+    }
+    assert_eq!(by_layout.us.first_word_correct + by_layout.ru.first_word_correct, first.earliness.candidate.first_word_correct);
     let models = tree().join("resources/models");
     let digest_of = |file: &str| digest(&std::fs::read(models.join(file)).expect("a model"));
     assert_eq!(report.installed_reference, Some(InstalledReference { context_sha256: digest_of("context_policy_v1.json"), prefix_sha256: digest_of("prefix_policy_v1.json") }));
@@ -300,6 +311,15 @@ fn a_prefix_candidate_of_schema_four_is_replayed_with_its_term_lists() {
     // A model that converts every prefix it is asked about switches the word typed as meant away at its fourth key.
     let first = report.profiles.as_ref().expect("profiles").portable.first.as_ref().expect("the first plans");
     assert_eq!(first.earliness.candidate.correct_first_plans.false_early, 1);
+    // Protocol 6 holds a pair with a prefix model of its own to the installed pair's early switches too.
+    let against = first.against_installed.as_ref().expect("the early switches of protocol 6");
+    assert!(!against.prefix_is_installed);
+    // The word typed first and the same word as the row's protocol-4 plan: two rows with a false early switch, which is
+    // as many as the allowance lets it have over the installed pair's none.
+    let early = &first.earliness.candidate;
+    assert_eq!((early.correct_first_plans.false_early, early.correct_sequence_plans.false_early), (1, 1));
+    assert_eq!((against.candidate.false_early, against.installed.false_early), (2, 0));
+    assert!(against.gates.false_early_within_allowance);
 }
 
 #[test]
