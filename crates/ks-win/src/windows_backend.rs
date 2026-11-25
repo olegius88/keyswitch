@@ -51,7 +51,7 @@ use crate::constants::{
     ALT_KEYS, CF_UNICODETEXT, CHROMIUM_WINDOW_CLASS, CLIPBOARD_SNAPSHOT_MAX_BYTES, CONSOLE_WINDOW_CLASSES, CONTROL_KEYS, DWORD_MASK,
     ENGINE_HOLD_MAX_MS, HELD_KEY_RETRY_POLL_SECONDS, HELD_KEY_RETRY_SECONDS, HOOK_SILENCE_MS, KEY_IN_FLIGHT_POLL_SECONDS, KEY_IN_FLIGHT_WAIT_SECONDS,
     KEYBOARD_LISTENER_START_TIMEOUT_SECONDS, KEYBOARD_LISTENER_STOP_TIMEOUT_SECONDS, LANG_ENGLISH, LANG_RUSSIAN,
-    LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS, REMOTE_INPUT_APPLICATIONS,
+    LAYOUT_SWITCH_FAST_POLL_SECONDS, LAYOUT_SWITCH_FAST_POLL_WINDOW_SECONDS, LAYOUT_SWITCH_POLL_SECONDS, LOWORD_MASK, MILLISECONDS_PER_SECOND, MODIFIER_KEYS, MODIFIER_RECHECK_GAP_MS, REMOTE_INPUT_APPLICATIONS,
     REMOTE_KEY_INTERVAL_MAX_MS, TRANSLATIONS_KEPT_MAX,
     KEYPAD_SLASH_KEY_NAME, KEYS_TYPED_BY_VIRTUAL_KEY, PRIMARY_LANGID_MASK, SCAN_CODE_LEFT_SHIFT, SCAN_CODE_RIGHT_SHIFT, SELECTION_ACCESSIBILITY_POLL_SECONDS, SELECTION_ACCESSIBILITY_WAIT_SECONDS, SELECTION_CLIPBOARD_POLL_SECONDS, SELECTION_CLIPBOARD_TIMEOUT_SECONDS,
     SELECTION_COMMAND_MAX_CHARACTERS, SELECTION_PASTE_CONFIRM_SECONDS, SHELL_TRAY_WINDOW_CLASSES, SHIFT_KEYS, SLOW_INPUT_FIELD_CLASSES, SUPER_KEYS,
@@ -2324,12 +2324,18 @@ impl Inner {
         if !self.api.request_layout(layout) {
             return Err(failed("Окно отклонило запрос смены раскладки"));
         }
-        let deadline = self.clock.monotonic() + WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS;
-        while self.clock.monotonic() < deadline {
+        let asked = self.clock.monotonic();
+        let deadline = asked + WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS;
+        loop {
+            let now = self.clock.monotonic();
+            if now >= deadline {
+                break;
+            }
             if self.group_for_layout(self.api.foreground_layout())? == group {
                 return Ok(true);
             }
-            self.clock.sleep(LAYOUT_SWITCH_POLL_SECONDS);
+            let fast = now - asked < LAYOUT_SWITCH_FAST_POLL_WINDOW_SECONDS;
+            self.clock.sleep(if fast { LAYOUT_SWITCH_FAST_POLL_SECONDS } else { LAYOUT_SWITCH_POLL_SECONDS });
         }
         Err(BackendError::LayoutSwitchUnconfirmed { message: unconfirmed_message(&self.api.active_application()), group })
     }

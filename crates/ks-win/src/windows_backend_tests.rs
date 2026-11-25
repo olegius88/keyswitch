@@ -1465,10 +1465,11 @@ fn a_switch_timeout_and_an_already_selected_group() {
     assert!(api.requests().is_empty());
 
     api.state().apply_switch = false;
-    clock.readings.lock().unwrap().extend([0.0, 0.6, 1.6]);
+    clock.readings.lock().unwrap().extend([0.0, 0.01, 0.6, 1.6]);
     let error = subject.inner.switch_group_inner(1).unwrap_err();
-    // Half a second is no longer the end of the wait: a busy editor answers later.
-    assert_eq!(*clock.sleeps.lock().unwrap(), [LAYOUT_SWITCH_POLL_SECONDS]);
+    // The first moments are asked at the finer step, the rest at the usual one; half a second is no longer the end of
+    // the wait: a busy editor answers later.
+    assert_eq!(*clock.sleeps.lock().unwrap(), [LAYOUT_SWITCH_FAST_POLL_SECONDS, LAYOUT_SWITCH_POLL_SECONDS]);
     // The request stays posted: the engine books the layout as its own if it comes.
     assert_eq!(
         error,

@@ -9,6 +9,14 @@
 pub const WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS: f64 = 1.5;
 /// Step at which a native backend polls for the layout it asked the operating system to switch to.
 pub const LAYOUT_SWITCH_POLL_SECONDS: f64 = 0.01;
+/// The finer step of the first moments after a layout request: a window takes the layout within a few milliseconds, and
+/// a word converted as it is typed goes as characters only once the layout is confirmed, so each step there is a delay
+/// the user sees. A sleep this short is kept on Windows 10 1803 and later, where the standard library sleeps on a
+/// high-resolution waitable timer.
+pub const LAYOUT_SWITCH_FAST_POLL_SECONDS: f64 = 0.001;
+/// How long after the request the layout is polled at the finer step; a window that has not taken it by then is busy,
+/// and is asked at the usual step.
+pub const LAYOUT_SWITCH_FAST_POLL_WINDOW_SECONDS: f64 = 0.03;
 /// Windows 11 confirms the layout before its text service has it and loses keys sent at once: `клавиатура ` typed
 /// right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms. The deletion
 /// needs no layout and goes before the pause.
