@@ -223,3 +223,25 @@ fn a_gram_given_many_times_is_packed_once_with_its_last_value() {
         assert_eq!(packed.get(gram), Some(-f64::from(u32::try_from(index * rounds + rounds - 1).unwrap())), "{gram}");
     }
 }
+
+/// The same for grams of the longest key, whose bytes leave no room for a place in many entries: the sort keeps the
+/// places beside the keys, and a repeated gram, met there once in the tests of a run of 25.11.2026, is taken many times.
+#[test]
+fn a_long_gram_given_many_times_is_packed_once_with_its_last_value() {
+    let letters: Vec<char> = ('a'..='z').collect();
+    // More grams than the least table that is packed at all.
+    let grams: Vec<String> = (0..5_000_usize).map(|number| (0..7).map(|place| letters[(number / 26_usize.pow(place)) % 26]).collect()).collect();
+    assert!(grams.iter().all(|gram| gram.chars().count() == 7));
+    let rounds = 24;
+    let mut table: Vec<(&str, f64)> = Vec::with_capacity(grams.len() * rounds);
+    for round in 0..rounds {
+        table.extend(grams.iter().enumerate().map(|(index, gram)| (gram.as_str(), -f64::from(u32::try_from(index * rounds + round).unwrap()))));
+    }
+    // More entries than the eight bits a key of seven letters leaves for a place.
+    assert!(table.len() >> 8 > 0);
+    let packed = PackedGrams::pack(&table).unwrap();
+    assert_eq!(packed.len(), grams.len());
+    for (index, gram) in grams.iter().enumerate() {
+        assert_eq!(packed.get(gram), Some(-f64::from(u32::try_from(index * rounds + rounds - 1).unwrap())), "{gram}");
+    }
+}
