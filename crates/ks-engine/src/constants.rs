@@ -23,6 +23,9 @@ pub const MINIMUM_WORD_LENGTH_SETTING_MIN: f64 = 2.0;
 pub const PAUSE_DELAY_SETTING_MAX_SECONDS: f64 = 5.0;
 pub const PAUSE_DELAY_SETTING_MIN_SECONDS: f64 = 0.3;
 pub const SELECTION_HOTKEYS: [&str; 3] = ["selection_layout", "selection_case", "selection_transliterate"];
+/// The signs that may stand right after the caret where a quote opens a mention: those that end a phrase or close a
+/// bracket (`@name,`). Anything else glued there is the written text the quote opens (`mention_place`).
+pub const MENTION_FOLLOWERS: &str = ",.!?:;)]}»…";
 pub const DOUBLE_CAPITALS: usize = 2;
 /// The shortest word whose capitals `fix_double_capitals` fixes: three letters, where Shift is held too long most often
 /// (`КАк`, `ТАк`, `ANd`).

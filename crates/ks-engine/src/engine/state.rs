@@ -155,6 +155,7 @@ impl EngineCore {
         // After a click, a caret move or another window nothing is known to
         // stand before the next key.
         self.last_key_character = String::new();
+        self.mention_erased = false;
         self.position_unknown = true;
         self.insertion = None;
         self.cancel_context_wait(if reason.is_empty() { "word_cleared" } else { reason });
@@ -179,8 +180,11 @@ impl EngineCore {
         self.strokes = Vec::new();
         self.symbol_strokes = Vec::new();
         // A shown "@" followed by the arrow keys, a click or Enter was the member
-        // list at work: it stays on screen and is no longer tracked.
-        self.mention_shown = None;
+        // list at work: it stays on screen and is no longer tracked. The log
+        // counts what came after it, a paste among the rest.
+        if self.mention_shown.take().is_some() {
+            technical_event!(self.shared, "mention_head_left", "reason": reason);
+        }
         self.source_group = -1;
         self.early_switch_origin = None;
         self.early_switch_at = None;

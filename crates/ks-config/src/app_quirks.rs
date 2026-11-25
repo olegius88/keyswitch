@@ -10,7 +10,8 @@
 //! Russian while `john` is a name, `привет` is an ordinary Russian word - and the head follows that decision: it
 //! becomes `@` again when the word turns out to be the other layout, and stays a quote when the word is left alone. A
 //! quotation therefore survives, and so does a quote typed after the user selected the layout by hand or moved the
-//! caret, because those already stop the engine from touching the word.
+//! caret, because those already stop the engine from touching the word, and a quote the field shows right against
+//! written text: one that closes a quotation, or opens text the caret was moved back to.
 //!
 //! Every convention is one setting the user can turn off, and every condition is observable in the engine's own state:
 //! which application has focus, which symbol is pending and which word grew after it.
@@ -45,7 +46,9 @@ pub static TELEGRAM_QUOTE_MENTION: MentionHead = MentionHead {
     description: "Кавычка, набранная в русской раскладке в начале слова, сразу показывается как «@», \
 чтобы открылся список участников; раскладка не меняется. Если после неё набрать текст, \
 «@» снова становится кавычкой и дальше решает слово: «ощрт» → «@john», а русское \
-слово остаётся цитатой. Pause сразу после «@» возвращает кавычку.",
+слово остаётся цитатой. Pause сразу после «@» возвращает кавычку. Кавычка вплотную к \
+уже написанному тексту (закрывающая или перед словом, к которому вернулись стрелками или \
+мышью) остаётся кавычкой; Pause превращает её в «@».",
     applications: &["telegram", "kotatogram", "ayugram", "unigram", "forkgram"],
     typed: "\"",
     meant: "@",

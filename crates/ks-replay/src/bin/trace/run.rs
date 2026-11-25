@@ -223,7 +223,12 @@ pub(crate) fn general(path: &str) -> String {
     out
 }
 
+/// Events only the Rust engine writes, with no line of the Python's to compare: where a quote may begin a mention, as the
+/// field or the keys say (`mention_head_place`), and what came after the `@` shown for one (`mention_head_left`).
+const RUST_ONLY_EVENTS: [&str; 2] = ["mention_head_place", "mention_head_left"];
+
 fn compare_logs(expected: &[Value], actual: &[String]) -> Option<Difference> {
+    let actual: Vec<String> = actual.iter().filter(|line| !RUST_ONLY_EVENTS.contains(&event_name(line).as_str())).cloned().collect();
     for (index, expected_line) in expected.iter().enumerate() {
         let expected_line = expected_line.as_str().unwrap_or("");
         let Some(actual_line) = actual.get(index) else {
@@ -598,6 +603,7 @@ impl Worker {
         {
             let mut tape = tape.lock().unwrap_or_else(PoisonError::into_inner);
             tape.load(step["io"].as_array().map_or(&[], Vec::as_slice));
+            tape.quote_press = super::backend::quote_pressed(step["a"].as_array().map_or(&[], Vec::as_slice));
             if let Some(status) = step["status"].as_str() {
                 status.clone_into(&mut tape.status);
             }
@@ -779,5 +785,19 @@ struct Expected {
     history: Option<Value>,
     rules: Option<Value>,
     prompt: Value,
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_events_only_the_rust_engine_writes_are_not_compared() {
+        let line = |event: &str| format!("TECHNICAL {}", json!({"event": event}));
+        let expected = [json!(line("word_kept"))];
+        assert!(compare_logs(&expected, &[line("mention_head_place"), line("word_kept"), line("mention_head_left")]).is_none());
+        assert!(compare_logs(&expected, &[line("word_kept"), line("word_dropped")]).is_some());
+    }
 }
 

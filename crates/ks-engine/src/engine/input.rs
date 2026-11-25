@@ -256,6 +256,7 @@ impl EngineCore {
             let typed = if event.key_name == "BackSpace" || event.key_name == "Delete" { "" } else { event.character.as_str() };
             self.character_before_key = std::mem::take(&mut self.last_key_character);
             self.last_key_character = if pystr::isprintable(typed) || pystr::isspace(typed) { typed.to_owned() } else { String::new() };
+            self.key_after_erased_mention = std::mem::take(&mut self.mention_erased);
         }
         if !event.pressed {
             if i64::from(event.keycode) == self.convert_keycode {
@@ -348,8 +349,8 @@ impl EngineCore {
             } else if !self.symbol_strokes.is_empty() {
                 self.symbol_strokes.pop();
                 if self.symbol_strokes.is_empty() {
-                    // The "@" shown for the quote is what this key erased.
-                    self.mention_shown = None;
+                    // The "@" shown for the quote is what this key erased: a quote typed next opens the list again.
+                    self.mention_erased = self.mention_shown.take().is_some();
                 }
             } else if let Some(reopenable) = reopenable {
                 // This Backspace took away the boundary that ended the last

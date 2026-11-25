@@ -58,11 +58,29 @@ pub(crate) struct Tape {
     pub pure: Vec<(String, Value)>,
     /// The first answer of each pure read in the whole trace, for an engine that asks before the Python did.
     pub future: Vec<(String, Value)>,
+    /// The entry in progress takes the press of a quote key (`quote_pressed`).
+    pub quote_press: bool,
+}
+
+/// Whether an entry's arguments hold the press of a quote key: there the Rust engine reads the field to see whether the
+/// quote may begin a mention (`EngineCore::mention_place`), and the Python never did.
+pub(crate) fn quote_pressed(arguments: &[Value]) -> bool {
+    arguments.iter().filter_map(key_from).any(|event| event.pressed && event.character == "\"")
 }
 
 impl Tape {
     pub(crate) fn new(clock: Arc<AtomicU64>, status: String) -> Tape {
-        Tape { calls: Vec::new(), at: 0, difference: None, status, clock, shared: Weak::new(), pure: Vec::new(), future: Vec::new() }
+        Tape { calls: Vec::new(), at: 0, difference: None, status, clock, shared: Weak::new(), pure: Vec::new(), future: Vec::new(), quote_press: false }
+    }
+
+    /// Whether a read of the field the Rust engine makes now has none of the Python's to answer it: the press of a quote
+    /// whose entry holds no read of the field from here on. Answered with no field, the engine decides from the keys, as
+    /// the Python did, and the rest of the trace is compared as before. The reads of the field at a quote are checked by
+    /// the engine's own tests (`telegram_quotes`).
+    pub(crate) fn unrecorded_quote_read(&self) -> bool {
+        self.quote_press
+            && self.difference.is_none()
+            && !self.calls.get(self.at..).unwrap_or_default().iter().any(|call| call["o"] == "r" && call["m"] == FIELD_READ)
     }
 
     /// Notes the first answer of each pure read in a list of entries.
@@ -631,6 +649,9 @@ pub(crate) fn role_from(name: &str) -> FieldRole {
 impl FieldReader for TraceReader {
     fn read(&self, application: &str, window: i64) -> Option<FieldContext> {
         let mut tape = self.tape.lock().unwrap_or_else(PoisonError::into_inner);
+        if tape.unrecorded_quote_read() {
+            return None;
+        }
         let call = tape.take("r", "read", json!([application, window]))?;
         if call.get("x").is_some() {
             tape.note("reader raises in the Python".to_owned(), compact(&call["x"]));
@@ -922,6 +943,26 @@ mod tests {
         for (name, role) in [("text", FieldRole::Text), ("code", FieldRole::Code), ("search", FieldRole::Search), ("terminal", FieldRole::Terminal), ("password", FieldRole::Password), ("other", FieldRole::Unknown)] {
             assert_eq!(role_from(name), role);
         }
+    }
+
+    #[test]
+    fn a_read_at_a_quote_the_python_never_made_finds_no_field() {
+        let quote = |pressed: bool, character: &str| key_value(&KeyEvent { pressed, character: character.to_owned(), ..KeyEvent::default() });
+        assert!(quote_pressed(&[json!("app"), quote(true, "\"")]));
+        assert!(!quote_pressed(&[quote(false, "\"")]) && !quote_pressed(&[quote(true, "a")]) && !quote_pressed(&[json!(1)]));
+        // At the press of a quote, with no read of the Python's left in the entry: no field, and no difference.
+        let reader = TraceReader { tape: tape(&json!([{"o": "b", "m": "stop", "a": []}])) };
+        reader.tape.lock().expect("not poisoned").quote_press = true;
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(noted(&reader.tape), None);
+        // A read of the Python's left in it answers, as anywhere.
+        let reader = TraceReader { tape: tape(&json!([{"o": "r", "m": "read", "a": ["app", 1], "r": {"application": "app", "before": "a"}}])) };
+        reader.tape.lock().expect("not poisoned").quote_press = true;
+        assert_eq!(reader.read("app", 1).map(|field| field.before).as_deref(), Some("a"));
+        // Anywhere else a read the Python never made is a difference.
+        let reader = TraceReader { tape: tape(&json!([{"o": "b", "m": "stop", "a": []}])) };
+        assert!(reader.read("app", 1).is_none());
+        assert_eq!(noted(&reader.tape).as_deref(), Some("call stop expected, read made"));
     }
 
     #[test]

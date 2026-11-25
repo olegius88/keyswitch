@@ -53,7 +53,8 @@ impl EngineCore {
     /// nothing is typed after it; the next printable key writes the quote back
     /// (`after_mention_head`) and the word that follows decides, as before,
     /// whether the pair was ``@name`` or a quotation. A quote typed after a
-    /// caret move or after the layout was chosen by hand is left alone.
+    /// caret move or after the layout was chosen by hand is left alone, and so
+    /// is one typed among written text (`mention_place`).
     pub fn show_mention_head(&mut self, stroke: &Stroke) {
         let application = self.backend.active_application();
         if !self.flag("enabled", true)
@@ -66,6 +67,11 @@ impl EngineCore {
             // can open a mention.
             || (!self.character_before_key.is_empty() && !pystr::isspace(&self.character_before_key))
         {
+            return;
+        }
+        let (place, begins) = self.mention_place(stroke, &application);
+        technical_event!(self.shared, "mention_head_place", "place": place, "shown": begins, "application": application);
+        if !begins {
             return;
         }
         let group = i64::from(stroke.group);
@@ -86,6 +92,52 @@ impl EngineCore {
         }));
         self.learning_prompt_after = None;
         self.pending_trigger_keycode = i64::from(stroke.keycode);
+    }
+
+    /// Whether a mention may begin where the quote is typed, and what says so (the log's `place`).
+    ///
+    /// After a caret move, a click, an erasure or a paste the keys say nothing of what stands before the caret, and the
+    /// quote was taken for one at the start of the text: every quote put around written text came out as `@`, to be
+    /// taken back with Pause one by one (Telegram logs, October and November 2026). A field that can be read tells:
+    /// - any character right before the caret but a space or a line break means the quote closes a quotation
+    ///   (`привет"`, `текст"` after a paste) or follows a bracket (`("`); when the key before the quote typed a space,
+    ///   the keys say that already, and a field that does not show the space yet is not asked;
+    /// - anything glued after the caret but a sign that ends a phrase (`MENTION_FOLLOWERS`) is the written text the
+    ///   quote opens: `"привет мир`, `"(текст)`, `"«цитата»`;
+    /// - with nothing glued on either side - the start of the line, after a space, between two spaces, before a
+    ///   comma - a mention may begin, as before.
+    ///
+    /// The quote typed again where Backspace has just erased the `@` it showed is that place judged a moment ago: the
+    /// list of people is opened again so, and a field still showing the `@` must not say otherwise. A field that cannot
+    /// be read after a caret move leaves the quote alone, as `caret_unknown` does where no field is read at all; after a
+    /// click, an erasure or Enter the keys say, as before.
+    fn mention_place(&self, stroke: &Stroke, application: &str) -> (&'static str, bool) {
+        if self.key_after_erased_mention {
+            return ("mention_erased", true);
+        }
+        let Some((before, after)) = self.field_around_quote(stroke, application) else {
+            return if self.caret_moved { ("caret_moved_unread", false) } else { ("keys", true) };
+        };
+        if self.character_before_key.is_empty() && before.chars().last().is_some_and(|character| !character.is_whitespace()) {
+            ("text_before_caret", false)
+        } else if after.chars().next().is_some_and(|character| !character.is_whitespace() && !MENTION_FOLLOWERS.contains(character)) {
+            ("text_after_caret", false)
+        } else {
+            ("field", true)
+        }
+    }
+
+    /// The text before and after the quote, as the field shows it; None where it cannot be read.
+    fn field_around_quote(&self, stroke: &Stroke, application: &str) -> Option<(String, String)> {
+        let reader = self.context_policy.reader.as_ref().filter(|_| self.flag("detection.context_read_field", false))?;
+        let snapshot = reader.read(application, self.focus_or_zero())?;
+        if snapshot.sensitive || snapshot.selection || snapshot.application != application {
+            return None;
+        }
+        // The field is read as the key goes down, and the quote may not stand in it yet: then the caret is where it
+        // goes. The keys typed after it may stand after it already, as after a word's first letter (`read_insertion`).
+        let around = Self::typed_in_field(&snapshot, &stroke.character, &self.typed_ahead(std::slice::from_ref(stroke)));
+        Some(around.unwrap_or((snapshot.before, snapshot.after)))
     }
 
     /// A key typed after the quote: the member list was not what came next.
