@@ -621,6 +621,7 @@ fn injection(strokes: &[KeyEvent], target_group: i32) -> Injection<'_> {
         kept_tail: 0,
         erased: None,
         mode: "boundary",
+        verified_in_field: false,
     }
 }
 
@@ -1118,6 +1119,79 @@ fn the_layout_settles_before_the_keys_of_a_new_layout() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0][0], NativeInput::key(true, VK_BACK));
     assert_eq!(sent[0][2], NativeInput::scan(true, SCAN_CODE_A));
+}
+
+/// The Unicode events of `text`, as `unicode_replacement` types them.
+fn characters_of(text: &str) -> Vec<NativeInput> {
+    text.encode_utf16().flat_map(|unit| [true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) })).collect()
+}
+
+#[test]
+fn a_short_word_in_a_read_field_goes_as_characters_right_after_the_switch() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let strokes = [key_event(), key_event()];
+    let read = |strokes| Injection { verified_in_field: true, ..injection(strokes, 1) };
+    assert_eq!(subject.inject_correction(read(&strokes)).unwrap(), 0);
+    // One call: the Backspaces and the letters as characters, no pause between them. The user's keys held meanwhile wait
+    // for the window's text service, as the letters typed as keys did.
+    let mut expected = [NativeInput::key(true, VK_BACK), NativeInput::key(false, VK_BACK)].repeat(2);
+    expected.extend(characters_of("фф"));
+    assert_eq!(api.sent(), [expected.clone()]);
+    assert_eq!(api.requests(), [RUSSIAN_HKL]);
+    assert_eq!(*clock.sleeps.lock().unwrap(), [WINDOWS_LAYOUT_SETTLE_SECONDS]);
+    // No switch, no wait.
+    clock.sleeps.lock().unwrap().clear();
+    api.state().sent.clear();
+    subject.inject_correction(read(&strokes)).unwrap();
+    assert_eq!(api.sent(), [expected]);
+    assert!(clock.sleeps.lock().unwrap().is_empty());
+    // A switch that took the settle's time already: nothing left to wait.
+    api.state().current_layout = ENGLISH_HKL;
+    api.state().sent.clear();
+    let slow = FakeClock::stepping(WINDOWS_LAYOUT_SETTLE_SECONDS);
+    let subject = backend_with(&api, slow.clone(), script(|_| {}));
+    subject.inject_correction(read(&strokes)).unwrap();
+    assert_eq!(api.sent().len(), 1);
+    assert!(slow.sleeps.lock().unwrap().is_empty());
+    // A call the system did not take whole fails: the result of the text is unknown.
+    api.state().send_count = Some(1);
+    assert!(message(&subject.inject_correction(read(&strokes)).unwrap_err()).contains("SendInput"));
+}
+
+#[test]
+fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
+    let one = [key_event()];
+    let seven = [key_event(), key_event(), key_event(), key_event(), key_event(), key_event(), key_event()];
+    let late = [key_event()];
+    let boundary = key_with(SCAN_CODE_SEMICOLON, ";", [";", "ж"], 0);
+    let two_characters = [KeyEvent { characters: vec!["a".to_owned(), "фф".to_owned()], ..key_event() }];
+    let no_character = [KeyEvent { characters: vec!["a".to_owned(), String::new()], ..key_event() }];
+    let read = |strokes| Injection { verified_in_field: true, ..injection(strokes, 1) };
+    let cases: [(&str, Injection<'_>); 8] = [
+        ("a field not read", injection(&one, 1)),
+        ("keys typed after the word", Injection { late: &late, ..read(&one) }),
+        ("signs after the word", Injection { trailing: &late, ..read(&one) }),
+        ("a boundary", Injection { boundary: Some(&boundary), source_group: Some(0), ..read(&one) }),
+        ("a kept tail", Injection { kept_tail: 1, source_group: Some(0), ..read(&seven) }),
+        ("two characters on a key", read(&two_characters)),
+        ("no character on a key", read(&no_character)),
+        ("a word too long for one call", read(&seven)),
+    ];
+    for (name, case) in cases {
+        let api = FakeWindowsAPI::plain();
+        let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
+        let _ = subject.inject_correction(case);
+        assert!(api.sent().iter().flatten().all(|input| !input.unicode), "{name}");
+    }
+    // A window that sends the keys on to another computer: keys, one to a call.
+    let api = FakeWindowsAPI::plain();
+    api.state().application = "TeamViewer".to_owned();
+    let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
+    subject.inject_correction(read(&one)).unwrap();
+    assert!(api.sent().iter().flatten().all(|input| !input.unicode));
+    assert!(api.sent().len() > 1);
 }
 
 #[test]
@@ -2829,6 +2903,8 @@ mod golden {
             kept_tail: number(&op["kept_tail"]).to::<usize>(),
             erased: op["erased"].as_u64().map(ks_cast::To::to::<usize>),
             mode: "boundary",
+            // The recorded calls were typed key by key: the path for a field that was not read.
+            verified_in_field: false,
         });
         outcome.map_or_else(|error| json!(error_text(&error)), |count| json!(count))
     }
@@ -3182,6 +3258,7 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
                         kept_tail: *dice.of(&[0, 0, 1, 9]),
                         erased: *dice.of(&[None, None, Some(1)]),
                         mode: "boundary",
+                        verified_in_field: dice.one_in(2),
                     });
                 }
                 23 => match dice.below(4) {

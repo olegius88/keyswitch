@@ -158,6 +158,9 @@ pub struct Injection<'a> {
     /// What decided the correction, as the engine's plan names it (`early`, `pause`, `boundary`, `context_word`, …).
     /// A backend types every kind alike; the name is there for whoever records what was typed.
     pub mode: &'static str,
+    /// The field was read just before the typing and showed the word there: a text field of a program on this computer.
+    /// A window that sends the keys on to another computer, or draws its text itself, gives no such read.
+    pub verified_in_field: bool,
 }
 
 /// Operations required by the correction engine and diagnostics UI.

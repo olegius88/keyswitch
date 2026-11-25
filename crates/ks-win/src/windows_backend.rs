@@ -60,7 +60,7 @@ use crate::constants::{
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS, WINDOWS_TYPED_EVENT_SETTLE_SECONDS,
-    WINDOWS_TYPED_SETTLE_MAX_SECONDS,
+    WINDOWS_TYPED_SETTLE_MAX_SECONDS, UNICODE_CORRECTION_MAX_EVENTS,
     WITHHELD_ACTION_MAX_MS, WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
 };
 use crate::log;
@@ -1788,6 +1788,7 @@ impl Inner {
         // Into a window that sends the keys on to another computer, one key to a call (`typing_pace`).
         let pace = self.typing_pace();
         self.typed_key_by_key.store(pace.is_some(), Ordering::Relaxed);
+        let characters = self.unicode_replacement(injection, delete_count, pace);
         let held_count = {
             let _inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
@@ -1810,9 +1811,22 @@ impl Inner {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                 }
                 let switched = self.switch_group_inner(target_group)?;
+                let confirmed = self.clock.monotonic();
                 // The switch waits for the window to answer, and the place may change meanwhile.
                 if self.typing_place_left() {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
+                }
+                if let Some(characters) = &characters {
+                    let mut batch = delete_inputs.concat();
+                    batch.extend_from_slice(characters);
+                    self.send_layout_free(&batch)?;
+                    // The user's keys held meanwhile are keys of the new layout: they wait for the window's text service
+                    // as the letters typed as keys did.
+                    let settled = confirmed + WINDOWS_LAYOUT_SETTLE_SECONDS - self.clock.monotonic();
+                    if switched && settled > 0.0 {
+                        self.clock.sleep(settled);
+                    }
+                    return Ok(());
                 }
                 if switched {
                     // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS); the
@@ -1866,6 +1880,48 @@ impl Inner {
             Some(error) => Err(error),
             None => Ok(held_count),
         }
+    }
+
+    /// The letters of `injection` as characters (`KEYEVENTF_UNICODE`), to go with the Backspaces in one call; None where
+    /// the replacement is typed as keys of the new layout.
+    ///
+    /// Typed as keys, the letters wait after the Backspaces for the window's text service to take the new layout
+    /// (`WINDOWS_LAYOUT_SETTLE_SECONDS`): an early switch stood half done on the screen for those 50 ms, the old letters
+    /// erased and the new ones not typed yet, and Notepad of Windows 11 lost the end of the replacement in 9 of 86 trials
+    /// when the user's next key followed it at once (a probe without KeySwitch, 26.11.2026). Characters need no layout:
+    /// they go with the Backspaces right after the window has confirmed the switch, the replacement shows about 50 ms
+    /// sooner, and the user's keys held meanwhile still wait for the settle. Only a word alone, short enough
+    /// (`UNICODE_CORRECTION_MAX_EVENTS`), each key of it one character, in a field read a moment ago that showed the word
+    /// (`Injection::verified_in_field`): a window that sends the keys on to another computer gives no such read, and
+    /// might pass the Backspaces on and not the characters. The keys typed after the word are given back as keys, which
+    /// the engine takes as the user's typing.
+    fn unicode_replacement(&self, injection: &Injection<'_>, delete_count: usize, pace: Option<f64>) -> Option<Vec<NativeInput>> {
+        let alone = injection.late.is_empty() && injection.trailing.is_empty() && injection.boundary.is_none() && injection.kept_tail == 0;
+        if !injection.verified_in_field || pace.is_some() || !alone {
+            return None;
+        }
+        let mut letters = Vec::new();
+        for stroke in injection.strokes {
+            let mut characters = stroke.character_for(injection.target_group).chars();
+            let (Some(character), None) = (characters.next(), characters.next()) else {
+                return None;
+            };
+            let mut buffer = [0; 2];
+            for &unit in character.encode_utf16(&mut buffer).iter() {
+                letters.extend([true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) }));
+            }
+        }
+        (2 * delete_count + letters.len() <= UNICODE_CORRECTION_MAX_EVENTS).then_some(letters)
+    }
+
+    /// `send_exact` for keys that mean the same in every layout (Backspace, characters): a layout asked for after them
+    /// cannot change them, so they set no time for the window to read them before it (`typed_until`).
+    fn send_layout_free(&self, inputs: &[NativeInput]) -> Result<(), WindowsBackendError> {
+        let sent = self.api.send_inputs(inputs)?;
+        if sent != inputs.len() {
+            return Err(failed(format!("SendInput отправил {sent} из {} событий; результат текста неизвестен", inputs.len())));
+        }
+        Ok(())
     }
 
     /// The keys of `strokes`, each the events of one stroke (`stroke_inputs`).

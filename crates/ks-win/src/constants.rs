@@ -20,6 +20,11 @@ pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
 /// (about 1 ms an event; measured 12.11.2026); the allowance is five times that.
 pub const WINDOWS_TYPED_EVENT_SETTLE_SECONDS: f64 = 0.005;
 pub const WINDOWS_TYPED_SETTLE_MAX_SECONDS: f64 = 0.5;
+/// The most key events a correction types as characters in one call (`Inner::unicode_replacement`): the Backspaces and
+/// the letters of a word of up to six letters. Notepad of Windows 11 loses characters from long calls, of characters and
+/// of keys alike (`привет мир` came out as `привет `, 03.11.2026); a call of 16 events lost none in 135 trials
+/// (26.11.2026). A longer replacement is typed as keys of the new layout, as before.
+pub const UNICODE_CORRECTION_MAX_EVENTS: usize = 24;
 /// How long a layout chosen in the tray menu waits for the window the user worked in to come back to the front with its
 /// keyboard focus, before it is switched wherever the front is.
 pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
