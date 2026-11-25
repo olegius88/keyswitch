@@ -62,10 +62,10 @@ pub(crate) struct Tape {
     pub quote_press: bool,
 }
 
-/// Whether an entry's arguments hold the press of a quote key: there the Rust engine reads the field to see whether the
-/// quote may begin a mention (`EngineCore::mention_place`), and the Python never did.
-pub(crate) fn quote_pressed(arguments: &[Value]) -> bool {
-    arguments.iter().filter_map(key_from).any(|event| event.pressed && event.character == "\"")
+/// Whether the keys an entry takes hold the press of a quote key: there the Rust engine reads the field to see whether
+/// the quote may begin a mention (`EngineCore::mention_place`), and the Python never did.
+pub(crate) fn quote_pressed(keys: impl IntoIterator<Item = KeyEvent>) -> bool {
+    keys.into_iter().any(|event| event.pressed && event.character == "\"")
 }
 
 impl Tape {
@@ -73,14 +73,12 @@ impl Tape {
         Tape { calls: Vec::new(), at: 0, difference: None, status, clock, shared: Weak::new(), pure: Vec::new(), future: Vec::new(), quote_press: false }
     }
 
-    /// Whether a read of the field the Rust engine makes now has none of the Python's to answer it: the press of a quote
-    /// whose entry holds no read of the field from here on. Answered with no field, the engine decides from the keys, as
-    /// the Python did, and the rest of the trace is compared as before. The reads of the field at a quote are checked by
-    /// the engine's own tests (`telegram_quotes`).
+    /// Whether a read of the field the Rust engine makes now has none of the Python's to answer it: the press of a quote,
+    /// and the Python's next call no read of the field. Answered with no field, the engine decides from the keys, as the
+    /// Python did, and the rest of the trace is compared as before. The reads of the field at a quote are checked by the
+    /// engine's own tests (`telegram_quotes`).
     pub(crate) fn unrecorded_quote_read(&self) -> bool {
-        self.quote_press
-            && self.difference.is_none()
-            && !self.calls.get(self.at..).unwrap_or_default().iter().any(|call| call["o"] == "r" && call["m"] == FIELD_READ)
+        self.quote_press && !self.next_is(FIELD_READ)
     }
 
     /// Notes the first answer of each pure read in a list of entries.
@@ -947,15 +945,15 @@ mod tests {
 
     #[test]
     fn a_read_at_a_quote_the_python_never_made_finds_no_field() {
-        let quote = |pressed: bool, character: &str| key_value(&KeyEvent { pressed, character: character.to_owned(), ..KeyEvent::default() });
-        assert!(quote_pressed(&[json!("app"), quote(true, "\"")]));
-        assert!(!quote_pressed(&[quote(false, "\"")]) && !quote_pressed(&[quote(true, "a")]) && !quote_pressed(&[json!(1)]));
-        // At the press of a quote, with no read of the Python's left in the entry: no field, and no difference.
+        let quote = |pressed: bool, character: &str| KeyEvent { pressed, character: character.to_owned(), ..KeyEvent::default() };
+        assert!(quote_pressed([quote(false, "a"), quote(true, "\"")]));
+        assert!(!quote_pressed([quote(false, "\"")]) && !quote_pressed([quote(true, "a")]) && !quote_pressed([]));
+        // At the press of a quote, the Python's next call no read of the field: no field, and no difference.
         let reader = TraceReader { tape: tape(&json!([{"o": "b", "m": "stop", "a": []}])) };
         reader.tape.lock().expect("not poisoned").quote_press = true;
         assert!(reader.read("app", 1).is_none());
         assert_eq!(noted(&reader.tape), None);
-        // A read of the Python's left in it answers, as anywhere.
+        // A read of the Python's next answers, as anywhere.
         let reader = TraceReader { tape: tape(&json!([{"o": "r", "m": "read", "a": ["app", 1], "r": {"application": "app", "before": "a"}}])) };
         reader.tape.lock().expect("not poisoned").quote_press = true;
         assert_eq!(reader.read("app", 1).map(|field| field.before).as_deref(), Some("a"));

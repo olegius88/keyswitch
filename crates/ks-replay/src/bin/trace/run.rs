@@ -603,7 +603,6 @@ impl Worker {
         {
             let mut tape = tape.lock().unwrap_or_else(PoisonError::into_inner);
             tape.load(step["io"].as_array().map_or(&[], Vec::as_slice));
-            tape.quote_press = super::backend::quote_pressed(step["a"].as_array().map_or(&[], Vec::as_slice));
             if let Some(status) = step["status"].as_str() {
                 status.clone_into(&mut tape.status);
             }
@@ -624,6 +623,7 @@ impl Worker {
         let name = step["n"].as_str().unwrap_or("");
         let positional = step["a"].as_array().map_or(&[][..], Vec::as_slice);
         let args = Args { positional, named: step["kw"].as_object() };
+        tape.lock().unwrap_or_else(PoisonError::into_inner).quote_press = super::backend::quote_pressed(positional.iter().filter_map(super::backend::key_from));
         let outcome = match step["k"].as_str().unwrap_or("") {
             "call" => entries::call(engine, name, &args, &step["r"]),
             kind => {
