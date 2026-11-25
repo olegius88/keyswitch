@@ -1,0 +1,547 @@
+{
+  "provenance": {
+    "Cargo.lock without the workspace's versions": "cdd25df7da011073129c072fb70209f639138f8b5dc4df673dbd8dbb09ea1acf",
+    "crates/ks-backend/src/backend.rs": "2200ae47d8dc88d69a186e973b2e1a636dff1c9585b90e0c53d22498fd96283b",
+    "crates/ks-backend/src/constants.rs": "ddd9e81ccbcfeaaafbe725d343734029b5f605891993bd802028e7e21f63f3c8",
+    "crates/ks-backend/src/field_context.rs": "c9f4e615e36cd56eded371517cea47d85da2f1a62fd56b26fd494c9f379af6d5",
+    "crates/ks-backend/src/input_delay.rs": "a98f1b35b89ce1869e5bd8714a98e095dfeb6f2f49ac5c0325c1b540c75a02db",
+    "crates/ks-backend/src/lib.rs": "9c41422073576daf6288b04c544c9b14bedc69ac8ae57acfec5356e62db8a2ab",
+    "crates/ks-backend/src/selected_text.rs": "1359ff9042a398a601325fc44da3b84eeabb900706c58b20f1c5076eea1e0a1e",
+    "crates/ks-backend/src/system_model.rs": "4fe1ac7dbf6d0a465824740bb5e1483d89550c30a8b4f4ff34310bd2e0f1ae2f",
+    "crates/ks-config/src/app_quirks.rs": "b51906369542a0a3f3578826e044c82a957a4f6d5a3b5b537916f7630447fc2e",
+    "crates/ks-config/src/config.rs": "70349abe49bbefb50a5fb11f9400bb96d7eb7eb7fe6531780d16a8ccfa4ce1db",
+    "crates/ks-config/src/constants.rs": "5e236c6845cd853a851ba0d0241bb2049d475c1f0ef1595655cae18244cd74a3",
+    "crates/ks-config/src/history.rs": "dbfa4db6c90bee6a15869fa6976eb10a943ad8b12919de94548be1a8e6877aff",
+    "crates/ks-config/src/indicator.rs": "e23bce05e4d1d184f8b8fe5266b37499142417de4730578b97e507da74383a1c",
+    "crates/ks-config/src/installation.rs": "e020379b678c8c0138a8f78d271b7be8bc7ba8f60aa212fdf3401bce9c63005b",
+    "crates/ks-config/src/learning.rs": "63a267191d69d8c117a5608b88c3e10c50e01dc5f821041ea9dbea1f6f25566d",
+    "crates/ks-config/src/lib.rs": "617d79e09dd586cb0bad06a5ab84ffbd18c6bd338e0cff08906e32e4f01172c4",
+    "crates/ks-config/src/log_privacy.rs": "f1ed88757c7607e98a0122899da2313401ff4ea4675c310c6fd226a6c6998276",
+    "crates/ks-config/src/logsetup.rs": "dfa56182a5627e5a81fb5a9a6915c21266df093c890753068902894404fa8fa6",
+    "crates/ks-config/src/memory_release.rs": "662760cd1e86d0bdbb429852b820378b927e8224c4f3250cc00096b9c98dec2f",
+    "crates/ks-config/src/personal_words.rs": "cdef3ad6c61c6d137b88f6cba9e8db05dd9681bd4195e7f51ef583783c0bd5c5",
+    "crates/ks-config/src/pycompat.rs": "a4d985679d0f10f19b1a4c45c22d875210eb7a3b905b3b5a9e49f91f5c5927b4",
+    "crates/ks-config/src/selection_commands.rs": "e94dcc834e86425b9f5828fd0c1aa3110fbd909382b4453e3bb3f66b39f2b0b8",
+    "crates/ks-config/src/selection_text.rs": "cc335d983d722b388bdf8b35182e7b089354ab62fc40fa3164644a05f827bf87",
+    "crates/ks-config/src/settings_diagnostics.rs": "de1dc38c796ce7ee66694145b646709aa6b3a9097d91721e53686952d3e36199",
+    "crates/ks-config/src/settings_file.rs": "18393960552f35fbea9ea500e1a96d6e5571d547a34160a0e393b254943202dd",
+    "crates/ks-context/src/constants.rs": "7d070ee6c1e3ef1e88e59a2d94a9741bb65e2d60079b37d188f11b7ef6964eac",
+    "crates/ks-context/src/context_action_features.rs": "38f49fa0118dc4fd2ccc7b0ba77293e2ebaded49d39816530dfc981c681b75c7",
+    "crates/ks-context/src/context_model.rs": "a9ad39b7c587d2858987e048454d16c05c87668600f73614a63e6e8046bafe86",
+    "crates/ks-context/src/context_policy.rs": "f69137ffd85f155dc37cd46d80b136c47c9732904d9254fc66e98bd1390db125",
+    "crates/ks-context/src/flat_table.rs": "0e69d251496d04bb7fb954ed49b74761c637ce148d6affbff0e33720fd0d47ee",
+    "crates/ks-context/src/input_context.rs": "76f4bed00e6676829a1814a434786d686bc19d99fff28475dd4023972ebc9177",
+    "crates/ks-context/src/lib.rs": "3592e18cbd84533bf9b32e11912cb1f46234a53e62047558731a53cc6c9020d0",
+    "crates/ks-context/src/prefix_model.rs": "4277e4f4e3ad8fc3c9471c9c0a74e35b951af9d6d4a89b249e4a8fcf8cfb6317",
+    "crates/ks-context/src/prefix_schema.rs": "21271d1cf1e8e7a7fa3f87cba9fbdc680f4d4cdfc9bc26dbe4735492fbf5d326",
+    "crates/ks-context/src/prefix_terms.rs": "1eab59e0c44cace0ac779231205cfaca4363dce8e4aab98c163d5cdeb8405dfd",
+    "crates/ks-context/src/typo_correction.rs": "ce9fe1e8570edb731de1045c2f6c87a40ce8663fd3ece0e753df9e0afe03cf4c",
+    "crates/ks-engine/src/constants.rs": "ebf2ef066f2cd26a9408ff683c80aca252495da84040df9e4daf4c68959a7e69",
+    "crates/ks-engine/src/context_access.rs": "31fbc5a2a614e4b6ca98dc5449a81fc5412c8e0152e978a41cf7546efd3426a6",
+    "crates/ks-engine/src/engine/commit.rs": "9d88a468bed80e66b2671cd66e9569927f22cb489208e99103e1d5797648149c",
+    "crates/ks-engine/src/engine/decide.rs": "88cce2cb4dcd2c52a6d61aa7acfcf7bb9e1701beef103fbfbbe9ed9a8c11e066",
+    "crates/ks-engine/src/engine/early.rs": "9ae497a84b7dd5ca92f4a3a0543e3fb52a3941ab52eaf792411dbb1b4bc02791",
+    "crates/ks-engine/src/engine/execute.rs": "02132d5fdcd042a53a709150f2e657e61392be01ffb7e93e13deb45e96822927",
+    "crates/ks-engine/src/engine/handle.rs": "c0633c8df6d73724fed64fe6ef3b1dc0a546284968ad8c38d8d9b8f6b8bfabb2",
+    "crates/ks-engine/src/engine/input.rs": "d43bbb4aff8bb3eedabf1559a34f12b1e282a0705a41c98546cfab4d1e273305",
+    "crates/ks-engine/src/engine/layout_tap.rs": "b18350f56efa954fdc24e6505ff0c971a2c55133ce3bc145fcd1b476fa01d24b",
+    "crates/ks-engine/src/engine/logging.rs": "d576bb01611023f285a695e6804871b45737e8dc948f5664d112ec76fa781c45",
+    "crates/ks-engine/src/engine/manual.rs": "d4c16921219c046dd53a9ac7eb57b6c4cf0c66e6f123f65700019ac38b8b610e",
+    "crates/ks-engine/src/engine/mention.rs": "f1d6c3e84b5d82cc7f1d8ad6e595356732a65e3176f58456c6eabc64d714b2b6",
+    "crates/ks-engine/src/engine/mod.rs": "f7e45fab0f62ab0a2022c281f3f71f585331b6f40a65cf427886a3232c7a06a6",
+    "crates/ks-engine/src/engine/neighbours.rs": "924de8bab53a98a58b6f915a3a9b064736475e59945982a7f6bc748aa98fcdd4",
+    "crates/ks-engine/src/engine/pause.rs": "976b23e217ef61704cc68cb0348a1334f41b925d73e91e39973d38b5b9c55a5d",
+    "crates/ks-engine/src/engine/retyped.rs": "40e9958c4124e9beeddde23fecd229e660e2c690f3d682bd834fd5cb55253bd2",
+    "crates/ks-engine/src/engine/selection.rs": "7145a8fd3cf50b538a0ab30f4b31d4653c2fd6ac804a0f84107e6e1a8f1f4d58",
+    "crates/ks-engine/src/engine/shared.rs": "3cd3f89544f2d94bbf8a3d407806d21f8e230b38f1d8dd82fd37535cabe246dc",
+    "crates/ks-engine/src/engine/state.rs": "ecab7b82d64e0fa996a6b915f6f4524b16b25ea5b8399f1ce98c1eb03083021c",
+    "crates/ks-engine/src/engine/types.rs": "b6f872eb63556245cfc89373c74ce0aace03e8d0a9ef1f0102c2095ea13ca153",
+    "crates/ks-engine/src/engine/word_parts.rs": "6b94bd584a331c0c2db933f38ce768b12af5d57d36a850bc99bc153ee6156dd0",
+    "crates/ks-engine/src/engine_loader.rs": "ebdec49bdaacec9a8de5083875fd73d4f3185cfd661665464575385a03c74762",
+    "crates/ks-engine/src/lib.rs": "a599b20387f65239b2d2fd0597b8b32ebdb9841bdc7baf2ae0607cd0f5d79949",
+    "crates/ks-engine/src/rule_editor.rs": "a32638b546c156e439278ebccbee29e473cd021168627ce23f1b5becda501771",
+    "crates/ks-engine/src/unicode_category.rs": "6df278fc24f0f3b5771a9b37a5873c26b6a5525be533c17a793e340e3270168d",
+    "crates/ks-hunspell/src/lib.rs": "0cecc78d0bf182c3fe2312be3a3ffff675ca2cf6b9f8614ba70b37e7ecb4387a",
+    "crates/ks-lang/src/boundary_model.rs": "e02c758166f1becddedf2623033cc732f7aa524022c51e1dab0ea31dd4214a04",
+    "crates/ks-lang/src/boundary_policy.rs": "a39dbe992b6017bf926752cdce9c68e970b15ef20dcdb81a5f16c5d62ed21303",
+    "crates/ks-lang/src/constants.rs": "915d10e037eb76e30e2e86185c5cc15615d81a918ec35f12aa547722b53d36cd",
+    "crates/ks-lang/src/detector.rs": "3ea71ad04b96a013eb80627d648d6d3d150e3edb1da938e13c3f47b100693458",
+    "crates/ks-lang/src/early_switch.rs": "67e74df96e7b88fd25d6bd2c4360ab83366f7c258ad5f07af5c467751a6dc142",
+    "crates/ks-lang/src/identifier_lexicon.rs": "0213ae13aa4600fb1f0063b6af2d1071469f0eaaf84c848282efe6f0e9257d36",
+    "crates/ks-lang/src/intent_model.rs": "0a7b29ea4c89cf0b937ae7f56884cce0ffad62777a9538593f0b6bb4e7faf0c1",
+    "crates/ks-lang/src/language_model.rs": "e280a799d36a7d60538805c9ac227dde2776c2234a790cddfa7141860b5389d6",
+    "crates/ks-lang/src/lexicon_supplement.rs": "db3b4e35a4b88d5e9cf94e5358b0191257673bf1bbe49985c97f5c6586844811",
+    "crates/ks-lang/src/lib.rs": "5cdd3ee4e1df799cc4bd351d0a72fc18a726493e2bc120953c986f43c8e4d82c",
+    "crates/ks-lang/src/load_error.rs": "95ba26a746ceccf3dfec7a451ec2782cf659c0f3e7679af0e93e81c06b6de1fb",
+    "crates/ks-lang/src/ortho_model.rs": "555eb370674f175451fb1853d7c2d71b3ea13566ec853abd69097ec6c22cc8a7",
+    "crates/ks-lang/src/packed_grams.rs": "dd16abcc67e3cd4fe3501d224b42ebe0002b324831dae3831dd80c3aa1439272",
+    "crates/ks-lang/src/pysum.rs": "dc9623c1095964d0aeaa02f8f77caa533eb36bc0b449119c86260145cef474b9",
+    "crates/ks-lang/src/resources.rs": "6948d97632583c36f2ed2310bd9c295cdb646ed10fd1d2144018449e1759234c",
+    "crates/ks-lang/src/script_names.rs": "37969af6212ad956efc2fab4df5becec07fd57f625be624c46c2e3e5bec44f05",
+    "crates/ks-lang/src/short_words.rs": "dad83959dda250a024cd1d1bb56453d998c0cf1b7f51da2161c889093fd3506a",
+    "crates/ks-lang/src/spellcheck.rs": "947b59f3f74be2b879f3ea7c1a4bb472e277e8adafc6ce59725e6606a19845df",
+    "crates/ks-lang/src/tables.rs": "8fdba910953a60ccb4a93be071a1c07e7ada6e516b134f90af2ffa0117af19f4",
+    "crates/ks-lang/src/word_decision.rs": "f97f7d09471e4732027bb9ed8eac152ea7fc1f48c615a8167fe69a46d185b8c5",
+    "crates/ks-replay/src/bin/field-gate.rs": "6d203c6c377cffab1f567c302cb6e20059ec2670177964291c2d17f023717046",
+    "crates/ks-replay/src/bin/ks-trace.rs": "2ed8f93cf146a48dd6f39c2210750c204813c8362d85d383d286766a986adc85",
+    "crates/ks-replay/src/bin/trace/backend.rs": "7d4daca86079b24d7b24787d1791bfbdbeae12ba6dd57f06fb4e0486af8c926b",
+    "crates/ks-replay/src/bin/trace/compare.rs": "4c246d433b45c9ff3f39233d6bb852b3a5c7636a50da4063180c0abbf817034f",
+    "crates/ks-replay/src/bin/trace/entries.rs": "2d22e248e763325a846e061390cd73dbffff748d978ae26ca35a49bf560fee3a",
+    "crates/ks-replay/src/bin/trace/run.rs": "33a45cdfd81b365f7f1f334d235f3d57bd5c4cc7ec7a26e0401e6ed98b73351e",
+    "crates/ks-replay/src/harness.rs": "d3ca61da5020f25c2b1960d8b4031642ef28c4db77448d8e98250752a6d9c6fb",
+    "crates/ks-replay/src/lib.rs": "a035d8a3c116dbba3946470d0894d50c4e09bd37ad7fb7e504a544e4b85139a9",
+    "crates/ks-replay/src/main.rs": "604bc6e6f225e6b8ccce807604e7348fe94eee15fe1ce81e5da3fee64b9b0a2b",
+    "crates/ks-text/src/bigint.rs": "eed1060c4b45421afaefb58eb7b1b7e21b4cfdbb704ea004c00bdc1d6922f0a1",
+    "crates/ks-text/src/constants/mod.rs": "a066da9ed9ef1792311d0b8fe026f92ef65357b72e263edc2b7016ccf340f122",
+    "crates/ks-text/src/constants/russian_text.rs": "f2c05829587ed64a341f30ef93ca07317bb67b1701b9e4df6de03395a78d2b6d",
+    "crates/ks-text/src/json.rs": "e9bb252d6471e376aca1a376d8bd35326cba58810be6b6ece30f9ba42cff6e5d",
+    "crates/ks-text/src/layouts.rs": "2cec831fcab88fa98d68c615fde7652d433508fcd5668805d5092fa869518b6c",
+    "crates/ks-text/src/lib.rs": "76a0eed06b2148dfbe8537a67d60a5beba79531a9906beb80ba4eb9fc39f6a23",
+    "crates/ks-text/src/normalize.rs": "aa5ed9a7524009699acaaaba6adf1afbf38dddd6308298ceba74cdb8c09de25d",
+    "crates/ks-text/src/pyjson.rs": "27e9b1abd8d5f1f72927736404fbe3cfaab44410ccf3caa959c49270c76a4599",
+    "crates/ks-text/src/pynum.rs": "406e36ca3ffdd1277dc4aa9fb5289f071be74aebc7e31fd80d8f5794b1c67857",
+    "crates/ks-text/src/pystr.rs": "54d5e040c455492ea0d40a6b31391062469b71d3ef8828ee00aeca9d10adbd32",
+    "crates/ks-text/src/russian_text.rs": "6cf5cad545c47df0eefd004e1339317a6c681c4d3ea830ac89ec5f18411ddc7f",
+    "crates/ks-text/src/ucd.rs": "de7c2fa3f763310ac771d393a2a91eab874a2721d9a41235629c676e020390c9",
+    "crates/ks-text/src/unicode_tables.rs": "04a9ed822c47fe98d2fd95804fae0a186509caf716492a3a8ce9b278555aee30",
+    "crates/ks-train/src/artifact.rs": "c0a61ac15c8fdc6d90af94745309d6abc9a9da7ffcdd6e8f3067249da6b9611c",
+    "crates/ks-train/src/base_corpus.rs": "b9e2d040baf56ccdedd1fb356a00a9ab6110cf41f5710356b942c4a962dc3f37",
+    "crates/ks-train/src/bin/ks-release.rs": "1440566bd9af1479c194aa88ecfc36f3aa8f7360ca959401192d80bc734a6983",
+    "crates/ks-train/src/boundary.rs": "f1023f9c831f0cf16a7fc5849b49ee3064edca5379a4540793e8f55a39f15202",
+    "crates/ks-train/src/captured.rs": "20db6cc3ca27de95ce75c7030a4079686cb6b7c2240df800ad16a99a9351ba3a",
+    "crates/ks-train/src/compare.rs": "d3b552d872411151a29f6ec60231aaf740ddaaf8d4be238857f90b3d33681ec0",
+    "crates/ks-train/src/corpus.rs": "d04b82502c9ec80fc1a81bddbced3199dd7cf6ea6f677da2e65768ec3219b270",
+    "crates/ks-train/src/coverage_gate.rs": "af5cc5716638a556dd41c07c3f466b6a0ecbfdafff7e94da21d3ba2daee1ae6d",
+    "crates/ks-train/src/curricula.rs": "bb333c0b24ac045257d5e3eb0922cee50463086833e57acae02f81c0b4f154af",
+    "crates/ks-train/src/deb_check.rs": "4379174cc8f894812456bd79b538f49a213178e559594599a7c4437848501295",
+    "crates/ks-train/src/detector.rs": "6cf6d00c9af003685bd9e5dba15e39f8d8075300d0a5e4839f24f9036c968059",
+    "crates/ks-train/src/engine_reports.rs": "c9b4194c7dd06cd9c180b1b3c51204d1a3157dffde33fd295d49667d4957829e",
+    "crates/ks-train/src/evaluate.rs": "dea69233e545791aff7a72503e05dc438a2176f16a6d2344a76fdedd447841bf",
+    "crates/ks-train/src/evidence.rs": "0d6645d6cd174e43a1a27c3b03a402054cc344b2914555f754074c446cbd8e69",
+    "crates/ks-train/src/fit.rs": "4eded37b82e41f9705b91b2eec940c0682818610e7156253e46b234fc15e0135",
+    "crates/ks-train/src/freeze.rs": "d032fb9c6aee05850e5d2ccaf995f1a0bc77eb6514ff57131ee0b169b45678f6",
+    "crates/ks-train/src/gates.rs": "05368624a2a3e57897c0413577f6bec042226223d68714dcc1bf4622c833916a",
+    "crates/ks-train/src/heads.rs": "b2972e190246ae845dff75d61816e5ea0242af44bb5347225d6227f9836da466",
+    "crates/ks-train/src/historical.rs": "6c1a9095ba7a2e1ebfd8adaac4bdd7424eaf2ff85a397f74e54d972e4b5ddbf3",
+    "crates/ks-train/src/intent/dataset.rs": "c739b43b0927e6743cbfce267499e5e511f6d03a6be28d84ee0ae8b5aca2caa9",
+    "crates/ks-train/src/intent/evaluate.rs": "605189ea6367b97c6d52d2d6f4365baaf4008c665af1dd7ccf052a7024d9724c",
+    "crates/ks-train/src/intent/external.rs": "a3435b8188ab34fae25529cdf7c5dbbd87f923d8b2059f1304b5502d902461d4",
+    "crates/ks-train/src/intent/fit.rs": "946730694d4080b4e6940c791f7dc4894b6af8e9365317a7aee16799b096d715",
+    "crates/ks-train/src/intent/mod.rs": "a2d3dd873f920739bb4ea2df11d52d703e91d2ee1e3390bb399edc5ddf5983e9",
+    "crates/ks-train/src/intent/pack.rs": "75630fcfa79138dd77ab0d0512759f10c271f5a28b5fe4ef2cd4606bd5094bc0",
+    "crates/ks-train/src/intent/pipeline.rs": "1ea8bec4afbb545073cfc55fa16429d15c5c46f87458223c3978ccfc4a21bf0c",
+    "crates/ks-train/src/intent/probe.rs": "251e656207577f0851568ea2757f7385c9d09759c3325e5547841da11fe5a839",
+    "crates/ks-train/src/intent/seal.rs": "ac613561215ab79831bed7fe14a706aa5ddba03eae0d2d8aa0b4c3bcb8a576f8",
+    "crates/ks-train/src/intent/train.rs": "97b007dcee169dc2f36b5f6ce3d7e5f4c912e4911278ed59f7f3f7d333ce662a",
+    "crates/ks-train/src/kernel.rs": "d6e7b260771d1ca895e01aa4dccf40d356143bb3d2c1dbef9c0a700552515d9c",
+    "crates/ks-train/src/lib.rs": "ff0e2f97f2ba74aaff68d1162807ce7334826b2989ff58043c80024437dd16e0",
+    "crates/ks-train/src/licenses.rs": "4cbccb5f265f5889bafb0a35299488bda602fa5ffc1d7d5c56e1b03b0ccfe33f",
+    "crates/ks-train/src/lookahead.rs": "77e7c35aaed546d80cdcfbe13219f6da4c59a344d4950d7a71773eadc03aa3c9",
+    "crates/ks-train/src/main.rs": "f8ead86d751269f8e139d7d07fbe68538c6c434d522ce87f75cd4e86d2e03fbe",
+    "crates/ks-train/src/messages.rs": "853e0c20fa49749db87e37ce76d5ed5277d9ce22b43422127ca08d4ee2efdf5f",
+    "crates/ks-train/src/mixed.rs": "3663c88b601229436d0238b0cc11f61ca086b2a521dd975dde8a02463239cdf3",
+    "crates/ks-train/src/ortho.rs": "7b3ac8550fd5b5292ca885003f705c4b132b3122e9d7522b2baf5c36c2b8bfdf",
+    "crates/ks-train/src/ortho_inputs.rs": "1f2f38c805b8753468083e109e4598965cfd64b472c71eae41f654f00ac8618c",
+    "crates/ks-train/src/physical.rs": "9193b78c9404d28afad31dc9b31ca8ee123f497ab75611f000fa91287ebaac7d",
+    "crates/ks-train/src/prefix.rs": "efbcdfcd462e60f515171eea8b5e75824feeab68d0076a5633f05936c30611a4",
+    "crates/ks-train/src/prefix_acceptance.rs": "533536652249f0948ae4bc6a8c26b75f0760e4f2d8b9a7b4f6aa94a24203198e",
+    "crates/ks-train/src/prefix_cache.rs": "63826a84a025b9e30180004641f03a5787625013df7f3bd2580f34362ffe3fed",
+    "crates/ks-train/src/prefix_corpus.rs": "0cfa9c11573458d06876d3b69dfff0d54d4049a56c18136e45a5b9f92c382fd4",
+    "crates/ks-train/src/prefix_words.rs": "bb4415b1f69551efa97c938adfdd83002107561a840bf1e2fc02aa939e1c360f",
+    "crates/ks-train/src/promote.rs": "38997f42eb0297a9de9311ba1c6c490da00934a09c3ea56d5e6525633334c70d",
+    "crates/ks-train/src/receipt.rs": "a7a5e50e9c92de5e6a19f8b33c57bc78382b21dde2d5e67ce5878aa01f728f07",
+    "crates/ks-train/src/replay.rs": "1fac11b796d60d62482e2060dc98b40ee4ed379ef8180fe6da291f0b98029a69",
+    "crates/ks-train/src/replay_cache.rs": "bcd8b6df08955698230a7e849692791aad25849427ac3798828dc710982099ac",
+    "crates/ks-train/src/retired/boundary_v1.rs": "c1f42e5b8451d63916e1a621dcfe36e202f7654a249c4ea4840d24ff2dc72e92",
+    "crates/ks-train/src/retired/context_frames.rs": "498bdd9c375b079c5bea08a354e3357fad9ca879037b815015456cb8e042d0a4",
+    "crates/ks-train/src/retired/context_v2.rs": "ab127b5c0b2233aa042acfbcdfff74e9ff70895a9453b123e7154094eb88edb7",
+    "crates/ks-train/src/retired/feature_two.rs": "788afb992ed8dd8f1b8e8620aa8d3d1e41b4eec895a0fd29cb8f1e058e2b935f",
+    "crates/ks-train/src/retired/mod.rs": "7f45ef4d2f82c0bf1d9fcda42a623e49e2875176fc86d20555a17de133aa2cdd",
+    "crates/ks-train/src/retired/ortho_v2.rs": "2ec3b8a043bc9181b33eac7b7ef857d260888509c9dc510b9d0e3b1d1ea1fe3b",
+    "crates/ks-train/src/retired/prefix_v1.rs": "35b05ebc8a1f8f8d7926f06a100d39be45cef76ba1c39cae35cb2147dc7fa3f3",
+    "crates/ks-train/src/retired/sources.rs": "382172ebafcdc64c677489bda4ac3f3c87386cf14dc01e34e1359eca415513b3",
+    "crates/ks-train/src/rows.rs": "70bc8bafd9a9fe5c09e207fa01ba08424de4668a733c5684886965a4a2b38d46",
+    "crates/ks-train/src/selection.rs": "3f0a91bbdd3386b3c200db449879896f61feb54679c02c30181d6fb74089ccb8",
+    "crates/ks-train/src/sequence_report.rs": "894e4509ff68b5575df3c281f3c21a267d32afcb3706d879574575e189417085",
+    "crates/ks-train/src/small_tools.rs": "262ccbab6a9f66b39493e0fa3549b7aefb2a108ef9730952c7a4202881c86289",
+    "crates/ks-train/src/spans.rs": "dbc119d3d69a593e1318248836b2a506a9c30190b2826ec6600edada441e47de",
+    "crates/ks-train/src/stages.rs": "837f54687145d9c46d81674d216865105260956e6624a3f55b7e6df814d92c21",
+    "crates/ks-train/src/tools.rs": "ceb62687ab05cba87dd1164857a212b68c9826beb00af854d785239bbbe7e9cf",
+    "crates/ks-train/src/typo_evaluation.rs": "7d4d0abd581d56cdd1a58b2112510e3d32d24663a0b25a21929dde6c7285034b",
+    "crates/ks-train/src/typo_frequency.rs": "6e135d769ffb9efd981207a72a9eeefdd872fd437172cdb273c7550cbccf0214",
+    "model/boundary_v1/candidate.json": "5462c7ffa9b43ebf584f782dd1aeffc6ffe0d2323eb3ffc733277b978d968f75",
+    "model/boundary_v2/corpus.json": "56e3f873ceb8d55a180eac6eafb3eca761c974df56d8668de0ba0f8e50675b64",
+    "model/boundary_v2/seal.json": "7fbf31d10721ce14612ba9052385d936fc2e317b6049f5e3837f57f700ff3269",
+    "model/context_v1/captured/manifest.json": "e6356fa512203a7dddcacecd1fa935c562f6291fc3150c63964bb37adf63a91a",
+    "model/context_v1/scenarios.json": "a29f3a7bc324a30ef244fee885555bab3d3547682df9942d233f0e1dd0963d12",
+    "model/context_v3/baseline-context-v1.json": "121e32d42939a9be6c9e6837bb7c4a5939778fcbf0c12b248e168225dba15f47",
+    "model/context_v3/captured/manifest.json": "a42b05c124f6c4091cf0c4871abbd0a7386e297c86c587adf3e05f82c68e395c",
+    "model/context_v3/recipe.json": "c03c56d64af9597cc0af1f1ec2d2f9f89b95614aa385efb285a7743cf0d0f324",
+    "model/intent_v1/config.json": "2026433380f1a418079c8cb60eafc64cc420fc256b3c074dbb7d6389f6b275fd",
+    "model/intent_v1/sources/en_US.lm": "017a513a23bb37947a3a0e73e307066fa8ec0642075172cdcad6ea204cae68da",
+    "model/intent_v1/sources/ru_RU.lm": "e57c14eec2b78e52a2125dce2b38044d8dfe480f3964b9d118614527195ceda9",
+    "resources/identifiers.json": "ee78e0bfd679817fff89894cdeec6c91ffea30a36e19d60479da5efe3b976601",
+    "resources/lexicon-supplement-ru_RU.json": "4ba5ebf4772e7d5911163b84760691b977abc896816e86729373e18affbe1b63",
+    "resources/models/boundary-v2.json": "c363d957cf622ee4dcee18466dd12e02a74cb072b655c12072de0dbd38ea5834",
+    "resources/models/context-alnum-frequency.json": "da17a0576c2423f9f44693d5db599c3183a577021d9e1951fb47c7d08a1e13d5",
+    "resources/models/context-capitals-frequency.json": "771be14f273280c44dcfaaf36be4f34752e0803000ee978b5b2f50dc506f7ee7",
+    "resources/models/context-short-frequency.json": "02c14cced1019c689a0892f2909feecaa34eed75d1feca781f7ffafaa363fef9",
+    "resources/models/context-term-frequency.json": "4d3afe98dc9382bc6d6e541c613eecd9645f989cd51850e3218479aabbbd6db1",
+    "resources/models/double-capitals-frequency.json": "c4068ea81e93bb09ab0bae1033baef05aa951c29ecd1c901cd3bd55133894403",
+    "resources/models/layout_intent_v1.ksm": "504f53329f863fccecf17cedf74d91d1de36008cf50a7b79fbc34342cfce00e5",
+    "resources/models/ortho_v1.json": "beec9eaafcedce6062e27f294a5f7ac4193f2c744c341ea7c303c99d4b1583b5",
+    "resources/protected_tokens.txt": "40dc37014ece76bf70a3e68c6e55cdf5a196b99619f29b441b2066df634fd740"
+  },
+  "results": {
+    "active_v2": {
+      "changed_correct": 0,
+      "exact": 18,
+      "injections_before_hard_boundary": 0,
+      "length_mismatches": 0,
+      "rows": [
+        {
+          "actual": "проблема ",
+          "before_hard_boundary": 0,
+          "expected": "проблема ",
+          "original": "ghj,ktvf"
+        },
+        {
+          "actual": "предложил ",
+          "before_hard_boundary": 0,
+          "expected": "предложил ",
+          "original": "ghtlkj;bk"
+        },
+        {
+          "actual": "библиотека ",
+          "before_hard_boundary": 0,
+          "expected": "библиотека ",
+          "original": ",b,kbjntrf"
+        },
+        {
+          "actual": "которую ",
+          "before_hard_boundary": 0,
+          "expected": "которую ",
+          "original": "rjnjhe."
+        },
+        {
+          "actual": "которую, ",
+          "before_hard_boundary": 0,
+          "expected": "которую, ",
+          "original": "rjnjhe.,"
+        },
+        {
+          "actual": "привет, ",
+          "before_hard_boundary": 0,
+          "expected": "привет, ",
+          "original": "ghbdtn,"
+        },
+        {
+          "actual": "привет. ",
+          "before_hard_boundary": 0,
+          "expected": "привет. ",
+          "original": "ghbdtn."
+        },
+        {
+          "actual": "привет... ",
+          "before_hard_boundary": 0,
+          "expected": "привет... ",
+          "original": "ghbdtn..."
+        },
+        {
+          "actual": "привет; ",
+          "before_hard_boundary": 0,
+          "expected": "привет; ",
+          "original": "ghbdtn;"
+        },
+        {
+          "actual": "hello, ",
+          "before_hard_boundary": 0,
+          "expected": "hello, ",
+          "original": "hello,"
+        },
+        {
+          "actual": "hello... ",
+          "before_hard_boundary": 0,
+          "expected": "hello... ",
+          "original": "hello..."
+        },
+        {
+          "actual": "hello,world ",
+          "before_hard_boundary": 0,
+          "expected": "hello,world ",
+          "original": "hello,world"
+        },
+        {
+          "actual": "don't ",
+          "before_hard_boundary": 0,
+          "expected": "don't ",
+          "original": "don't"
+        },
+        {
+          "actual": "example.org ",
+          "before_hard_boundary": 0,
+          "expected": "example.org ",
+          "original": "example.org"
+        },
+        {
+          "actual": "path/file.py ",
+          "before_hard_boundary": 0,
+          "expected": "path/file.py ",
+          "original": "path/file.py"
+        },
+        {
+          "actual": "pm2 ",
+          "before_hard_boundary": 0,
+          "expected": "pm2 ",
+          "original": "pm2"
+        },
+        {
+          "actual": "HTTP ",
+          "before_hard_boundary": 0,
+          "expected": "HTTP ",
+          "original": "HTTP"
+        },
+        {
+          "actual": "we’re ",
+          "before_hard_boundary": 0,
+          "expected": "we’re ",
+          "original": "we’re"
+        }
+      ]
+    },
+    "legacy_no_segmentation": {
+      "changed_correct": 0,
+      "exact": 13,
+      "injections_before_hard_boundary": 8,
+      "length_mismatches": 0,
+      "rows": [
+        {
+          "actual": "про,лема ",
+          "before_hard_boundary": 1,
+          "expected": "проблема ",
+          "original": "ghj,ktvf"
+        },
+        {
+          "actual": "предло;ил ",
+          "before_hard_boundary": 1,
+          "expected": "предложил ",
+          "original": "ghtlkj;bk"
+        },
+        {
+          "actual": "библиотека ",
+          "before_hard_boundary": 0,
+          "expected": "библиотека ",
+          "original": ",b,kbjntrf"
+        },
+        {
+          "actual": "котору. ",
+          "before_hard_boundary": 1,
+          "expected": "которую ",
+          "original": "rjnjhe."
+        },
+        {
+          "actual": "котору.б ",
+          "before_hard_boundary": 1,
+          "expected": "которую, ",
+          "original": "rjnjhe.,"
+        },
+        {
+          "actual": "привет, ",
+          "before_hard_boundary": 1,
+          "expected": "привет, ",
+          "original": "ghbdtn,"
+        },
+        {
+          "actual": "привет. ",
+          "before_hard_boundary": 1,
+          "expected": "привет. ",
+          "original": "ghbdtn."
+        },
+        {
+          "actual": "привет.юю ",
+          "before_hard_boundary": 1,
+          "expected": "привет... ",
+          "original": "ghbdtn..."
+        },
+        {
+          "actual": "привет; ",
+          "before_hard_boundary": 1,
+          "expected": "привет; ",
+          "original": "ghbdtn;"
+        },
+        {
+          "actual": "hello, ",
+          "before_hard_boundary": 0,
+          "expected": "hello, ",
+          "original": "hello,"
+        },
+        {
+          "actual": "hello... ",
+          "before_hard_boundary": 0,
+          "expected": "hello... ",
+          "original": "hello..."
+        },
+        {
+          "actual": "hello,world ",
+          "before_hard_boundary": 0,
+          "expected": "hello,world ",
+          "original": "hello,world"
+        },
+        {
+          "actual": "don't ",
+          "before_hard_boundary": 0,
+          "expected": "don't ",
+          "original": "don't"
+        },
+        {
+          "actual": "example.org ",
+          "before_hard_boundary": 0,
+          "expected": "example.org ",
+          "original": "example.org"
+        },
+        {
+          "actual": "path/file.py ",
+          "before_hard_boundary": 0,
+          "expected": "path/file.py ",
+          "original": "path/file.py"
+        },
+        {
+          "actual": "pm2 ",
+          "before_hard_boundary": 0,
+          "expected": "pm2 ",
+          "original": "pm2"
+        },
+        {
+          "actual": "HTTP ",
+          "before_hard_boundary": 0,
+          "expected": "HTTP ",
+          "original": "HTTP"
+        },
+        {
+          "actual": "we’re ",
+          "before_hard_boundary": 0,
+          "expected": "we’re ",
+          "original": "we’re"
+        }
+      ]
+    },
+    "rejected_v1": {
+      "changed_correct": 0,
+      "exact": 18,
+      "injections_before_hard_boundary": 0,
+      "length_mismatches": 0,
+      "rows": [
+        {
+          "actual": "проблема ",
+          "before_hard_boundary": 0,
+          "expected": "проблема ",
+          "original": "ghj,ktvf"
+        },
+        {
+          "actual": "предложил ",
+          "before_hard_boundary": 0,
+          "expected": "предложил ",
+          "original": "ghtlkj;bk"
+        },
+        {
+          "actual": "библиотека ",
+          "before_hard_boundary": 0,
+          "expected": "библиотека ",
+          "original": ",b,kbjntrf"
+        },
+        {
+          "actual": "которую ",
+          "before_hard_boundary": 0,
+          "expected": "которую ",
+          "original": "rjnjhe."
+        },
+        {
+          "actual": "которую, ",
+          "before_hard_boundary": 0,
+          "expected": "которую, ",
+          "original": "rjnjhe.,"
+        },
+        {
+          "actual": "привет, ",
+          "before_hard_boundary": 0,
+          "expected": "привет, ",
+          "original": "ghbdtn,"
+        },
+        {
+          "actual": "привет. ",
+          "before_hard_boundary": 0,
+          "expected": "привет. ",
+          "original": "ghbdtn."
+        },
+        {
+          "actual": "привет... ",
+          "before_hard_boundary": 0,
+          "expected": "привет... ",
+          "original": "ghbdtn..."
+        },
+        {
+          "actual": "привет; ",
+          "before_hard_boundary": 0,
+          "expected": "привет; ",
+          "original": "ghbdtn;"
+        },
+        {
+          "actual": "hello, ",
+          "before_hard_boundary": 0,
+          "expected": "hello, ",
+          "original": "hello,"
+        },
+        {
+          "actual": "hello... ",
+          "before_hard_boundary": 0,
+          "expected": "hello... ",
+          "original": "hello..."
+        },
+        {
+          "actual": "hello,world ",
+          "before_hard_boundary": 0,
+          "expected": "hello,world ",
+          "original": "hello,world"
+        },
+        {
+          "actual": "don't ",
+          "before_hard_boundary": 0,
+          "expected": "don't ",
+          "original": "don't"
+        },
+        {
+          "actual": "example.org ",
+          "before_hard_boundary": 0,
+          "expected": "example.org ",
+          "original": "example.org"
+        },
+        {
+          "actual": "path/file.py ",
+          "before_hard_boundary": 0,
+          "expected": "path/file.py ",
+          "original": "path/file.py"
+        },
+        {
+          "actual": "pm2 ",
+          "before_hard_boundary": 0,
+          "expected": "pm2 ",
+          "original": "pm2"
+        },
+        {
+          "actual": "HTTP ",
+          "before_hard_boundary": 0,
+          "expected": "HTTP ",
+          "original": "HTTP"
+        },
+        {
+          "actual": "we’re ",
+          "before_hard_boundary": 0,
+          "expected": "we’re ",
+          "original": "we’re"
+        }
+      ]
+    }
+  },
+  "schema_version": 1,
+  "scope": "authored in-process regression; fixed physical keys/live layout; no native OS proof or independent model evaluation"
+}
