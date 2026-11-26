@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ks_lang::detector::{DecideOptions, LanguageDetector, LanguageScorer, ProtectedTokens};
-use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixScorer, early_switch_decision};
+use ks_lang::early_switch::{EarlySwitchPolicy, PrefixIndex, PrefixLexicon, PrefixScorer, early_switch_decision};
 use ks_lang::language_model::WordScore;
 use ks_lang::lexicon_supplement::supplement_words;
 use ks_lang::ortho_model::{FEATURES, OrthoEvidence, OrthoModel};
@@ -60,9 +60,20 @@ fn an_orthotactic_file_past_its_limit_is_unavailable() {
 fn what_is_read_once_is_kept_and_a_lexicon_that_is_gone_knows_nothing() {
     let shipped = Resources::new(resources());
     let model = shipped.engine_language_model("en_US").unwrap();
-    let first = shipped.prefix_index(&model);
-    let second = shipped.prefix_index(&model);
-    assert!(Arc::ptr_eq(&first, &second));
+    for lexicon in [PrefixLexicon::Plain, PrefixLexicon::Held] {
+        let first = shipped.prefix_index(&model, lexicon);
+        let second = shipped.prefix_index(&model, lexicon);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+    // Another model of the same lexicon file holds other words: its held index is its own, its plain one is shared.
+    let other = shipped.language_model("en_US", ["zzyzxword"]);
+    assert!(!Arc::ptr_eq(&shipped.prefix_index(&model, PrefixLexicon::Held), &shipped.prefix_index(&other, PrefixLexicon::Held)));
+    assert!(Arc::ptr_eq(&shipped.prefix_index(&model, PrefixLexicon::Plain), &shipped.prefix_index(&other, PrefixLexicon::Plain)));
+    assert_eq!(shipped.prefix_index(&other, PrefixLexicon::Held).len(), shipped.prefix_index(&other, PrefixLexicon::Plain).len() + 1);
+    // A model of the emergency words alone was read from no folder: its plain lexicon is those words again.
+    let emergency = ks_lang::LanguageModel::load("en_US", std::iter::empty::<&str>(), &[], ks_lang::LanguageModel::disabled_speller());
+    assert!(emergency.lexicon_roots().is_empty());
+    assert_eq!(shipped.prefix_index(&emergency, PrefixLexicon::Plain).len(), emergency.frequencies.len());
     let empty = folder("no-resources");
     let nothing = Resources::new(empty.clone());
     assert!(!(nothing.packaged_identifier())("htop"));

@@ -12,7 +12,7 @@ use crate::corpus::{CALIBRATION, DEVELOPMENT, checksum, load_rows};
 use crate::evaluate::{EARLY_KIND, PROFILES, first_word, script_group, trimmed_window, typed_first};
 use crate::physical::{expanded_aliases, hex};
 use crate::prefix_words::{ACCEPTANCE_SPLIT, draw, held_out_of, read_split};
-use crate::replay::{Mode, Plan, Replayer, prefix_indexes};
+use crate::replay::{Mode, Plan, Replayer, prefix_indexes, prefix_indexes_of};
 use crate::sequence_report::Case;
 use crate::tools::{Lexicons, Tools, reference_models};
 use flate2::Compression;
@@ -22,6 +22,7 @@ use ks_context::VersionedPrefixModel;
 use ks_context::context_model::ContextModel;
 use ks_context::prefix_terms::PrefixTerms;
 use ks_lang::Resources;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_text::{Indent, JsonOptions, pystr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -414,6 +415,10 @@ pub struct NamedPair {
     pub name: String,
     pub context: PathBuf,
     pub prefix: PathBuf,
+    /// The words of the prefix index when not those the prefix model runs with (`VersionedPrefixModel::prefix_lexicon`):
+    /// the installed pair as it was measured before the program and the tools gave it one index (`M`), beside the pair
+    /// as users run it.
+    pub lexicon: Option<PrefixLexicon>,
 }
 
 /// Which corrections give a row typed in the other layout its key in the mean: one of kind early, or one of any kind.
@@ -846,9 +851,15 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
     let tools = Tools::new(request.root, resources.clone(), portable.clone(), BTreeSet::new())?;
     let lexicons: [&Lexicons; 2] = [&portable, &spelling];
     let shared = crate::evaluate::shared_ortho(&resources, &portable);
-    let indexes = [prefix_indexes(&portable), prefix_indexes(&spelling)];
     let models_dir = resources.resource_dir().join("models");
     let prefixes: Vec<Arc<VersionedPrefixModel>> = request.pairs.iter().map(|pair| VersionedPrefixModel::load(&pair.prefix).map(Arc::new).map_err(|error| format!("{}: {}", pair.prefix.display(), error.name))).collect::<Result<_, _>>()?;
+    // Each pair's indexes for each profile: those its prefix model runs with, unless the pair names others.
+    let indexes: Vec<[Vec<Arc<PrefixIndex>>; 2]> = request
+        .pairs
+        .iter()
+        .zip(&prefixes)
+        .map(|(pair, prefix)| lexicons.map(|models| pair.lexicon.map_or_else(|| prefix_indexes(&resources, models, Some(prefix)), |lexicon| prefix_indexes_of(&resources, models, lexicon))))
+        .collect();
     // The term lists of each profile, as the engine builds them, and closed to the tokens of A3.
     let tokens: BTreeSet<String> = rows.iter().filter(|row| row.sample == Sample::A3).map(|row| pystr::casefold(&row.text)).collect();
     let open: Vec<Arc<PrefixTerms>> = lexicons.iter().map(|models| crate::prefix::prefix_terms_of(request.resource_dir, models).map(Arc::new)).collect::<Result<_, _>>()?;
@@ -886,7 +897,7 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
                     };
                     let folder = std::env::temp_dir().join(format!("ks-acceptance-{}-{worker}", std::process::id()));
                     let terms = if task.part == Part::Closed { &closed[task.profile] } else { &open[task.profile] };
-                    let mut replayer = Replayer::new(tools, lexicons[task.profile], shared.clone(), folder.clone(), model, Some(prefixes[task.pair].clone()), indexes[task.profile].clone()).with_prefix_terms(terms.clone());
+                    let mut replayer = Replayer::new(tools, lexicons[task.profile], shared.clone(), folder.clone(), model, Some(prefixes[task.pair].clone()), indexes[task.pair][task.profile].clone()).with_prefix_terms(terms.clone());
                     let found: Vec<Replayed> = task
                         .rows
                         .iter()

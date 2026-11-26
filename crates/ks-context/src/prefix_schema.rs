@@ -11,8 +11,9 @@ use crate::constants::{
     MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_HEAD_MAX_LENGTH_BUCKET, PREFIX_HEAD_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, PREFIX_ORTHO_ABSOLUTE_MAX_STEPS,
     PREFIX_ORTHO_ABSOLUTE_STEP_NATS, PREFIX_ORTHO_BOTH_MAX_STEPS, PREFIX_ORTHO_BOTH_STEP_NATS, PREFIX_ORTHO_LENGTH_BUCKETS, PREFIX_ORTHO_MAX_STEPS,
     PREFIX_TAIL_MAX_LENGTH_BUCKET, PREFIX_TERM_COUNT_LOG_DIVISOR, TERMS_PREFIX_FEATURE_VERSION, PREFIX_ORTHO_MEAN_BOUND_NATS, PREFIX_ORTHO_STEP_NATS, PREFIX_ORTHO_SUM_BOUND_NATS,
-    PREFIX_ORTHO_WORST_BOUND_NATS,
+    PREFIX_ORTHO_WORST_BOUND_NATS, SUPPLEMENTED_PREFIX_FEATURE_VERSION,
 };
+use ks_lang::early_switch::PrefixLexicon;
 use crate::context_model::{first_greatest, ContextAction, ContextPrediction, ACTIONS};
 use crate::flat_table::load_artifact;
 use crate::prefix_model::{actions_match, features, finish_load, weight_spec, PrefixInput, PrefixModel, PrefixSide, ARTIFACT_FILE, PREFIX_FEATURE_VERSION};
@@ -22,6 +23,13 @@ use ks_lang::ortho_model::{BOS, Channel, OrthoModel};
 use ks_text::pystr;
 use serde_json::Value;
 use std::path::Path;
+
+/// The words the prefix index of a schema holds (`VersionedPrefixModel::prefix_lexicon`), for whoever builds frames of that
+/// schema before any model of it exists: the trainer.
+#[must_use]
+pub fn prefix_lexicon_of(feature_version: i64) -> PrefixLexicon {
+    if feature_version >= SUPPLEMENTED_PREFIX_FEATURE_VERSION.to::<i64>() { PrefixLexicon::Held } else { PrefixLexicon::Plain }
+}
 
 /// Schema one stays frozen; schema two learns characters of observed prefixes.
 ///
@@ -279,6 +287,15 @@ impl VersionedPrefixModel {
     #[must_use]
     pub fn needs_terms(&self) -> bool {
         self.feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()
+    }
+
+    /// The words its prefix index holds (`Resources::prefix_index`). A model of schema four is trained, measured and run
+    /// with every word of the language model, the supplement's among them. An older one runs with the index the program
+    /// has always given it, without the supplement: prefix_v2 was trained with the supplement, but users have run it
+    /// without since 0.37.0, and it stays as they know it.
+    #[must_use]
+    pub fn prefix_lexicon(&self) -> PrefixLexicon {
+        prefix_lexicon_of(self.feature_version)
     }
 
     pub fn load(path: &Path) -> Result<VersionedPrefixModel, LoadError> {

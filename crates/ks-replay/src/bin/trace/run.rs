@@ -16,7 +16,7 @@ use ks_context::{ContextModel, ContextPolicy, VersionedPrefixModel};
 use ks_engine::engine::{CorrectionPlan, EngineCore, EngineParts, EngineSnapshot, KeySwitchEngine, LearningPrompt, PlanRef, Stroke};
 use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::detector::ProtectedTokens;
-use ks_lang::early_switch::PrefixIndex;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_lang::{LanguageModel, Resources, WordTable};
 use serde_json::{json, Value};
@@ -371,7 +371,9 @@ impl Worker {
         let words = |index: usize| (wanted.get(index).and_then(|model| model["words"].as_u64()).unwrap_or(0)).to::<usize>();
         if self.packaged.is_none() {
             let models: Vec<Arc<LanguageModel>> = ["en_US", "ru_RU"].iter().filter_map(|locale| self.resources.engine_language_model(locale).ok()).collect();
-            let prefix_indexes = models.iter().map(|model| self.resources.prefix_index(model)).collect();
+            // The index the program gives the prefix model it replays with, as the engine's start does.
+            let lexicon = self.prefix_model.as_ref().map_or(PrefixLexicon::Plain, |model| model.prefix_lexicon());
+            let prefix_indexes = models.iter().map(|model| self.resources.prefix_index(model, lexicon)).collect();
             self.packaged = Some(self.kind_of(models, prefix_indexes));
         }
         let fits = |kind: &Kind| {

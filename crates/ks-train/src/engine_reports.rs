@@ -5,7 +5,8 @@ use crate::corpus::{checksum, read_json};
 use crate::fit::{provenance as tree_provenance, readable};
 use crate::physical::{hex_digest, pair};
 use crate::prefix::role_named;
-use crate::tools::{LOCALES, Lexicons, reference_models};
+use crate::replay::{prefix_indexes, prefix_indexes_of};
+use crate::tools::{Lexicons, reference_models};
 use flate2::read::MultiGzDecoder;
 use ks_backend::{FieldContext, FieldReader, FieldRole, KeyEvent};
 use ks_config::config::SettingsStore;
@@ -17,10 +18,10 @@ use ks_context::{ContextPolicy, VersionedPrefixModel};
 use ks_engine::engine::{EngineCore, EngineParts};
 use ks_lang::boundary_model::BoundaryModel;
 use ks_lang::boundary_policy::BoundaryPolicy;
-use ks_lang::constants::{BOUNDARY_V1_FEATURE_VERSION, PREFIX_INDEX_DICTIONARY_MAX_BYTES};
-use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
+use ks_lang::constants::BOUNDARY_V1_FEATURE_VERSION;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
-use ks_lang::{LanguageModel, Resources};
+use ks_lang::Resources;
 use ks_replay::harness::{Backend, FakeClock, UnreadField};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -283,38 +284,28 @@ impl FieldReader for Reader {
     }
 }
 
-struct PrefixLexicon {
+struct PrefixProfile {
     models: Lexicons,
-    indexes: Vec<Arc<PrefixIndex>>,
+    /// The engine's indexes without a prefix model, and with the model of the report (`VersionedPrefixModel::prefix_lexicon`).
+    plain: Vec<Arc<PrefixIndex>>,
+    with_model: Vec<Arc<PrefixIndex>>,
     shared: SharedOrtho,
 }
 
-/// `prefix_corpus.lexicon`: the engine's models; indexes of the onboard lexicon and its fallback words without the
-/// supplement, plus the stems of the Hunspell dictionary the serving model uses.
-fn lexicon(root: &Path, resources: &Arc<Resources>, profile: &str) -> Result<PrefixLexicon, String> {
-    let spelling = profile == "reference_hunspell";
-    let models = reference_models(root, resources, spelling)?;
-    let config = read_json(&root.join("model/intent_v1/config.json"))?;
-    let mut indexes = Vec::new();
-    for (group, locale) in LOCALES.iter().enumerate() {
-        let path = root.join(config["sources"]["languages"][locale]["path"].as_str().ok_or("a lexicon without a path")?);
-        let directory = path.parent().ok_or("a lexicon outside a folder")?.to_path_buf();
-        let onboard = LanguageModel::load(locale, std::iter::empty::<&str>(), &[directory], LanguageModel::disabled_speller());
-        let index = if spelling {
-            let stems = dictionary_stems(Path::new(models[group].speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
-            PrefixIndex::new(onboard.frequencies.words().iter().chain(stems.iter()), onboard.frequencies.clone())
-        } else {
-            PrefixIndex::new(onboard.frequencies.words().iter(), onboard.frequencies.clone())
-        };
-        indexes.push(Arc::new(index));
-    }
+/// `prefix_corpus.lexicon`: the engine's models of a profile and their indexes, built as the program builds them
+/// (`Resources::prefix_index`): the lexicon file and its fallback words, plus the stems of the Hunspell dictionary the
+/// serving model uses, and for a prefix model of schema four the supplement too.
+fn lexicon(root: &Path, resources: &Arc<Resources>, profile: &str, model: &VersionedPrefixModel) -> Result<PrefixProfile, String> {
+    let models = reference_models(root, resources, profile == "reference_hunspell")?;
+    let plain = prefix_indexes_of(resources, &models, PrefixLexicon::Plain);
+    let with_model = prefix_indexes(resources, &models, Some(model));
     let shared = shared_of(resources, &models);
-    Ok(PrefixLexicon { models, indexes, shared })
+    Ok(PrefixProfile { models, plain, with_model, shared })
 }
 
 struct PrefixTask<'a> {
     resources: &'a Arc<Resources>,
-    lexicon: &'a PrefixLexicon,
+    lexicon: &'a PrefixProfile,
     prefix: Option<Arc<VersionedPrefixModel>>,
     native: bool,
 }
@@ -327,7 +318,7 @@ fn prefix_replay(row: &PrefixRow, task: &PrefixTask<'_>, policy: &mut Option<Con
     let backend = Arc::new(Backend::new(&row.application, row.source, before));
     let settings = vec![("detection.context_policy", json!("assist")), ("detection.early_switch", json!(true)), ("detection.context_read_field", json!(task.native)), ("detection.learning", json!(false)), ("detection.respect_manual_layout", json!(false)), ("general.keep_history", json!(false))];
     let reader = Arc::new(Reader { backend: backend.clone(), role: row.role });
-    let mut engine = engine(Parts { resources: task.resources, models: &task.lexicon.models, policy: policy.take().ok_or("one engine at a time")?, reader, boundary: task.resources.boundary_policy(), prefix: task.prefix.clone(), indexes: task.lexicon.indexes.clone(), settings, backend: backend.clone(), folder })?;
+    let mut engine = engine(Parts { resources: task.resources, models: &task.lexicon.models, policy: policy.take().ok_or("one engine at a time")?, reader, boundary: task.resources.boundary_policy(), prefix: task.prefix.clone(), indexes: if task.prefix.is_some() { task.lexicon.with_model.clone() } else { task.lexicon.plain.clone() }, settings, backend: backend.clone(), folder })?;
     engine.core.shared.set_focus_window(EDITOR_WINDOW);
     engine.core.context_policy.stream.focus(&row.application, EDITOR_WINDOW);
     engine.core.context_policy.stream.text.clone_from(&row.before);
@@ -355,7 +346,7 @@ pub fn prefix_report(root: &Path, resources: &Arc<Resources>, split: &str, scrat
     let runtime = extras(root, "model/prefix_v2/recipe.json", &[&candidate, &seal, &directory.join("corpus.json"), &root.join("resources/lexicon-supplement-ru_RU.json")])?;
     let selected = prefix_rows(root, split)?;
     let model = Arc::new(VersionedPrefixModel::load(&candidate).map_err(|error| error.name.to_string())?);
-    let lexicons: BTreeMap<&str, PrefixLexicon> = PROFILES.iter().map(|profile| Ok((*profile, lexicon(root, resources, profile)?))).collect::<Result<_, String>>()?;
+    let lexicons: BTreeMap<&str, PrefixProfile> = PROFILES.iter().map(|profile| Ok((*profile, lexicon(root, resources, profile, &model)?))).collect::<Result<_, String>>()?;
     let tasks: Vec<(&str, bool, &str)> = PROFILES.iter().flat_map(|profile| [false, true].into_iter().flat_map(move |native| ["shipping_no_prefix", "candidate"].into_iter().map(move |name| (*profile, native, name)))).collect();
     let outcome: Mutex<Vec<Option<Result<(BTreeMap<&str, i64>, Vec<Value>), String>>>> = Mutex::new((0..tasks.len()).map(|_| None).collect());
     let next = std::sync::atomic::AtomicUsize::new(0);

@@ -642,6 +642,10 @@ pub const PREFIX_ORTHO_LENGTH_BUCKETS: [usize; 4] = [3, 4, 5, 6];
 // the start of the typed keys (crates/ks-context/src/prefix_schema.rs, prefix_terms.rs).
 pub const TERMS_PREFIX_FEATURE_VERSION: usize = 4;
 
+// The first schema whose prefix index holds every word of the language model, the supplement's among them, in the program
+// as in its training (`VersionedPrefixModel::prefix_lexicon`); older ones run without the supplement, as users know them.
+pub const SUPPLEMENTED_PREFIX_FEATURE_VERSION: usize = 4;
+
 // The fewest letters of a reading the term lists are asked about: shorter ones begin too many terms to say anything.
 pub const PREFIX_TERM_MIN_CHARACTERS: usize = 3;
 

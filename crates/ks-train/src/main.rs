@@ -3,7 +3,7 @@
 //! `ks-train prefix-report --fit <folder> --output <file>`
 //! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--frames-cache <folder>] --output <file> [--jobs N]`
 //! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
-//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>... --reference <name> --output <file> [--jobs N]`
+//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>[,plain|held]... --reference <name> --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
 //! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
@@ -459,6 +459,7 @@ fn all_of<'a>(arguments: &'a [String], name: &str) -> Vec<&'a str> {
 
 /// `prefix-acceptance build|run`: the acceptance samples of a prefix candidate, and their one replay.
 fn acceptance_command(arguments: &[String]) -> i32 {
+    use ks_lang::early_switch::PrefixLexicon;
     use ks_train::prefix_acceptance::{self, BuildRequest, Minimums, NamedPair, RunRequest};
     let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let paths = |name: &str| all_of(arguments, name).into_iter().map(PathBuf::from).collect::<Vec<_>>();
@@ -477,9 +478,16 @@ fn acceptance_command(arguments: &[String]) -> i32 {
             let pairs: Vec<NamedPair> = all_of(arguments, "--pair")
                 .into_iter()
                 .map(|named| {
-                    let (name, models) = named.split_once('=').unwrap_or_else(|| panic!("a pair is <name>=<context model>,<prefix model>: {named}"));
-                    let (context, prefix) = models.split_once(',').unwrap_or_else(|| panic!("a pair is <name>=<context model>,<prefix model>: {named}"));
-                    NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix) }
+                    let shape = || format!("a pair is <name>=<context model>,<prefix model>[,plain|held]: {named}");
+                    let (name, models) = named.split_once('=').unwrap_or_else(|| panic!("{}", shape()));
+                    let (context, rest) = models.split_once(',').unwrap_or_else(|| panic!("{}", shape()));
+                    let (prefix, lexicon) = match rest.split_once(',') {
+                        None => (rest, None),
+                        Some((prefix, "plain")) => (prefix, Some(PrefixLexicon::Plain)),
+                        Some((prefix, "held")) => (prefix, Some(PrefixLexicon::Held)),
+                        Some(_) => panic!("{}", shape()),
+                    };
+                    NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix), lexicon }
                 })
                 .collect();
             let (root, samples, output) = (required("--tree"), required("--samples"), required("--output"));

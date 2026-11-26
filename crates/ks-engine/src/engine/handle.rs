@@ -7,6 +7,7 @@ use crate::constants::{ENGINE_LOOP_MAX_WAKE_SECONDS, ENGINE_LOOP_MIN_WAKE_SECOND
 use ks_backend::{BackendError, FieldReader};
 use ks_config::indicator::alternate_layout_group;
 use ks_config::learning::{LearnedRule, LearningError};
+use ks_lang::early_switch::PrefixLexicon;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
@@ -77,13 +78,14 @@ impl KeySwitchEngine {
         // The typo lists are read beside the rest too, when the engine is to correct typos; `from_parts` reads them itself
         // otherwise, as it did before (and again, should this reading fail).
         let correct_typos = settings.with_value("detection.correct_typos", |value| value.is_none_or(truthy));
-        let (models, (intent_model, intent_model_status), context_policy, prefix_indexes, typo) = std::thread::scope(|scope| -> EngineResult<_> {
+        let (models, (intent_model, intent_model_status), context_policy, prefix_model, prefix_indexes, typo) = std::thread::scope(|scope| -> EngineResult<_> {
             let typo = scope.spawn(|| {
                 let locales: Vec<&str> = wanted.iter().map(String::as_str).collect();
                 correct_typos.then(|| TypoCorrector::packaged(resources.resource_dir(), &locales).ok().map(Arc::new)).flatten()
             });
             let intent = scope.spawn(|| resources.intent_model());
             let context = scope.spawn(|| ks_context::ContextModel::try_load(&models_dir));
+            let prefix = scope.spawn(|| VersionedPrefixModel::default_model(&models_dir).map(Arc::new));
             let dictionaries: Arc<OnceLock<Vec<Arc<LanguageModel>>>> = Arc::new(OnceLock::new());
             let known = EngineCore::known_later(&wanted, &dictionaries);
             let ortho = scope.spawn(|| ContextPolicy::load_ortho(resources, known));
@@ -93,11 +95,14 @@ impl KeySwitchEngine {
             for reading in readings {
                 models.push(joined(reading)?);
             }
-            let indexes = models.iter().map(|model| resources.prefix_index(model)).collect::<Vec<_>>();
+            // The index the prefix model was trained on (`prefix_lexicon`); without a model, the plain one, as always.
+            let prefix_model = joined(prefix);
+            let lexicon = prefix_model.as_ref().map_or(PrefixLexicon::Plain, |model| model.prefix_lexicon());
+            let indexes = models.iter().map(|model| resources.prefix_index(model, lexicon)).collect::<Vec<_>>();
             // Before the orthotactic model is joined, and so before anything can ask it a word.
             let _ = dictionaries.set(models.clone());
             let context_policy = ContextPolicy::with_models(resources, reader, joined(ortho), joined(context), Some(clock.clone()));
-            Ok((models, joined(intent), context_policy, indexes, joined(typo)))
+            Ok((models, joined(intent), context_policy, prefix_model, indexes, joined(typo)))
         })?;
         let core = EngineCore::from_parts_with_typo(EngineParts {
             settings,
@@ -111,7 +116,7 @@ impl KeySwitchEngine {
             protected_tokens: resources.protected_tokens(),
             context_policy,
             boundary_model: resources.boundary_policy(),
-            prefix_model: VersionedPrefixModel::default_model(&resources.resource_dir().join("models")).map(Arc::new),
+            prefix_model,
             prefix_indexes,
             prefix_terms: None,
             resource_dir: resources.resource_dir().to_path_buf(),

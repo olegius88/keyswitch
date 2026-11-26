@@ -15,12 +15,13 @@ use flate2::write::GzEncoder;
 use ks_backend::{FieldContext, FieldRole};
 use ks_context::prefix_model::{PrefixInput, PrefixModel, PrefixSide};
 use ks_context::constants::TERMS_PREFIX_FEATURE_VERSION;
-use ks_context::prefix_schema::{PrefixReaders, features_with_readers};
+use ks_context::prefix_schema::{PrefixReaders, features_with_readers, prefix_lexicon_of};
 use ks_context::prefix_terms::PrefixTerms;
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_context::flat_table::WeightTable;
-use ks_lang::early_switch::{PrefixIndex, dictionary_stems};
+use ks_lang::early_switch::PrefixIndex;
 use ks_lang::{Resources, LanguageModel};
+use crate::replay::prefix_indexes_of;
 use ks_text::{JsonOptions, fsum, json_dumps, py_round_ndigits, pystr};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -35,7 +36,6 @@ const SAFETY_CATEGORIES: [&str; 3] = ["identifier", "command", "mixed_english"];
 const PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL: u8 = 2;
 const PREFIX_V2_LEGACY_DELETION_INDEX: usize = 3;
 const PREFIX_V2_SHORT_PREFIX_CHARACTERS: usize = 4;
-use ks_lang::constants::PREFIX_INDEX_DICTIONARY_MAX_BYTES;
 const PREFIX_MIN_CHARACTERS: usize = 4;
 const PREFIX_MAX_CHARACTERS: usize = 12;
 const VERSION_HASH_CHARACTERS: usize = 12;
@@ -423,21 +423,16 @@ fn contexts_of(parent: &ParentWord) -> Vec<PrefixContext> {
 }
 
 pub struct Indexes {
-    portable: Vec<PrefixIndex>,
-    hunspell: Vec<PrefixIndex>,
+    portable: Vec<Arc<PrefixIndex>>,
+    hunspell: Vec<Arc<PrefixIndex>>,
 }
 
-/// `_indexes`: the supplied frozen models, with the Hunspell stems for the reference profile.
-fn indexes_of(portable: &Lexicons, spelling: &Lexicons) -> Indexes {
-    let plain = portable.iter().map(|model| PrefixIndex::new(model.frequencies.words().iter(), model.frequencies.clone())).collect();
-    let stemmed = spelling
-        .iter()
-        .map(|model| {
-            let stems = dictionary_stems(Path::new(model.speller.source()), PREFIX_INDEX_DICTIONARY_MAX_BYTES);
-            PrefixIndex::new(model.frequencies.words().iter().chain(stems.iter()), model.frequencies.clone())
-        })
-        .collect();
-    Indexes { portable: plain, hunspell: stemmed }
+/// `_indexes`: the supplied frozen models, with the Hunspell stems for the reference profile, built as the program builds
+/// them for a model of the schema (`prefix_lexicon_of`): every word the models hold for schema four, the plain lexicon for
+/// an older one, which the program has always given it.
+fn indexes_of(resources: &Resources, portable: &Lexicons, spelling: &Lexicons, feature_version: i64) -> Indexes {
+    let lexicon = prefix_lexicon_of(feature_version);
+    Indexes { portable: prefix_indexes_of(resources, portable, lexicon), hunspell: prefix_indexes_of(resources, spelling, lexicon) }
 }
 
 /// A frame of the curriculum, with what the epochs and the metrics read.
@@ -1394,7 +1389,7 @@ impl FrameMaker {
         let resources: Arc<Resources> = Resources::with_speller(resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         let portable = reference_models(root, &resources, false)?;
         let spelling = reference_models(root, &resources, true)?;
-        let indexes = indexes_of(&portable, &spelling);
+        let indexes = indexes_of(&resources, &portable, &spelling, feature_version);
         // Schemas three and four read the keys with the packaged orthotactic models, as the engine does; four the term
         // lists as well.
         let terms = (feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()).then(|| prefix_terms_of(resource_dir, &portable)).transpose()?;

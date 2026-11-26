@@ -629,7 +629,6 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let load_context = |path: &Path| ContextModel::load_artifact(path, &models_dir).map_err(|error| format!("{}: {}", path.display(), error.name));
     let load_prefix = |path: &Path| VersionedPrefixModel::load(path).map(Arc::new).map_err(|error| format!("{}: {}", path.display(), error.name));
     let (prefix_candidate, prefix_baseline, prefix_installed) = (load_prefix(&pairs.prefix_candidate)?, load_prefix(&pairs.prefix_baseline)?, load_prefix(&pairs.prefix_installed)?);
-    let indexes = [prefix_indexes(first), prefix_indexes(spelling)];
     // A prefix model that reads the term lists gets them built once for each profile, as its engine would build them, and
     // not once for every plan.
     let terms: Option<[Arc<ks_context::prefix_terms::PrefixTerms>; 2]> = if [&prefix_candidate, &prefix_baseline, &prefix_installed].iter().any(|model| model.needs_terms()) {
@@ -661,7 +660,7 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
     let read_back = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for worker in 0..jobs.max(1).min(tasks.len()) {
-            let (tasks, order, next, done, failure, plans_of, shared, indexes, load_context) = (&tasks, &order, &next, &done, &failure, &plans_of, &shared, &indexes, &load_context);
+            let (tasks, order, next, done, failure, plans_of, shared, load_context) = (&tasks, &order, &next, &done, &failure, &plans_of, &shared, &load_context);
             let (prefix_candidate, prefix_baseline, prefix_installed) = (&prefix_candidate, &prefix_baseline, &prefix_installed);
             let (digests, read_back, terms) = (&digests, &read_back, &terms);
             scope.spawn(move || {
@@ -692,7 +691,9 @@ pub fn score_sequences(root: &Path, resources: &Arc<Resources>, tools: &Tools, s
                     };
                     let models = if task.profile == 0 { first } else { spelling };
                     let folder = std::env::temp_dir().join(format!("ks-evaluate-{}-{worker}", std::process::id()));
-                    let replayer = Replayer::new(tools, models, shared.clone(), folder.clone(), model, Some(prefix_model), indexes[task.profile].clone());
+                    // Each pair with the index its prefix model runs with: the installed prefix_v2 as users run it.
+                    let indexes = prefix_indexes(resources, models, Some(&prefix_model));
+                    let replayer = Replayer::new(tools, models, shared.clone(), folder.clone(), model, Some(prefix_model), indexes);
                     let mut replayer = match terms {
                         Some(lists) => replayer.with_prefix_terms(lists[task.profile].clone()),
                         None => replayer,

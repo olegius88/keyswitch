@@ -6,6 +6,7 @@ use ks_context::prefix_model::{PrefixInput, PrefixSide};
 use ks_context::prefix_schema::{PrefixReaders, VersionedPrefixModel, features_with_readers};
 use ks_context::prefix_terms::{PrefixTerms, TermEvidence, TermMatch};
 use ks_lang::Resources;
+use ks_lang::early_switch::PrefixLexicon;
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use std::path::PathBuf;
 
@@ -56,7 +57,7 @@ fn the_lists_say_what_each_term_and_each_longer_one_a_reading_begins_is() {
 fn schema_four_reads_the_lists_both_readings_scores_and_a_word_at_the_start() {
     let resources = Resources::new(resources());
     let (en, ru) = (resources.engine_language_model("en_US").expect("en"), resources.engine_language_model("ru_RU").expect("ru"));
-    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    let (en_index, ru_index) = (resources.prefix_index(&en, PrefixLexicon::Plain), resources.prefix_index(&ru, PrefixLexicon::Plain));
     let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
     let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).expect("the orthotactic model");
     let tables = tables();
@@ -99,9 +100,11 @@ fn a_model_of_schema_four_answers_only_with_the_term_lists() {
     let model = ks_context::prefix_model::PrefixModel { weights: ks_context::flat_table::WeightTable::from_entries(vec![("bias", [0.0, 5.43, 0.0, 0.0])]), version: "prefix-v4-000000000000".to_owned(), conversion_threshold: 0.99 };
     let model = VersionedPrefixModel { model, feature_version: 4, thresholds: None };
     assert!(model.needs_ortho() && model.needs_terms());
+    // Its index holds every word of the language model, as it was trained.
+    assert_eq!(model.prefix_lexicon(), PrefixLexicon::Held);
     let resources = Resources::new(resources());
     let (en, ru) = (resources.engine_language_model("en_US").expect("en"), resources.engine_language_model("ru_RU").expect("ru"));
-    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    let (en_index, ru_index) = (resources.prefix_index(&en, model.prefix_lexicon()), resources.prefix_index(&ru, model.prefix_lexicon()));
     let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
     let item = PrefixInput { original: "ghbd".to_owned(), alternative: "прив".to_owned(), source_group: 0, field: FieldContext::new("Editor", "1") };
     let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).expect("the orthotactic model");
