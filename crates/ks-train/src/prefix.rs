@@ -86,8 +86,8 @@ pub struct FrameRules {
     /// The families the lists are closed to read none for the reading as typed of a word typed as meant, and all of them
     /// otherwise; without it they read none at all.
     pub close_typed_reading_only: bool,
-    /// A prefix typed in the other layout whose reading in the layout meant continues fewer words of that layout's index
-    /// waits: there a word typed as meant reads the same (none when 0).
+    /// A prefix typed in the other layout of no more letters than `convert_from` whose reading in the layout meant continues
+    /// fewer words of that layout's index waits: there a word typed as meant reads the same (none when 0).
     pub wait_below_target_completions: i64,
 }
 
@@ -548,7 +548,9 @@ fn parent_frames(
                     assert!((0..=1).contains(&source), "a side of the pair");
                     let ambiguous = indexes.portable[source.to::<usize>()].completions(&original).completions > 0;
                     let term = *desired && rules.terms.as_ref().is_some_and(|terms| begins_a_term(terms, &original));
-                    let sparse = *desired && table[(1 - source).to::<usize>()].completions(&alternate).completions < rules.wait_below_target_completions;
+                    // At the first key it may convert at, not after: a longer prefix continues few words because it is
+                    // nearly the word.
+                    let sparse = *desired && length <= rules.convert_from && table[(1 - source).to::<usize>()].completions(&alternate).completions < rules.wait_below_target_completions;
                     let label = label_of(*desired, length, ambiguous, term, sparse, rules);
                     let mut field = FieldContext::new(context.application.as_str(), pair_id.as_str());
                     field.before.clone_from(&context.before);
@@ -1472,7 +1474,7 @@ impl FrameMaker {
     fn settings(&self, feature_version: i64, lexicon: PrefixLexicon, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
-            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}\nwait on lexicon {}\nclosed to the typed reading only {}\nwait below target completions {}",
+            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}\nwait on lexicon {}\nclosed to the typed reading only {}\nwait up to the first converting key below target completions {}",
             self.maximum_prefix_length,
             self.rules.convert_from,
             self.rules.minimum_characters,
