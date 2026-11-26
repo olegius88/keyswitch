@@ -1189,16 +1189,18 @@ fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
     for kept in [true, false] {
         let api = FakeWindowsAPI::plain();
         let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
+        subject.start(collecting(&collected())).unwrap();
+        let hook = api.hook();
+        subject.hold_input();
         if kept {
-            let mut hold = subject.inner.hold.lock().unwrap();
-            hold.holding = true;
-            hold.keep(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 11));
+            assert!(hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
         } else {
             lock(&subject.inner.hook).pressed.insert(VK_D);
         }
         subject.inject_correction(read(&one)).unwrap();
         assert!(api.sent().iter().flatten().all(|input| !input.unicode), "kept {kept}");
         assert!(api.sent().len() > 1, "kept {kept}");
+        subject.stop();
     }
     // A window that sends the keys on to another computer: keys, one to a call.
     let api = FakeWindowsAPI::plain();
