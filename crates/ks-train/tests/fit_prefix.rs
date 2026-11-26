@@ -463,6 +463,76 @@ mod words {
         low_keys_cut_nats: Option<BTreeMap<String, f64>>,
     }
 
+    /// `prefix-derive` from a frozen corpus into `output`, under a cut of half the training families.
+    fn derive(from: &Path, extra: &[&str], output: &Path) -> std::process::Output {
+        trainer().arg("prefix-derive").arg("--from").arg(from).args(["--namespace", "test:derive", "--cut-per-mille", "500"]).args(extra).arg("--output").arg(output).output().expect("the trainer starts")
+    }
+
+    /// A corpus derived from a frozen one: half its training families cut into acceptance, its acceptance kept as
+    /// development of its own, development, calibration, the held-out file and the config copied; words of one class and
+    /// source added from a file of rows, but none the corpus holds, none of a family of another split or of the cut, none
+    /// listed. The derived corpus is read as any word corpus, its former acceptance by a probe.
+    fn derived_from(small: &Path, frozen: &Path, kept: &Path) {
+        // The source of the words offered, and another one.
+        const EXTRA: &str = "extra";
+        const OTHER: &str = "other";
+        let read_split = ks_train::prefix_words::read_split;
+        let (train, development) = (read_split(frozen, "train").expect("training"), read_split(frozen, "development").expect("development"));
+        let renamed = |row: &WordRow, class: Class, source: &str| WordRow { text: format!("{}{}", row.text, if row.group == 1 { "ж" } else { "q" }), class, source: source.to_owned(), ..row.clone() };
+        // A word of a family the cut leaves in training: the one listed, and the one the corpus holds.
+        let left = train.iter().find(|row| ks_train::prefix_words::draw(&format!("test:derive:cut:{}", row.family)) % 1000 >= 500).expect("a family the cut leaves");
+        let mut offered: Vec<WordRow> = train.iter().map(|row| renamed(row, Class::EnglishKeys, EXTRA)).collect();
+        offered.extend([
+            renamed(&train[0], Class::Rare, EXTRA),
+            renamed(&train[0], Class::EnglishKeys, OTHER),
+            WordRow { class: Class::EnglishKeys, source: EXTRA.to_owned(), ..left.clone() },
+            renamed(&development[0], Class::EnglishKeys, EXTRA),
+        ]);
+        let listed = renamed(left, Class::EnglishKeys, EXTRA).text;
+        let inputs = scratch("words-derive-inputs");
+        let (rows, list) = (inputs.join("offered.jsonl.gz"), inputs.join("listed.txt"));
+        std::fs::write(&rows, gz(&offered)).expect("the offered rows");
+        std::fs::write(&list, format!("{listed}\n")).expect("a list");
+        let output = small.join("model/words-derived");
+        let (rows_text, list_text, development_text) = (rows.display().to_string(), list.display().to_string(), frozen.join("development.jsonl.gz").display().to_string());
+        let said = succeeded(&derive(frozen, &["--add", &rows_text, "--add-class", "english_keys", "--add-source", EXTRA, "--exclude", &list_text, "--exclude", &development_text], &output));
+        assert!(said.contains("\"cut_families\""), "{said}");
+        let receipt: ks_train::prefix_words::WordReceipt = read(&output.join("corpus.json"));
+        let derivation = receipt.derived.expect("how it was derived");
+        let added = derivation.added.expect("the words added");
+        let (moved, new_train) = (read_split(&output, "acceptance").expect("the cut"), read_split(&output, "train").expect("training"));
+        let families = |rows: &[WordRow]| rows.iter().map(|row| row.family.clone()).collect::<std::collections::BTreeSet<_>>();
+        // The cut families are in acceptance only; training keeps the rest and gains the words added.
+        assert!(families(&moved).is_disjoint(&families(&new_train)) && derivation.cut_families == families(&moved).len() && derivation.cut_families > 0);
+        assert_eq!(moved.len() + new_train.len(), train.len() + added.rows);
+        assert_eq!((added.offered, added.words, added.class), (train.iter().map(|row| (&row.text, row.group)).collect::<std::collections::BTreeSet<_>>().len() + 2, added.eligible, Class::EnglishKeys));
+        assert!(added.eligible > 0 && added.eligible < added.offered - 2 && derivation.excluded.len() == 2);
+        assert!(!new_train.iter().any(|row| row.text == listed || row.source == OTHER || (row.source == EXTRA && row.class != Class::EnglishKeys)));
+        assert_eq!(new_train.iter().filter(|row| row.text == left.text && row.group == left.group).count(), train.iter().filter(|row| row.text == left.text && row.group == left.group).count());
+        for (from, to) in [("development", "development"), ("calibration", "calibration"), ("acceptance", "former-acceptance")] {
+            assert_eq!(std::fs::read(frozen.join(format!("{from}.jsonl.gz"))).expect("a split"), std::fs::read(output.join(format!("{to}.jsonl.gz"))).expect("a split"), "{to}");
+        }
+        assert_eq!(read_split(&output, "former-acceptance").expect("the former acceptance").len(), read_split(frozen, "acceptance").expect("acceptance").len());
+        // Without words added and without a cut, training is the frozen one byte for byte.
+        let plain = scratch("words-derive-plain").join("out");
+        succeeded(&trainer().arg("prefix-derive").arg("--from").arg(frozen).args(["--namespace", "test:derive", "--cut-per-mille", "0"]).arg("--output").arg(&plain).output().expect("the trainer starts"));
+        assert_eq!(std::fs::read(frozen.join("train.jsonl.gz")).expect("training"), std::fs::read(plain.join("train.jsonl.gz")).expect("training"));
+        // The former acceptance is development a probe reads.
+        let probed = scratch("words-derive-probe").join("probe.json");
+        let installed = small.join("resources/models/prefix_policy_v1.json");
+        succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(small).arg("--model").arg(&installed).arg("--recipe").arg(word_recipe(small, "words-derived", &[])).args(["--split", "former-acceptance", "--numbers-only"]).arg("--output").arg(&probed).output().expect("the trainer starts"));
+        // More words than may be added; a folder that holds a corpus; a config other than the receipt's; no acceptance.
+        refused(&derive(frozen, &["--add", &rows_text, "--add-class", "english_keys", "--add-source", EXTRA, "--add-words", "100000"], &scratch("words-derive-more").join("out")), "words of the class asked");
+        refused(&derive(frozen, &[], &output), "refusing to overwrite");
+        refused(&derive(kept, &[], &scratch("words-derive-kept").join("out")), "not the config the corpus was drawn by");
+        let bare = scratch("words-derive-bare");
+        std::fs::copy(frozen.join("config.json"), bare.join("config.json")).expect("the config");
+        let mut without: ks_train::prefix_words::WordReceipt = read(&frozen.join("corpus.json"));
+        without.sha256.remove("acceptance");
+        write(&bare.join("corpus.json"), &without);
+        refused(&derive(&bare, &[], &bare.join("out")), "has no acceptance split");
+    }
+
     #[test]
     fn a_word_corpus_is_frozen_once_and_verified_byte_for_byte() {
         let small = small_tree("words-freeze", &recipe());
@@ -519,7 +589,9 @@ mod words {
         std::fs::write(kept.join("config.json"), "{}").expect("a config");
         succeeded(&on(&["--hold-out", &sample_text, "--freeze", &kept.display().to_string()]));
         assert_eq!(std::fs::read_to_string(kept.join("config.json")).expect("the config"), "{}");
+        derived_from(&small, &frozen, &kept);
         std::fs::write(frozen.join("development.jsonl.gz"), gz(&[Sample { original: "" }])).expect("a split");
+        refused(&derive(&frozen, &[], &scratch("words-derive-changed").join("out")), "not the file the receipt pins");
         refused(&on(&[]), "1 files of the word corpus differ");
         assert!(ks_train::prefix_words::read_split(&frozen, "development").unwrap_err().contains("checksum mismatch"));
         assert!(ks_train::prefix_words::read_split(&frozen, "test").unwrap_err().contains("no such split"));
@@ -866,7 +938,7 @@ mod words {
         let found: Probe = read(&third);
         assert_eq!((found.false_texts.len(), found.minimum_characters), (0, 3));
         for split in ["calibration", "acceptance", "test"] {
-            refused(&probed(&["--split", split], &probe.join("refused.json")), &format!("a probe reads development or a list of words, not {split}"));
+            refused(&probed(&["--split", split], &probe.join("refused.json")), &format!("a probe reads development, a former acceptance split or a list of words, not {split}"));
         }
         let list = probe.join("words.txt");
         std::fs::write(&list, "garden\n\nпогода\n").expect("a list");

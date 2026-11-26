@@ -244,8 +244,8 @@ pub fn prefix_terms_of(resource_dir: &Path, models: &Lexicons) -> Result<PrefixT
 
 /// The parents of a word corpus's split: each row a word in its own situation, typed in the other layout too when paired.
 pub fn load_word_parents(directory: &Path, split: &str) -> Result<Vec<ParentWord>, String> {
-    if !FITTING_SPLITS.contains(&split) {
-        return Err("prefix-v2 may read only exposed train/development/calibration splits".to_owned());
+    if !FITTING_SPLITS.contains(&split) && split != crate::prefix_words::FORMER_ACCEPTANCE_SPLIT {
+        return Err("prefix-v2 may read only exposed train/development/calibration splits and a former acceptance split".to_owned());
     }
     crate::prefix_words::read_split(directory, split)?
         .into_iter()
@@ -1890,7 +1890,7 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
     let (parents, texts) = match request.words {
         ProbeWords::List(path) => (listed_parents(path)?, !request.numbers_only),
         // Calibration is read once, by the fit of the chosen recipe; the acceptance split by its samples alone.
-        ProbeWords::Split(split) if split != DEVELOPMENT => return Err(format!("a probe reads development or a list of words, not {split}")),
+        ProbeWords::Split(split) if ![DEVELOPMENT, crate::prefix_words::FORMER_ACCEPTANCE_SPLIT].contains(&split) => return Err(format!("a probe reads development, a former acceptance split or a list of words, not {split}")),
         ProbeWords::Split(split) => {
             let directory = request.root.join(options.corpus.as_deref().unwrap_or("model/prefix_v1"));
             let parents = if options.corpus.is_some() {

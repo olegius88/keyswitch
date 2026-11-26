@@ -38,9 +38,12 @@ pub const WORD_CORPUS_KIND: &str = "prefix-words";
 /// Schema two: the corpus as first drawn. Schema three adds the hard words by their first keys, the `low_keys` class, the
 /// acceptance split and a calibration cell of each direction.
 const WORD_CORPUS_SCHEMAS: [u32; 2] = [2, 3];
-const HELD_OUT_FILE: &str = "held-out.json.gz";
-const RECEIPT_FILE: &str = "corpus.json";
-const CONFIG_FILE: &str = "config.json";
+pub(crate) const HELD_OUT_FILE: &str = "held-out.json.gz";
+pub(crate) const RECEIPT_FILE: &str = "corpus.json";
+pub(crate) const CONFIG_FILE: &str = "config.json";
+/// The acceptance split of the corpus a derived corpus was made from (`prefix_derive`): development of its own, as the
+/// samples drawn from it were replayed and read in the cycle before. No fit reads it; a probe may.
+pub const FORMER_ACCEPTANCE_SPLIT: &str = "former-acceptance";
 const GENERATOR: &str = "crates/ks-train/src/prefix_words.rs";
 const TATOEBA_SNAPSHOT: &str = "model/context_v2/sources/tatoeba-cc0-en-ru.tsv.gz";
 const IDENTIFIERS: &str = "resources/identifiers.json";
@@ -49,7 +52,7 @@ const TERM_TABLE: &str = "resources/models/context-term-frequency.json";
 /// Hex digits of a draw: 64 bits of the SHA-256 of a name.
 const DRAW_HEX_DIGITS: usize = 16;
 /// Hex digits of a held-out alias kept in the held-out file: 64 bits, against some hundreds of thousands of aliases.
-const HELD_OUT_ALIAS_HEX_DIGITS: usize = 16;
+pub(crate) const HELD_OUT_ALIAS_HEX_DIGITS: usize = 16;
 const PER_MILLE: u64 = 1000;
 /// Keys of the US layout that are letters of the Russian one: the keys an address part may hold after its first letter.
 const LAYOUT_LETTER_SIGNS: &str = ",.;'[]<>:\"{}`~";
@@ -331,6 +334,9 @@ pub struct WordReceipt {
     /// Schema three: the mean log-probability, per language, at or under which a word's first keys make it hard.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub low_keys_cut_nats: Option<BTreeMap<String, f64>>,
+    /// A corpus derived from another without drawing its words again: how (`prefix_derive`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived: Option<crate::prefix_derive::Derivation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -394,11 +400,11 @@ struct SampleRow {
     original: String,
 }
 
-fn compact() -> JsonOptions {
+pub(crate) fn compact() -> JsonOptions {
     JsonOptions { ensure_ascii: false, separators: Some((",".to_owned(), ":".to_owned())), sort_keys: true, ..JsonOptions::default() }
 }
 
-fn readable() -> JsonOptions {
+pub(crate) fn readable() -> JsonOptions {
     JsonOptions { ensure_ascii: false, indent: Some(Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }
 }
 
@@ -408,7 +414,7 @@ pub fn draw(text: &str) -> u64 {
     u64::from_str_radix(hex_digest(text).get(..DRAW_HEX_DIGITS).unwrap_or_default(), 16).expect("hex digits")
 }
 
-fn read_gzip_lines(path: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn read_gzip_lines(path: &Path) -> Result<Vec<String>, String> {
     let file = std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
     std::io::BufReader::new(MultiGzDecoder::new(file)).lines().collect::<Result<Vec<String>, _>>().map_err(|error| format!("{}: {error}", path.display()))
 }
@@ -873,13 +879,13 @@ pub fn held_out_of(samples: &[PathBuf]) -> Result<HeldOut, String> {
     })
 }
 
-fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(bytes).map_err(|error| error.to_string())?;
     encoder.finish().map_err(|error| error.to_string())
 }
 
-fn gunzip(path: &Path) -> Result<Vec<u8>, String> {
+pub(crate) fn gunzip(path: &Path) -> Result<Vec<u8>, String> {
     let mut raw = Vec::new();
     MultiGzDecoder::new(std::fs::File::open(path).map_err(|error| format!("{}: {error}", path.display()))?).read_to_end(&mut raw).map_err(|error| error.to_string())?;
     Ok(raw)
@@ -983,6 +989,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
         situations: "each word in three of four situations drawn by hash (an empty field of unknown role, Russian text, English text, a code comment); an address part in its own sentence and two of the four; one application for every row".to_owned(),
         scope: config.evidence_scope.clone(),
         low_keys_cut_nats: three.then(|| ["en", "ru"].iter().zip(cuts).filter_map(|(language, cut)| Some(((*language).to_owned(), cut?))).collect()),
+        derived: None,
     };
     let receipt_bytes = (ks_text::json::dumps(&receipt, &readable()) + "\n").into_bytes();
     Ok((content, receipt_bytes, counts))
@@ -1039,7 +1046,7 @@ pub fn command(request: &WordCorpusRequest<'_>) -> Result<BTreeMap<String, Split
 
 /// A frozen split of a word corpus, its checksum checked against the receipt.
 pub fn read_split(directory: &Path, split: &str) -> Result<Vec<WordRow>, String> {
-    if !WORD_SPLITS.contains(&split) && split != ACCEPTANCE_SPLIT {
+    if !WORD_SPLITS.contains(&split) && ![ACCEPTANCE_SPLIT, FORMER_ACCEPTANCE_SPLIT].contains(&split) {
         return Err("a word corpus has no such split".to_owned());
     }
     /// What a reader of the splits needs of the receipt: the checksum of each.

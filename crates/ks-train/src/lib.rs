@@ -37,6 +37,7 @@ pub mod prefix;
 pub mod prefix_acceptance;
 pub mod prefix_cache;
 pub mod prefix_corpus;
+pub mod prefix_derive;
 pub mod prefix_words;
 pub mod rows;
 pub mod promote;
