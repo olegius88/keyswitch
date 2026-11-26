@@ -1185,6 +1185,21 @@ fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
         let _ = subject.inject_correction(case);
         assert!(api.sent().iter().flatten().all(|input| !input.unicode), "{name}");
     }
+    // A key of the user's kept back by the hold, or one down, as the letters go out: keys.
+    for kept in [true, false] {
+        let api = FakeWindowsAPI::plain();
+        let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
+        if kept {
+            let mut hold = subject.inner.hold.lock().unwrap();
+            hold.holding = true;
+            hold.keep(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 11));
+        } else {
+            lock(&subject.inner.hook).pressed.insert(VK_D);
+        }
+        subject.inject_correction(read(&one)).unwrap();
+        assert!(api.sent().iter().flatten().all(|input| !input.unicode), "kept {kept}");
+        assert!(api.sent().len() > 1, "kept {kept}");
+    }
     // A window that sends the keys on to another computer: keys, one to a call.
     let api = FakeWindowsAPI::plain();
     api.state().application = "TeamViewer".to_owned();

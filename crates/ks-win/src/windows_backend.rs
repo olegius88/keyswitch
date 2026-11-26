@@ -1816,7 +1816,7 @@ impl Inner {
                 if self.typing_place_left() {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                 }
-                if let Some(characters) = &characters {
+                if let Some(characters) = characters.as_ref().filter(|_| self.no_user_key_on_its_way()) {
                     let mut batch = delete_inputs.concat();
                     batch.extend_from_slice(characters);
                     self.send_layout_free(&batch)?;
@@ -1912,6 +1912,20 @@ impl Inner {
             }
         }
         (2 * delete_count + letters.len() <= UNICODE_CORRECTION_MAX_EVENTS).then_some(letters)
+    }
+
+    /// Whether no key of the user's is down or kept back by the hold as the letters of a correction go out, so that they
+    /// may go as characters (`unicode_replacement`).
+    ///
+    /// Typed fast, with each key pressed before the last one is up, an early switch always has the user's next key held
+    /// meanwhile; in Notepad of Windows 11 (a virtual machine, 120 rows at about 650 keys a minute, 26.11.2026) 3 of the
+    /// 23 replacements typed as characters with such a key held came out as their last letter repeated (`басс` as
+    /// `сссс`), while the keys of the new layout never did and none of the 78 typed as characters with no key held went
+    /// wrong (the same machine at an ordinary pace). Without KeySwitch, and with its hook but without a correction,
+    /// characters typed into a busy Notepad kept their letters, so the cause is not known: the characters wait for a
+    /// moment no key of the user's is on its way.
+    fn no_user_key_on_its_way(&self) -> bool {
+        lock(&self.hold).held.is_empty() && lock(&self.hook).pressed.0.is_empty()
     }
 
     /// `send_exact` for keys that mean the same in every layout (Backspace, characters): a layout asked for after them
