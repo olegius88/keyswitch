@@ -27,7 +27,7 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--config <file> --base <frozen base> [--hold-out <development.jsonl.gz>...]] [--freeze <folder>|--rebuild <folder>]`, `ks-train archive --tree <root> [--write]`
-//! `ks-train prefix-zone-words --tree <root> --corpus <word corpus> --base <frozen base> --list <file> --minimum N --maximum N --source <name> --output <rows.jsonl.gz>`
+//! `ks-train prefix-zone-words --tree <root> --corpus <word corpus> --base <frozen base> --list <file> --minimum N --maximum N [--layout latin|cyrillic] --source <name> --output <rows.jsonl.gz>`
 //! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class>... --add-source <source>... [--add-words N]] [--exclude <file>]... --output <folder>`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
@@ -486,7 +486,9 @@ fn zone_command(arguments: &[String]) -> i32 {
     let required = |name: &str| option(arguments, name).unwrap_or_else(|| panic!("{name} is required"));
     let count = |name: &str| required(name).parse::<u64>().unwrap_or_else(|_| panic!("{name} is a number"));
     let (root, corpus, base, list, output) = (PathBuf::from(required("--tree")), PathBuf::from(required("--corpus")), PathBuf::from(required("--base")), PathBuf::from(required("--list")), PathBuf::from(required("--output")));
-    let request = ks_train::prefix_zone::ZoneRequest { root: &root, corpus: &corpus, base: &base, list: &list, minimum: count("--minimum"), maximum: count("--maximum"), source: required("--source"), output: &output };
+    let layout = option(arguments, "--layout").unwrap_or("latin");
+    let group = ["latin", "cyrillic"].iter().position(|name| *name == layout).unwrap_or_else(|| panic!("--layout is latin or cyrillic: {layout}"));
+    let request = ks_train::prefix_zone::ZoneRequest { root: &root, corpus: &corpus, base: &base, list: &list, minimum: count("--minimum"), maximum: count("--maximum"), group: group.to::<i64>(), source: required("--source"), output: &output };
     match ks_train::prefix_zone::zone_words(&request) {
         Ok(counts) => {
             println!("{}", ks_text::json::dumps(&counts, &JsonOptions { indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }));

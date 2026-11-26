@@ -552,6 +552,22 @@ mod words {
         let counts: ks_train::prefix_zone::ZoneCounts = ks_text::json::loads(succeeded(&zone(&rows_path))).expect("the counts");
         assert_eq!(counts, ks_train::prefix_zone::ZoneCounts { listed: 9, admitted: 7, unknown: 4, zone: 2, terms: 1, short_terms: 1, rows: 6 });
         refused(&zone(&rows_path), "refusing to overwrite the rows of the zone");
+        // Cyrillic words of the zone: four keys that begin an English word and no Russian one; a known word is not; the
+        // rows are typed as meant only.
+        let russian = folder.join("russian.txt");
+        std::fs::write(&russian, "1\tагда\t20\n2\tпогода\t20\n").expect("a list");
+        let cyrillic = |output: &Path, layout: &str| {
+            let mut command = trainer();
+            command.arg("prefix-zone-words").arg("--tree").arg(small).arg("--corpus").arg(&derived).arg("--base").arg(base).arg("--list").arg(&russian);
+            command.args(["--minimum", "10", "--maximum", "49", "--layout", layout, "--source", "zone-ru"]).arg("--output").arg(output).output().expect("the trainer starts")
+        };
+        let russian_rows = folder.join("rows").join("zone-ru.jsonl.gz");
+        let counts: ks_train::prefix_zone::ZoneCounts = ks_text::json::loads(succeeded(&cyrillic(&russian_rows, "cyrillic"))).expect("the counts");
+        assert_eq!((counts.listed, counts.unknown, counts.zone, counts.rows), (2, 1, 1, 3));
+        use std::io::BufRead as _;
+        let typed: Vec<WordRow> = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(std::fs::File::open(&russian_rows).expect("the rows"))).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect();
+        assert!(typed.iter().all(|row| !row.paired && row.group == 1));
+        refused(&cyrillic(&folder.join("rows").join("zone-other.jsonl.gz"), "greek"), "--layout is latin or cyrillic");
         // Added to a derived corpus as terms and short terms together; an addition of no class is refused.
         let rows_text = rows_path.display().to_string();
         let output = scratch("words-zone-derived").join("out");
@@ -561,7 +577,6 @@ mod words {
         assert_eq!((added.offered, added.class, added.more_classes), (2, Class::Term, vec![Class::ShortTerm]));
         refused(&derive(frozen, &["--add", &rows_text, "--add-source", "zone"], &scratch("words-zone-classless").join("out")), "an addition names the class of its rows");
         // Rows of two sources in one file, added together; an addition of no source is refused.
-        use std::io::BufRead as _;
         let zone_rows: Vec<WordRow> = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(std::fs::File::open(&rows_path).expect("the rows"))).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect();
         let second: Vec<WordRow> = zone_rows.iter().map(|row| WordRow { text: format!("{}q", row.text), source: "second".to_owned(), ..row.clone() }).collect();
         let merged = folder.join("merged.jsonl.gz");
