@@ -86,6 +86,9 @@ pub struct FrameRules {
     /// The families the lists are closed to read none for the reading as typed of a word typed as meant, and all of them
     /// otherwise; without it they read none at all.
     pub close_typed_reading_only: bool,
+    /// A prefix typed in the other layout whose reading in the layout meant continues fewer words of that layout's index
+    /// waits: there a word typed as meant reads the same (none when 0).
+    pub wait_below_target_completions: i64,
 }
 
 impl Default for FrameRules {
@@ -98,18 +101,19 @@ impl Default for FrameRules {
             closed_term_families_per_mille: None,
             wait_on_lexicon: true,
             close_typed_reading_only: false,
+            wait_below_target_completions: 0,
         }
     }
 }
 
 /// The label of a prefix: kept when typed as meant; typed in the other layout, it waits while it is short, while it
-/// continues a word of the typed layout's lexicon (unless the rules say otherwise) or begins a known term, and converts
-/// after.
+/// continues a word of the typed layout's lexicon (unless the rules say otherwise), begins a known term or, read in the
+/// layout meant, continues fewer words than the rules ask (`sparse`), and converts after.
 #[must_use]
-pub fn label_of(desired: bool, length: usize, ambiguous: bool, term: bool, rules: &FrameRules) -> u8 {
+pub fn label_of(desired: bool, length: usize, ambiguous: bool, term: bool, sparse: bool, rules: &FrameRules) -> u8 {
     if !desired {
         0
-    } else if length < rules.convert_from || (ambiguous && rules.wait_on_lexicon) || term {
+    } else if length < rules.convert_from || (ambiguous && rules.wait_on_lexicon) || term || sparse {
         PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL
     } else {
         1
@@ -211,6 +215,10 @@ pub struct RecipeOptions {
     /// typed as meant alone, so that a Latin token missing from the lists is still kept; without it they read none.
     #[serde(default)]
     pub closed_terms_typed_reading_only: bool,
+    /// A prefix typed in the other layout waits while its reading in the layout meant continues fewer words of that
+    /// layout's index than this (`FrameRules::wait_below_target_completions`); none waits so when 0.
+    #[serde(default)]
+    pub wait_below_target_completions: i64,
     /// The model an epoch chosen by the mean key must not be worse than on development, relative to the tree, its
     /// version and the threshold it is measured at.
     pub floor_model: Option<String>,
@@ -244,6 +252,7 @@ pub fn frame_rules(options: &RecipeOptions, resource_dir: &Path) -> Result<Frame
     rules.closed_term_families_per_mille = options.closed_term_families_per_mille;
     rules.wait_on_lexicon = !options.convert_lexicon_continuations;
     rules.close_typed_reading_only = options.closed_terms_typed_reading_only;
+    rules.wait_below_target_completions = options.wait_below_target_completions;
     Ok(rules)
 }
 
@@ -539,7 +548,8 @@ fn parent_frames(
                     assert!((0..=1).contains(&source), "a side of the pair");
                     let ambiguous = indexes.portable[source.to::<usize>()].completions(&original).completions > 0;
                     let term = *desired && rules.terms.as_ref().is_some_and(|terms| begins_a_term(terms, &original));
-                    let label = label_of(*desired, length, ambiguous, term, rules);
+                    let sparse = *desired && table[(1 - source).to::<usize>()].completions(&alternate).completions < rules.wait_below_target_completions;
+                    let label = label_of(*desired, length, ambiguous, term, sparse, rules);
                     let mut field = FieldContext::new(context.application.as_str(), pair_id.as_str());
                     field.before.clone_from(&context.before);
                     field.role = context.role;
@@ -1462,14 +1472,15 @@ impl FrameMaker {
     fn settings(&self, feature_version: i64, lexicon: PrefixLexicon, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
-            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}\nwait on lexicon {}\nclosed to the typed reading only {}",
+            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}\nwait on lexicon {}\nclosed to the typed reading only {}\nwait below target completions {}",
             self.maximum_prefix_length,
             self.rules.convert_from,
             self.rules.minimum_characters,
             self.rules.engine_support,
             lexicon.name(),
             self.rules.wait_on_lexicon,
-            self.rules.close_typed_reading_only
+            self.rules.close_typed_reading_only,
+            self.rules.wait_below_target_completions
         )
     }
 
@@ -2003,13 +2014,15 @@ mod tests {
     #[test]
     fn a_prefix_typed_in_the_other_layout_converts_from_the_recipes_letters_unless_a_word_or_a_term_goes_on() {
         let (four, three) = (FrameRules::default(), FrameRules { convert_from: 3, ..FrameRules::default() });
-        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &four)), [2, 2, 1]);
-        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &three)), [2, 1, 1]);
-        assert_eq!((label_of(true, 5, true, false, &three), label_of(true, 5, false, true, &three), label_of(false, 5, false, false, &three)), (2, 2, 0));
-        // A recipe that converts continuations of the lexicon: a word going on no longer waits, a term still does.
-        let options: RecipeOptions = ks_text::json::loads(r#"{"convert_lexicon_continuations": true}"#).expect("options");
+        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, false, &four)), [2, 2, 1]);
+        assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, false, &three)), [2, 1, 1]);
+        assert_eq!((label_of(true, 5, true, false, false, &three), label_of(true, 5, false, true, false, &three), label_of(false, 5, false, false, false, &three)), (2, 2, 0));
+        // A recipe that converts continuations of the lexicon: a word going on no longer waits, a term still does, and
+        // so does a prefix whose reading meant continues too few words.
+        let options: RecipeOptions = ks_text::json::loads(r#"{"convert_lexicon_continuations": true, "wait_below_target_completions": 4}"#).expect("options");
         let converting = frame_rules(&options, Path::new("/nonexistent")).expect("rules without terms");
-        assert_eq!((label_of(true, 5, true, false, &converting), label_of(true, 5, true, true, &converting), label_of(true, 3, true, false, &converting)), (1, 2, 2));
+        assert_eq!((label_of(true, 5, true, false, false, &converting), label_of(true, 5, true, true, false, &converting), label_of(true, 3, true, false, false, &converting)), (1, 2, 2));
+        assert_eq!((label_of(true, 5, false, false, true, &converting), converting.wait_below_target_completions), (2, 4));
         let terms = vec!["git".to_owned(), "github".to_owned(), "kubectl".to_owned()];
         assert!(begins_a_term(&terms, "Gith") && begins_a_term(&terms, "kub") && !begins_a_term(&terms, "gk") && !begins_a_term(&terms, "zzz"));
     }
