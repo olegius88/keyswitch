@@ -649,6 +649,19 @@ pub struct PairReport {
     pub safety_by_sample: BTreeMap<String, [Safety; 2]>,
     pub safety_by_profile: BTreeMap<String, [Safety; 2]>,
     pub safety_by_class: BTreeMap<String, [Safety; 2]>,
+    /// The digest of what every replayed row says, in the order of part, profile and row (`rows_digest`): two replays
+    /// of the same samples with the same digest agree on every row. Empty in a report written before it was kept.
+    #[serde(default)]
+    pub rows_sha256: String,
+}
+
+/// The digest of what each replayed row says, in the order they are given.
+fn rows_digest(replayed: &[Replayed]) -> String {
+    let mut hasher = Sha256::new();
+    for item in replayed {
+        hasher.update(format!("{:?} {} {} {:?}\n", item.part, item.profile, item.row, item.observed).as_bytes());
+    }
+    hex(&hasher.finalize())
 }
 
 /// The cells of the safety gates.
@@ -925,6 +938,7 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
         }
         found.sort_by_key(|item| (item.part, item.profile, item.row));
         let mut report = pair_report(&rows, found);
+        report.rows_sha256 = rows_digest(found);
         report.context_sha256 = checksum(&pair.context)?;
         report.prefix_sha256 = checksum(&pair.prefix)?;
         prefixes[index].version().clone_into(&mut report.prefix_version);

@@ -1187,6 +1187,8 @@ mod acceptance {
             assert_eq!(at(&pair.safety_by_sample, "A3_closed")[0].rows, at(&pair.safety_by_sample, "A3")[0].rows);
             assert_eq!(at(&pair.earliness, "A1")[0].rows, 2 * at(&receipt.counts, "A1").words[0]);
         }
+        // The digest of the rows: the same for the pair replayed twice (`plain`, above), another for another model.
+        assert!(reference.rows_sha256.len() == 64 && reference.rows_sha256 != candidate.rows_sha256);
         // A model that converts every prefix switches words typed as meant away: more false early switches than the
         // installed one, and its gates do not hold.
         assert!(at(&candidate.safety, "all").false_early.words > at(&reference.safety, "all").false_early.words);
