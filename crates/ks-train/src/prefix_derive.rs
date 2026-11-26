@@ -46,7 +46,8 @@ pub struct DeriveRequest<'a> {
 /// Words of one class and source added to training from a file of word rows.
 pub struct Addition<'a> {
     pub rows: &'a Path,
-    pub class: Class,
+    /// The classes of the rows added: one at least.
+    pub classes: &'a [Class],
     pub source: &'a str,
     /// How many, the first by their draw; every word that may be added when none.
     pub words: Option<usize>,
@@ -74,7 +75,10 @@ pub struct Derivation {
 pub struct Added {
     /// The SHA-256 of the file of rows.
     pub sha256: String,
+    /// The first class of the rows added, and the others (none in a receipt written before an addition took more).
     pub class: Class,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more_classes: Vec<Class>,
     pub source: String,
     /// The words of the class and source the file holds, those of them that may be added, and those added.
     pub offered: usize,
@@ -158,7 +162,7 @@ pub fn derive(request: &DeriveRequest<'_>) -> Result<WordReceipt, String> {
             .map(|line| ks_text::json::loads::<WordRow>(line).map_err(|error| format!("{}: {error}", addition.rows.display())))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .filter(|row| row.class == addition.class && row.source == addition.source)
+            .filter(|row| addition.classes.contains(&row.class) && row.source == addition.source)
             .collect();
         let present: BTreeSet<(&str, i64)> = train.iter().chain(&moved).map(|row| (row.text.as_str(), row.group)).collect();
         let words: BTreeSet<(&str, i64, &str)> = offered.iter().map(|row| (row.text.as_str(), row.group, row.family.as_str())).collect();
@@ -175,7 +179,8 @@ pub fn derive(request: &DeriveRequest<'_>) -> Result<WordReceipt, String> {
         let chosen: BTreeSet<(String, i64)> = eligible.iter().take(asked).map(|(_, text, group)| ((*text).to_owned(), *group)).collect();
         let (offered_words, eligible_words) = (words.len(), eligible.len());
         let rows: Vec<WordRow> = offered.into_iter().filter(|row| chosen.contains(&(row.text.clone(), row.group))).collect();
-        added = Some(Added { sha256: checksum(addition.rows)?, class: addition.class, source: addition.source.to_owned(), offered: offered_words, eligible: eligible_words, words: chosen.len(), rows: rows.len() });
+        let (class, more_classes) = addition.classes.split_first().ok_or("an addition names the class of its rows")?;
+        added = Some(Added { sha256: checksum(addition.rows)?, class: *class, more_classes: more_classes.to_vec(), source: addition.source.to_owned(), offered: offered_words, eligible: eligible_words, words: chosen.len(), rows: rows.len() });
         train.extend(rows);
     }
     // The old acceptance split is development of its own; training and the new acceptance are counted again.

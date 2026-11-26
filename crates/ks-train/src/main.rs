@@ -27,7 +27,8 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--config <file> --base <frozen base> [--hold-out <development.jsonl.gz>...]] [--freeze <folder>|--rebuild <folder>]`, `ks-train archive --tree <root> [--write]`
-//! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class> --add-source <source> [--add-words N]] [--exclude <file>]... --output <folder>`
+//! `ks-train prefix-zone-words --tree <root> --corpus <word corpus> --base <frozen base> --list <file> --minimum N --maximum N --source <name> --output <rows.jsonl.gz>`
+//! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class>... --add-source <source> [--add-words N]] [--exclude <file>]... --output <folder>`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
@@ -270,6 +271,9 @@ fn main() {
     if arguments.first().map(String::as_str) == Some("prefix-derive") {
         std::process::exit(derive_command(&arguments));
     }
+    if arguments.first().map(String::as_str) == Some("prefix-zone-words") {
+        std::process::exit(zone_command(&arguments));
+    }
     if arguments.first().map(String::as_str) == Some("base") {
         match base_command(&arguments) {
             Ok(summary) => println!("{summary}"),
@@ -476,6 +480,25 @@ fn word_list(named: &str) -> ks_train::prefix_acceptance::WordListInput {
     ks_train::prefix_acceptance::WordListInput { name: name.to_owned(), path: PathBuf::from(path), group: group.to::<i64>(), minimum: minimum.parse().unwrap_or_else(|_| panic!("{}", shape())), cut }
 }
 
+/// `prefix-zone-words`: the rows of a list's Latin words in the zone a prefix model decides alone; their counts, or why
+/// not.
+fn zone_command(arguments: &[String]) -> i32 {
+    let required = |name: &str| option(arguments, name).unwrap_or_else(|| panic!("{name} is required"));
+    let count = |name: &str| required(name).parse::<u64>().unwrap_or_else(|_| panic!("{name} is a number"));
+    let (root, corpus, base, list, output) = (PathBuf::from(required("--tree")), PathBuf::from(required("--corpus")), PathBuf::from(required("--base")), PathBuf::from(required("--list")), PathBuf::from(required("--output")));
+    let request = ks_train::prefix_zone::ZoneRequest { root: &root, corpus: &corpus, base: &base, list: &list, minimum: count("--minimum"), maximum: count("--maximum"), source: required("--source"), output: &output };
+    match ks_train::prefix_zone::zone_words(&request) {
+        Ok(counts) => {
+            println!("{}", ks_text::json::dumps(&counts, &JsonOptions { indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }));
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
 /// `prefix-derive`: a word corpus derived from a frozen one; its counts by split, or why not.
 fn derive_command(arguments: &[String]) -> i32 {
     use ks_train::prefix_derive::{Addition, DeriveRequest, derive};
@@ -483,9 +506,10 @@ fn derive_command(arguments: &[String]) -> i32 {
     let (from, output) = (PathBuf::from(required("--from")), PathBuf::from(required("--output")));
     let excluded: Vec<PathBuf> = all_of(arguments, "--exclude").into_iter().map(PathBuf::from).collect();
     let added = option(arguments, "--add").map(PathBuf::from);
+    let classes: Vec<ks_train::prefix_words::Class> = all_of(arguments, "--add-class").into_iter().map(|class| ks_text::json::loads(format!("\"{class}\"")).expect("--add-class is a class of the word corpus")).collect();
     let addition = added.as_deref().map(|rows| Addition {
         rows,
-        class: ks_text::json::loads(format!("\"{}\"", required("--add-class"))).expect("--add-class is a class of the word corpus"),
+        classes: &classes,
         source: required("--add-source"),
         words: option(arguments, "--add-words").map(|value| value.parse().expect("--add-words is a number")),
     });

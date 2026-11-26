@@ -39,6 +39,7 @@ pub mod prefix_cache;
 pub mod prefix_corpus;
 pub mod prefix_derive;
 pub mod prefix_words;
+pub mod prefix_zone;
 pub mod rows;
 pub mod promote;
 pub mod receipt;

@@ -704,15 +704,22 @@ impl WordClasses {
         };
         word_class(word, group, &self.frequent, self.known(word, group), english_like, self.is_low(word, group))
     }
+
+    /// The reference lexicons: what the indexes of the prefix model are built from.
+    #[must_use]
+    pub fn models(&self) -> &crate::tools::Lexicons {
+        &self.models
+    }
 }
 
 /// A frozen word corpus read to class words of other sources as it classed its own: its config, its receipt, the aliases
-/// it held out, and its classes.
+/// it held out, its classes, and the phrases its situations put before a word.
 pub struct ClassedCorpus {
     pub config: WordConfig,
     pub receipt: WordReceipt,
     pub held_out: HashSet<String>,
     pub classes: WordClasses,
+    pools: Pools,
 }
 
 impl ClassedCorpus {
@@ -736,13 +743,22 @@ impl ClassedCorpus {
         }
         let pools = pools(root, &config, &rows)?;
         let classes = WordClasses::new(root, resources, &config, &pools)?;
-        Ok(ClassedCorpus { config, receipt, held_out: held.aliases.into_iter().collect(), classes })
+        Ok(ClassedCorpus { config, receipt, held_out: held.aliases.into_iter().collect(), classes, pools })
     }
 
     /// A lower-case word of one layout the corpus could have held: of its lengths, all of it that layout's letters.
     #[must_use]
     pub fn admits(&self, word: &str, group: i64) -> bool {
         in_bounds(&self.config, word) && lower_group(word) == Some(group)
+    }
+
+    /// The rows the corpus gives candidates of its own: each in the situations it draws for it, the text before it as
+    /// it draws it, in the order of its splits.
+    #[must_use]
+    pub fn rows_of(&self, candidates: &[Candidate]) -> Vec<WordRow> {
+        let mut rows: Vec<WordRow> = candidates.iter().flat_map(|candidate| situations_of(&self.config, candidate).into_iter().map(move |situation| row_of(&self.config, &self.pools, candidate, situation))).collect();
+        rows.sort_by(|left, right| (&left.family, &left.text, left.group, left.situation).cmp(&(&right.family, &right.text, right.group, right.situation)));
+        rows
     }
 }
 
@@ -860,6 +876,23 @@ fn before_of(config: &WordConfig, pools: &Pools, candidate: &Candidate, situatio
     }
 }
 
+/// The row of a candidate in one of its situations.
+fn row_of(config: &WordConfig, pools: &Pools, candidate: &Candidate, situation: Situation) -> WordRow {
+    WordRow {
+        before: before_of(config, pools, candidate, situation),
+        class: candidate.class,
+        family: family(&candidate.text, candidate.group),
+        group: candidate.group,
+        paired: candidate.class.paired(),
+        role: situation.role().to_owned(),
+        situation,
+        source: candidate.source.clone(),
+        text: candidate.text.clone(),
+        // A corpus of schema two has no hard words by their first keys and writes none.
+        hard: config.low_keys.is_some() && candidate.hard,
+    }
+}
+
 /// The rows of every split: each split's candidates of each language and class in hash order, up to the quota.
 fn rows(config: &WordConfig, pools: &Pools, candidates: &[Candidate]) -> Result<BTreeMap<&'static str, Vec<WordRow>>, String> {
     let mut grouped: BTreeMap<(&'static str, i64, Class), Vec<&Candidate>> = BTreeMap::new();
@@ -873,19 +906,7 @@ fn rows(config: &WordConfig, pools: &Pools, candidates: &[Candidate]) -> Result<
         members.sort_by_cached_key(|candidate| (draw(&format!("{}:select:{}:{}", config.namespace, class.as_str(), candidate.text)), candidate.text.clone()));
         for candidate in members.into_iter().take(quota) {
             for situation in situations_of(config, candidate) {
-                result.get_mut(split).expect("a split").push(WordRow {
-                    before: before_of(config, pools, candidate, situation),
-                    class,
-                    family: family(&candidate.text, group),
-                    group,
-                    paired: class.paired(),
-                    role: situation.role().to_owned(),
-                    situation,
-                    source: candidate.source.clone(),
-                    text: candidate.text.clone(),
-                    // A corpus of schema two has no hard words by their first keys and writes none.
-                    hard: config.low_keys.is_some() && candidate.hard,
-                });
+                result.get_mut(split).expect("a split").push(row_of(config, pools, candidate, situation));
             }
         }
     }

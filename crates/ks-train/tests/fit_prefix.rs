@@ -533,6 +533,35 @@ mod words {
         refused(&derive(&bare, &[], &bare.join("out")), "has no acceptance split");
     }
 
+    /// The Latin words of a list in the zone a prefix model of schema four decides alone, written once as rows in the
+    /// corpus's situations; a derived corpus adds them, of two classes at once.
+    fn zone_of_derived(small: &Path, frozen: &Path, base: &Path) {
+        let derived = small.join("model/words-derived");
+        let folder = scratch("words-zone-inputs");
+        let list = folder.join("list.txt");
+        // In the band and in the zone, a term and a short term; the first again; a known English word, a term of the lists,
+        // a word whose Russian reading is a Russian word, four keys that begin an English word, four keys whose Russian
+        // reading begins no Russian word, a word too short, one not of letters alone; and words out of the band.
+        std::fs::write(&list, "abita 20\nafib 20\nAbita 20\ngarden 20\nkubectl 20\nghbdtn 20\ngardzz 20\nqqqqzz 20\nabc 20\nx1yz 20\nababy 5\nababbas 100\n").expect("a list");
+        let zone = |output: &Path| {
+            let mut command = trainer();
+            command.arg("prefix-zone-words").arg("--tree").arg(small).arg("--corpus").arg(&derived).arg("--base").arg(base).arg("--list").arg(&list);
+            command.args(["--minimum", "10", "--maximum", "49", "--source", "zone"]).arg("--output").arg(output).output().expect("the trainer starts")
+        };
+        let rows_path = folder.join("rows").join("zone.jsonl.gz");
+        let counts: ks_train::prefix_zone::ZoneCounts = ks_text::json::loads(succeeded(&zone(&rows_path))).expect("the counts");
+        assert_eq!(counts, ks_train::prefix_zone::ZoneCounts { listed: 9, admitted: 7, unknown: 4, zone: 2, terms: 1, short_terms: 1, rows: 6 });
+        refused(&zone(&rows_path), "refusing to overwrite the rows of the zone");
+        // Added to a derived corpus as terms and short terms together; an addition of no class is refused.
+        let rows_text = rows_path.display().to_string();
+        let output = scratch("words-zone-derived").join("out");
+        succeeded(&derive(frozen, &["--add", &rows_text, "--add-class", "term", "--add-class", "short_term", "--add-source", "zone"], &output));
+        let receipt: ks_train::prefix_words::WordReceipt = read(&output.join("corpus.json"));
+        let added = receipt.derived.and_then(|derived| derived.added).expect("the words added");
+        assert_eq!((added.offered, added.class, added.more_classes), (2, Class::Term, vec![Class::ShortTerm]));
+        refused(&derive(frozen, &["--add", &rows_text, "--add-source", "zone"], &scratch("words-zone-classless").join("out")), "an addition names the class of its rows");
+    }
+
     /// A folder copied file by file.
     fn copied(from: &Path, name: &str) -> PathBuf {
         let to = scratch(name).join("corpus");
@@ -728,6 +757,7 @@ mod words {
         assert_eq!(std::fs::read_to_string(kept.join("config.json")).expect("the config"), "{}");
         derived_from(&small, &frozen, &kept);
         samples_of_derived(&small, &frozen, &folder.join("base"));
+        zone_of_derived(&small, &frozen, &folder.join("base"));
         std::fs::write(frozen.join("development.jsonl.gz"), gz(&[Sample { original: "" }])).expect("a split");
         refused(&derive(&frozen, &[], &scratch("words-derive-changed").join("out")), "not the file the receipt pins");
         refused(&on(&[]), "1 files of the word corpus differ");
@@ -1117,8 +1147,18 @@ mod words {
         let output = scratch("words-floor-development").join("out");
         let said = succeeded(&trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).arg("--development-only").output().expect("the trainer starts"));
         assert!(said.contains("is written for development measures only") && said.contains("by key Some(") && said.contains("thresholds Some("), "{said}");
-        let seal: serde_json::Value = read(&output.join("seal.json"));
-        assert!(seal["epoch_selection"]["counts"] == serde_json::Value::Bool(false) && seal["calibration_passed"] == serde_json::Value::Bool(false), "{seal}");
+        /// What the test reads of the seal of a fit by the mean key.
+        #[derive(Deserialize)]
+        struct BelowFloor {
+            epoch_selection: Counted,
+            calibration_passed: bool,
+        }
+        #[derive(Deserialize)]
+        struct Counted {
+            counts: bool,
+        }
+        let seal: BelowFloor = read(&output.join("seal.json"));
+        assert!(!seal.epoch_selection.counts && !seal.calibration_passed);
     }
 
     /// The frames of schemas three and four, read with the orthotactic models and the term lists, closed to a share of the

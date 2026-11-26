@@ -317,8 +317,8 @@ fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     encoder.finish().map_err(|error| error.to_string())
 }
 
-/// The words of a list counted at least `minimum`, as listed (`WordListInput`).
-fn listed_words(path: &Path, minimum: u64) -> Result<Vec<String>, String> {
+/// The words of a list with their counts, as listed (`WordListInput`).
+pub(crate) fn listed_counts(path: &Path) -> Result<Vec<(String, u64)>, String> {
     let mut words = Vec::new();
     for line in read_text(path)?.lines().filter(|line| !line.trim().is_empty()) {
         let fields: Vec<&str> = if line.contains('\t') { line.split('\t').collect() } else { line.split(' ').collect() };
@@ -327,11 +327,14 @@ fn listed_words(path: &Path, minimum: u64) -> Result<Vec<String>, String> {
             _ => return Err(format!("{}: a line of neither `word count` nor `id<TAB>word<TAB>count`", path.display())),
         };
         let count: u64 = count.trim().parse().map_err(|_| format!("{}: a count that is no number", path.display()))?;
-        if count >= minimum {
-            words.push(word.to_owned());
-        }
+        words.push((word.to_owned(), count));
     }
     Ok(words)
+}
+
+/// The words of a list counted at least `minimum`, as listed.
+fn listed_words(path: &Path, minimum: u64) -> Result<Vec<String>, String> {
+    Ok(listed_counts(path)?.into_iter().filter(|(_, count)| *count >= minimum).map(|(word, _)| word).collect())
 }
 
 /// Whether neither lexicon knows a word, its supplement's forms among it: not its own layout's as meant, not the other
