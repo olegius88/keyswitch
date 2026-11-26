@@ -219,6 +219,11 @@ pub struct RecipeOptions {
     /// layout's index than this (`FrameRules::wait_below_target_completions`); none waits so when 0.
     #[serde(default)]
     pub wait_below_target_completions: i64,
+    /// On calibration, a direction's threshold may convert as many distinct words typed as meant as the floor model
+    /// converts there at its threshold with the index the program gives it; without it, no sequence typed as meant may
+    /// convert, as every sealed recipe has it.
+    #[serde(default)]
+    pub calibration_false_words_of_floor: bool,
     /// The model an epoch chosen by the mean key must not be worse than on development, relative to the tree, its
     /// version and the threshold it is measured at.
     pub floor_model: Option<String>,
@@ -1188,25 +1193,37 @@ fn clean_threshold(scores: &[Sequence], grid: &[f64], direction: usize) -> Optio
     })
 }
 
+/// What a threshold on calibration may convert of the sequences typed as meant: none, or the distinct words of their
+/// texts, by the layout group of the keys, up to these counts (`RecipeOptions::calibration_false_words_of_floor`).
+#[derive(Clone, Copy, Debug)]
+enum CalibrationFalse<'a> {
+    None,
+    Words { allowed: [usize; 2], typed: &'a [String] },
+}
+
 /// A direction's threshold on calibration: the first of the grid, not below its development threshold, at which, in
-/// both profiles, no sequence typed as meant in that direction converts and enough of those typed in the other layout
-/// convert before their end. None when no threshold passes.
-fn calibrated_direction(scores: &[Sequence], grid: &[f64], direction: usize, floor: f64, minimum_recall: f64) -> Option<f64> {
+/// both profiles, the sequences typed as meant in that direction convert no more than the rule allows and enough of those
+/// typed in the other layout convert before their end. None when no threshold passes.
+fn calibrated_direction(scores: &[Sequence], grid: &[f64], direction: usize, floor: f64, minimum_recall: f64, rule: CalibrationFalse<'_>) -> Option<f64> {
     if !(PREFIX_MIN_EARLY_RECALL_FLOOR..=1.0).contains(&minimum_recall) {
         return None;
     }
     sorted_grid(grid).into_iter().filter(|threshold| *threshold >= floor).find(|threshold| {
+        let clean = |cell: &DirectionMetrics| match rule {
+            CalibrationFalse::None => cell.false_conversions == 0,
+            CalibrationFalse::Words { allowed, typed } => false_words(scores, [*threshold, *threshold], typed)[direction] <= allowed[direction],
+        };
         direction_metrics(scores, [*threshold, *threshold]).iter().all(|profile| {
             let cell = &profile[direction];
-            cell.desired != 0 && cell.kept != 0 && cell.false_conversions == 0 && cell.early_recall() >= minimum_recall
+            cell.desired != 0 && cell.kept != 0 && clean(cell) && cell.early_recall() >= minimum_recall
         })
     })
 }
 
 /// Both directions' thresholds on calibration, each not below its development threshold; a direction that allows none
 /// keeps the top of the grid, and the calibration has not passed.
-fn calibrated_thresholds(scores: &[Sequence], grid: &[f64], floors: [f64; 2], minimum_recall: f64) -> ([f64; 2], bool) {
-    let found = [calibrated_direction(scores, grid, 0, floors[0], minimum_recall), calibrated_direction(scores, grid, 1, floors[1], minimum_recall)];
+fn calibrated_thresholds(scores: &[Sequence], grid: &[f64], floors: [f64; 2], minimum_recall: f64, rule: CalibrationFalse<'_>) -> ([f64; 2], bool) {
+    let found = [calibrated_direction(scores, grid, 0, floors[0], minimum_recall, rule), calibrated_direction(scores, grid, 1, floors[1], minimum_recall, rule)];
     match found {
         [Some(latin), Some(cyrillic)] => ([latin, cyrillic], true),
         _ => (found.map(|threshold| threshold.unwrap_or(1.0)), false),
@@ -1301,13 +1318,7 @@ struct FloorMeasures {
 /// program gives it and with every word the models hold; an epoch counts only if it is not worse than either. The recipe
 /// names the model, its version and the threshold; a model of another version is refused.
 fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &RecipeOptions) -> Result<FloorMeasures, String> {
-    let (Some(path), Some(version), Some(threshold)) = (&options.floor_model, &options.floor_model_version, options.floor_threshold) else {
-        return Err("a fit by the mean key names its floor: floor_model, floor_model_version and floor_threshold".to_owned());
-    };
-    let floor = ks_context::prefix_schema::VersionedPrefixModel::load(&root.join(path)).map_err(|error| format!("{path} does not load: {}", error.name))?;
-    if floor.version() != version {
-        return Err(format!("{path} is {}, the recipe names {version}", floor.version()));
-    }
+    let (floor, threshold) = floor_model(root, options)?;
     let measure = |lexicon: PrefixLexicon| -> Result<KeyFloor, String> {
         let frames = maker.frames_of_schema(DEVELOPMENT, parents, floor.feature_version, lexicon)?;
         let scores = sequence_scores(&frames, &runtime_probabilities(&floor.model, &frames));
@@ -1315,6 +1326,28 @@ fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &
     };
     let (users, every_word) = (measure(floor.prefix_lexicon())?, measure(PrefixLexicon::Held)?);
     Ok(FloorMeasures { strictest: users.strictest(&every_word), users, every_word })
+}
+
+/// The floor model a recipe names, checked against its version, and the threshold it is measured at.
+fn floor_model(root: &Path, options: &RecipeOptions) -> Result<(ks_context::prefix_schema::VersionedPrefixModel, f64), String> {
+    let (Some(path), Some(version), Some(threshold)) = (&options.floor_model, &options.floor_model_version, options.floor_threshold) else {
+        return Err("a fit by the mean key names its floor: floor_model, floor_model_version and floor_threshold".to_owned());
+    };
+    let floor = ks_context::prefix_schema::VersionedPrefixModel::load(&root.join(path)).map_err(|error| format!("{path} does not load: {}", error.name))?;
+    if floor.version() != version {
+        return Err(format!("{path} is {}, the recipe names {version}", floor.version()));
+    }
+    Ok((floor, threshold))
+}
+
+/// The distinct words typed as meant the floor model converts on a split's frames of its schema at its own threshold,
+/// with the index the program gives it, by the layout group of the keys: what a threshold on calibration may convert by
+/// `calibration_false_words_of_floor`.
+fn floor_false_words(maker: &FrameMaker, split: &str, parents: &[ParentWord], root: &Path, options: &RecipeOptions) -> Result<[usize; 2], String> {
+    let (floor, threshold) = floor_model(root, options)?;
+    let frames = maker.frames_of_schema(split, parents, floor.feature_version, floor.prefix_lexicon())?;
+    let scores = sequence_scores(&frames, &runtime_probabilities(&floor.model, &frames));
+    Ok(false_words(&scores, [threshold, threshold], &frames.typed))
 }
 
 /// The chosen epoch among measured ones: of those that count, the lowest measure; those within `EQUAL_MEAN_KEY` of it are
@@ -1557,6 +1590,10 @@ struct DirectionSeal {
     development: ProfileDirections,
     #[serde(skip_serializing_if = "Option::is_none")]
     calibration: Option<ProfileDirections>,
+    /// By `calibration_false_words_of_floor`: the distinct words typed as meant the floor model converts on calibration,
+    /// as many as a threshold there may convert, by the layout group of the keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    calibration_false_words_allowed: Option<[usize; 2]>,
 }
 
 /// What it adds to its artifact: the threshold of each direction.
@@ -1792,9 +1829,16 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let calibration_frames = if request.development_only { None } else { Some(maker.frames(CALIBRATION, &parents[CALIBRATION])?) };
     // The runtime's own softmax: what the installed candidate answers.
     let scores = calibration_frames.as_ref().map(|frames| sequence_scores(frames, &runtime_probabilities(&program, frames)));
+    // What a threshold on calibration may convert of the words typed as meant: by the recipe, what the floor model
+    // converts there; otherwise nothing.
+    let allowed_false = match &calibration_frames {
+        Some(frames) if options.calibration_false_words_of_floor => Some((floor_false_words(&maker, CALIBRATION, &parents[CALIBRATION], request.root, &options)?, frames)),
+        _ => None,
+    };
+    let rule = allowed_false.map_or(CalibrationFalse::None, |(allowed, frames)| CalibrationFalse::Words { allowed, typed: &frames.typed });
     let (per_direction, passed) = match &scores {
         None => (development_thresholds, false),
-        Some(scores) if by_key => calibrated_thresholds(scores, &thresholds, development_thresholds, minimum_recall),
+        Some(scores) if by_key => calibrated_thresholds(scores, &thresholds, development_thresholds, minimum_recall, rule),
         Some(scores) => {
             let (threshold, passed) = calibrated_threshold(scores, &thresholds, minimum_recall);
             ([threshold, threshold], passed)
@@ -1851,6 +1895,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
             calibration_cells,
             development: ProfileDirections::of(direction_metrics(&final_development, per_direction)),
             calibration: scores.as_ref().map(|scores| ProfileDirections::of(direction_metrics(scores, per_direction))),
+            calibration_false_words_allowed: allowed_false.map(|(allowed, _)| allowed),
         };
         merged(&mut seal, &fields)?;
     }
@@ -2186,21 +2231,28 @@ mod tests {
         // Nor one without words to convert: calibration then has no threshold for it either.
         let wanting: Vec<Sequence> = calibration().into_iter().filter(|value| !value.desired || value.source == 0 || value.profile == 0).collect();
         assert_eq!(clean_threshold(&wanting, &grid, 1), None);
-        assert_eq!((calibrated_direction(&wanting, &grid, 1, 0.985, 0.7), calibrated_direction(&lacking, &grid, 1, 0.985, 0.7)), (None, None));
+        assert_eq!((calibrated_direction(&wanting, &grid, 1, 0.985, 0.7, CalibrationFalse::None), calibrated_direction(&lacking, &grid, 1, 0.985, 0.7, CalibrationFalse::None)), (None, None));
     }
 
     #[test]
     fn calibration_takes_each_direction_s_first_threshold_not_below_its_development_threshold() {
         let grid = [0.999, 0.985, 0.99, 0.995, 0.999];
-        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.985], 0.7), ([0.999, 0.985], true));
+        let none = CalibrationFalse::None;
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.985], 0.7, none), ([0.999, 0.985], true));
         // Development made the Cyrillic direction clean at 0.99 only: calibration does not go below it.
-        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.99], 0.7), ([0.999, 0.99], true));
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.99], 0.7, none), ([0.999, 0.99], true));
         // Too much recall asked of the Cyrillic direction at no threshold: it is converted at 0.99 only. It keeps the top of
         // the grid, and calibration has not passed.
-        assert_eq!(calibrated_direction(&calibration(), &[0.995, 0.999], 1, 0.985, 0.7), None);
-        assert_eq!(calibrated_thresholds(&calibration(), &[0.995, 0.999], [0.985, 0.985], 0.7), ([0.999, 1.0], false));
+        assert_eq!(calibrated_direction(&calibration(), &[0.995, 0.999], 1, 0.985, 0.7, none), None);
+        assert_eq!(calibrated_thresholds(&calibration(), &[0.995, 0.999], [0.985, 0.985], 0.7, none), ([0.999, 1.0], false));
         // A recall floor below the program's is no rule.
-        assert_eq!(calibrated_direction(&calibration(), &grid, 1, 0.985, 0.5), None);
+        assert_eq!(calibrated_direction(&calibration(), &grid, 1, 0.985, 0.5, none), None);
+        // Allowed as many words typed as meant as the floor model converts: the Latin word to keep, one word in both
+        // profiles, holds the threshold no more when one is allowed, and does when none is.
+        let typed: Vec<String> = calibration().iter().map(|value| format!("{}:{}", value.source, value.desired)).collect();
+        let one = CalibrationFalse::Words { allowed: [1, 0], typed: &typed };
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.985], 0.7, one), ([0.985, 0.985], true));
+        assert_eq!(calibrated_thresholds(&calibration(), &grid, [0.985, 0.985], 0.7, CalibrationFalse::Words { allowed: [0, 0], typed: &typed }), ([0.999, 0.985], true));
     }
 
     /// Development of both profiles: the Latin word to convert switches at `key`, the Cyrillic one at 5; a word to keep in

@@ -1133,6 +1133,20 @@ mod words {
         assert_eq!(found.false_words.iter().sum::<usize>(), found.false_texts.len());
         std::fs::write(&list, "garden\n123\n").expect("a list");
         refused(&probed(&["--words", &list.display().to_string()], &listed), "opens with a letter of neither layout");
+        // By the recipe, a threshold on calibration may convert as many words typed as meant as the floor model converts
+        // there, and the seal says how many: none for a floor at the top of the grid.
+        /// What the test reads of the seal of such a fit.
+        #[derive(Deserialize)]
+        struct Relative {
+            calibration_read: bool,
+            calibration_false_words_allowed: [usize; 2],
+        }
+        let relative = key_recipe(&small, "words-key", &[("calibration_false_words_of_floor", "true")]);
+        let output = scratch("words-key-relative").join("out");
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&relative).arg("--output").arg(&output).arg("--frames-cache").arg(&cache).args(["--jobs", "2"]).output().expect("the trainer starts");
+        assert!(output.join("seal.json").exists(), "{}", String::from_utf8_lossy(&answer.stderr));
+        let relative_seal: Relative = read(&output.join("seal.json"));
+        assert!(relative_seal.calibration_read && relative_seal.calibration_false_words_allowed == [0, 0]);
     }
 
     #[test]
