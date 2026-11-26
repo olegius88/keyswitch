@@ -660,6 +660,7 @@ mod words {
     #[derive(Deserialize)]
     struct DirectionCounts {
         desired: i64,
+        converted: i64,
         kept: i64,
     }
 
@@ -787,6 +788,7 @@ mod words {
     /// What a test reads of a probe.
     #[derive(Deserialize)]
     struct Probe {
+        index: String,
         words: usize,
         thresholds: [f64; 2],
         minimum_characters: usize,
@@ -914,7 +916,16 @@ mod words {
         // A probe of a recipe that names no word corpus reads the prefix-v1 corpus.
         let plain = scratch("words-schemas-plain").join("probe.json");
         let installed = small.join("resources/models/prefix_policy_v1.json");
-        succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(small.join("model/prefix_v2/recipe.json")).arg("--split").arg("development").arg("--output").arg(&plain).output().expect("the trainer starts"));
+        let installed_probe = |extra: &[&str], output: &Path| trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(small.join("model/prefix_v2/recipe.json")).arg("--split").arg("development").args(extra).arg("--output").arg(output).output().expect("the trainer starts");
+        succeeded(&installed_probe(&[], &plain));
+        // The installed model of schema two reads the plain lexicon, as the program gives it; held, every word (`M`), and
+        // with them converts more of the words typed in Latin.
+        let held = scratch("words-schemas-held").join("probe.json");
+        succeeded(&installed_probe(&["--lexicon", "held"], &held));
+        let (plain_found, held_found): (Probe, Probe) = (read(&plain), read(&held));
+        assert_eq!((plain_found.index.as_str(), held_found.index.as_str(), plain_found.words), ("plain", "held", held_found.words));
+        assert!(at(&held_found.by_threshold, "0.985")[0].converted > at(&plain_found.by_threshold, "0.985")[0].converted);
+        refused(&installed_probe(&["--lexicon", "every"], &held), "--lexicon is plain or held: every");
         refused(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(&recipe_path).arg("--output").arg(&plain).output().expect("the trainer starts"), "one of --split and --words is required");
         // The parents of a word corpus: of its fitting splits only, and hard when their row says so.
         let corpus = small.join("model/words-schemas");

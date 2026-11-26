@@ -64,7 +64,9 @@ fn what_is_read_once_is_kept_and_a_lexicon_that_is_gone_knows_nothing() {
         let first = shipped.prefix_index(&model, lexicon);
         let second = shipped.prefix_index(&model, lexicon);
         assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(PrefixLexicon::named(lexicon.name()), Some(lexicon));
     }
+    assert_eq!(PrefixLexicon::named("every"), None);
     // Another model of the same lexicon file holds other words: its held index is its own, its plain one is shared.
     let other = shipped.language_model("en_US", ["zzyzxword"]);
     assert!(!Arc::ptr_eq(&shipped.prefix_index(&model, PrefixLexicon::Held), &shipped.prefix_index(&other, PrefixLexicon::Held)));

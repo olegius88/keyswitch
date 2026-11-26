@@ -115,6 +115,23 @@ pub enum PrefixLexicon {
     Held,
 }
 
+impl PrefixLexicon {
+    /// The word the trainer's commands and reports name it by.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            PrefixLexicon::Plain => "plain",
+            PrefixLexicon::Held => "held",
+        }
+    }
+
+    /// The lexicon a command names, if it names one.
+    #[must_use]
+    pub fn named(name: &str) -> Option<PrefixLexicon> {
+        [PrefixLexicon::Plain, PrefixLexicon::Held].into_iter().find(|lexicon| lexicon.name() == name)
+    }
+}
+
 /// Sorted case-folded words of one language with lexicon frequencies.
 pub struct PrefixIndex {
     /// `None`: the words are the keys of `frequencies`, as on a machine without Hunspell stems.

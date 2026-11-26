@@ -19,7 +19,7 @@ use ks_context::prefix_schema::{PrefixReaders, features_with_readers, prefix_lex
 use ks_context::prefix_terms::PrefixTerms;
 use ks_lang::ortho_model::{OrthoModel, artifact_path};
 use ks_context::flat_table::WeightTable;
-use ks_lang::early_switch::PrefixIndex;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_lang::{Resources, LanguageModel};
 use crate::replay::prefix_indexes_of;
 use ks_text::{JsonOptions, fsum, json_dumps, py_round_ndigits, pystr};
@@ -427,11 +427,10 @@ pub struct Indexes {
     hunspell: Vec<Arc<PrefixIndex>>,
 }
 
-/// `_indexes`: the supplied frozen models, with the Hunspell stems for the reference profile, built as the program builds
-/// them for a model of the schema (`prefix_lexicon_of`): every word the models hold for schema four, the plain lexicon for
-/// an older one, which the program has always given it.
-fn indexes_of(resources: &Resources, portable: &Lexicons, spelling: &Lexicons, feature_version: i64) -> Indexes {
-    let lexicon = prefix_lexicon_of(feature_version);
+/// `_indexes`: the supplied frozen models, with the Hunspell stems for the reference profile, of the words `lexicon`
+/// names. A fit builds them as the program does for a model of its schema (`prefix_lexicon_of`): every word the models
+/// hold for schema four, the plain lexicon for an older one, which the program has always given it.
+fn indexes_of(resources: &Resources, portable: &Lexicons, spelling: &Lexicons, lexicon: PrefixLexicon) -> Indexes {
     Indexes { portable: prefix_indexes_of(resources, portable, lexicon), hunspell: prefix_indexes_of(resources, spelling, lexicon) }
 }
 
@@ -1379,17 +1378,19 @@ struct FrameMaker {
     terms: Option<PrefixTerms>,
     rules: FrameRules,
     feature_version: i64,
+    /// The words of `indexes`.
+    lexicon: PrefixLexicon,
     maximum_prefix_length: usize,
     jobs: usize,
     cache: Option<FramesCache>,
 }
 
 impl FrameMaker {
-    fn new(root: &Path, resource_dir: &Path, feature_version: i64, maximum_prefix_length: usize, rules: FrameRules, jobs: usize, cache: Option<&Path>) -> Result<FrameMaker, String> {
+    fn new(root: &Path, resource_dir: &Path, feature_version: i64, lexicon: PrefixLexicon, maximum_prefix_length: usize, rules: FrameRules, jobs: usize, cache: Option<&Path>) -> Result<FrameMaker, String> {
         let resources: Arc<Resources> = Resources::with_speller(resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         let portable = reference_models(root, &resources, false)?;
         let spelling = reference_models(root, &resources, true)?;
-        let indexes = indexes_of(&resources, &portable, &spelling, feature_version);
+        let indexes = indexes_of(&resources, &portable, &spelling, lexicon);
         // Schemas three and four read the keys with the packaged orthotactic models, as the engine does; four the term
         // lists as well.
         let terms = (feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()).then(|| prefix_terms_of(resource_dir, &portable)).transpose()?;
@@ -1399,15 +1400,15 @@ impl FrameMaker {
             None
         };
         let cache = cache.map(|folder| FramesCache::open(folder, root, resource_dir)).transpose()?;
-        Ok(FrameMaker { portable, spelling, indexes, ortho, terms, rules, feature_version, maximum_prefix_length, jobs, cache })
+        Ok(FrameMaker { portable, spelling, indexes, ortho, terms, rules, feature_version, lexicon, maximum_prefix_length, jobs, cache })
     }
 
     /// What the frames read besides their parents, worded for the frames cache.
     fn settings(&self, feature_version: i64, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
-            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}",
-            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support
+            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}",
+            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support, self.lexicon.name()
         )
     }
 
@@ -1558,7 +1559,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     }
     let development_cells = check_cells(DEVELOPMENT, &parents[DEVELOPMENT], &options)?;
     let calibration_cells = check_cells(CALIBRATION, &parents[CALIBRATION], &options)?;
-    let maker = FrameMaker::new(request.root, request.resource_dir, feature_version, numbers.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
+    let maker = FrameMaker::new(request.root, request.resource_dir, feature_version, prefix_lexicon_of(feature_version), numbers.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
     let train_frames = maker.frames(TRAIN, &parents[TRAIN])?;
     println!("train: {} frames", train_frames.frames.len());
     let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());
@@ -1798,6 +1799,9 @@ pub struct ProbeRequest<'a> {
     pub minimum_characters: Option<usize>,
     /// Write no text of the words: a sample whose texts are read nowhere.
     pub numbers_only: bool,
+    /// The words of the prefix index when not those the model runs with (`VersionedPrefixModel::prefix_lexicon`): held
+    /// measures prefix_v2 as every acceptance before the program and the tools gave it one index did (`M`).
+    pub lexicon: Option<PrefixLexicon>,
     pub output: &'a Path,
     pub jobs: usize,
     pub frames_cache: Option<&'a Path>,
@@ -1808,6 +1812,8 @@ pub struct ProbeRequest<'a> {
 #[derive(serde::Serialize)]
 pub struct ProbeReport {
     model_version: String,
+    /// The words of the index the frames were made with: `plain` or `held`.
+    index: &'static str,
     thresholds: [f64; 2],
     minimum_characters: usize,
     words: usize,
@@ -1872,7 +1878,8 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
         rules.minimum_characters = minimum;
     }
     let minimum_characters = rules.minimum_characters;
-    let maker = FrameMaker::new(request.root, request.resource_dir, loaded.feature_version, cfg.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
+    let lexicon = request.lexicon.unwrap_or_else(|| loaded.prefix_lexicon());
+    let maker = FrameMaker::new(request.root, request.resource_dir, loaded.feature_version, lexicon, cfg.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
     let frames = maker.frames("probe", &parents)?;
     let scores = sequence_scores(&frames, &runtime_probabilities(&loaded.model, &frames));
     let thresholds = loaded.thresholds();
@@ -1880,6 +1887,7 @@ pub fn probe(request: &ProbeRequest<'_>) -> Result<ProbeReport, String> {
     let typed: Vec<Option<String>> = frames.typed.iter().map(|text| texts.then(|| text.clone())).collect();
     let report = ProbeReport {
         model_version: loaded.version().to_owned(),
+        index: lexicon.name(),
         thresholds,
         minimum_characters,
         words: parents.len(),

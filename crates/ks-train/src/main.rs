@@ -1,7 +1,7 @@
 //! `ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]`
 //! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--development-only] [--jobs N]`
 //! `ks-train prefix-report --fit <folder> --output <file>`
-//! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--frames-cache <folder>] --output <file> [--jobs N]`
+//! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--lexicon plain|held] [--frames-cache <folder>] --output <file> [--jobs N]`
 //! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
 //! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>[,plain|held]... --reference <name> --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
@@ -109,6 +109,7 @@ fn main() {
             words,
             minimum_characters: option(&arguments, "--minimum-characters").map(|value| value.parse().expect("--minimum-characters is a number")),
             numbers_only: flag(&arguments, "--numbers-only"),
+            lexicon: option(&arguments, "--lexicon").map(|name| ks_lang::early_switch::PrefixLexicon::named(name).unwrap_or_else(|| panic!("--lexicon is plain or held: {name}"))),
             output: &output,
             jobs: option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number")),
             frames_cache: option(&arguments, "--frames-cache").map(Path::new),
@@ -483,9 +484,7 @@ fn acceptance_command(arguments: &[String]) -> i32 {
                     let (context, rest) = models.split_once(',').unwrap_or_else(|| panic!("{}", shape()));
                     let (prefix, lexicon) = match rest.split_once(',') {
                         None => (rest, None),
-                        Some((prefix, "plain")) => (prefix, Some(PrefixLexicon::Plain)),
-                        Some((prefix, "held")) => (prefix, Some(PrefixLexicon::Held)),
-                        Some(_) => panic!("{}", shape()),
+                        Some((prefix, name)) => (prefix, Some(PrefixLexicon::named(name).unwrap_or_else(|| panic!("{}", shape())))),
                     };
                     NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix), lexicon }
                 })
