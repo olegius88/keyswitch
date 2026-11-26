@@ -257,7 +257,7 @@ pub struct WordRow {
 }
 
 #[expect(clippy::trivially_copy_pass_by_ref, reason = "serde hands a skipped field by reference")]
-fn is_false(value: &bool) -> bool {
+pub(crate) fn is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -638,48 +638,123 @@ pub fn low_keys_cut(means: &mut [f64], per_mille: u64) -> Option<f64> {
     means.get(place.min(means.len().saturating_sub(1))).copied()
 }
 
-/// Which words are hard by their first keys: the cut of each language, over its names and words, and the test.
-struct LowKeys<'a> {
-    ortho: &'a OrthoModel,
+/// How the generation classes a word, kept so that a word of another source is classed as the corpus would have classed
+/// it: the reference lexicons (their supplements among them), the orthotactic model, the cut of each language under which
+/// a word is hard by its first keys, over its names and words, and the frequent words of the snapshot.
+pub struct WordClasses {
+    models: crate::tools::Lexicons,
+    ortho: OrthoModel,
     rule: Option<LowKeysRule>,
     cuts: [Option<f64>; 2],
+    frequent: BTreeSet<(String, i64)>,
+    english_keys_minimum_nats: f64,
+    english_keys_maximum_characters: usize,
 }
 
-impl LowKeys<'_> {
-    fn is_low(&self, text: &str, group: i64) -> bool {
+impl WordClasses {
+    fn new(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pools: &Pools) -> Result<WordClasses, String> {
+        let models = reference_models(root, resources, false)?;
+        let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?;
+        let mut cuts = [None, None];
+        if let Some(rule) = config.low_keys {
+            let mut means: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+            let named = pools.names.keys().map(|(text, group)| (text.as_str(), *group));
+            for (text, group) in named.chain(pools.tatoeba.keys().chain(pools.treebank_words.keys()).map(|(text, group)| (text.as_str(), *group))) {
+                // Every word here has letters, so it has a mean.
+                means[usize::from(group == 1)].extend(own_keys_mean(&ortho, text, group, rule.characters));
+            }
+            cuts = means.map(|mut found| low_keys_cut(&mut found, rule.per_mille));
+        }
+        let mut by_count: Vec<(&(String, i64), &i64)> = pools.tatoeba.iter().collect();
+        by_count.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
+        let mut frequent: BTreeSet<(String, i64)> = BTreeSet::new();
+        let mut per_group = [0_usize; 2];
+        for (key, _) in by_count {
+            let taken = &mut per_group[key.1.to::<usize>()];
+            if *taken < config.frequent_words_per_language {
+                *taken += 1;
+                frequent.insert(key.clone());
+            }
+        }
+        Ok(WordClasses { models, ortho, rule: config.low_keys, cuts, frequent, english_keys_minimum_nats: config.english_keys_minimum_nats, english_keys_maximum_characters: config.english_keys_maximum_characters })
+    }
+
+    /// Hard by its first keys: its own layout's channel reads them at or under its language's cut.
+    #[must_use]
+    pub fn is_low(&self, text: &str, group: i64) -> bool {
         let (Some(rule), Some(cut)) = (self.rule, self.cuts[usize::from(group == 1)]) else {
             return false;
         };
-        own_keys_mean(self.ortho, text, group, rule.characters).is_some_and(|mean| mean <= cut)
+        own_keys_mean(&self.ortho, text, group, rule.characters).is_some_and(|mean| mean <= cut)
     }
+
+    /// The onboard lexicon of the word's layout knows the form, its supplement's forms among it.
+    #[must_use]
+    pub fn known(&self, word: &str, group: i64) -> bool {
+        self.models[group.to::<usize>()].frequencies.contains(word)
+    }
+
+    /// The class of a paired lower-case word.
+    #[must_use]
+    pub fn class_of(&self, word: &str, group: i64) -> Class {
+        let english_like = group == 1 && {
+            let keys = pystr::casefold(&crate::physical::pair().translate(word, "ru", "us").expect("the pair of layouts"));
+            let (english, russian) = (prefix_conditionals(&self.ortho.channels.en, &keys), prefix_conditionals(&self.ortho.channels.ru, &keys));
+            english_margin(&english, &russian, self.english_keys_maximum_characters).is_some_and(|margin| margin >= self.english_keys_minimum_nats)
+        };
+        word_class(word, group, &self.frequent, self.known(word, group), english_like, self.is_low(word, group))
+    }
+}
+
+/// A frozen word corpus read to class words of other sources as it classed its own: its config, its receipt, the aliases
+/// it held out, and its classes.
+pub struct ClassedCorpus {
+    pub config: WordConfig,
+    pub receipt: WordReceipt,
+    pub held_out: HashSet<String>,
+    pub classes: WordClasses,
+}
+
+impl ClassedCorpus {
+    /// Its config, receipt and held-out aliases, each checked against the receipt, and the classes of the base it was
+    /// drawn from, which the receipt pins too.
+    pub fn read(root: &Path, resources: &Arc<Resources>, corpus: &Path, base: &Path) -> Result<ClassedCorpus, String> {
+        let receipt: WordReceipt = ks_text::json::loads(std::fs::read(corpus.join(RECEIPT_FILE)).map_err(|error| format!("{}: {error}", corpus.display()))?).map_err(|error| format!("{RECEIPT_FILE}: {error}"))?;
+        let config_path = corpus.join(CONFIG_FILE);
+        if checksum(&config_path)? != receipt.config_sha256 {
+            return Err("not the config the word corpus was drawn by".to_owned());
+        }
+        let held_out_path = corpus.join(HELD_OUT_FILE);
+        if checksum(&held_out_path)? != receipt.held_out.sha256 {
+            return Err("not the held-out words the word corpus was drawn without".to_owned());
+        }
+        let config: WordConfig = ks_text::json::loads(std::fs::read(&config_path).map_err(|error| error.to_string())?).map_err(|error| format!("{CONFIG_FILE}: {error}"))?;
+        let held: HeldOut = ks_text::json::loads(gunzip(&held_out_path)?).map_err(|error| format!("{HELD_OUT_FILE}: {error}"))?;
+        let (rows, namespace, digest) = base_rows(base)?;
+        if !receipt.sources.iter().any(|source| source.name == base_source_name(&namespace) && source.sha256 == digest) {
+            return Err("not the base the word corpus was drawn from".to_owned());
+        }
+        let pools = pools(root, &config, &rows)?;
+        let classes = WordClasses::new(root, resources, &config, &pools)?;
+        Ok(ClassedCorpus { config, receipt, held_out: held.aliases.into_iter().collect(), classes })
+    }
+
+    /// A lower-case word of one layout the corpus could have held: of its lengths, all of it that layout's letters.
+    #[must_use]
+    pub fn admits(&self, word: &str, group: i64) -> bool {
+        in_bounds(&self.config, word) && lower_group(word) == Some(group)
+    }
+}
+
+/// The name a receipt gives the base corpus it was drawn from.
+fn base_source_name(namespace: &str) -> String {
+    format!("base corpus {namespace}, training split")
 }
 
 /// Every candidate once, held-out words left out. Names come first, then words, then tokens typed only as meant; a
 /// term that is a word of the corpus stays a word.
 fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pools: &Pools, held_out: &HashSet<String>) -> Result<(Vec<Candidate>, [Option<f64>; 2]), String> {
-    let models = reference_models(root, resources, false)?;
-    let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).map_err(|error| format!("the orthotactic model: {}", error.name))?;
-    let mut low = LowKeys { ortho: &ortho, rule: config.low_keys, cuts: [None, None] };
-    if let Some(rule) = config.low_keys {
-        let mut means: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
-        let named = pools.names.keys().map(|(text, group)| (text.as_str(), *group));
-        for (text, group) in named.chain(pools.tatoeba.keys().chain(pools.treebank_words.keys()).map(|(text, group)| (text.as_str(), *group))) {
-            // Every word here has letters, so it has a mean.
-            means[usize::from(group == 1)].extend(own_keys_mean(&ortho, text, group, rule.characters));
-        }
-        low.cuts = means.map(|mut found| low_keys_cut(&mut found, rule.per_mille));
-    }
-    let mut by_count: Vec<(&(String, i64), &i64)> = pools.tatoeba.iter().collect();
-    by_count.sort_by(|left, right| right.1.cmp(left.1).then_with(|| left.0.cmp(right.0)));
-    let mut frequent: BTreeSet<(String, i64)> = BTreeSet::new();
-    let mut per_group = [0_usize; 2];
-    for (key, _) in by_count {
-        let taken = &mut per_group[key.1.to::<usize>()];
-        if *taken < config.frequent_words_per_language {
-            *taken += 1;
-            frequent.insert(key.clone());
-        }
-    }
+    let classes = WordClasses::new(root, resources, config, pools)?;
     let leaders: Vec<char> = config.sign_leaders.chars().collect();
     if leaders.is_empty() {
         return Err("a word corpus needs sign leaders".to_owned());
@@ -693,20 +768,14 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
         }
     };
     for ((name, group), source) in &pools.names {
-        add(Candidate { text: name.clone(), group: *group, class: Class::Name, source: source.clone(), natural: None, hard: Class::Name.hard(*group) || low.is_low(name, *group) }, &mut chosen);
+        add(Candidate { text: name.clone(), group: *group, class: Class::Name, source: source.clone(), natural: None, hard: Class::Name.hard(*group) || classes.is_low(name, *group) }, &mut chosen);
     }
     let mut words: BTreeMap<(String, i64), String> = pools.tatoeba.keys().map(|key| (key.clone(), TATOEBA_SNAPSHOT.to_owned())).collect();
     for (key, source) in &pools.treebank_words {
         words.entry(key.clone()).or_insert_with(|| source.clone());
     }
     for ((word, group), source) in &words {
-        let known = models[group.to::<usize>()].frequencies.contains(word);
-        let english_like = *group == 1 && {
-            let keys = pystr::casefold(&crate::physical::pair().translate(word, "ru", "us").expect("the pair of layouts"));
-            let (english, russian) = (prefix_conditionals(&ortho.channels.en, &keys), prefix_conditionals(&ortho.channels.ru, &keys));
-            english_margin(&english, &russian, config.english_keys_maximum_characters).is_some_and(|margin| margin >= config.english_keys_minimum_nats)
-        };
-        let class = word_class(word, *group, &frequent, known, english_like, low.is_low(word, *group));
+        let class = classes.class_of(word, *group);
         add(Candidate { text: word.clone(), group: *group, class, source: source.clone(), natural: None, hard: class.hard(*group) }, &mut chosen);
     }
     let english: Vec<Candidate> = chosen.values().filter(|candidate| candidate.group == 0).cloned().collect();
@@ -722,7 +791,7 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
         // A token whose keys read as a Russian word is that word typed in the wrong layout as often as a term: it would
         // be kept here and converted as the Russian word.
         let reading = crate::physical::pair().translate(term, "us", "ru").expect("the pair of layouts");
-        if known_words.contains(term) || known_words.contains(&reading) || models[1].frequencies.contains(&reading) {
+        if known_words.contains(term) || known_words.contains(&reading) || classes.known(&reading, 1) {
             continue;
         }
         let class = if term.chars().count() <= 4 { Class::ShortTerm } else { Class::Term };
@@ -732,12 +801,12 @@ fn candidates(root: &Path, resources: &Arc<Resources>, config: &WordConfig, pool
     for (token, before, source) in &pools.addresses {
         for (part, inside) in address_parts(token) {
             if in_bounds(config, &part) {
-                let hard = low.is_low(&part, 0);
+                let hard = classes.is_low(&part, 0);
                 add(Candidate { text: part, group: 0, class: Class::Address, source: source.clone(), natural: Some(format!("{before}{inside}")), hard }, &mut chosen);
             }
         }
     }
-    Ok((chosen.into_values().collect(), low.cuts))
+    Ok((chosen.into_values().collect(), classes.cuts))
 }
 
 /// The split of a physical family: development, calibration and acceptance take their thousandths by hash, training the
@@ -966,7 +1035,7 @@ fn generation(request: &WordCorpusRequest<'_>, config: &WordConfig, held_out: &H
     let ud = crate::base_corpus::BASE_PINS.iter().map(|(name, commit)| format!("{name}@{commit}")).collect::<Vec<_>>().join(", ");
     let sources = vec![
         SourceRecord { name: TATOEBA_SNAPSHOT.to_owned(), pin: "Tatoeba CC0 export of 2026-08-29 (model/context_v2/sources/README.md)".to_owned(), license: "CC0 1.0".to_owned(), sha256: tree_file(TATOEBA_SNAPSHOT)?, gives: "word counts (frequent, rare and unknown words) and the phrases put before a word".to_owned() },
-        SourceRecord { name: format!("base corpus {namespace}, training split"), pin: format!("train.jsonl.gz of the frozen base; treebanks {ud}; Debian trixie main amd64 Contents"), license: "UD_English-EWT and UD_Russian-Taiga CC BY-SA 4.0, UD_Russian-SynTagRus CC BY-NC-SA 4.0 (their LICENSE.txt at the pinned commits); Debian file names: the Contents index states no license".to_owned(), sha256: base_digest, gives: "treebank words and names (PROPN), Debian commands, address parts of UD_English-EWT".to_owned() },
+        SourceRecord { name: base_source_name(&namespace), pin: format!("train.jsonl.gz of the frozen base; treebanks {ud}; Debian trixie main amd64 Contents"), license: "UD_English-EWT and UD_Russian-Taiga CC BY-SA 4.0, UD_Russian-SynTagRus CC BY-NC-SA 4.0 (their LICENSE.txt at the pinned commits); Debian file names: the Contents index states no license".to_owned(), sha256: base_digest, gives: "treebank words and names (PROPN), Debian commands, address parts of UD_English-EWT".to_owned() },
         SourceRecord { name: IDENTIFIERS.to_owned(), pin: "Debian trixie main amd64 Contents (its source block)".to_owned(), license: "the Contents index states no license".to_owned(), sha256: tree_file(IDENTIFIERS)?, gives: "terms and short terms".to_owned() },
         SourceRecord { name: PROTECTED_TOKENS.to_owned(), pin: "this tree".to_owned(), license: "the project's".to_owned(), sha256: tree_file(PROTECTED_TOKENS)?, gives: "terms and short terms".to_owned() },
         SourceRecord { name: format!("{TERM_TABLE} (latin)"), pin: "ru.stackoverflow.com via Hugging Face IlyaGusev/ru_stackoverflow@3bfd79e5, training split".to_owned(), license: "CC BY-SA 4.0".to_owned(), sha256: tree_file(TERM_TABLE)?, gives: "Latin tokens of Russian technical text: terms and short terms".to_owned() },
@@ -1199,10 +1268,14 @@ mod tests {
         assert_eq!(low_keys_cut(&mut [3.0, -1.0, -5.0, 0.0], 250), Some(-1.0));
         assert_eq!(low_keys_cut(&mut [3.0, -1.0], 1000), Some(3.0));
         assert_eq!(low_keys_cut(&mut [], 250), None);
-        let low = LowKeys { ortho: &ortho, rule: Some(LowKeysRule { characters: 4, per_mille: 200 }), cuts: [Some(mean("cntk", 0)), Some(mean("офсет", 1))] };
-        assert!(low.is_low("cntk", 0) && !low.is_low("house", 0) && low.is_low("офсет", 1) && !low.is_low("погода", 1));
-        assert!(!LowKeys { rule: None, ..low }.is_low("cntk", 0));
-        assert!(!LowKeys { cuts: [None, None], ..low }.is_low("cntk", 0));
+        let (rule, cuts) = (Some(LowKeysRule { characters: 4, per_mille: 200 }), [Some(mean("cntk", 0)), Some(mean("офсет", 1))]);
+        let models = reference_models(&root, &resources, false).expect("the reference lexicons");
+        let classes = WordClasses { models, ortho, rule, cuts, frequent: BTreeSet::new(), english_keys_minimum_nats: 0.0, english_keys_maximum_characters: 4 };
+        assert!(classes.is_low("cntk", 0) && !classes.is_low("house", 0) && classes.is_low("офсет", 1) && !classes.is_low("погода", 1));
+        let classes = WordClasses { rule: None, ..classes };
+        assert!(!classes.is_low("cntk", 0));
+        let classes = WordClasses { rule, cuts: [None, None], ..classes };
+        assert!(!classes.is_low("cntk", 0));
     }
 
     #[test]

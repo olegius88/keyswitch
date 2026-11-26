@@ -11,10 +11,12 @@ use ks_cast::To as _;
 use crate::corpus::{CALIBRATION, DEVELOPMENT, checksum, load_rows};
 use crate::evaluate::{EARLY_KIND, PROFILES, first_word, script_group, trimmed_window, typed_first};
 use crate::physical::{expanded_aliases, hex};
-use crate::prefix_words::{ACCEPTANCE_SPLIT, draw, held_out_of, read_split};
+use crate::prefix_corpus::family;
+use crate::prefix_derive::moved_by_cut;
+use crate::prefix_words::{ACCEPTANCE_SPLIT, Class, ClassedCorpus, WordClasses, draw, held_out_of, read_split};
 use crate::replay::{Mode, Plan, Replayer, prefix_indexes, prefix_indexes_of};
 use crate::sequence_report::Case;
-use crate::tools::{Lexicons, Tools, reference_models};
+use crate::tools::{LOCALES, Lexicons, Tools, reference_models};
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
@@ -58,7 +60,15 @@ const ROWS_PER_TASK: usize = 400;
 /// The name the samples give a word of plain text, in place of a class of the word corpus.
 const PLAIN_CLASS: &str = "plain";
 
-/// The samples of the pre-registration.
+/// The source of the words the acceptance split gives A1 to A3, and of the Russian supplement's forms of the families a
+/// derived corpus's cut moved.
+pub const SOURCE_CORPUS: &str = "corpus";
+pub const SOURCE_SUPPLEMENT: &str = "supplement";
+/// The words of A5 a direction of each of its halves must hold for its gates to count; fewer are only reported.
+pub const MINIMUM_UNKNOWN_WORDS_PER_DIRECTION: usize = 1000;
+
+/// The samples of the pre-registration. A5: words neither lexicon knows in either reading (its supplement's forms among
+/// it), typed in the other layout and as meant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Sample {
     A1,
@@ -66,6 +76,7 @@ pub enum Sample {
     A3,
     N1,
     N2,
+    A5,
 }
 
 impl Sample {
@@ -77,9 +88,13 @@ impl Sample {
             Sample::A3 => "A3",
             Sample::N1 => "N1",
             Sample::N2 => "N2",
+            Sample::A5 => "A5",
         }
     }
 }
+
+/// Every sample, in the order the receipt counts them.
+pub const SAMPLES: [Sample; 6] = [Sample::A1, Sample::A2, Sample::A3, Sample::N1, Sample::N2, Sample::A5];
 
 /// A row of a sample: one word, typed as meant or in the other layout.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -94,8 +109,12 @@ pub struct AcceptanceRow {
     pub class: String,
     /// Typed in the other layout; otherwise as meant.
     pub other: bool,
-    /// Typed through the engine: every row of A1 to A3, the share of N1 and N2 drawn by hash.
+    /// Typed through the engine: every row of A1 to A3, the share of N1, N2 and A5 drawn by hash.
     pub engine: bool,
+    /// Where the word came from: `corpus`, `supplement` or the name of a list for A1 to A3; the sources of plain text it
+    /// was found in, joined by `+`, for N1, N2 and A5. Empty in samples built before rows named it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
 }
 
 impl AcceptanceRow {
@@ -113,12 +132,49 @@ pub struct Minimums {
     pub paired: usize,
     pub plain: usize,
     pub engine_plain: usize,
+    /// The words of a half of A5 a direction holds for its gates to count (none in samples built before A5).
+    #[serde(default)]
+    pub unknown: usize,
 }
 
 impl Default for Minimums {
     fn default() -> Minimums {
-        Minimums { paired: MINIMUM_PAIRED_WORDS_PER_DIRECTION, plain: MINIMUM_PLAIN_WORDS_PER_DIRECTION, engine_plain: ENGINE_PLAIN_WORDS_PER_DIRECTION }
+        Minimums { paired: MINIMUM_PAIRED_WORDS_PER_DIRECTION, plain: MINIMUM_PLAIN_WORDS_PER_DIRECTION, engine_plain: ENGINE_PLAIN_WORDS_PER_DIRECTION, unknown: MINIMUM_UNKNOWN_WORDS_PER_DIRECTION }
     }
+}
+
+/// A list of words with their counts: lines of `word count` (the FrequencyWords lists) or `id<TAB>word<TAB>count` (the
+/// Leipzig corpora), read under a name for the words of one layout counted at least `minimum`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WordListInput {
+    pub name: String,
+    pub path: PathBuf,
+    pub group: i64,
+    pub minimum: u64,
+    /// A1 to A3 also take its words of the families a derived corpus's cut moved.
+    pub cut: bool,
+}
+
+/// A list the samples read: where, its SHA-256, what of it was taken, and the words it gave.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListFile {
+    pub name: String,
+    pub path: String,
+    pub sha256: String,
+    pub group: i64,
+    pub minimum: u64,
+    pub cut: bool,
+    /// Its words counted at least the minimum, as listed.
+    pub listed: usize,
+}
+
+/// What classes the words of a list or of the supplement as the word corpus classed its own (`ClassedCorpus`), and what
+/// A5 is drawn by: the tree and the frozen base the corpus was drawn from.
+#[derive(Clone, Copy, Debug)]
+pub struct ClassesInput<'a> {
+    pub root: &'a Path,
+    pub base: &'a Path,
 }
 
 /// What `prefix-acceptance build` reads.
@@ -135,6 +191,13 @@ pub struct BuildRequest<'a> {
     pub inventories: &'a [PathBuf],
     /// Development samples and lists of words, as a word corpus's freeze holds them out.
     pub hold_out: &'a [PathBuf],
+    /// Lists of words with their counts: words of N1 and N2, and of A5; those marked `cut` give A1 to A3 their words of
+    /// the families the cut moved.
+    pub word_lists: &'a [WordListInput],
+    /// A1 to A3 also take the Russian supplement's forms of the families the cut moved.
+    pub supplement: bool,
+    /// Needed by the lists, the supplement and A5; without them the samples are those of v89.
+    pub classes: Option<ClassesInput<'a>>,
     pub namespace: &'a str,
     pub minimums: Minimums,
     pub output: &'a Path,
@@ -177,6 +240,14 @@ pub struct SamplesReceipt {
     pub plain_by_source: BTreeMap<String, [usize; 2]>,
     pub sha256: BTreeMap<String, String>,
     pub scope: String,
+    /// The lists of words read, and whether A1 to A3 took the supplement's forms; neither in samples built before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub word_lists: Vec<ListFile>,
+    #[serde(default, skip_serializing_if = "crate::prefix_words::is_false")]
+    pub supplement: bool,
+    /// The words of each sample by the source its rows name, by direction.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_source: BTreeMap<String, BTreeMap<String, [usize; 2]>>,
 }
 
 fn readable() -> JsonOptions {
@@ -246,20 +317,51 @@ fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     encoder.finish().map_err(|error| error.to_string())
 }
 
+/// The words of a list counted at least `minimum`, as listed (`WordListInput`).
+fn listed_words(path: &Path, minimum: u64) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    for line in read_text(path)?.lines().filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = if line.contains('\t') { line.split('\t').collect() } else { line.split(' ').collect() };
+        let (word, count) = match fields.as_slice() {
+            [word, count] | [_, word, count] => (*word, *count),
+            _ => return Err(format!("{}: a line of neither `word count` nor `id<TAB>word<TAB>count`", path.display())),
+        };
+        let count: u64 = count.trim().parse().map_err(|_| format!("{}: a count that is no number", path.display()))?;
+        if count >= minimum {
+            words.push(word.to_owned());
+        }
+    }
+    Ok(words)
+}
+
+/// Whether neither lexicon knows a word, its supplement's forms among it: not its own layout's as meant, not the other
+/// layout's in the reading its keys type there.
+#[must_use]
+pub fn unknown_both_ways(classes: &WordClasses, text: &str, group: i64) -> bool {
+    let (from, to) = if group == 1 { ("ru", "us") } else { ("us", "ru") };
+    let other = crate::physical::pair().translate(text, from, to).map(|reading| pystr::casefold(&reading));
+    !classes.known(text, group) && other.is_ok_and(|reading| !classes.known(&reading, 1 - group))
+}
+
 /// The words of a sample of plain text, typed as meant (N2) or in the other layout (N1), those the engine types drawn by
-/// hash in each direction.
-fn plain_rows(words: &BTreeSet<(String, i64)>, sample: Sample, namespace: &str, engine: usize, untyped: &mut BTreeMap<String, [usize; 2]>) -> Vec<AcceptanceRow> {
+/// hash in each direction; each names the sources it was found in.
+fn plain_rows(words: &BTreeMap<WordKey, String>, sample: Sample, namespace: &str, engine: usize, untyped: &mut BTreeMap<String, [usize; 2]>) -> Vec<AcceptanceRow> {
     let other = sample == Sample::N1;
     let rows: Vec<AcceptanceRow> = words
         .iter()
-        .filter(|(text, group)| !other || letters_both_ways(text, *group))
-        .map(|(text, group)| AcceptanceRow { sample, text: text.clone(), group: *group, class: PLAIN_CLASS.to_owned(), other, engine: false })
+        .filter(|((text, group), _)| !other || letters_both_ways(text, *group))
+        .map(|((text, group), source)| AcceptanceRow { sample, text: text.clone(), group: *group, class: PLAIN_CLASS.to_owned(), other, engine: false, source: source.clone() })
         .collect();
+    engine_share(rows, namespace, engine, untyped)
+}
+
+/// The rows the replay can type, and of them those the engine types: in each direction, `engine` drawn by hash.
+fn engine_share(rows: Vec<AcceptanceRow>, namespace: &str, engine: usize, untyped: &mut BTreeMap<String, [usize; 2]>) -> Vec<AcceptanceRow> {
     // A row the replay cannot type is left out before the engine's share is drawn.
     let mut rows = typable(rows, untyped);
     for direction in 0..2 {
         let mut drawn: Vec<&mut AcceptanceRow> = rows.iter_mut().filter(|row| row.direction() == direction).collect();
-        drawn.sort_by_cached_key(|row| (draw(&format!("{namespace}:engine:{}:{}:{}", sample.as_str(), row.group, row.text)), row.text.clone()));
+        drawn.sort_by_cached_key(|row| (draw(&format!("{namespace}:engine:{}:{}:{}", row.sample.as_str(), row.group, row.text)), row.text.clone()));
         for row in drawn.into_iter().take(engine) {
             row.engine = true;
         }
@@ -273,7 +375,7 @@ fn typable(rows: Vec<AcceptanceRow>, untyped: &mut BTreeMap<String, [usize; 2]>)
         .filter(|row| {
             let typed = row_plan(0, row).unsupported.is_empty();
             if !typed {
-                untyped.entry(row.sample.as_str().to_owned()).or_default()[row.direction()] += 1;
+                untyped.entry(half_name(row).to_owned()).or_default()[row.direction()] += 1;
             }
             typed
         })
@@ -285,11 +387,20 @@ fn base_splits(calibration: bool) -> &'static [&'static str] {
     if calibration { &[DEVELOPMENT, CALIBRATION] } else { &[DEVELOPMENT] }
 }
 
-/// The counts of the rows of each sample.
+/// The name the rows of A5 typed as meant are counted under, apart from those typed in the other layout.
+pub const A5_AS_MEANT: &str = "A5_as_meant";
+
+/// The name a row is counted under: its sample, the rows of A5 typed as meant apart.
+#[must_use]
+pub fn half_name(row: &AcceptanceRow) -> &'static str {
+    if row.sample == Sample::A5 && !row.other { A5_AS_MEANT } else { row.sample.as_str() }
+}
+
+/// The counts of the rows of each sample (A5's two halves apart).
 fn sample_counts(rows: &[AcceptanceRow]) -> BTreeMap<String, SampleCount> {
-    let mut counts: BTreeMap<String, SampleCount> = [Sample::A1, Sample::A2, Sample::A3, Sample::N1, Sample::N2].iter().map(|sample| (sample.as_str().to_owned(), SampleCount::default())).collect();
+    let mut counts: BTreeMap<String, SampleCount> = SAMPLES[..5].iter().map(|sample| (sample.as_str().to_owned(), SampleCount::default())).collect();
     for row in rows {
-        let count = counts.entry(row.sample.as_str().to_owned()).or_default();
+        let count = counts.entry(half_name(row).to_owned()).or_default();
         count.words[row.direction()] += 1;
         count.engine[row.direction()] += usize::from(row.engine);
     }
@@ -301,16 +412,53 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
     if request.output.join(RECEIPT_FILE).exists() {
         return Err("refusing to overwrite acceptance samples".to_owned());
     }
-    // A1 to A3: the acceptance split, each word once.
-    let mut words: BTreeMap<(String, i64), (crate::prefix_words::Class, bool)> = BTreeMap::new();
+    let mut names: BTreeSet<&str> = [DEVELOPMENT, CALIBRATION, SOURCE_TEXT, SOURCE_CORPUS, SOURCE_SUPPLEMENT].into_iter().collect();
+    if let Some(list) = request.word_lists.iter().find(|list| !names.insert(list.name.as_str())) {
+        return Err(format!("two sources of the samples are named {}", list.name));
+    }
+    let classed = match request.classes {
+        Some(input) => {
+            let resources = Resources::new(input.root.join("resources"));
+            let corpus = ClassedCorpus::read(input.root, &resources, request.corpus, input.base)?;
+            Some((resources, corpus))
+        }
+        None if request.supplement || !request.word_lists.is_empty() => return Err("lists of words and the supplement are read with the classes of the word corpus (--classes-base)".to_owned()),
+        None => None,
+    };
+    let listed: Vec<Vec<String>> = request.word_lists.iter().map(|list| listed_words(&list.path, list.minimum)).collect::<Result<_, _>>()?;
+    let held_out = held_out_of(request.hold_out)?;
+    let mut barred: HashSet<String> = held_out.aliases.iter().cloned().collect();
+    // A1 to A3: the acceptance split, each word once, and of a derived corpus the words of the families its cut moved.
+    let mut words: BTreeMap<WordKey, (Class, bool, String)> = BTreeMap::new();
     for row in read_split(request.corpus, ACCEPTANCE_SPLIT)? {
         let hard = row.hard || row.class.hard(row.group);
-        let entry = words.entry((row.text, row.group)).or_insert((row.class, hard));
+        let entry = words.entry((row.text, row.group)).or_insert((row.class, hard, SOURCE_CORPUS.to_owned()));
         entry.1 |= hard;
     }
+    if let Some((resources, classed)) = &classed {
+        barred.extend(classed.held_out.iter().cloned());
+        if request.supplement || request.word_lists.iter().any(|list| list.cut) {
+            let derived = classed.receipt.derived.as_ref().ok_or("the families a cut moved are those of a derived corpus")?;
+            let mut offered: Vec<(String, i64, String)> = Vec::new();
+            if request.supplement {
+                let forms = resources.supplement_words(LOCALES[1]).map_err(|error| error.name.to_string())?;
+                offered.extend(forms.iter().map(|form| (pystr::casefold(form), 1, SOURCE_SUPPLEMENT.to_owned())));
+            }
+            for (list, found) in request.word_lists.iter().zip(&listed).filter(|(list, _)| list.cut) {
+                offered.extend(found.iter().map(|word| (pystr::casefold(word), list.group, list.name.clone())));
+            }
+            for (text, group, source) in offered {
+                let fresh = !words.contains_key(&(text.clone(), group)) && !aliases_of(&text).any(|alias| barred.contains(&alias));
+                if fresh && classed.admits(&text, group) && moved_by_cut(&classed.config, derived, &family(&text, group)) {
+                    let class = classed.classes.class_of(&text, group);
+                    words.insert((text, group), (class, class.hard(group), source));
+                }
+            }
+        }
+    }
     let mut drawn: Vec<AcceptanceRow> = Vec::new();
-    for ((text, group), (class, hard)) in &words {
-        let row = |sample: Sample, other: bool| AcceptanceRow { sample, text: text.clone(), group: *group, class: class.as_str().to_owned(), other, engine: true };
+    for ((text, group), (class, hard, source)) in &words {
+        let row = |sample: Sample, other: bool| AcceptanceRow { sample, text: text.clone(), group: *group, class: class.as_str().to_owned(), other, engine: true, source: source.clone() };
         if class.paired() {
             drawn.push(row(Sample::A1, true));
             drawn.push(row(Sample::A2, false));
@@ -321,41 +469,66 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
     }
     let mut untyped: BTreeMap<String, [usize; 2]> = BTreeMap::new();
     let mut rows = typable(drawn, &mut untyped);
-    // N1 and N2: plain text, without every word a prefix selection, a held-out sample or the acceptance split holds.
-    let mut held: HashSet<String> = HashSet::new();
+    // N1 and N2: plain text, without every word a prefix selection, a held-out sample or A1 to A3 holds.
+    let mut held: HashSet<String> = barred;
     for path in request.inventories {
         held.extend(inventory_aliases(path)?);
     }
-    let held_out = held_out_of(request.hold_out)?;
-    held.extend(held_out.aliases.iter().cloned());
     for (text, _) in words.keys() {
         held.extend(aliases_of(text));
     }
-    // The words of each source, and their union.
-    let mut by_source: BTreeMap<&'static str, BTreeSet<(String, i64)>> = BTreeMap::new();
+    // The words of each source, and their union, each naming the sources it was found in.
+    let mut by_source: BTreeMap<String, BTreeSet<WordKey>> = BTreeMap::new();
     let splits = base_splits(request.base_calibration);
     for base in request.bases {
         for split in splits {
             for row in load_rows(base, split)? {
                 let (before, after, _, _) = trimmed_window(&row);
-                words_of(&format!("{before}{}{after}", row.original), by_source.entry(split).or_default());
+                words_of(&format!("{before}{}{after}", row.original), by_source.entry((*split).to_owned()).or_default());
             }
         }
     }
     for path in request.texts {
-        words_of(&read_text(path)?, by_source.entry(SOURCE_TEXT).or_default());
+        words_of(&read_text(path)?, by_source.entry(SOURCE_TEXT.to_owned()).or_default());
     }
-    let mut plain: BTreeSet<(String, i64)> = by_source.values().flatten().cloned().collect();
-    plain.retain(|(text, _)| !aliases_of(text).any(|alias| held.contains(&alias)));
+    for (list, found) in request.word_lists.iter().zip(&listed) {
+        by_source.entry(list.name.clone()).or_default().extend(found.iter().filter_map(|word| plain_word(word)).filter(|(_, group)| *group == list.group));
+    }
+    let mut plain: BTreeMap<WordKey, String> = BTreeMap::new();
+    for (source, found) in &by_source {
+        for key in found.iter().filter(|(text, _)| !aliases_of(text).any(|alias| held.contains(&alias))) {
+            let named = plain.entry(key.clone()).or_default();
+            if !named.is_empty() {
+                named.push('+');
+            }
+            named.push_str(source);
+        }
+    }
     rows.extend(plain_rows(&plain, Sample::N1, request.namespace, request.minimums.engine_plain, &mut untyped));
     rows.extend(plain_rows(&plain, Sample::N2, request.namespace, request.minimums.engine_plain, &mut untyped));
+    // A5: the words of N's sources and of the lists A1 to A3 took that neither lexicon knows in either reading.
+    if let Some((_, classed)) = &classed {
+        let mut unknown: BTreeMap<WordKey, String> = plain.clone();
+        for (key, (_, _, source)) in words.iter().filter(|(_, (_, _, source))| request.word_lists.iter().any(|list| list.name == *source)) {
+            unknown.insert(key.clone(), source.clone());
+        }
+        unknown.retain(|(text, group), _| unknown_both_ways(&classed.classes, text, *group));
+        for other in [true, false] {
+            let half: Vec<AcceptanceRow> = unknown.iter().map(|((text, group), source)| AcceptanceRow { sample: Sample::A5, text: text.clone(), group: *group, class: classed.classes.class_of(text, *group).as_str().to_owned(), other, engine: false, source: source.clone() }).collect();
+            rows.extend(engine_share(half, request.namespace, request.minimums.engine_plain, &mut untyped));
+        }
+    }
     rows.sort();
     let in_source = |source: &str, row: &AcceptanceRow| by_source.get(source).is_some_and(|found| found.contains(&(row.text.clone(), row.group)));
     let mut plain_by_source: BTreeMap<String, [usize; 2]> = BTreeMap::new();
     for row in rows.iter().filter(|row| row.sample == Sample::N2) {
         for source in by_source.keys().filter(|source| in_source(source, row)) {
-            plain_by_source.entry((*source).to_owned()).or_default()[row.direction()] += 1;
+            plain_by_source.entry(source.clone()).or_default()[row.direction()] += 1;
         }
+    }
+    let mut counted_by_source: BTreeMap<String, BTreeMap<String, [usize; 2]>> = BTreeMap::new();
+    for row in &rows {
+        counted_by_source.entry(half_name(row).to_owned()).or_default().entry(row.source.clone()).or_default()[row.direction()] += 1;
     }
     let counts = sample_counts(&rows);
     let minimums = request.minimums;
@@ -388,7 +561,10 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
         untyped,
         plain_by_source,
         sha256: [(ROWS_FILE, packed.as_slice()), (PLAIN_AS_MEANT_FILE, as_meant.as_bytes()), (PLAIN_DEVELOPMENT_FILE, of_development.as_bytes())].into_iter().map(|(name, bytes)| (name.to_owned(), hex(&Sha256::digest(bytes)))).collect(),
-        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads; N1 and N2 from the development split (and, when asked, the calibration split) of frozen base corpora and files of plain text, without the words any prefix selection, held-out sample or the acceptance split holds, by their physical aliases; N2 counted by source, the words of the development documents also listed apart. A row is one token typed first in an empty text field and followed by a space; a row the replay cannot type is left out and counted; only counts are read.".to_owned(),
+        scope: "A1 to A3 from the acceptance split of the word corpus, which no fit reads, and, of a derived corpus, the Russian supplement's forms and the words of the lists marked cut of the families its cut moved, classed as the corpus classes its own, none held out by it or by the samples named; N1 and N2 from the development split (and, when asked, the calibration split) of frozen base corpora, files of plain text and lists of words counted enough, without the words any prefix selection, held-out sample or A1 to A3 holds, by their physical aliases; A5 the words of N's sources and of the lists A1 to A3 took that neither lexicon knows in either reading, typed in the other layout and as meant; every row names its source, N2 also counted by source, the words of the development documents also listed apart. A row is one token typed first in an empty text field and followed by a space; a row the replay cannot type is left out and counted; only counts are read.".to_owned(),
+        word_lists: request.word_lists.iter().zip(&listed).map(|(list, found)| Ok(ListFile { name: list.name.clone(), path: list.path.display().to_string(), sha256: checksum(&list.path)?, group: list.group, minimum: list.minimum, cut: list.cut, listed: found.len() })).collect::<Result<_, String>>()?,
+        supplement: request.supplement,
+        by_source: counted_by_source,
     };
     std::fs::write(request.output.join(RECEIPT_FILE), ks_text::json::dumps(&receipt, &readable()) + "\n").map_err(|error| error.to_string())?;
     Ok(receipt)
@@ -436,8 +612,9 @@ pub struct RunRequest<'a> {
     pub resource_dir: &'a Path,
     pub samples: &'a Path,
     pub pairs: &'a [NamedPair],
-    /// The pair the others are held against: the installed one.
-    pub reference: &'a str,
+    /// The pairs the others are held against: the installed one as users run it first, then any other (the same pair as
+    /// it was measured); a gate holds only when it holds against each.
+    pub references: &'a [String],
     pub jobs: usize,
     pub output: &'a Path,
 }
@@ -649,6 +826,12 @@ pub struct PairReport {
     pub safety_by_sample: BTreeMap<String, [Safety; 2]>,
     pub safety_by_profile: BTreeMap<String, [Safety; 2]>,
     pub safety_by_class: BTreeMap<String, [Safety; 2]>,
+    /// The earliness of each sample's rows typed in the other layout and the safety of its rows typed as meant, by the
+    /// source the rows name (`<sample> <source>`), each by direction; none for samples whose rows name none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub earliness_by_source: BTreeMap<String, [Earliness; 2]>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub safety_by_source: BTreeMap<String, [Safety; 2]>,
     /// The digest of what every replayed row says, in the order of part, profile and row (`rows_digest`): two replays
     /// of the same samples with the same digest agree on every row. Empty in a report written before it was kept.
     #[serde(default)]
@@ -671,33 +854,43 @@ pub const SAFETY_CELLS: [&str; 3] = ["latin", "cyrillic", "all"];
 fn pair_report(rows: &[AcceptanceRow], replayed: &[Replayed]) -> PairReport {
     let key_of = |item: &Replayed| (rows[item.row].text.clone(), rows[item.row].group);
     let mut report = PairReport::default();
-    for sample in [Sample::A1, Sample::N1] {
-        let by_direction = [0, 1].map(|direction| {
-            // Every row of A1 and N1 is typed in the other layout.
-            let found: Vec<(WordKey, Observed)> = replayed.iter().filter(|item| rows[item.row].sample == sample && rows[item.row].direction() == direction).map(|item| (key_of(item), item.observed.clone())).collect();
+    // A1 and N1, and A5 when the samples hold it: their rows typed in the other layout.
+    let typed_other: Vec<&Replayed> = replayed.iter().filter(|item| rows[item.row].other).collect();
+    let early = |filter: &dyn Fn(&AcceptanceRow) -> bool| {
+        [0, 1].map(|direction| {
+            let found: Vec<(WordKey, Observed)> = typed_other.iter().filter(|item| filter(&rows[item.row]) && rows[item.row].direction() == direction).map(|item| (key_of(item), item.observed.clone())).collect();
             earliness(&found)
-        });
-        report.earliness.insert(sample.as_str().to_owned(), by_direction);
+        })
+    };
+    let a5 = rows.iter().any(|row| row.sample == Sample::A5);
+    for sample in [Sample::A1, Sample::N1].into_iter().chain(a5.then_some(Sample::A5)) {
+        report.earliness.insert(sample.as_str().to_owned(), early(&|row| row.sample == sample));
     }
-    // A word typed as meant is the same word in every sample: A3 holds the hard words of A2.
+    // A word typed as meant is the same word in every sample: A3 holds the hard words of A2. A5 stands apart from the
+    // cells and from the splits by profile and class.
     let as_meant: Vec<(&Replayed, (WordKey, Observed))> = replayed.iter().filter(|item| !rows[item.row].other).map(|item| (item, (key_of(item), item.observed.clone()))).collect();
     let cell = |filter: &dyn Fn(&Replayed) -> bool| safety(as_meant.iter().filter(|(item, _)| filter(item)).map(|(_, row)| row));
-    report.safety.insert(SAFETY_CELLS[0].to_owned(), cell(&|item| rows[item.row].direction() == 0));
-    report.safety.insert(SAFETY_CELLS[1].to_owned(), cell(&|item| rows[item.row].direction() == 1));
-    report.safety.insert(SAFETY_CELLS[2].to_owned(), cell(&|_| true));
+    let common = |item: &Replayed| rows[item.row].sample != Sample::A5;
+    report.safety.insert(SAFETY_CELLS[0].to_owned(), cell(&|item| common(item) && rows[item.row].direction() == 0));
+    report.safety.insert(SAFETY_CELLS[1].to_owned(), cell(&|item| common(item) && rows[item.row].direction() == 1));
+    report.safety.insert(SAFETY_CELLS[2].to_owned(), cell(&common));
     let sample_name = |item: &Replayed| if item.part == Part::Closed { "A3_closed".to_owned() } else { rows[item.row].sample.as_str().to_owned() };
-    let mut names: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
-    for (item, _) in &as_meant {
-        names.entry("sample").or_default().insert(sample_name(item));
-        names.entry("profile").or_default().insert(PROFILES[item.profile].to_owned());
-        names.entry("class").or_default().insert(rows[item.row].class.clone());
-    }
-    let split = |kind: &str, name_of: &dyn Fn(&Replayed) -> String| -> BTreeMap<String, [Safety; 2]> {
-        names.get(kind).into_iter().flatten().map(|name| (name.clone(), [0, 1].map(|direction| cell(&|item| name_of(item) == *name && rows[item.row].direction() == direction)))).collect()
+    let source_name = |item: &Replayed| format!("{} {}", sample_name(item), rows[item.row].source);
+    // Each split by the names its rows have: every row by sample, the rows that name a source by it, the common rows by
+    // profile and by class.
+    let named = |rows_in: &dyn Fn(&Replayed) -> bool| -> Vec<&Replayed> { as_meant.iter().map(|(item, _)| *item).filter(|item| rows_in(item)).collect() };
+    let split = |name_of: &dyn Fn(&Replayed) -> String, rows_in: &dyn Fn(&Replayed) -> bool| -> BTreeMap<String, [Safety; 2]> {
+        let names: BTreeSet<String> = named(rows_in).into_iter().map(name_of).collect();
+        names.into_iter().map(|name| (name.clone(), [0, 1].map(|direction| cell(&|item| rows_in(item) && name_of(item) == name && rows[item.row].direction() == direction)))).collect()
     };
-    report.safety_by_sample = split("sample", &sample_name);
-    report.safety_by_profile = split("profile", &|item| PROFILES[item.profile].to_owned());
-    report.safety_by_class = split("class", &|item| rows[item.row].class.clone());
+    report.safety_by_sample = split(&sample_name, &|_| true);
+    report.safety_by_source = split(&source_name, &|item| !rows[item.row].source.is_empty());
+    report.safety_by_profile = split(&|item| PROFILES[item.profile].to_owned(), &common);
+    report.safety_by_class = split(&|item| rows[item.row].class.clone(), &common);
+    let sources: BTreeSet<(Sample, &str)> = typed_other.iter().map(|item| &rows[item.row]).filter(|row| !row.source.is_empty()).map(|row| (row.sample, row.source.as_str())).collect();
+    for (sample, source) in sources {
+        report.earliness_by_source.insert(format!("{} {source}", sample.as_str()), early(&|row| row.sample == sample && row.source == source));
+    }
     report
 }
 
@@ -763,14 +956,22 @@ pub struct Gates {
     pub s2_exact: BTreeMap<String, [CountGate; 2]>,
     /// No row of either pair failed to replay.
     pub execution: bool,
+    /// The directions of a half of A5 (`A5` typed in the other layout, `A5_as_meant`) of fewer words than the samples
+    /// gate: their gates are reported and not counted. None in samples without A5.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reported_only: BTreeMap<String, [bool; 2]>,
     /// E1, E2's first sentence, S1, S2 and the execution.
     pub all_held: bool,
 }
 
-/// A pair against the reference.
+/// A pair against the reference; a half of A5 of fewer than `unknown` words a direction is only reported.
 #[must_use]
-pub fn gates(candidate: &PairReport, reference: &PairReport) -> Gates {
+pub fn gates(candidate: &PairReport, reference: &PairReport, unknown: usize) -> Gates {
     let mut gates = Gates::default();
+    if let (Some(early), Some(safe)) = (candidate.earliness.get(Sample::A5.as_str()), candidate.safety_by_sample.get(Sample::A5.as_str())) {
+        gates.reported_only.insert(Sample::A5.as_str().to_owned(), early.each_ref().map(|cell| cell.words < unknown));
+        gates.reported_only.insert(A5_AS_MEANT.to_owned(), safe.each_ref().map(|cell| cell.words < unknown));
+    }
     for (sample, ours) in &candidate.earliness {
         let theirs = &reference.earliness[sample];
         let by = |test: &dyn Fn(&Earliness, &Earliness) -> bool| [0, 1].map(|direction| test(&ours[direction], &theirs[direction]));
@@ -794,25 +995,37 @@ pub fn gates(candidate: &PairReport, reference: &PairReport) -> Gates {
         gates.s2_corruption.insert(cell.clone(), ours.corrupted.words <= theirs.corrupted.words);
     }
     let none = [Safety::default(), Safety::default()];
-    for sample in SAMPLES_ALONE.map(Sample::as_str) {
+    let alone = SAMPLES_ALONE.into_iter().chain(candidate.safety_by_sample.contains_key(Sample::A5.as_str()).then_some(Sample::A5));
+    for sample in alone.map(Sample::as_str) {
         let (ours, theirs) = (candidate.safety_by_sample.get(sample).unwrap_or(&none), reference.safety_by_sample.get(sample).unwrap_or(&none));
         gates.s1_alone.insert(sample.to_owned(), [0, 1].map(|direction| SafetyGate::of(&ours[direction], &theirs[direction])));
         gates.s2_corruption_alone.insert(sample.to_owned(), [0, 1].map(|direction| ours[direction].corrupted.words <= theirs[direction].corrupted.words));
     }
     let errors = |report: &PairReport| report.safety.get(SAFETY_CELLS[2]).map_or(0, |cell| cell.execution_errors) + report.earliness.values().flatten().map(|cell| cell.execution_errors).sum::<usize>();
     gates.execution = errors(candidate) + errors(reference) == 0;
+    // A gate of a half of A5 counts only in a direction of enough words; A5's rows typed as meant are gated alone.
+    let counts = |half: &str, direction: usize| !gates.reported_only.get(half).is_some_and(|found| found[direction]);
+    let half_of = |sample: &str| if sample == Sample::A5.as_str() { Sample::A5.as_str() } else { "" };
+    let as_meant_half = |sample: &str| if sample == Sample::A5.as_str() { A5_AS_MEANT } else { "" };
+    let each = |gates: &BTreeMap<String, [bool; 2]>, half: &dyn Fn(&str) -> &'static str| -> Vec<bool> { gates.iter().flat_map(|(sample, by)| [0, 1].into_iter().filter(|direction| counts(half(sample), *direction)).map(|direction| by[direction])).collect() };
     let mut held: Vec<bool> = vec![gates.execution];
-    let counted = |gate: CountGate| [gate.rows, gate.words];
-    held.extend(gates.e1.values().flatten().flat_map(|gate| [[gate.early_mean_key_lower, gate.any_mean_key_lower], counted(gate.switched_by_key_not_fewer), counted(gate.inside_word_not_fewer)]).flatten());
-    held.extend(gates.e2.values().flatten().copied());
-    let safe = |gate: &SafetyGate| [gate.false_early_not_more, gate.stays_not_more];
-    held.extend(gates.s1.values().flat_map(safe));
-    held.extend(gates.s1_alone.values().flatten().flat_map(safe));
+    let counted = |gate: &CountGate| gate.rows && gate.words;
+    let earlier = |gate: &EarlierGate| gate.early_mean_key_lower && gate.any_mean_key_lower && counted(&gate.switched_by_key_not_fewer) && counted(&gate.inside_word_not_fewer);
+    let safe = |gate: &SafetyGate| gate.false_early_not_more && gate.stays_not_more;
+    held.extend(each(&held_by_direction(&gates.e1, earlier), &half_of));
+    held.extend(each(&gates.e2, &half_of));
+    held.extend(gates.s1.values().map(safe));
+    held.extend(each(&held_by_direction(&gates.s1_alone, safe), &as_meant_half));
     held.extend(gates.s2_corruption.values().copied());
-    held.extend(gates.s2_corruption_alone.values().flatten().copied());
-    held.extend(gates.s2_exact.values().flatten().copied().flat_map(counted));
+    held.extend(each(&gates.s2_corruption_alone, &as_meant_half));
+    held.extend(each(&held_by_direction(&gates.s2_exact, counted), &half_of));
     gates.all_held = !held.contains(&false);
     gates
+}
+
+/// Whether each direction's gate of each sample holds.
+fn held_by_direction<T>(gates: &BTreeMap<String, [T; 2]>, holds: impl Fn(&T) -> bool) -> BTreeMap<String, [bool; 2]> {
+    gates.iter().map(|(sample, by)| (sample.clone(), [holds(&by[0]), holds(&by[1])])).collect()
 }
 
 /// `prefix-acceptance run`'s report: numbers only.
@@ -825,6 +1038,12 @@ pub struct AcceptanceReport {
     pub reference: String,
     pub pairs: BTreeMap<String, PairReport>,
     pub gates: BTreeMap<String, Gates>,
+    /// Against each further reference, the gates of every pair but it; and of each pair that is no reference, whether its
+    /// gates hold against every reference. None for a run of one reference.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub gates_against: BTreeMap<String, BTreeMap<String, Gates>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub held_against_every_reference: BTreeMap<String, bool>,
 }
 
 /// The plan of a row: the word typed first in an empty field, a space after it.
@@ -846,8 +1065,9 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
     if request.output.exists() {
         return Err("refusing to overwrite an acceptance report".to_owned());
     }
-    if !request.pairs.iter().any(|pair| pair.name == request.reference) {
-        return Err(format!("no pair is named {}", request.reference));
+    let reference = request.references.first().ok_or("a run names the pair the others are held against")?.as_str();
+    if let Some(missing) = request.references.iter().find(|name| !request.pairs.iter().any(|pair| pair.name == **name)) {
+        return Err(format!("no pair is named {missing}"));
     }
     let (receipt, all_rows) = read_samples(request.samples)?;
     let rows: Vec<AcceptanceRow> = all_rows.into_iter().filter(|row| row.engine).collect();
@@ -944,15 +1164,25 @@ pub fn run(request: &RunRequest<'_>) -> Result<AcceptanceReport, String> {
         prefixes[index].version().clone_into(&mut report.prefix_version);
         pairs.insert(pair.name.clone(), report);
     }
-    let reference = &pairs[request.reference];
-    let gates = pairs.iter().filter(|(name, _)| *name != request.reference).map(|(name, report)| (name.clone(), gates(report, reference))).collect();
+    let unknown = receipt.minimums.unknown;
+    let against = |reference: &str| -> BTreeMap<String, Gates> { pairs.iter().filter(|(name, _)| *name != reference).map(|(name, report)| (name.clone(), gates(report, &pairs[reference], unknown))).collect() };
+    let held = against(reference);
+    let gates_against: BTreeMap<String, BTreeMap<String, Gates>> = request.references[1..].iter().map(|other| (other.clone(), against(other))).collect();
+    let held_against_every_reference: BTreeMap<String, bool> = if gates_against.is_empty() {
+        BTreeMap::new()
+    } else {
+        let others = held.iter().filter(|(name, _)| !request.references.contains(name));
+        others.map(|(name, gates)| (name.clone(), std::iter::once(gates).chain(gates_against.values().map(|against| &against[name])).all(|gates| gates.all_held))).collect()
+    };
     let report = AcceptanceReport {
         kind: REPORT_KIND.to_owned(),
         samples_receipt_sha256: checksum(&request.samples.join(RECEIPT_FILE))?,
         counts: receipt.counts,
-        reference: request.reference.to_owned(),
+        reference: reference.to_owned(),
         pairs,
-        gates,
+        gates: held,
+        gates_against,
+        held_against_every_reference,
     };
     std::fs::write(request.output, ks_text::json::dumps(&report, &readable()) + "\n").map_err(|error| format!("{}: {error}", request.output.display()))?;
     Ok(report)
@@ -966,7 +1196,7 @@ mod tests {
 
     /// A row of a word meant in Cyrillic, typed in the other layout or as meant.
     fn row(other: bool) -> AcceptanceRow {
-        AcceptanceRow { sample: if other { Sample::A1 } else { Sample::A2 }, text: "погода".to_owned(), group: 1, class: "rare".to_owned(), other, engine: true }
+        AcceptanceRow { sample: if other { Sample::A1 } else { Sample::A2 }, text: "погода".to_owned(), group: 1, class: "rare".to_owned(), other, engine: true, source: String::new() }
     }
 
     /// A case of six letters typed, with these corrections: (key, layout typed, kind).
@@ -1067,24 +1297,42 @@ mod tests {
             ..PairReport::default()
         };
         let reference = report(6.0, 3, 1);
-        let earlier = gates(&report(5.0, 4, 1), &reference);
+        let earlier = gates(&report(5.0, 4, 1), &reference, 0);
         assert!(earlier.all_held && earlier.execution && earlier.e2["A1"] == [true, true] && earlier.s1_alone["N2"][1].false_early_not_more);
         // As early is not earlier; one more false switch is too many, on a sample alone as in the cells.
-        assert!(!gates(&report(6.0, 4, 1), &reference).all_held);
-        let riskier = gates(&report(5.0, 4, 2), &reference);
+        assert!(!gates(&report(6.0, 4, 1), &reference, 0).all_held);
+        let riskier = gates(&report(5.0, 4, 2), &reference, 0);
         assert!(!riskier.all_held && !riskier.s1["latin"].false_early_not_more && !riskier.s2_corruption["all"]);
         assert!(!riskier.s1_alone["A2"][0].false_early_not_more && !riskier.s2_corruption_alone["A2"][1]);
         // Earlier by the mean key of any kind of correction only, or by fewer distinct words switched, is no gain.
         let any_only = PairReport { earliness: [("A1".to_owned(), [Earliness { early_mean_key: 6.0, ..earliness(5.0, 4, 1) }, earliness(5.0, 4, 1)])].into_iter().collect(), ..report(5.0, 4, 1) };
-        let held = gates(&any_only, &reference);
+        let held = gates(&any_only, &reference, 0);
         assert!(!held.all_held && held.e1["A1"][0].any_mean_key_lower && !held.e1["A1"][0].early_mean_key_lower);
         let fewer_words = PairReport { earliness: [("A1".to_owned(), [Earliness { inside_word: Count { rows: 4, words: 2 }, ..earliness(5.0, 4, 1) }, earliness(5.0, 4, 1)])].into_iter().collect(), ..report(5.0, 4, 1) };
-        let held = gates(&fewer_words, &reference);
+        let held = gates(&fewer_words, &reference, 0);
         assert!(!held.all_held && held.e1["A1"][0].inside_word_not_fewer == CountGate { rows: true, words: false });
         // A row that failed to replay, of either pair, stops the gates.
         let failed = |report: PairReport| PairReport { earliness: [("A1".to_owned(), [Earliness { execution_errors: 1, ..report.earliness["A1"][0].clone() }, report.earliness["A1"][1].clone()])].into_iter().collect(), ..report };
-        assert!(!gates(&failed(report(5.0, 4, 1)), &reference).execution);
-        assert!(!gates(&report(5.0, 4, 1), &failed(reference.clone())).all_held);
+        assert!(!gates(&failed(report(5.0, 4, 1)), &reference, 0).execution);
+        assert!(!gates(&report(5.0, 4, 1), &failed(reference.clone()), 0).all_held);
+        // A5: its gates count in a direction of enough words, and in one of fewer they are only reported.
+        let with_a5 = |report: PairReport, key: f64, false_early: usize| {
+            let (mut early, mut alone) = (report.earliness.clone(), report.safety_by_sample.clone());
+            early.insert("A5".to_owned(), [Earliness { words: 10, ..earliness(key, 4, 1) }, Earliness { words: 2, ..earliness(key, 4, 1) }]);
+            alone.insert("A5".to_owned(), [Safety { words: 2, ..safe(false_early) }, Safety { words: 10, ..safe(false_early) }]);
+            PairReport { earliness: early, safety_by_sample: alone, ..report }
+        };
+        let reference = with_a5(reference, 6.0, 1);
+        let held = gates(&with_a5(report(5.0, 4, 1), 5.0, 1), &reference, 5);
+        assert!(held.all_held && held.reported_only["A5"] == [false, true] && held.reported_only[A5_AS_MEANT] == [true, false] && held.s1_alone.contains_key("A5"));
+        // Later on A5 and less safe on it: the gates of the directions of enough words do not hold.
+        let later = gates(&with_a5(report(5.0, 4, 1), 7.0, 1), &reference, 5);
+        assert!(!later.all_held && !later.e1["A5"][0].early_mean_key_lower);
+        let riskier = gates(&with_a5(report(5.0, 4, 1), 5.0, 2), &reference, 5);
+        assert!(!riskier.all_held && !riskier.s1_alone["A5"][1].false_early_not_more);
+        // Of too few words in every direction, nothing of A5 counts.
+        let few = gates(&with_a5(report(5.0, 4, 1), 7.0, 2), &reference, 100);
+        assert!(few.all_held && few.reported_only.values().all(|by| *by == [true, true]));
     }
 
     #[test]

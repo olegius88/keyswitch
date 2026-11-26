@@ -18,6 +18,18 @@ use std::path::{Path, PathBuf};
 /// Thousandths: the cut takes a family when its draw falls under its share of them.
 const PER_MILLE: u64 = 1000;
 
+/// Whether the cut of a derivation takes a family of training: its draw under the derivation's name falls under the share.
+#[must_use]
+pub fn cut_takes(namespace: &str, cut_per_mille: u64, family: &str) -> bool {
+    draw(&format!("{namespace}:cut:{family}")) % PER_MILLE < cut_per_mille
+}
+
+/// Whether a family is one the cut of a derived corpus moved: a family of training by the config, which the cut takes.
+#[must_use]
+pub fn moved_by_cut(config: &WordConfig, derivation: &Derivation, family: &str) -> bool {
+    split_of(config, family) == TRAIN && cut_takes(&derivation.namespace, derivation.cut_per_mille, family)
+}
+
 /// What `prefix-derive` is asked.
 pub struct DeriveRequest<'a> {
     /// The frozen word corpus derived from.
@@ -136,7 +148,7 @@ pub fn derive(request: &DeriveRequest<'_>) -> Result<WordReceipt, String> {
         excluded.push(HeldOutFile { sha256: checksum(path)?, rows: words.len() });
     }
     // The cut: training families whose draw under the new name falls under its share leave training for acceptance.
-    let is_cut = |family: &str| draw(&format!("{}:cut:{family}", request.namespace)) % PER_MILLE < request.cut_per_mille;
+    let is_cut = |family: &str| cut_takes(request.namespace, request.cut_per_mille, family);
     let (moved, mut train): (Vec<WordRow>, Vec<WordRow>) = read_split(request.from, TRAIN)?.into_iter().partition(|row| is_cut(&row.family));
     let cut_families = moved.iter().map(|row| row.family.as_str()).collect::<BTreeSet<_>>().len();
     let mut added = None;
