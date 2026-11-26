@@ -989,7 +989,15 @@ mod words {
         // without the term lists.
         let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).args(["--jobs", "2"]).output().expect("the trainer starts");
         let said = String::from_utf8_lossy(&answer.stdout);
-        assert!(said.contains("train: ") && said.contains("prefix-v2 epoch 1"), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        assert!(said.contains("train: ") && said.contains("prefix-v2 epoch 1") && said.contains(", 0 read a term list, 0 of them"), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        // Closed to the reading as typed of the words typed as meant alone: the other readings, and every reading of the
+        // words typed in the other layout, read the lists; a prefix that goes on a word of the lexicon converts.
+        let typed_only = word_recipe(&small, "words-schemas", &[("runtime_feature_version", "4"), ("closed_term_families_per_mille", "1000"), ("closed_terms_typed_reading_only", "true"), ("convert_lexicon_continuations", "true"), ("epochs", "1"), ("minimum_feature_mass", "1.0"), ("support", "\"engine\"")]);
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&typed_only).arg("--output").arg(scratch("words-schemas-typed").join("out")).args(["--jobs", "2"]).output().expect("the trainer starts");
+        let said = String::from_utf8_lossy(&answer.stdout);
+        let line = said.lines().find(|line| line.starts_with("train: ")).unwrap_or_default();
+        let counts: Vec<usize> = line.split(|character: char| !character.is_ascii_digit()).filter_map(|number| number.parse().ok()).collect();
+        assert!(counts.len() == 3 && counts[1] > counts[2], "{said}{}", String::from_utf8_lossy(&answer.stderr));
         // Models that convert every prefix: whatever is typed as meant, each word converted once.
         let list = scratch("words-schemas-list").join("words.txt");
         std::fs::write(&list, "garden\nпогода\n").expect("a list");

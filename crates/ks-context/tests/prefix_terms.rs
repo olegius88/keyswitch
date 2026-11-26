@@ -63,11 +63,15 @@ fn schema_four_reads_the_lists_both_readings_scores_and_a_word_at_the_start() {
     let tables = tables();
     let terms = PrefixTerms::build(["kubectl"].into_iter(), ["git"].into_iter(), tables.term("latin"), tables.term("cyrillic"), known);
     let item = |original: &str, alternative: &str, source_group: i64| PrefixInput { original: original.to_owned(), alternative: alternative.to_owned(), source_group, field: FieldContext::new("Editor", "1") };
-    let both = PrefixReaders { ortho: Some(&ortho), terms: Some(&terms) };
+    let both = PrefixReaders { ortho: Some(&ortho), terms: Some(&terms), typed_terms: None };
     let features = |input: &PrefixInput| features_with_readers(input, sides, 4, both).expect("schema four");
     let refused = |readers: PrefixReaders<'_>| features_with_readers(&item("cntk", "стел", 0), sides, 4, readers).expect_err("a refusal").message;
-    assert!(refused(PrefixReaders { ortho: None, terms: Some(&terms) }).contains("orthotactic"));
-    assert!(refused(PrefixReaders { ortho: Some(&ortho), terms: None }).contains("term lists"));
+    assert!(refused(PrefixReaders { ortho: None, terms: Some(&terms), typed_terms: None }).contains("orthotactic"));
+    assert!(refused(PrefixReaders { ortho: Some(&ortho), terms: None, typed_terms: None }).contains("term lists"));
+    // Lists closed to the reading as typed alone: the typed term is not found, the other reading is still looked up.
+    let none = PrefixTerms::default();
+    let typed_closed = features_with_readers(&item("cntk", "стел", 0), sides, 4, PrefixReaders { typed_terms: Some(&none), ..both }).expect("schema four");
+    assert!(!typed_closed.keys().any(|name| name.starts_with("term:typed:")) && features(&item("cntk", "стел", 0)).keys().any(|name| name.starts_with("term:typed:")));
     // A term of the table, with its count; the other reading is no term.
     let cntk = features(&item("cntk", "стел", 0));
     assert!(cntk.contains_key("term:typed:exact") && cntk.get("term:typed:exact:count").is_some_and(|count| *count > 0.0) && !cntk.keys().any(|name| name.starts_with("term:other")));
@@ -110,6 +114,6 @@ fn a_model_of_schema_four_answers_only_with_the_term_lists() {
     let ortho = OrthoModel::load(&artifact_path(resources.resource_dir()), None, None, Some(resources.clone())).expect("the orthotactic model");
     assert!(model.predict_with(&item, sides, Some(&ortho)).is_err());
     let terms = PrefixTerms::default();
-    let answer = model.predict_with_readers(&item, sides, PrefixReaders { ortho: Some(&ortho), terms: Some(&terms) }).expect("an answer");
+    let answer = model.predict_with_readers(&item, sides, PrefixReaders { ortho: Some(&ortho), terms: Some(&terms), typed_terms: None }).expect("an answer");
     assert!((answer.probability - 0.987).abs() < 0.001);
 }

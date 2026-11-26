@@ -25,7 +25,7 @@ use crate::replay::prefix_indexes_of;
 use ks_text::{JsonOptions, fsum, json_dumps, py_round_ndigits, pystr};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{BufRead, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -81,21 +81,35 @@ pub struct FrameRules {
     /// The thousandths of the training families whose frames read no term list (`closed_family`), so that a token
     /// missing from the lists is not taken for a word of the other layout.
     pub closed_term_families_per_mille: Option<u64>,
+    /// A prefix typed in the other layout that continues a word of the typed layout's lexicon waits.
+    pub wait_on_lexicon: bool,
+    /// The families the lists are closed to read none for the reading as typed of a word typed as meant, and all of them
+    /// otherwise; without it they read none at all.
+    pub close_typed_reading_only: bool,
 }
 
 impl Default for FrameRules {
     fn default() -> Self {
-        FrameRules { convert_from: PREFIX_V2_SHORT_PREFIX_CHARACTERS, terms: None, engine_support: false, minimum_characters: PREFIX_MIN_CHARACTERS, closed_term_families_per_mille: None }
+        FrameRules {
+            convert_from: PREFIX_V2_SHORT_PREFIX_CHARACTERS,
+            terms: None,
+            engine_support: false,
+            minimum_characters: PREFIX_MIN_CHARACTERS,
+            closed_term_families_per_mille: None,
+            wait_on_lexicon: true,
+            close_typed_reading_only: false,
+        }
     }
 }
 
 /// The label of a prefix: kept when typed as meant; typed in the other layout, it waits while it is short, while it
-/// continues a word of the typed layout's lexicon or begins a known term, and converts after.
+/// continues a word of the typed layout's lexicon (unless the rules say otherwise) or begins a known term, and converts
+/// after.
 #[must_use]
 pub fn label_of(desired: bool, length: usize, ambiguous: bool, term: bool, rules: &FrameRules) -> u8 {
     if !desired {
         0
-    } else if length < rules.convert_from || ambiguous || term {
+    } else if length < rules.convert_from || (ambiguous && rules.wait_on_lexicon) || term {
         PREFIX_V2_AMBIGUOUS_POSITIVE_LABEL
     } else {
         1
@@ -189,6 +203,14 @@ pub struct RecipeOptions {
     pub minimum_hard_words_per_direction: Option<usize>,
     /// Schema four: the thousandths of the training families whose frames read no term list.
     pub closed_term_families_per_mille: Option<u64>,
+    /// A prefix typed in the other layout that continues a word of the typed layout's lexicon is labelled to convert
+    /// like any other; without it, it waits, as every sealed recipe has it.
+    #[serde(default)]
+    pub convert_lexicon_continuations: bool,
+    /// Schema four: the families `closed_term_families_per_mille` names read no list for the reading as typed of a word
+    /// typed as meant alone, so that a Latin token missing from the lists is still kept; without it they read none.
+    #[serde(default)]
+    pub closed_terms_typed_reading_only: bool,
     /// The model an epoch chosen by the mean key must not be worse than on development, relative to the tree, its
     /// version and the threshold it is measured at.
     pub floor_model: Option<String>,
@@ -220,6 +242,8 @@ pub fn frame_rules(options: &RecipeOptions, resource_dir: &Path) -> Result<Frame
     }
     rules.engine_support = options.support == Some(Support::Engine);
     rules.closed_term_families_per_mille = options.closed_term_families_per_mille;
+    rules.wait_on_lexicon = !options.convert_lexicon_continuations;
+    rules.close_typed_reading_only = options.closed_terms_typed_reading_only;
     Ok(rules)
 }
 
@@ -474,8 +498,11 @@ struct ParentFrames {
     typed: Vec<String>,
 }
 
-/// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller.
-fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, readers: PrefixReaders<'_>, rules: &FrameRules) -> ParentFrames {
+/// The frames of one parent. Sequences and pairs are numbered inside the parent and renumbered by the caller. With the
+/// readers come the lists the reading as typed of the word typed as meant reads, when they are closed to it alone.
+fn parent_frames(
+    parent: &ParentWord, family_count: u64, family: u32, class: u16, models: [&Lexicons; 2], indexes: &Indexes, maximum_prefix_length: usize, feature_version: i64, (readers, typed_closed): (PrefixReaders<'_>, Option<&PrefixTerms>), rules: &FrameRules,
+) -> ParentFrames {
     let variants = contexts_of(parent);
     let states: &[bool] = if parent.paired { &[false, true] } else { &[false] };
     let parent_length = pystr::len(&parent.original);
@@ -501,6 +528,7 @@ fn parent_frames(parent: &ParentWord, family_count: u64, family: u32, class: u16
                 let sequence_number = out.sequences.len().to::<u32>();
                 out.sequences.push(sequence_id);
                 out.typed.push(full.clone());
+                let readers = if *desired { readers } else { PrefixReaders { typed_terms: typed_closed.filter(|_| readers.terms.is_some()), ..readers } };
                 for length in 1..=length_count {
                     let original = pystr::slice(&full, None, Some(length.to::<i64>())).to_owned();
                     let (source_layout, target_layout) = if source != 0 { ("ru", "us") } else { ("us", "ru") };
@@ -576,8 +604,9 @@ fn generate_frames(parents: &[ParentWord], models: [&Lexicons; 2], indexes: &Ind
                     let Some(parent) = parents.get(index) else { break };
                     let class = class_number[class_name(parent).as_str()];
                     let shut = closed.is_some_and(|per_mille| closed_family(&parent.family, per_mille));
-                    let readers = if shut { PrefixReaders { terms: readers.terms.map(|_| &no_terms), ..readers } } else { readers };
-                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], class, models, indexes, maximum_prefix_length, feature_version, readers, rules);
+                    let typed_closed = (shut && rules.close_typed_reading_only).then_some(&no_terms);
+                    let readers = if shut && typed_closed.is_none() { PrefixReaders { terms: readers.terms.map(|_| &no_terms), ..readers } } else { readers };
+                    let built = parent_frames(parent, family_counts[parent.family.as_str()], family_number[parent.family.as_str()], class, models, indexes, maximum_prefix_length, feature_version, (readers, typed_closed), rules);
                     done.lock().expect("a worker finished")[index] = Some(built);
                 }
             });
@@ -1433,8 +1462,14 @@ impl FrameMaker {
     fn settings(&self, feature_version: i64, lexicon: PrefixLexicon, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
-            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}",
-            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support, lexicon.name()
+            "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}\nwait on lexicon {}\nclosed to the typed reading only {}",
+            self.maximum_prefix_length,
+            self.rules.convert_from,
+            self.rules.minimum_characters,
+            self.rules.engine_support,
+            lexicon.name(),
+            self.rules.wait_on_lexicon,
+            self.rules.close_typed_reading_only
         )
     }
 
@@ -1448,7 +1483,7 @@ impl FrameMaker {
     /// does.
     fn frames_of_schema(&self, split: &str, parents: &[ParentWord], feature_version: i64, lexicon: PrefixLexicon) -> Result<SplitFrames, String> {
         let closed = self.rules.closed_term_families_per_mille.filter(|_| split == TRAIN);
-        let readers = PrefixReaders { ortho: self.ortho.as_ref(), terms: self.terms.as_ref() };
+        let readers = PrefixReaders { ortho: self.ortho.as_ref(), terms: self.terms.as_ref(), typed_terms: None };
         let indexes = indexes_of(&self.resources, &self.portable, &self.spelling, lexicon);
         let build = || generate_frames(parents, [&self.portable, &self.spelling], &indexes, self.maximum_prefix_length, feature_version, readers, closed, &self.rules, self.jobs);
         let Some(cache) = &self.cache else {
@@ -1589,7 +1624,11 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     let calibration_cells = check_cells(CALIBRATION, &parents[CALIBRATION], &options)?;
     let maker = FrameMaker::new(request.root, request.resource_dir, feature_version, prefix_lexicon_of(feature_version), numbers.maximum_prefix_length, rules, request.jobs, request.frames_cache)?;
     let train_frames = maker.frames(TRAIN, &parents[TRAIN])?;
-    println!("train: {} frames", train_frames.frames.len());
+    // How many frames read a term list, and of the words typed as meant: what the closed lists leave.
+    let term_names: HashSet<u32> = train_frames.names.iter().enumerate().filter(|(_, name)| name.starts_with("term:")).map(|(id, _)| id.to::<u32>()).collect();
+    let reading = |frame: &&PrefixFrame| frame.features.iter().any(|(id, _)| term_names.contains(id));
+    let (read, kept) = (train_frames.frames.iter().filter(reading).count(), train_frames.frames.iter().filter(|frame| !frame.desired).filter(reading).count());
+    println!("train: {} frames, {read} read a term list, {kept} of them of words typed as meant", train_frames.frames.len());
     let names = feature_vocabulary(&train_frames, cfg.float("minimum_feature_mass"), cfg.int("maximum_features").to::<usize>());
     if names.is_empty() {
         return Err("no prefix features survive the family-mass cutoff".to_owned());
@@ -1949,6 +1988,10 @@ mod tests {
         assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &four)), [2, 2, 1]);
         assert_eq!([2, 3, 4].map(|length| label_of(true, length, false, false, &three)), [2, 1, 1]);
         assert_eq!((label_of(true, 5, true, false, &three), label_of(true, 5, false, true, &three), label_of(false, 5, false, false, &three)), (2, 2, 0));
+        // A recipe that converts continuations of the lexicon: a word going on no longer waits, a term still does.
+        let options: RecipeOptions = ks_text::json::loads(r#"{"convert_lexicon_continuations": true}"#).expect("options");
+        let converting = frame_rules(&options, Path::new("/nonexistent")).expect("rules without terms");
+        assert_eq!((label_of(true, 5, true, false, &converting), label_of(true, 5, true, true, &converting), label_of(true, 3, true, false, &converting)), (1, 2, 2));
         let terms = vec!["git".to_owned(), "github".to_owned(), "kubectl".to_owned()];
         assert!(begins_a_term(&terms, "Gith") && begins_a_term(&terms, "kub") && !begins_a_term(&terms, "gk") && !begins_a_term(&terms, "zzz"));
     }
