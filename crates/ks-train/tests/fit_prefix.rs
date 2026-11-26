@@ -1143,11 +1143,17 @@ mod acceptance {
             command.args(["--reference", reference, "--jobs", "2"]).args(extra).arg("--output").arg(report);
             command.output().expect("the trainer starts")
         };
+        // The installed pair once more with the index named: plain, the one its prefix model of schema two runs with, and
+        // held, every word the language model holds (`M`).
+        let named = |name: &str, lexicon: &str| format!("{name}={},{},{lexicon}", models.join("context_policy_v1.json").display(), models.join("prefix_policy_v1.json").display());
+        let (plain, measured) = (named("plain", "plain"), named("measured", "held"));
         let report_path = scratch("acceptance-report").join("report.json");
-        let said = succeeded(&run(&[&installed, &early], "installed", &report_path, &[]));
+        let said = succeeded(&run(&[&installed, &early, &plain, &measured], "installed", &report_path, &[]));
         assert!(said.contains("eager: gates held false"), "{said}");
         let report: AcceptanceReport = read(&report_path);
-        assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager"]);
+        assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager", "measured", "plain"]);
+        assert_eq!(at(&report.pairs, "plain"), at(&report.pairs, "installed"));
+        refused(&run(&[&named("other", "every")], "other", &scratch("acceptance-every").join("report.json"), &[]), "a pair is <name>=<context model>,<prefix model>[,plain|held]");
         let (reference, candidate) = (at(&report.pairs, "installed"), at(&report.pairs, "eager"));
         for pair in [reference, candidate] {
             assert!(pair.safety_by_sample.contains_key("N2") && pair.safety_by_profile.len() == 2);
