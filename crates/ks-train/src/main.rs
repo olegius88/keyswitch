@@ -28,7 +28,7 @@
 //! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--config <file> --base <frozen base> [--hold-out <development.jsonl.gz>...]] [--freeze <folder>|--rebuild <folder>]`, `ks-train archive --tree <root> [--write]`
 //! `ks-train prefix-zone-words --tree <root> --corpus <word corpus> --base <frozen base> --list <file> --minimum N --maximum N --source <name> --output <rows.jsonl.gz>`
-//! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class>... --add-source <source> [--add-words N]] [--exclude <file>]... --output <folder>`
+//! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class>... --add-source <source>... [--add-words N]] [--exclude <file>]... --output <folder>`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
@@ -507,10 +507,11 @@ fn derive_command(arguments: &[String]) -> i32 {
     let excluded: Vec<PathBuf> = all_of(arguments, "--exclude").into_iter().map(PathBuf::from).collect();
     let added = option(arguments, "--add").map(PathBuf::from);
     let classes: Vec<ks_train::prefix_words::Class> = all_of(arguments, "--add-class").into_iter().map(|class| ks_text::json::loads(format!("\"{class}\"")).expect("--add-class is a class of the word corpus")).collect();
+    let sources: Vec<&str> = all_of(arguments, "--add-source");
     let addition = added.as_deref().map(|rows| Addition {
         rows,
         classes: &classes,
-        source: required("--add-source"),
+        sources: &sources,
         words: option(arguments, "--add-words").map(|value| value.parse().expect("--add-words is a number")),
     });
     let cut_per_mille = required("--cut-per-mille").parse().expect("--cut-per-mille is a number");

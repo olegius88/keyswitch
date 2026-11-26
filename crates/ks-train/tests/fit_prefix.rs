@@ -560,6 +560,19 @@ mod words {
         let added = receipt.derived.and_then(|derived| derived.added).expect("the words added");
         assert_eq!((added.offered, added.class, added.more_classes), (2, Class::Term, vec![Class::ShortTerm]));
         refused(&derive(frozen, &["--add", &rows_text, "--add-source", "zone"], &scratch("words-zone-classless").join("out")), "an addition names the class of its rows");
+        // Rows of two sources in one file, added together; an addition of no source is refused.
+        use std::io::BufRead as _;
+        let zone_rows: Vec<WordRow> = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(std::fs::File::open(&rows_path).expect("the rows"))).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect();
+        let second: Vec<WordRow> = zone_rows.iter().map(|row| WordRow { text: format!("{}q", row.text), source: "second".to_owned(), ..row.clone() }).collect();
+        let merged = folder.join("merged.jsonl.gz");
+        std::fs::write(&merged, [std::fs::read(&rows_path).expect("the rows"), gz(&second)].concat()).expect("the rows of both");
+        let merged_text = merged.display().to_string();
+        let both = scratch("words-zone-sources").join("out");
+        succeeded(&derive(frozen, &["--add", &merged_text, "--add-class", "term", "--add-class", "short_term", "--add-source", "zone", "--add-source", "second"], &both));
+        let receipt: ks_train::prefix_words::WordReceipt = read(&both.join("corpus.json"));
+        let added = receipt.derived.and_then(|derived| derived.added).expect("the words added");
+        assert_eq!((added.offered, added.source.as_str(), added.more_sources), (4, "zone", vec!["second".to_owned()]));
+        refused(&derive(frozen, &["--add", &merged_text, "--add-class", "term"], &scratch("words-zone-sourceless").join("out")), "an addition names the source of its rows");
     }
 
     /// A folder copied file by file.
