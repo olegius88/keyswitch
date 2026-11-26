@@ -1112,6 +1112,13 @@ mod words {
         let version = format!("\"{}\"", super::eager_model(&eager, 2));
         let recipe_path = key_recipe(&small, "words-small-cell", &[("floor_model", "\"eager-floor.json\""), ("floor_model_version", &version), ("learning_rate", "0.0"), ("epochs", "2")]);
         refused(&fit(&recipe_path, "words-floor-eager"), "no epoch is as early as the installed model in both directions");
+        // On development alone, the earliest epoch below such a floor is written for development measures, its seal saying
+        // it does not count.
+        let output = scratch("words-floor-development").join("out");
+        let said = succeeded(&trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).arg("--development-only").output().expect("the trainer starts"));
+        assert!(said.contains("is written for development measures only") && said.contains("by key Some(") && said.contains("thresholds Some("), "{said}");
+        let seal: serde_json::Value = read(&output.join("seal.json"));
+        assert!(seal["epoch_selection"]["counts"] == serde_json::Value::Bool(false) && seal["calibration_passed"] == serde_json::Value::Bool(false), "{seal}");
     }
 
     /// The frames of schemas three and four, read with the orthotactic models and the term lists, closed to a share of the

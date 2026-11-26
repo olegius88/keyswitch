@@ -1655,6 +1655,10 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
     // measure only falls, so an epoch above it by more than `EQUAL_MEAN_KEY` never comes back).
     let mut measures: Vec<KeyMeasure> = Vec::new();
     let mut kept_weights: BTreeMap<i64, Vec<f64>> = BTreeMap::new();
+    // On development alone, the earliest epoch below the floor too: when none counts, its model is written for the
+    // measures of development only, its seal's selection saying it does not count (a fit that reads no calibration passes
+    // nothing and installs nothing).
+    let mut below_floor: Option<(KeyMeasure, Vec<f64>)> = None;
     let (mut lowest_measure, mut measure_epoch) = (f64::INFINITY, 0);
     let mut history = Vec::new();
     let denominator = fsum(&development.importance).expect("finite importance");
@@ -1673,19 +1677,25 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         if let Some(floor) = &floor {
             let measure = KeyMeasure::of(epoch + 1, &development_scores, &thresholds, loss, &floor.strictest);
             println!(
-                "prefix-v2 epoch {}: development loss {loss:.9}, mean key {:?}, counts {:?}",
+                "prefix-v2 epoch {}: development loss {loss:.9}, mean key {:?}, by key {:?}, thresholds {:?}, counts {:?}",
                 epoch + 1,
                 measure.as_ref().map(|found| found.mean_key),
+                measure.as_ref().map(|found| found.switched_by_key),
+                measure.as_ref().map(|found| found.thresholds),
                 measure.as_ref().map(|found| found.counts)
             );
             history.push(crate::artifact::typed(&KeyEpoch { epoch: epoch + 1, development_loss: loss, selection: measure.as_ref() })?);
-            if let Some(found) = measure.filter(|found| found.counts) {
-                if found.measure < lowest_measure {
-                    (lowest_measure, measure_epoch) = (found.measure, epoch + 1);
+            match measure {
+                Some(found) if found.counts => {
+                    if found.measure < lowest_measure {
+                        (lowest_measure, measure_epoch) = (found.measure, epoch + 1);
+                    }
+                    kept_weights.insert(found.epoch, rounded.clone());
+                    measures.push(found);
+                    kept_weights.retain(|kept, _| measures.iter().any(|known| known.epoch == *kept && known.measure <= lowest_measure + EQUAL_MEAN_KEY));
                 }
-                kept_weights.insert(found.epoch, rounded.clone());
-                measures.push(found);
-                kept_weights.retain(|kept, _| measures.iter().any(|known| known.epoch == *kept && known.measure <= lowest_measure + EQUAL_MEAN_KEY));
+                Some(found) if request.development_only && below_floor.as_ref().is_none_or(|(known, _)| found.measure < known.measure) => below_floor = Some((found, rounded.clone())),
+                _ => {}
             }
         } else {
             let candidate = assess(&development_scores, &thresholds, loss);
@@ -1710,7 +1720,15 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         }
     }
     let (selection_loss, selection_value, development_thresholds) = if by_key {
-        let chosen = chosen_epoch(&measures).ok_or("no epoch is as early as the installed model in both directions")?.clone();
+        let chosen = match (chosen_epoch(&measures).cloned(), below_floor) {
+            (Some(chosen), _) => chosen,
+            (None, Some((found, weights))) => {
+                println!("no epoch is as early as the installed model in both directions: epoch {} is written for development measures only", found.epoch);
+                kept_weights.insert(found.epoch, weights);
+                found
+            }
+            (None, None) => return Err("no epoch is as early as the installed model in both directions".to_owned()),
+        };
         best.clone_from(kept_weights.get(&chosen.epoch).expect("the weights of an epoch that may be chosen are kept"));
         selected_epoch = chosen.epoch;
         (chosen.loss, crate::artifact::typed(&chosen)?, chosen.thresholds)
