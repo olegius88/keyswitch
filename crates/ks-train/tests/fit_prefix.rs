@@ -752,6 +752,16 @@ mod words {
     struct Floor {
         model_version: String,
         mean_key: [f64; 2],
+        switched_by_key: [i64; 2],
+        users: FloorMeasure,
+        every_word: FloorMeasure,
+    }
+
+    /// The installed model measured with one index.
+    #[derive(Deserialize)]
+    struct FloorMeasure {
+        mean_key: [f64; 2],
+        switched_by_key: [i64; 2],
     }
 
     #[derive(Deserialize)]
@@ -832,6 +842,12 @@ mod words {
         assert!(seal.calibration_read && seal.thresholds.iter().zip(seal.development_thresholds).all(|(found, floor)| *found >= floor));
         // The floor converts nothing at the top of the grid: every word typed in the other layout counts its boundary.
         assert!(!seal.floor.model_version.is_empty() && seal.floor.mean_key.iter().all(|key| *key > 4.0));
+        // The floor is the stricter of the installed model with its own index and with every word, in each direction.
+        let (users, every_word) = (&seal.floor.users, &seal.floor.every_word);
+        for direction in 0..2 {
+            assert_eq!(seal.floor.mean_key[direction], users.mean_key[direction].min(every_word.mean_key[direction]));
+            assert_eq!(seal.floor.switched_by_key[direction], users.switched_by_key[direction].max(every_word.switched_by_key[direction]));
+        }
         assert!(seal.development_cells.map(|cell| cell.words).iter().all(|words| *words > 0));
         // Typed in Latin: four English words and four led by a sign key, which are hard; in Cyrillic four Russian words.
         assert_eq!(seal.calibration_cells.map(|cell| (cell.words, cell.hard)), [(8, 4), (4, 0)]);

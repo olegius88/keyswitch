@@ -1187,6 +1187,16 @@ impl KeyFloor {
     fn of(metrics: &[DirectionMetrics; 2]) -> KeyFloor {
         KeyFloor { mean_key: metrics.map(|cell| cell.mean_key()), switched_by_key: metrics.map(|cell| cell.switched_by_key) }
     }
+
+    /// The floor of two measures of the installed model: in each direction the earlier mean key and the larger count, so
+    /// that an epoch not worse than it is not worse than either.
+    #[must_use]
+    pub fn strictest(&self, other: &KeyFloor) -> KeyFloor {
+        KeyFloor {
+            mean_key: [0, 1].map(|direction| self.mean_key[direction].min(other.mean_key[direction])),
+            switched_by_key: [0, 1].map(|direction| self.switched_by_key[direction].max(other.switched_by_key[direction])),
+        }
+    }
 }
 
 /// An epoch as the mean key measures it, on development alone: each direction at its development threshold.
@@ -1234,10 +1244,22 @@ struct KeyEpoch<'a> {
     selection: Option<&'a KeyMeasure>,
 }
 
+/// The floor of a fit by the mean key, and the two measures it is the strictest of.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+struct FloorMeasures {
+    #[serde(flatten)]
+    strictest: KeyFloor,
+    /// The installed model with the index the program gives it (`VersionedPrefixModel::prefix_lexicon`): as users run it.
+    users: KeyFloor,
+    /// The same with every word the models hold: as it was measured before the program and the tools gave it one index.
+    every_word: KeyFloor,
+}
+
 /// The floor of a fit by the mean key: the installed model's mean key and count switched by `SWITCH_KEY` on the
-/// development words, in each direction, both profiles together, at its own threshold. The recipe names the model, its
-/// version and the threshold; a model of another version is refused.
-fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &RecipeOptions) -> Result<KeyFloor, String> {
+/// development words, in each direction, both profiles together, at its own threshold, measured with the index the
+/// program gives it and with every word the models hold; an epoch counts only if it is not worse than either. The recipe
+/// names the model, its version and the threshold; a model of another version is refused.
+fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &RecipeOptions) -> Result<FloorMeasures, String> {
     let (Some(path), Some(version), Some(threshold)) = (&options.floor_model, &options.floor_model_version, options.floor_threshold) else {
         return Err("a fit by the mean key names its floor: floor_model, floor_model_version and floor_threshold".to_owned());
     };
@@ -1245,9 +1267,13 @@ fn key_floor(maker: &FrameMaker, parents: &[ParentWord], root: &Path, options: &
     if floor.version() != version {
         return Err(format!("{path} is {}, the recipe names {version}", floor.version()));
     }
-    let frames = maker.frames_of_schema(DEVELOPMENT, parents, floor.feature_version)?;
-    let scores = sequence_scores(&frames, &runtime_probabilities(&floor.model, &frames));
-    Ok(KeyFloor::of(&pooled(&direction_metrics(&scores, [threshold, threshold]))))
+    let measure = |lexicon: PrefixLexicon| -> Result<KeyFloor, String> {
+        let frames = maker.frames_of_schema(DEVELOPMENT, parents, floor.feature_version, lexicon)?;
+        let scores = sequence_scores(&frames, &runtime_probabilities(&floor.model, &frames));
+        Ok(KeyFloor::of(&pooled(&direction_metrics(&scores, [threshold, threshold]))))
+    };
+    let (users, every_word) = (measure(floor.prefix_lexicon())?, measure(PrefixLexicon::Held)?);
+    Ok(FloorMeasures { strictest: users.strictest(&every_word), users, every_word })
 }
 
 /// The chosen epoch among measured ones: of those that count, the lowest measure; those within `EQUAL_MEAN_KEY` of it are
@@ -1371,14 +1397,15 @@ fn reuse_installed(request: &PrefixRequest<'_>) -> Result<Option<Value>, String>
 /// What makes the frames of a split: the lexicons of both profiles, the orthotactic models when the schema reads them,
 /// the recipe's rules, and the cache the frames may be kept in.
 struct FrameMaker {
+    /// What builds and keeps the prefix indexes of `portable` and `spelling`.
+    resources: Arc<Resources>,
     portable: Lexicons,
     spelling: Lexicons,
-    indexes: Indexes,
     ortho: Option<OrthoModel>,
     terms: Option<PrefixTerms>,
     rules: FrameRules,
     feature_version: i64,
-    /// The words of `indexes`.
+    /// The words of the prefix index the frames of `frames` read.
     lexicon: PrefixLexicon,
     maximum_prefix_length: usize,
     jobs: usize,
@@ -1390,7 +1417,6 @@ impl FrameMaker {
         let resources: Arc<Resources> = Resources::with_speller(resource_dir.to_path_buf(), ks_hunspell::hunspell_speller(ks_config::history::data_dir()));
         let portable = reference_models(root, &resources, false)?;
         let spelling = reference_models(root, &resources, true)?;
-        let indexes = indexes_of(&resources, &portable, &spelling, lexicon);
         // Schemas three and four read the keys with the packaged orthotactic models, as the engine does; four the term
         // lists as well.
         let terms = (feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()).then(|| prefix_terms_of(resource_dir, &portable)).transpose()?;
@@ -1400,33 +1426,35 @@ impl FrameMaker {
             None
         };
         let cache = cache.map(|folder| FramesCache::open(folder, root, resource_dir)).transpose()?;
-        Ok(FrameMaker { portable, spelling, indexes, ortho, terms, rules, feature_version, lexicon, maximum_prefix_length, jobs, cache })
+        Ok(FrameMaker { resources, portable, spelling, ortho, terms, rules, feature_version, lexicon, maximum_prefix_length, jobs, cache })
     }
 
     /// What the frames read besides their parents, worded for the frames cache.
-    fn settings(&self, feature_version: i64, closed: Option<u64>) -> String {
+    fn settings(&self, feature_version: i64, lexicon: PrefixLexicon, closed: Option<u64>) -> String {
         let terms = self.rules.terms.as_ref().map_or_else(String::new, |terms| hex(&Sha256::digest(terms.join("\n").as_bytes())));
         format!(
             "features {feature_version}\nmaximum prefix {}\nconvert from {}\nminimum {}\nengine support {}\nterms {terms}\nclosed {closed:?}\nindex {}",
-            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support, self.lexicon.name()
+            self.maximum_prefix_length, self.rules.convert_from, self.rules.minimum_characters, self.rules.engine_support, lexicon.name()
         )
     }
 
-    /// The frames of a split's parents in the recipe's schema.
+    /// The frames of a split's parents in the recipe's schema, with its index.
     fn frames(&self, split: &str, parents: &[ParentWord]) -> Result<SplitFrames, String> {
-        self.frames_of_schema(split, parents, self.feature_version)
+        self.frames_of_schema(split, parents, self.feature_version, self.lexicon)
     }
 
-    /// The frames of a split's parents in a schema, read back from the cache when it holds them. Only training closes the
-    /// term lists to some families: development and calibration read them as the engine does.
-    fn frames_of_schema(&self, split: &str, parents: &[ParentWord], feature_version: i64) -> Result<SplitFrames, String> {
+    /// The frames of a split's parents in a schema with the index of `lexicon`, read back from the cache when it holds
+    /// them. Only training closes the term lists to some families: development and calibration read them as the engine
+    /// does.
+    fn frames_of_schema(&self, split: &str, parents: &[ParentWord], feature_version: i64, lexicon: PrefixLexicon) -> Result<SplitFrames, String> {
         let closed = self.rules.closed_term_families_per_mille.filter(|_| split == TRAIN);
         let readers = PrefixReaders { ortho: self.ortho.as_ref(), terms: self.terms.as_ref() };
-        let build = || generate_frames(parents, [&self.portable, &self.spelling], &self.indexes, self.maximum_prefix_length, feature_version, readers, closed, &self.rules, self.jobs);
+        let indexes = indexes_of(&self.resources, &self.portable, &self.spelling, lexicon);
+        let build = || generate_frames(parents, [&self.portable, &self.spelling], &indexes, self.maximum_prefix_length, feature_version, readers, closed, &self.rules, self.jobs);
         let Some(cache) = &self.cache else {
             return Ok(build());
         };
-        let key = cache.key(&self.settings(feature_version, closed), parents);
+        let key = cache.key(&self.settings(feature_version, lexicon, closed), parents);
         if let Some(found) = cache.read(&key) {
             println!("{split}: frames read from the cache");
             return Ok(found);
@@ -1466,7 +1494,7 @@ struct FloorSeal {
     model_version: String,
     threshold: f64,
     #[serde(flatten)]
-    measures: KeyFloor,
+    measures: FloorMeasures,
 }
 
 /// What a fit by the mean key adds to its seal.
@@ -1604,7 +1632,7 @@ pub fn fit(request: &PrefixRequest<'_>) -> Result<Value, String> {
         assert!(loss.is_finite(), "prefix optimisation diverged");
         let development_scores = sequence_scores(&development_frames, &probabilities);
         if let Some(floor) = &floor {
-            let measure = KeyMeasure::of(epoch + 1, &development_scores, &thresholds, loss, floor);
+            let measure = KeyMeasure::of(epoch + 1, &development_scores, &thresholds, loss, &floor.strictest);
             println!(
                 "prefix-v2 epoch {}: development loss {loss:.9}, mean key {:?}, counts {:?}",
                 epoch + 1,
@@ -2119,6 +2147,9 @@ mod tests {
         assert!(!KeyMeasure::of(1, &switching(4), &grid, 0.2, &KeyFloor { switched_by_key: [3, 0], ..floor }).expect("measured").counts);
         // No clean threshold in a direction: no measure.
         assert!(KeyMeasure::of(1, &switching(4), &[0.99], 0.2, &floor).is_none());
+        // Of the installed model measured with two indexes, each direction's earlier mean key and larger count.
+        let other = KeyFloor { mean_key: [4.7, 4.9], switched_by_key: [1, 3] };
+        assert_eq!(floor.strictest(&other), KeyFloor { mean_key: [4.5, 4.9], switched_by_key: [2, 3] });
         let measure = |epoch: i64, measure: f64, loss: f64, counts: bool| KeyMeasure { epoch, measure, loss, counts, ..early.clone() };
         // Of measures within `EQUAL_MEAN_KEY` of the lowest, the lower loss, then the earlier epoch; an epoch that does not
         // count is never chosen.
