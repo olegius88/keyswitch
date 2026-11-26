@@ -591,7 +591,7 @@ mod words {
     /// counted enough; A5 the words of either that neither lexicon knows in either reading, typed both ways; each row
     /// names its source. Replayed beside two references, the gates of every pair are read against each.
     fn samples_of_derived(small: &Path, frozen: &Path, base: &Path) {
-        use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, SOURCE_CORPUS, SOURCE_SUPPLEMENT, Sample, SamplesReceipt};
+        use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, SOURCE_CORPUS, SOURCE_SUPPLEMENT, Sample, SamplesReceipt, TRAINING_FAMILY_SUFFIX};
         use std::io::BufRead as _;
         // The name of the list of English words, and a word of it of no family the cut moved.
         const ENGLISH: &str = "en";
@@ -631,13 +631,15 @@ mod words {
         succeeded(&run_build(&derived, &full, with(&["--supplement", "--word-list", &en_cut, "--word-list", &ru])));
         let receipt: SamplesReceipt = read(&full.join("receipt.json"));
         let rows = rows_of(&full);
-        let has = |sample: Sample, text: &str, other: bool, source: &str| rows.iter().any(|row| row.sample == sample && row.text == text && row.other == other && row.source == source);
+        // A word of plain text of a training family says so after its source.
+        let source_of = |row: &AcceptanceRow| row.source.trim_end_matches(TRAINING_FAMILY_SUFFIX).to_owned();
+        let has = |sample: Sample, text: &str, other: bool, source: &str| rows.iter().any(|row| row.sample == sample && row.text == text && row.other == other && source_of(row) == source);
         assert!(rows.iter().any(|row| row.source == SOURCE_SUPPLEMENT && row.sample == Sample::A1));
         assert!(has(Sample::A1, &new_word, true, ENGLISH) && has(Sample::A2, &new_word, false, ENGLISH));
         assert!(has(Sample::A1, &kept_word, true, SOURCE_CORPUS) && !rows.iter().any(|row| row.text == kept_word && row.source == ENGLISH));
         let absent = [barred_word.clone(), "ab".to_owned(), format!("{kept_word}x"), "x1yz".to_owned(), "бегемот".to_owned()];
         assert!(!rows.iter().any(|row| absent.contains(&row.text)));
-        assert!(has(Sample::N2, "молоко", false, "ru+text") && rows.iter().any(|row| row.text == PEOPLE && row.source == ENGLISH));
+        assert!(has(Sample::N2, "молоко", false, "ru+text") && rows.iter().any(|row| row.text == PEOPLE && source_of(row) == ENGLISH));
         for word in ["zzqxw", "ыыыщщ"] {
             assert!([true, false].iter().all(|other| rows.iter().any(|row| row.sample == Sample::A5 && row.text == word && row.other == *other)), "{word}");
         }

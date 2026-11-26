@@ -64,6 +64,8 @@ const PLAIN_CLASS: &str = "plain";
 /// derived corpus's cut moved.
 pub const SOURCE_CORPUS: &str = "corpus";
 pub const SOURCE_SUPPLEMENT: &str = "supplement";
+/// What the source of a word of plain text ends with when its family is one the word corpus trains on.
+pub const TRAINING_FAMILY_SUFFIX: &str = "@training-family";
 /// The words of A5 a direction of each of its halves must hold for its gates to count; fewer are only reported.
 pub const MINIMUM_UNKNOWN_WORDS_PER_DIRECTION: usize = 1000;
 
@@ -505,6 +507,14 @@ pub fn build(request: &BuildRequest<'_>) -> Result<SamplesReceipt, String> {
                 named.push('+');
             }
             named.push_str(source);
+        }
+    }
+    // A word of plain text of a family the corpus trains on is new by the word, not by its first keys: its source says
+    // so, and the report counts it apart.
+    if classed.is_some() {
+        let trained: BTreeSet<String> = read_split(request.corpus, crate::corpus::TRAIN)?.into_iter().map(|row| row.family).collect();
+        for ((text, group), named) in &mut plain {
+            named.push_str(["", TRAINING_FAMILY_SUFFIX][usize::from(trained.contains(&family(text, *group)))]);
         }
     }
     rows.extend(plain_rows(&plain, Sample::N1, request.namespace, request.minimums.engine_plain, &mut untyped));
