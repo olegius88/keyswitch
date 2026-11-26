@@ -1900,6 +1900,13 @@ impl Inner {
         if !injection.verified_in_field || pace.is_some() || !alone {
             return None;
         }
+        // A sign typed in the word (`,` for `б`, `;` for `ж`) is something a window may act on as it takes it in: in Notepad
+        // of Windows 11 (a virtual machine, ordinary pace, 26.11.2026) 5 of the 7 replacements typed as characters whose
+        // keys held `,` or `;` came out as their last letter repeated (`,fcc` as `сссс` for `басс`), and none of the 58
+        // whose keys typed letters only; typed as keys of the new layout, 50 ms later, the same words came out whole.
+        if !injection.strokes.iter().all(|stroke| !stroke.character.is_empty() && stroke.character.chars().all(char::is_alphabetic)) {
+            return None;
+        }
         let mut letters = Vec::new();
         for stroke in injection.strokes {
             let mut characters = stroke.character_for(injection.target_group).chars();

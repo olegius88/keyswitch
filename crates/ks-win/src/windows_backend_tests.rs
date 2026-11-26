@@ -1168,8 +1168,12 @@ fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
     let boundary = key_with(SCAN_CODE_SEMICOLON, ";", [";", "ж"], 0);
     let two_characters = [KeyEvent { characters: vec!["a".to_owned(), "фф".to_owned()], ..key_event() }];
     let no_character = [KeyEvent { characters: vec!["a".to_owned(), String::new()], ..key_event() }];
+    let sign = [key_event(), KeyEvent { character: ",".to_owned(), characters: vec![",".to_owned(), "б".to_owned()], ..key_event() }];
+    let nothing_typed = [KeyEvent { character: String::new(), ..key_event() }];
     let read = |strokes| Injection { verified_in_field: true, ..injection(strokes, 1) };
-    let cases: [(&str, Injection<'_>); 8] = [
+    let cases: [(&str, Injection<'_>); 10] = [
+        ("a sign typed in the word", read(&sign)),
+        ("nothing typed by a key", read(&nothing_typed)),
         ("a field not read", injection(&one, 1)),
         ("keys typed after the word", Injection { late: &late, ..read(&one) }),
         ("signs after the word", Injection { trailing: &late, ..read(&one) }),
