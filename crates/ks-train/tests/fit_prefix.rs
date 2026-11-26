@@ -1032,6 +1032,7 @@ mod words {
     /// What a test reads of the seal of a fit by the switch key.
     #[derive(Deserialize)]
     struct KeySeal {
+        provenance: BTreeMap<String, String>,
         threshold: f64,
         thresholds: [f64; 2],
         development_thresholds: [f64; 2],
@@ -1096,6 +1097,9 @@ mod words {
         assert!(seal.calibration_read && seal.thresholds.iter().zip(seal.development_thresholds).all(|(found, floor)| *found >= floor));
         // The floor converts nothing at the top of the grid: every word typed in the other layout counts its boundary.
         assert!(!seal.floor.model_version.is_empty() && seal.floor.mean_key.iter().all(|key| *key > 4.0));
+        // The floor is named by its version, not pinned by its path: promoting the candidate replaces the installed model
+        // the floor is, and the seal still holds against the tree after it.
+        assert!(!seal.provenance.contains_key("resources/models/prefix_policy_v1.json") && seal.provenance.contains_key("model/words-key/train.jsonl.gz"));
         // The floor is the stricter of the installed model with its own index and with every word, in each direction.
         let (users, every_word) = (&seal.floor.users, &seal.floor.every_word);
         for direction in 0..2 {

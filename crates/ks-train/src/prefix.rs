@@ -1400,10 +1400,10 @@ fn check_cells(split: &str, parents: &[ParentWord], options: &RecipeOptions) -> 
 
 /// The inputs of a fit; what a seal pins.
 fn prefix_provenance(root: &Path, recipe_path: &Path) -> Result<BTreeMap<String, String>, String> {
+    // The floor model is not pinned by its path: the fit checks its version (the digest of its weights) and the seal
+    // names it, and the installed model it usually is gets replaced by the candidate when the pair is promoted, after
+    // which the receipt checks this seal against the tree.
     let mut result = provenance(root, recipe_path)?;
-    if let Some(floor) = RecipeOptions::of(recipe_path).ok().and_then(|options| options.floor_model) {
-        result.insert(floor.clone(), checksum(&root.join(&floor))?);
-    }
     let names: Vec<String> = match corpus_of(recipe_path) {
         Some(corpus) => ["corpus.json", "config.json", "held-out.json.gz", "train.jsonl.gz", "development.jsonl.gz", "calibration.jsonl.gz"].iter().map(|name| format!("{corpus}/{name}")).collect(),
         None => ["model/prefix_v1/corpus.json", "model/prefix_v1/config.json", "model/prefix_v1/train.jsonl.gz", "model/prefix_v1/development.jsonl.gz", "model/prefix_v1/calibration.jsonl.gz"].map(str::to_owned).to_vec(),
