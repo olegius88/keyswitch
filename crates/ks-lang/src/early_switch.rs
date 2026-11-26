@@ -103,6 +103,35 @@ impl EarlySwitchDecision {
     }
 }
 
+/// Which words of a language model a prefix index holds (`Resources::prefix_index`). The prefix model says which it was
+/// trained on (`VersionedPrefixModel::prefix_lexicon`), and the program, the trainer's replays and the typing barrier give
+/// it that index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PrefixLexicon {
+    /// The lexicon file and its fallback words, as `LanguageModel.load(locale)` reads them, without the supplement: what
+    /// the program gave every prefix model before schema four, prefix_v2 among them, which users have run so since 0.37.0.
+    Plain,
+    /// Every word the model holds, the supplement's among them: what the trainer builds its features from.
+    Held,
+}
+
+impl PrefixLexicon {
+    /// The word the trainer's commands and reports name it by.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            PrefixLexicon::Plain => "plain",
+            PrefixLexicon::Held => "held",
+        }
+    }
+
+    /// The lexicon a command names, if it names one.
+    #[must_use]
+    pub fn named(name: &str) -> Option<PrefixLexicon> {
+        [PrefixLexicon::Plain, PrefixLexicon::Held].into_iter().find(|lexicon| lexicon.name() == name)
+    }
+}
+
 /// Sorted case-folded words of one language with lexicon frequencies.
 pub struct PrefixIndex {
     /// `None`: the words are the keys of `frequencies`, as on a machine without Hunspell stems.
@@ -123,11 +152,7 @@ impl PrefixIndex {
     }
 
     /// The body of `_cached_index` on the frequencies it found: the words of a lexicon plus the stems of the Hunspell
-    /// dictionary `source` names, if it names one.
-    ///
-    /// `PrefixIndex.for_language_model` in the Python builds on `LanguageModel.load(locale)`, which holds no supplement,
-    /// whatever the model passed: `Resources::prefix_index` does the same. A replay patches that `load` to return the
-    /// reference model with the supplement; it passes that model's frequencies here.
+    /// dictionary `source` names, if it names one. `Resources::prefix_index` chooses the frequencies (`PrefixLexicon`).
     #[must_use]
     pub fn from_lexicon(frequencies: Arc<WordTable>, source: &str) -> Self {
         let stems = hunspell_dictionary_path(source).map(|path| dictionary_stems(&path, PREFIX_INDEX_DICTIONARY_MAX_BYTES));

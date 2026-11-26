@@ -352,6 +352,14 @@ impl LanguageModel {
             .collect()
     }
 
+    /// The folder the lexicon of this model was read from, as the roots `load_tables` reads that lexicon again from;
+    /// none for a model of the emergency words alone. `source` names the lexicon file first (`; Hunspell: …` after it).
+    #[must_use]
+    pub fn lexicon_roots(&self) -> Vec<PathBuf> {
+        let lexicon = Path::new(pystr::strip(self.source.split(';').next().unwrap_or_default()));
+        lexicon.parent().filter(|_| lexicon.is_file()).map(Path::to_path_buf).into_iter().collect()
+    }
+
     /// `LanguageModel.load(locale, extra_words)` over given roots, without the Python's cache (see `Resources`).
     pub fn load<S: AsRef<str>, I: IntoIterator<Item = S>>(locale: &str, extra_words: I, roots: &[PathBuf], speller: Box<dyn SpellChecker>) -> Self {
         let tables = Self::load_tables(locale, extra_words, roots);

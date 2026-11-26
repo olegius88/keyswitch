@@ -6,7 +6,7 @@ use ks_cast::To as _;
 use crate::boundary_model::{self, BoundaryModel};
 use crate::boundary_policy::{self, BoundaryPolicy};
 use crate::detector::{LanguageDetector, LanguageScorer, ProtectedTokens};
-use crate::early_switch::PrefixIndex;
+use crate::early_switch::{PrefixIndex, PrefixLexicon};
 use crate::identifier_lexicon::{self, IdentifierLexicon};
 use crate::intent_model::{IntentModelStatus, LinearNgramModel};
 use crate::language_model::{model_roots, LanguageModel};
@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// Opens the speller of a locale: `HunspellDictionary(locale)`.
 pub type SpellerFactory = Box<dyn Fn(&str) -> Box<dyn SpellChecker> + Send + Sync>;
 
-/// The indexes built, by locale and lexicon source.
-type PrefixIndexes = Vec<((String, String), Arc<PrefixIndex>)>;
+/// The indexes built, by locale, lexicon source, the words taken and, for the words a model holds, that model's table.
+type PrefixIndexes = Vec<((String, String, PrefixLexicon, usize), Arc<PrefixIndex>)>;
 
 pub struct Resources {
     resource_dir: PathBuf,
@@ -35,7 +35,7 @@ pub struct Resources {
     /// read. The list is locked only to find the place, never while a model is read, so the dictionaries of a start are
     /// read side by side (`KeySwitchEngine::new`).
     engine_models: Mutex<Vec<(String, Arc<OnceLock<Arc<LanguageModel>>>)>>,
-    plain_frequencies: Mutex<Vec<(String, Arc<WordTable>)>>,
+    plain_frequencies: Mutex<Vec<((String, String), Arc<WordTable>)>>,
     prefix_indexes: Mutex<PrefixIndexes>,
     identifiers: OnceLock<(Option<Arc<IdentifierLexicon>>, String)>,
     boundary_policy: OnceLock<Option<Arc<BoundaryPolicy>>>,
@@ -113,30 +113,42 @@ impl Resources {
         place
     }
 
-    /// The frequencies of `LanguageModel.load(locale)`: the file and the fallback words, no supplement. Where the model
-    /// asked about holds the very same table (a locale without a supplement), its table is shared, not held twice.
+    /// The frequencies of `LanguageModel.load(locale)` for the lexicon `model` was read from: the file and the fallback
+    /// words, no supplement. Where the model asked about holds the very same table (a locale without a supplement), its
+    /// table is shared, not held twice.
     fn plain_frequencies(&self, model: &LanguageModel) -> Arc<WordTable> {
-        let locale = model.locale.as_str();
+        let key = (model.locale.clone(), model.source.clone());
         let mut tables = self.plain_frequencies.lock().expect("the lock is not poisoned");
-        if let Some(found) = tables.iter().find(|entry| entry.0 == locale) {
+        if let Some(found) = tables.iter().find(|entry| entry.0 == key) {
             return found.1.clone();
         }
-        let read = LanguageModel::load_tables(locale, std::iter::empty::<&str>(), &self.model_roots()).frequencies;
+        let read = LanguageModel::load_tables(&model.locale, std::iter::empty::<&str>(), &model.lexicon_roots()).frequencies;
         let table = if read == *model.frequencies { model.frequencies.clone() } else { Arc::new(read) };
-        tables.push((locale.to_string(), table.clone()));
+        tables.push((key, table.clone()));
         table
     }
 
-    /// `PrefixIndex.for_language_model(model)`: built once per lexicon source, from the lexicon plus Hunspell stems.
-    /// The lexicon is that of `LanguageModel.load(locale)`, without the supplement, whatever the model holds: the
-    /// Python does the same (a replay passes its reference model's frequencies to `PrefixIndex::from_lexicon`).
-    pub fn prefix_index(&self, model: &LanguageModel) -> Arc<PrefixIndex> {
-        let key = (model.locale.clone(), model.source.clone());
+    /// `PrefixIndex.for_language_model(model)`: the words `lexicon` names (`PrefixLexicon`) plus the stems of the
+    /// Hunspell dictionary the model spells with, built once for each lexicon of each model. The program, the trainer's
+    /// replays and the typing barrier all take their indexes here, so that a model is measured with the index it runs
+    /// with: the trainer's replays once built theirs apart, with the supplement, while the program built it without, and
+    /// every acceptance since prefix_v2 measured an index users never ran.
+    pub fn prefix_index(&self, model: &LanguageModel, lexicon: PrefixLexicon) -> Arc<PrefixIndex> {
+        // A held index belongs to the very table of the model: another model of the same lexicon file may hold other words.
+        let held = match lexicon {
+            PrefixLexicon::Plain => 0,
+            PrefixLexicon::Held => Arc::as_ptr(&model.frequencies).addr(),
+        };
+        let key = (model.locale.clone(), model.source.clone(), lexicon, held);
         let mut indexes = self.prefix_indexes.lock().expect("the lock is not poisoned");
         if let Some(found) = indexes.iter().find(|entry| entry.0 == key) {
             return found.1.clone();
         }
-        let index = Arc::new(PrefixIndex::from_lexicon(self.plain_frequencies(model), &model.source));
+        let frequencies = match lexicon {
+            PrefixLexicon::Plain => self.plain_frequencies(model),
+            PrefixLexicon::Held => model.frequencies.clone(),
+        };
+        let index = Arc::new(PrefixIndex::from_lexicon(frequencies, &model.source));
         indexes.push((key, index.clone()));
         index
     }

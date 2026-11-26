@@ -1,9 +1,9 @@
 //! `ks-train fit --tree <root> --corpus <folder> --output <folder> [--recipe <file>] [--ledger <folder>] [--jobs N] [--stages <folder>]`
 //! `ks-train prefix --tree <root> --output <folder> [--recipe <file>] [--reuse-installed] [--frames-cache <folder>] [--development-only] [--jobs N]`
 //! `ks-train prefix-report --fit <folder> --output <file>`
-//! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--frames-cache <folder>] --output <file> [--jobs N]`
-//! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N]`
-//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>... --reference <name> --output <file> [--jobs N]`
+//! `ks-train prefix-probe --tree <root> --model <file> --recipe <file> --split development|--words <file> [--minimum-characters N] [--numbers-only] [--lexicon plain|held] [--frames-cache <folder>] --output <file> [--jobs N]`
+//! `ks-train prefix-acceptance build --corpus <word corpus> [--base <frozen base>]... [--base-calibration] [--text <file>]... [--inventory <file>]... [--hold-out <file>]... [--tree <root> --classes-base <frozen base> [--word-list <name>=<file>,<minimum count>,latin|cyrillic[,cut]]... [--supplement]] --namespace <name> --output <folder> [--minimum-paired N] [--minimum-plain N] [--engine-plain N] [--minimum-unknown N]`
+//! `ks-train prefix-acceptance run --tree <root> --samples <folder> --pair <name>=<context model>,<prefix model>[,plain|held]... --reference <name>... --output <file> [--jobs N]`
 //! `ks-train evaluate --tree <root> --candidate <file> --seal <file> --prefix-candidate <file> --prefix-seal <file> --corpus <folder> --output <file> [--split development|test] [--unsealed] [--cache <folder>] [--jobs N]`
 //! `ks-train holdout --tree <root> --source-root <folder> --treebank <name>... --sid-directory|--arch-directory|--rpm-directory|--alpine-directory <folder> --base <folder> ... --output <folder>`
 //! `ks-train capture --tree <root> --manifest <file> --messages <folder> --model <file> [--only <file>] [--verify] [--jobs N]`
@@ -27,6 +27,8 @@
 //! `ks-train base freeze|reconcile|technical|merge|inventory --tree <root> ...`
 //! `ks-train typo-evaluation synthetic|clean|field|all|vocabulary --tree <root> --messages <folder> --manifest <file> --out <folder> [--tune] [--utc-offset S]`
 //! `ks-train prefix-corpus --tree <root> [--config <file> --base <frozen base> [--hold-out <development.jsonl.gz>...]] [--freeze <folder>|--rebuild <folder>]`, `ks-train archive --tree <root> [--write]`
+//! `ks-train prefix-zone-words --tree <root> --corpus <word corpus> --base <frozen base> --list <file> --minimum N --maximum N [--layout latin|cyrillic] --source <name> --output <rows.jsonl.gz>`
+//! `ks-train prefix-derive --from <word corpus> --namespace <name> --cut-per-mille N [--add <rows> --add-class <class>... --add-source <source>... [--add-words N]] [--exclude <file>]... --output <folder>`
 //! `ks-train gates --tree <root>`, `ks-train licenses --tree <root> [--verify]`, `ks-train deb-check --tree <root> <package>`
 //! `ks-train retired boundary-v1|context-v2|ortho-v2|prefix-v1 --tree <root> [--replay]`, `retired context-corpus --tree <root>`, `retired context-engine --tree <root> [--output <file>]`
 //! `ks-train detector --tree <root> [--sample N] [--dictionary-sample N] [--strict]`
@@ -109,6 +111,7 @@ fn main() {
             words,
             minimum_characters: option(&arguments, "--minimum-characters").map(|value| value.parse().expect("--minimum-characters is a number")),
             numbers_only: flag(&arguments, "--numbers-only"),
+            lexicon: option(&arguments, "--lexicon").map(|name| ks_lang::early_switch::PrefixLexicon::named(name).unwrap_or_else(|| panic!("--lexicon is plain or held: {name}"))),
             output: &output,
             jobs: option(&arguments, "--jobs").map_or(1, |value| value.parse().expect("--jobs is a number")),
             frames_cache: option(&arguments, "--frames-cache").map(Path::new),
@@ -264,6 +267,12 @@ fn main() {
             std::process::exit(1);
         }
         return;
+    }
+    if arguments.first().map(String::as_str) == Some("prefix-derive") {
+        std::process::exit(derive_command(&arguments));
+    }
+    if arguments.first().map(String::as_str) == Some("prefix-zone-words") {
+        std::process::exit(zone_command(&arguments));
     }
     if arguments.first().map(String::as_str) == Some("base") {
         match base_command(&arguments) {
@@ -457,37 +466,115 @@ fn all_of<'a>(arguments: &'a [String], name: &str) -> Vec<&'a str> {
     arguments.iter().enumerate().filter(|(_, argument)| *argument == name).filter_map(|(place, _)| arguments.get(place + 1)).map(String::as_str).collect()
 }
 
+/// A list of words for the acceptance samples: `<name>=<file>,<minimum count>,latin|cyrillic[,cut]`.
+fn word_list(named: &str) -> ks_train::prefix_acceptance::WordListInput {
+    let shape = || format!("a list of words is <name>=<file>,<minimum count>,latin|cyrillic[,cut]: {named}");
+    let (name, rest) = named.split_once('=').unwrap_or_else(|| panic!("{}", shape()));
+    let parts: Vec<&str> = rest.split(',').collect();
+    let (path, minimum, layout, cut) = match parts.as_slice() {
+        [path, minimum, layout] => (path, minimum, layout, false),
+        [path, minimum, layout, "cut"] => (path, minimum, layout, true),
+        _ => panic!("{}", shape()),
+    };
+    let group = ["latin", "cyrillic"].iter().position(|found| found == layout).unwrap_or_else(|| panic!("{}", shape()));
+    ks_train::prefix_acceptance::WordListInput { name: name.to_owned(), path: PathBuf::from(path), group: group.to::<i64>(), minimum: minimum.parse().unwrap_or_else(|_| panic!("{}", shape())), cut }
+}
+
+/// `prefix-zone-words`: the rows of a list's Latin words in the zone a prefix model decides alone; their counts, or why
+/// not.
+fn zone_command(arguments: &[String]) -> i32 {
+    let required = |name: &str| option(arguments, name).unwrap_or_else(|| panic!("{name} is required"));
+    let count = |name: &str| required(name).parse::<u64>().unwrap_or_else(|_| panic!("{name} is a number"));
+    let (root, corpus, base, list, output) = (PathBuf::from(required("--tree")), PathBuf::from(required("--corpus")), PathBuf::from(required("--base")), PathBuf::from(required("--list")), PathBuf::from(required("--output")));
+    let layout = option(arguments, "--layout").unwrap_or("latin");
+    let group = ["latin", "cyrillic"].iter().position(|name| *name == layout).unwrap_or_else(|| panic!("--layout is latin or cyrillic: {layout}"));
+    let request = ks_train::prefix_zone::ZoneRequest { root: &root, corpus: &corpus, base: &base, list: &list, minimum: count("--minimum"), maximum: count("--maximum"), group: group.to::<i64>(), source: required("--source"), output: &output };
+    match ks_train::prefix_zone::zone_words(&request) {
+        Ok(counts) => {
+            println!("{}", ks_text::json::dumps(&counts, &JsonOptions { indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }));
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// `prefix-derive`: a word corpus derived from a frozen one; its counts by split, or why not.
+fn derive_command(arguments: &[String]) -> i32 {
+    use ks_train::prefix_derive::{Addition, DeriveRequest, derive};
+    let required = |name: &str| option(arguments, name).unwrap_or_else(|| panic!("{name} is required"));
+    let (from, output) = (PathBuf::from(required("--from")), PathBuf::from(required("--output")));
+    let excluded: Vec<PathBuf> = all_of(arguments, "--exclude").into_iter().map(PathBuf::from).collect();
+    let added = option(arguments, "--add").map(PathBuf::from);
+    let classes: Vec<ks_train::prefix_words::Class> = all_of(arguments, "--add-class").into_iter().map(|class| ks_text::json::loads(format!("\"{class}\"")).expect("--add-class is a class of the word corpus")).collect();
+    let sources: Vec<&str> = all_of(arguments, "--add-source");
+    let addition = added.as_deref().map(|rows| Addition {
+        rows,
+        classes: &classes,
+        sources: &sources,
+        words: option(arguments, "--add-words").map(|value| value.parse().expect("--add-words is a number")),
+    });
+    let cut_per_mille = required("--cut-per-mille").parse().expect("--cut-per-mille is a number");
+    let request = DeriveRequest { from: &from, namespace: required("--namespace"), cut_per_mille, addition, excluded: &excluded, output: &output };
+    match derive(&request) {
+        Ok(receipt) => {
+            println!("{}", ks_text::json::dumps(&(&receipt.counts, &receipt.derived), &JsonOptions { ensure_ascii: false, indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }));
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
 /// `prefix-acceptance build|run`: the acceptance samples of a prefix candidate, and their one replay.
 fn acceptance_command(arguments: &[String]) -> i32 {
-    use ks_train::prefix_acceptance::{self, BuildRequest, Minimums, NamedPair, RunRequest};
+    use ks_lang::early_switch::PrefixLexicon;
+    use ks_train::prefix_acceptance::{self, BuildRequest, ClassesInput, Minimums, NamedPair, RunRequest, WordListInput};
     let required = |name: &str| option(arguments, name).map_or_else(|| panic!("{name} is required"), PathBuf::from);
     let paths = |name: &str| all_of(arguments, name).into_iter().map(PathBuf::from).collect::<Vec<_>>();
     let number = |name: &str, default: usize| option(arguments, name).map_or(default, |value| value.parse().unwrap_or_else(|_| panic!("{name} is a number")));
     let result = match arguments.get(1).map(String::as_str) {
         Some("build") => {
             let defaults = Minimums::default();
-            let minimums = Minimums { paired: number("--minimum-paired", defaults.paired), plain: number("--minimum-plain", defaults.plain), engine_plain: number("--engine-plain", defaults.engine_plain) };
+            let minimums = Minimums { paired: number("--minimum-paired", defaults.paired), plain: number("--minimum-plain", defaults.plain), engine_plain: number("--engine-plain", defaults.engine_plain), unknown: number("--minimum-unknown", defaults.unknown) };
             let (bases, texts, inventories, hold_out) = (paths("--base"), paths("--text"), paths("--inventory"), paths("--hold-out"));
             let (corpus, output) = (required("--corpus"), required("--output"));
             let namespace = option(arguments, "--namespace").expect("--namespace is required");
-            let request = BuildRequest { corpus: &corpus, bases: &bases, base_calibration: flag(arguments, "--base-calibration"), texts: &texts, inventories: &inventories, hold_out: &hold_out, namespace, minimums, output: &output };
+            let word_lists: Vec<WordListInput> = all_of(arguments, "--word-list").into_iter().map(word_list).collect();
+            let (root, classes_base) = (option(arguments, "--tree").map(PathBuf::from), option(arguments, "--classes-base").map(PathBuf::from));
+            let classes = classes_base.as_deref().map(|base| ClassesInput { root: root.as_deref().expect("--tree is required with --classes-base"), base });
+            let request = BuildRequest { corpus: &corpus, bases: &bases, base_calibration: flag(arguments, "--base-calibration"), texts: &texts, inventories: &inventories, hold_out: &hold_out, word_lists: &word_lists, supplement: flag(arguments, "--supplement"), classes, namespace, minimums, output: &output };
             prefix_acceptance::build(&request).map(|receipt| ks_text::json::dumps(&receipt.counts, &JsonOptions { indent: Some(ks_text::Indent::Spaces(1)), sort_keys: true, ..JsonOptions::default() }))
         }
         Some("run") => {
             let pairs: Vec<NamedPair> = all_of(arguments, "--pair")
                 .into_iter()
                 .map(|named| {
-                    let (name, models) = named.split_once('=').unwrap_or_else(|| panic!("a pair is <name>=<context model>,<prefix model>: {named}"));
-                    let (context, prefix) = models.split_once(',').unwrap_or_else(|| panic!("a pair is <name>=<context model>,<prefix model>: {named}"));
-                    NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix) }
+                    let shape = || format!("a pair is <name>=<context model>,<prefix model>[,plain|held]: {named}");
+                    let (name, models) = named.split_once('=').unwrap_or_else(|| panic!("{}", shape()));
+                    let (context, rest) = models.split_once(',').unwrap_or_else(|| panic!("{}", shape()));
+                    let (prefix, lexicon) = match rest.split_once(',') {
+                        None => (rest, None),
+                        Some((prefix, name)) => (prefix, Some(PrefixLexicon::named(name).unwrap_or_else(|| panic!("{}", shape())))),
+                    };
+                    NamedPair { name: name.to_owned(), context: PathBuf::from(context), prefix: PathBuf::from(prefix), lexicon }
                 })
                 .collect();
             let (root, samples, output) = (required("--tree"), required("--samples"), required("--output"));
             let resource_dir = root.join("resources");
-            let reference = option(arguments, "--reference").expect("--reference is required");
-            let request = RunRequest { root: &root, resource_dir: &resource_dir, samples: &samples, pairs: &pairs, reference, jobs: number("--jobs", 1), output: &output };
+            let references: Vec<String> = all_of(arguments, "--reference").into_iter().map(str::to_owned).collect();
+            assert!(!references.is_empty(), "--reference is required");
+            let request = RunRequest { root: &root, resource_dir: &resource_dir, samples: &samples, pairs: &pairs, references: &references, jobs: number("--jobs", 1), output: &output };
             prefix_acceptance::run(&request).map(|report| {
-                let held: Vec<String> = report.gates.iter().map(|(name, gates)| format!("{name}: gates held {}", gates.all_held)).collect();
+                let mut held: Vec<String> = report.gates.iter().map(|(name, gates)| format!("{name}: gates held {}", gates.all_held)).collect();
+                for (reference, gates) in &report.gates_against {
+                    held.extend(gates.iter().map(|(name, gates)| format!("{name} against {reference}: gates held {}", gates.all_held)));
+                }
+                held.extend(report.held_against_every_reference.iter().map(|(name, all)| format!("{name}: gates held against every reference {all}")));
                 held.join("\n")
             })
         }

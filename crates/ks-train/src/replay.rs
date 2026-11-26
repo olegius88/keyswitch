@@ -17,7 +17,8 @@ use ks_context::{ContextPolicy, VersionedPrefixModel};
 use ks_engine::engine::{EngineCore, EngineParts};
 use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::detector::ProtectedTokens;
-use ks_lang::early_switch::PrefixIndex;
+use ks_lang::Resources;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_replay::harness::{Backend, Correction, FakeClock, UnreadField};
 use ks_text::pystr;
@@ -148,10 +149,18 @@ pub fn mode_settings(path: PathBuf, mode: Mode) -> Arc<SettingsStore> {
     settings
 }
 
-/// The prefix index of each lexicon, as a replay hands the engine its reference models.
+/// The prefix index of each lexicon for `prefix`, built as the program builds it (`Resources::prefix_index`): of the words
+/// the model was trained on (`VersionedPrefixModel::prefix_lexicon`), of the plain lexicon without a model.
 #[must_use]
-pub fn prefix_indexes(models: &Lexicons) -> Vec<Arc<PrefixIndex>> {
-    models.iter().map(|model| Arc::new(PrefixIndex::from_lexicon(model.frequencies.clone(), &model.source))).collect()
+pub fn prefix_indexes(resources: &Resources, models: &Lexicons, prefix: Option<&VersionedPrefixModel>) -> Vec<Arc<PrefixIndex>> {
+    prefix_indexes_of(resources, models, prefix.map_or(PrefixLexicon::Plain, VersionedPrefixModel::prefix_lexicon))
+}
+
+/// The prefix index of each lexicon of the words `lexicon` names, whatever the prefix model: what a measure of a model
+/// with an index it does not run with asks for.
+#[must_use]
+pub fn prefix_indexes_of(resources: &Resources, models: &Lexicons, lexicon: PrefixLexicon) -> Vec<Arc<PrefixIndex>> {
+    models.iter().map(|model| resources.prefix_index(model, lexicon)).collect()
 }
 
 impl Replayer {

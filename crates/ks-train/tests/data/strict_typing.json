@@ -506,7 +506,7 @@
     },
     "src/engine_reports.rs": {
      "literal_compares": 6,
-     "string_key_index": 30,
+     "string_key_index": 27,
      "value_tokens": 57
     },
     "src/evaluate.rs": {
@@ -898,7 +898,7 @@
     }
    },
    "literal_compares": 250,
-   "string_key_index": 2815,
+   "string_key_index": 2812,
    "value_tokens": 3722
   },
   "ks-ui": {

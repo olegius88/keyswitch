@@ -463,6 +463,273 @@ mod words {
         low_keys_cut_nats: Option<BTreeMap<String, f64>>,
     }
 
+    /// `prefix-derive` from a frozen corpus into `output`, under a cut of half the training families.
+    fn derive(from: &Path, extra: &[&str], output: &Path) -> std::process::Output {
+        trainer().arg("prefix-derive").arg("--from").arg(from).args(["--namespace", "test:derive", "--cut-per-mille", "500"]).args(extra).arg("--output").arg(output).output().expect("the trainer starts")
+    }
+
+    /// A corpus derived from a frozen one: half its training families cut into acceptance, its acceptance kept as
+    /// development of its own, development, calibration, the held-out file and the config copied; words of one class and
+    /// source added from a file of rows, but none the corpus holds, none of a family of another split or of the cut, none
+    /// listed. The derived corpus is read as any word corpus, its former acceptance by a probe.
+    fn derived_from(small: &Path, frozen: &Path, kept: &Path) {
+        // The source of the words offered, and another one.
+        const EXTRA: &str = "extra";
+        const OTHER: &str = "other";
+        let read_split = ks_train::prefix_words::read_split;
+        let (train, development) = (read_split(frozen, "train").expect("training"), read_split(frozen, "development").expect("development"));
+        let renamed = |row: &WordRow, class: Class, source: &str| WordRow { text: format!("{}{}", row.text, if row.group == 1 { "ж" } else { "q" }), class, source: source.to_owned(), ..row.clone() };
+        // A word of a family the cut leaves in training: the one listed, and the one the corpus holds.
+        let left = train.iter().find(|row| ks_train::prefix_words::draw(&format!("test:derive:cut:{}", row.family)) % 1000 >= 500).expect("a family the cut leaves");
+        let mut offered: Vec<WordRow> = train.iter().map(|row| renamed(row, Class::EnglishKeys, EXTRA)).collect();
+        offered.extend([
+            renamed(&train[0], Class::Rare, EXTRA),
+            renamed(&train[0], Class::EnglishKeys, OTHER),
+            WordRow { class: Class::EnglishKeys, source: EXTRA.to_owned(), ..left.clone() },
+            renamed(&development[0], Class::EnglishKeys, EXTRA),
+        ]);
+        let listed = renamed(left, Class::EnglishKeys, EXTRA).text;
+        let inputs = scratch("words-derive-inputs");
+        let (rows, list) = (inputs.join("offered.jsonl.gz"), inputs.join("listed.txt"));
+        std::fs::write(&rows, gz(&offered)).expect("the offered rows");
+        std::fs::write(&list, format!("{listed}\n")).expect("a list");
+        let output = small.join("model/words-derived");
+        let (rows_text, list_text, development_text) = (rows.display().to_string(), list.display().to_string(), frozen.join("development.jsonl.gz").display().to_string());
+        let said = succeeded(&derive(frozen, &["--add", &rows_text, "--add-class", "english_keys", "--add-source", EXTRA, "--exclude", &list_text, "--exclude", &development_text], &output));
+        assert!(said.contains("\"cut_families\""), "{said}");
+        let receipt: ks_train::prefix_words::WordReceipt = read(&output.join("corpus.json"));
+        let derivation = receipt.derived.expect("how it was derived");
+        let added = derivation.added.expect("the words added");
+        let (moved, new_train) = (read_split(&output, "acceptance").expect("the cut"), read_split(&output, "train").expect("training"));
+        let families = |rows: &[WordRow]| rows.iter().map(|row| row.family.clone()).collect::<std::collections::BTreeSet<_>>();
+        // The cut families are in acceptance only; training keeps the rest and gains the words added.
+        assert!(families(&moved).is_disjoint(&families(&new_train)) && derivation.cut_families == families(&moved).len() && derivation.cut_families > 0);
+        assert_eq!(moved.len() + new_train.len(), train.len() + added.rows);
+        assert_eq!((added.offered, added.words, added.class), (train.iter().map(|row| (&row.text, row.group)).collect::<std::collections::BTreeSet<_>>().len() + 2, added.eligible, Class::EnglishKeys));
+        assert!(added.eligible > 0 && added.eligible < added.offered - 2 && derivation.excluded.len() == 2);
+        assert!(!new_train.iter().any(|row| row.text == listed || row.source == OTHER || (row.source == EXTRA && row.class != Class::EnglishKeys)));
+        assert_eq!(new_train.iter().filter(|row| row.text == left.text && row.group == left.group).count(), train.iter().filter(|row| row.text == left.text && row.group == left.group).count());
+        for (from, to) in [("development", "development"), ("calibration", "calibration"), ("acceptance", "former-acceptance")] {
+            assert_eq!(std::fs::read(frozen.join(format!("{from}.jsonl.gz"))).expect("a split"), std::fs::read(output.join(format!("{to}.jsonl.gz"))).expect("a split"), "{to}");
+        }
+        assert_eq!(read_split(&output, "former-acceptance").expect("the former acceptance").len(), read_split(frozen, "acceptance").expect("acceptance").len());
+        // Without words added and without a cut, training is the frozen one byte for byte.
+        let plain = scratch("words-derive-plain").join("out");
+        succeeded(&trainer().arg("prefix-derive").arg("--from").arg(frozen).args(["--namespace", "test:derive", "--cut-per-mille", "0"]).arg("--output").arg(&plain).output().expect("the trainer starts"));
+        assert_eq!(std::fs::read(frozen.join("train.jsonl.gz")).expect("training"), std::fs::read(plain.join("train.jsonl.gz")).expect("training"));
+        // The former acceptance is development a probe reads.
+        let probed = scratch("words-derive-probe").join("probe.json");
+        let installed = small.join("resources/models/prefix_policy_v1.json");
+        succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(small).arg("--model").arg(&installed).arg("--recipe").arg(word_recipe(small, "words-derived", &[])).args(["--split", "former-acceptance", "--numbers-only"]).arg("--output").arg(&probed).output().expect("the trainer starts"));
+        // More words than may be added; a folder that holds a corpus; a config other than the receipt's; no acceptance.
+        refused(&derive(frozen, &["--add", &rows_text, "--add-class", "english_keys", "--add-source", EXTRA, "--add-words", "100000"], &scratch("words-derive-more").join("out")), "words of the class asked");
+        refused(&derive(frozen, &[], &output), "refusing to overwrite");
+        refused(&derive(kept, &[], &scratch("words-derive-kept").join("out")), "not the config the corpus was drawn by");
+        let bare = scratch("words-derive-bare");
+        std::fs::copy(frozen.join("config.json"), bare.join("config.json")).expect("the config");
+        let mut without: ks_train::prefix_words::WordReceipt = read(&frozen.join("corpus.json"));
+        without.sha256.remove("acceptance");
+        write(&bare.join("corpus.json"), &without);
+        refused(&derive(&bare, &[], &bare.join("out")), "has no acceptance split");
+    }
+
+    /// The Latin words of a list in the zone a prefix model of schema four decides alone, written once as rows in the
+    /// corpus's situations; a derived corpus adds them, of two classes at once.
+    fn zone_of_derived(small: &Path, frozen: &Path, base: &Path) {
+        let derived = small.join("model/words-derived");
+        let folder = scratch("words-zone-inputs");
+        let list = folder.join("list.txt");
+        // In the band and in the zone, a term and a short term; the first again; a known English word, a term of the lists,
+        // a word whose Russian reading is a Russian word, four keys that begin an English word, four keys whose Russian
+        // reading begins no Russian word, a word too short, one not of letters alone; and words out of the band.
+        std::fs::write(&list, "abita 20\nafib 20\nAbita 20\ngarden 20\nkubectl 20\nghbdtn 20\ngardzz 20\nqqqqzz 20\nabc 20\nx1yz 20\nababy 5\nababbas 100\n").expect("a list");
+        let zone = |output: &Path| {
+            let mut command = trainer();
+            command.arg("prefix-zone-words").arg("--tree").arg(small).arg("--corpus").arg(&derived).arg("--base").arg(base).arg("--list").arg(&list);
+            command.args(["--minimum", "10", "--maximum", "49", "--source", "zone"]).arg("--output").arg(output).output().expect("the trainer starts")
+        };
+        let rows_path = folder.join("rows").join("zone.jsonl.gz");
+        let counts: ks_train::prefix_zone::ZoneCounts = ks_text::json::loads(succeeded(&zone(&rows_path))).expect("the counts");
+        assert_eq!(counts, ks_train::prefix_zone::ZoneCounts { listed: 9, admitted: 7, unknown: 4, zone: 2, terms: 1, short_terms: 1, rows: 6 });
+        refused(&zone(&rows_path), "refusing to overwrite the rows of the zone");
+        // Cyrillic words of the zone: four keys that begin an English word and no Russian one; a known word is not; the
+        // rows are typed as meant only.
+        let russian = folder.join("russian.txt");
+        std::fs::write(&russian, "1\tагда\t20\n2\tпогода\t20\n").expect("a list");
+        let cyrillic = |output: &Path, layout: &str| {
+            let mut command = trainer();
+            command.arg("prefix-zone-words").arg("--tree").arg(small).arg("--corpus").arg(&derived).arg("--base").arg(base).arg("--list").arg(&russian);
+            command.args(["--minimum", "10", "--maximum", "49", "--layout", layout, "--source", "zone-ru"]).arg("--output").arg(output).output().expect("the trainer starts")
+        };
+        let russian_rows = folder.join("rows").join("zone-ru.jsonl.gz");
+        let counts: ks_train::prefix_zone::ZoneCounts = ks_text::json::loads(succeeded(&cyrillic(&russian_rows, "cyrillic"))).expect("the counts");
+        assert_eq!((counts.listed, counts.unknown, counts.zone, counts.rows), (2, 1, 1, 3));
+        use std::io::BufRead as _;
+        let typed: Vec<WordRow> = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(std::fs::File::open(&russian_rows).expect("the rows"))).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect();
+        assert!(typed.iter().all(|row| !row.paired && row.group == 1));
+        refused(&cyrillic(&folder.join("rows").join("zone-other.jsonl.gz"), "greek"), "--layout is latin or cyrillic");
+        // Added to a derived corpus as terms and short terms together; an addition of no class is refused.
+        let rows_text = rows_path.display().to_string();
+        let output = scratch("words-zone-derived").join("out");
+        succeeded(&derive(frozen, &["--add", &rows_text, "--add-class", "term", "--add-class", "short_term", "--add-source", "zone"], &output));
+        let receipt: ks_train::prefix_words::WordReceipt = read(&output.join("corpus.json"));
+        let added = receipt.derived.and_then(|derived| derived.added).expect("the words added");
+        assert_eq!((added.offered, added.class, added.more_classes), (2, Class::Term, vec![Class::ShortTerm]));
+        refused(&derive(frozen, &["--add", &rows_text, "--add-source", "zone"], &scratch("words-zone-classless").join("out")), "an addition names the class of its rows");
+        // Rows of two sources in one file, added together; an addition of no source is refused.
+        let zone_rows: Vec<WordRow> = std::io::BufReader::new(flate2::read::MultiGzDecoder::new(std::fs::File::open(&rows_path).expect("the rows"))).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect();
+        let second: Vec<WordRow> = zone_rows.iter().map(|row| WordRow { text: format!("{}q", row.text), source: "second".to_owned(), ..row.clone() }).collect();
+        let merged = folder.join("merged.jsonl.gz");
+        std::fs::write(&merged, [std::fs::read(&rows_path).expect("the rows"), gz(&second)].concat()).expect("the rows of both");
+        let merged_text = merged.display().to_string();
+        let both = scratch("words-zone-sources").join("out");
+        succeeded(&derive(frozen, &["--add", &merged_text, "--add-class", "term", "--add-class", "short_term", "--add-source", "zone", "--add-source", "second"], &both));
+        let receipt: ks_train::prefix_words::WordReceipt = read(&both.join("corpus.json"));
+        let added = receipt.derived.and_then(|derived| derived.added).expect("the words added");
+        assert_eq!((added.offered, added.source.as_str(), added.more_sources), (4, "zone", vec!["second".to_owned()]));
+        refused(&derive(frozen, &["--add", &merged_text, "--add-class", "term"], &scratch("words-zone-sourceless").join("out")), "an addition names the source of its rows");
+    }
+
+    /// A folder copied file by file.
+    fn copied(from: &Path, name: &str) -> PathBuf {
+        let to = scratch(name).join("corpus");
+        std::fs::create_dir_all(&to).expect("a folder");
+        for entry in std::fs::read_dir(from).expect("a folder") {
+            let path = entry.expect("an entry").path();
+            std::fs::copy(&path, to.join(path.file_name().expect("a name"))).expect("a file");
+        }
+        to
+    }
+
+    /// The acceptance samples of a derived corpus: A1 to A3 also take the supplement's forms and the words of a list of the
+    /// families the cut moved, classed as the corpus classes its own, none held out; N1 and N2 also the words of lists
+    /// counted enough; A5 the words of either that neither lexicon knows in either reading, typed both ways; each row
+    /// names its source. Replayed beside two references, the gates of every pair are read against each.
+    fn samples_of_derived(small: &Path, frozen: &Path, base: &Path) {
+        use ks_train::prefix_acceptance::{AcceptanceReport, AcceptanceRow, SOURCE_CORPUS, SOURCE_SUPPLEMENT, Sample, SamplesReceipt, TRAINING_FAMILY_SUFFIX};
+        use std::io::BufRead as _;
+        // The name of the list of English words, and a word of it of no family the cut moved.
+        const ENGLISH: &str = "en";
+        const PEOPLE: &str = "people";
+        let derived = small.join("model/words-derived");
+        let moved = ks_train::prefix_words::read_split(&derived, "acceptance").expect("the cut");
+        let latin: Vec<&WordRow> = moved.iter().filter(|row| row.group == 0 && row.class.paired() && row.text.chars().all(|character| character.is_ascii_lowercase())).collect();
+        assert!(latin.len() >= 2, "two Latin words of the families the cut moved");
+        // A word the cut moved, a new one of its family, one of another family held out, and words of no family moved.
+        let (kept_word, new_word, barred_word) = (latin[0].text.clone(), format!("{}q", latin[0].text), format!("{}zz", latin[1].text));
+        let folder = scratch("words-samples-inputs");
+        let english = folder.join("en.txt");
+        std::fs::write(&english, format!("{kept_word} 100\n{new_word} 100\n{barred_word} 100\nab 100\n{kept_word}x 1\n\npeople 100\nghbdtn 100\nzzqxw 100\nx1yz 100\n")).expect("a list");
+        let russian = folder.join("ru.txt");
+        std::fs::write(&russian, "1\tмолоко\t50\n2\tкрокодилы\t50\n3\tыыыщщ\t50\n4\tбегемот\t3\n").expect("a list");
+        let (text, held) = (folder.join("text.txt"), folder.join("held.txt"));
+        std::fs::write(&text, "молоко и мёд\n").expect("a text");
+        std::fs::write(&held, format!("{barred_word}\n")).expect("a list");
+        let build = |corpus: &Path, output: &Path, extra: &[&str]| {
+            let mut command = trainer();
+            command.arg("prefix-acceptance").arg("build").arg("--corpus").arg(corpus).arg("--text").arg(&text).arg("--hold-out").arg(&held);
+            command.args(["--namespace", "test-v90", "--minimum-paired", "1", "--minimum-plain", "1", "--engine-plain", "2", "--minimum-unknown", "1"]).args(extra).arg("--output").arg(output);
+            command.output().expect("the trainer starts")
+        };
+        let (tree, base_text) = (small.display().to_string(), base.display().to_string());
+        let classes = ["--tree", tree.as_str(), "--classes-base", base_text.as_str()];
+        let (en_cut, ru) = (format!("en={},5,latin,cut", english.display()), format!("ru={},10,cyrillic", russian.display()));
+        let with = |extra: &[&str]| [&classes[..], extra].concat().into_iter().map(str::to_owned).collect::<Vec<String>>();
+        let rows_of = |folder: &Path| -> Vec<AcceptanceRow> {
+            let file = std::fs::File::open(folder.join("rows.jsonl.gz")).expect("the rows");
+            std::io::BufReader::new(flate2::read::MultiGzDecoder::new(file)).lines().map(|line| ks_text::json::loads(line.expect("a line")).expect("a row")).collect()
+        };
+        let run_build = |corpus: &Path, output: &Path, args: Vec<String>| build(corpus, output, &args.iter().map(String::as_str).collect::<Vec<_>>());
+
+        // Every source: the supplement, a list of the cut, a list of plain words.
+        let full = scratch("words-samples-full").join("samples");
+        succeeded(&run_build(&derived, &full, with(&["--supplement", "--word-list", &en_cut, "--word-list", &ru])));
+        let receipt: SamplesReceipt = read(&full.join("receipt.json"));
+        let rows = rows_of(&full);
+        // A word of plain text of a training family says so after its source.
+        let source_of = |row: &AcceptanceRow| row.source.trim_end_matches(TRAINING_FAMILY_SUFFIX).to_owned();
+        let has = |sample: Sample, text: &str, other: bool, source: &str| rows.iter().any(|row| row.sample == sample && row.text == text && row.other == other && source_of(row) == source);
+        assert!(rows.iter().any(|row| row.source == SOURCE_SUPPLEMENT && row.sample == Sample::A1));
+        assert!(has(Sample::A1, &new_word, true, ENGLISH) && has(Sample::A2, &new_word, false, ENGLISH));
+        assert!(has(Sample::A1, &kept_word, true, SOURCE_CORPUS) && !rows.iter().any(|row| row.text == kept_word && row.source == ENGLISH));
+        let absent = [barred_word.clone(), "ab".to_owned(), format!("{kept_word}x"), "x1yz".to_owned(), "бегемот".to_owned()];
+        assert!(!rows.iter().any(|row| absent.contains(&row.text)));
+        assert!(has(Sample::N2, "молоко", false, "ru+text") && rows.iter().any(|row| row.text == PEOPLE && source_of(row) == ENGLISH));
+        for word in ["zzqxw", "ыыыщщ"] {
+            assert!([true, false].iter().all(|other| rows.iter().any(|row| row.sample == Sample::A5 && row.text == word && row.other == *other)), "{word}");
+        }
+        assert!(!rows.iter().any(|row| row.sample == Sample::A5 && [PEOPLE, "ghbdtn", "молоко"].contains(&row.text.as_str())));
+        assert!(receipt.supplement && receipt.word_lists.iter().map(|list| list.listed).collect::<Vec<_>>() == [8, 3]);
+        assert!(receipt.by_source.contains_key("A5") && receipt.by_source.contains_key("A5_as_meant") && receipt.counts.contains_key("A5_as_meant"));
+
+        // A list of the cut alone, replayed beside the installed pair as users run it and as it was measured.
+        let samples = scratch("words-samples-run").join("samples");
+        succeeded(&run_build(&derived, &samples, with(&["--word-list", &en_cut, "--word-list", &ru])));
+        assert!(!rows_of(&samples).iter().any(|row| row.source == SOURCE_SUPPLEMENT));
+        let models = small.join("resources/models");
+        let eager = scratch("words-samples-eager").join("eager.json");
+        super::eager_model(&eager, 4);
+        let (context, installed_prefix) = (models.join("context_policy_v1.json"), models.join("prefix_policy_v1.json"));
+        let pairs = [format!("installed={},{}", context.display(), installed_prefix.display()), format!("measured={},{},held", context.display(), installed_prefix.display()), format!("eager={},{}", context.display(), eager.display())];
+        let run = |references: &[&str], report: &Path| {
+            let mut command = trainer();
+            command.arg("prefix-acceptance").arg("run").arg("--tree").arg(small).arg("--samples").arg(&samples);
+            for pair in &pairs {
+                command.arg("--pair").arg(pair);
+            }
+            for reference in references {
+                command.args(["--reference", reference]);
+            }
+            command.args(["--jobs", "2"]).arg("--output").arg(report).output().expect("the trainer starts")
+        };
+        let report_path = scratch("words-samples-report").join("report.json");
+        let said = succeeded(&run(&["installed", "measured"], &report_path));
+        assert!(said.contains("eager against measured: gates held false") && said.contains("eager: gates held against every reference false"), "{said}");
+        let report: AcceptanceReport = read(&report_path);
+        assert!(at(&report.gates_against, "measured").contains_key("installed") && report.held_against_every_reference.keys().map(String::as_str).eq(["eager"]));
+        let pair = at(&report.pairs, "installed");
+        assert!(pair.earliness.contains_key("A5") && pair.safety_by_sample.contains_key("A5") && pair.earliness_by_source.contains_key("A1 en") && pair.safety_by_source.contains_key("A2 corpus"));
+        // A5 stands apart from the cells: they hold every other row typed as meant.
+        let by_sample = |name: &str| at(&pair.safety_by_sample, name).iter().map(|cell| cell.rows).sum::<usize>();
+        assert_eq!(at(&pair.safety, "all").rows + by_sample("A5"), pair.safety_by_sample.keys().map(|name| by_sample(name)).sum::<usize>());
+        assert!(at(&report.gates, "eager").reported_only.contains_key("A5_as_meant"));
+        refused(&run(&[], &scratch("words-samples-none").join("report.json")), "--reference is required");
+
+        // Lists without a cut, and no supplement.
+        let en_plain = format!("en={},5,latin", english.display());
+        succeeded(&run_build(&derived, &scratch("words-samples-plain").join("samples"), with(&["--word-list", &ru, "--word-list", &en_plain])));
+        // What is refused: a list named as another source, lists without the corpus's classes, the families of a cut in a
+        // corpus of none, a config, held-out words or a base other than the receipt's, lists of other lines.
+        let nowhere = || scratch("words-samples-refused").join("samples");
+        refused(&run_build(&derived, &nowhere(), with(&["--word-list", &format!("text={},1,latin", english.display())])), "two sources of the samples are named text");
+        refused(&build(&derived, &nowhere(), &["--word-list", &ru]), "read with the classes of the word corpus");
+        refused(&build(&derived, &nowhere(), &["--supplement"]), "read with the classes of the word corpus");
+        refused(&run_build(frozen, &nowhere(), with(&["--supplement"])), "the families a cut moved are those of a derived corpus");
+        let changed_config = copied(&derived, "words-samples-config");
+        std::fs::write(changed_config.join("config.json"), [std::fs::read(derived.join("config.json")).expect("the config").as_slice(), b"\n"].concat()).expect("a config");
+        refused(&run_build(&changed_config, &nowhere(), with(&[])), "not the config the word corpus was drawn by");
+        let changed_held = copied(&derived, "words-samples-held");
+        std::fs::write(changed_held.join("held-out.json.gz"), gz::<Sample>(&[])).expect("a held-out file");
+        refused(&run_build(&changed_held, &nowhere(), with(&[])), "not the held-out words the word corpus was drawn without");
+        let other_base = folder.join("other-base");
+        self::base(&other_base);
+        let mut manifest: ReadManifest = read(&other_base.join("manifest.json"));
+        "another-base".clone_into(&mut manifest.namespace);
+        write(&other_base.join("manifest.json"), &manifest);
+        let other_text = other_base.display().to_string();
+        refused(&build(&derived, &nowhere(), &["--tree", &tree, "--classes-base", &other_text]), "not the base the word corpus was drawn from");
+        for (lines, said) in [("a b c d\n", "a line of neither"), ("word many\n", "a count that is no number")] {
+            let list = folder.join("odd.txt");
+            std::fs::write(&list, lines).expect("a list");
+            refused(&run_build(&derived, &nowhere(), with(&["--word-list", &format!("odd={},1,latin", list.display())])), said);
+        }
+        let shapes = ["en".to_owned(), format!("en={},5", english.display()), format!("en={},5,greek", english.display()), format!("en={},x,latin", english.display()), format!("en={},5,latin,other", english.display())];
+        for shape in &shapes {
+            refused(&run_build(&derived, &nowhere(), with(&["--word-list", shape])), "a list of words is <name>=<file>,<minimum count>,latin|cyrillic[,cut]");
+        }
+        refused(&build(&derived, &nowhere(), &["--classes-base", &base_text]), "--tree is required with --classes-base");
+    }
+
     #[test]
     fn a_word_corpus_is_frozen_once_and_verified_byte_for_byte() {
         let small = small_tree("words-freeze", &recipe());
@@ -519,7 +786,11 @@ mod words {
         std::fs::write(kept.join("config.json"), "{}").expect("a config");
         succeeded(&on(&["--hold-out", &sample_text, "--freeze", &kept.display().to_string()]));
         assert_eq!(std::fs::read_to_string(kept.join("config.json")).expect("the config"), "{}");
+        derived_from(&small, &frozen, &kept);
+        samples_of_derived(&small, &frozen, &folder.join("base"));
+        zone_of_derived(&small, &frozen, &folder.join("base"));
         std::fs::write(frozen.join("development.jsonl.gz"), gz(&[Sample { original: "" }])).expect("a split");
+        refused(&derive(&frozen, &[], &scratch("words-derive-changed").join("out")), "not the file the receipt pins");
         refused(&on(&[]), "1 files of the word corpus differ");
         assert!(ks_train::prefix_words::read_split(&frozen, "development").unwrap_err().contains("checksum mismatch"));
         assert!(ks_train::prefix_words::read_split(&frozen, "test").unwrap_err().contains("no such split"));
@@ -660,6 +931,7 @@ mod words {
     #[derive(Deserialize)]
     struct DirectionCounts {
         desired: i64,
+        converted: i64,
         kept: i64,
     }
 
@@ -751,6 +1023,16 @@ mod words {
     struct Floor {
         model_version: String,
         mean_key: [f64; 2],
+        switched_by_key: [i64; 2],
+        users: FloorMeasure,
+        every_word: FloorMeasure,
+    }
+
+    /// The installed model measured with one index.
+    #[derive(Deserialize)]
+    struct FloorMeasure {
+        mean_key: [f64; 2],
+        switched_by_key: [i64; 2],
     }
 
     #[derive(Deserialize)]
@@ -767,6 +1049,7 @@ mod words {
     /// What a test reads of the seal of a fit by the switch key.
     #[derive(Deserialize)]
     struct KeySeal {
+        provenance: BTreeMap<String, String>,
         threshold: f64,
         thresholds: [f64; 2],
         development_thresholds: [f64; 2],
@@ -787,6 +1070,7 @@ mod words {
     /// What a test reads of a probe.
     #[derive(Deserialize)]
     struct Probe {
+        index: String,
         words: usize,
         thresholds: [f64; 2],
         minimum_characters: usize,
@@ -830,6 +1114,15 @@ mod words {
         assert!(seal.calibration_read && seal.thresholds.iter().zip(seal.development_thresholds).all(|(found, floor)| *found >= floor));
         // The floor converts nothing at the top of the grid: every word typed in the other layout counts its boundary.
         assert!(!seal.floor.model_version.is_empty() && seal.floor.mean_key.iter().all(|key| *key > 4.0));
+        // The floor is named by its version, not pinned by its path: promoting the candidate replaces the installed model
+        // the floor is, and the seal still holds against the tree after it.
+        assert!(!seal.provenance.contains_key("resources/models/prefix_policy_v1.json") && seal.provenance.contains_key("model/words-key/train.jsonl.gz"));
+        // The floor is the stricter of the installed model with its own index and with every word, in each direction.
+        let (users, every_word) = (&seal.floor.users, &seal.floor.every_word);
+        for direction in 0..2 {
+            assert_eq!(seal.floor.mean_key[direction], users.mean_key[direction].min(every_word.mean_key[direction]));
+            assert_eq!(seal.floor.switched_by_key[direction], users.switched_by_key[direction].max(every_word.switched_by_key[direction]));
+        }
         assert!(seal.development_cells.map(|cell| cell.words).iter().all(|words| *words > 0));
         // Typed in Latin: four English words and four led by a sign key, which are hard; in Cyrillic four Russian words.
         assert_eq!(seal.calibration_cells.map(|cell| (cell.words, cell.hard)), [(8, 4), (4, 0)]);
@@ -848,7 +1141,7 @@ mod words {
         let found: Probe = read(&third);
         assert_eq!((found.false_texts.len(), found.minimum_characters), (0, 3));
         for split in ["calibration", "acceptance", "test"] {
-            refused(&probed(&["--split", split], &probe.join("refused.json")), &format!("a probe reads development or a list of words, not {split}"));
+            refused(&probed(&["--split", split], &probe.join("refused.json")), &format!("a probe reads development, a former acceptance split or a list of words, not {split}"));
         }
         let list = probe.join("words.txt");
         std::fs::write(&list, "garden\n\nпогода\n").expect("a list");
@@ -861,6 +1154,20 @@ mod words {
         assert_eq!(found.false_words.iter().sum::<usize>(), found.false_texts.len());
         std::fs::write(&list, "garden\n123\n").expect("a list");
         refused(&probed(&["--words", &list.display().to_string()], &listed), "opens with a letter of neither layout");
+        // By the recipe, a threshold on calibration may convert as many words typed as meant as the floor model converts
+        // there, and the seal says how many: none for a floor at the top of the grid.
+        /// What the test reads of the seal of such a fit.
+        #[derive(Deserialize)]
+        struct Relative {
+            calibration_read: bool,
+            calibration_false_words_allowed: [usize; 2],
+        }
+        let relative = key_recipe(&small, "words-key", &[("calibration_false_words_of_floor", "true")]);
+        let output = scratch("words-key-relative").join("out");
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&relative).arg("--output").arg(&output).arg("--frames-cache").arg(&cache).args(["--jobs", "2"]).output().expect("the trainer starts");
+        assert!(output.join("seal.json").exists(), "{}", String::from_utf8_lossy(&answer.stderr));
+        let relative_seal: Relative = read(&output.join("seal.json"));
+        assert!(relative_seal.calibration_read && relative_seal.calibration_false_words_allowed == [0, 0]);
     }
 
     #[test]
@@ -884,6 +1191,23 @@ mod words {
         let version = format!("\"{}\"", super::eager_model(&eager, 2));
         let recipe_path = key_recipe(&small, "words-small-cell", &[("floor_model", "\"eager-floor.json\""), ("floor_model_version", &version), ("learning_rate", "0.0"), ("epochs", "2")]);
         refused(&fit(&recipe_path, "words-floor-eager"), "no epoch is as early as the installed model in both directions");
+        // On development alone, the earliest epoch below such a floor is written for development measures, its seal saying
+        // it does not count.
+        let output = scratch("words-floor-development").join("out");
+        let said = succeeded(&trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).arg("--development-only").output().expect("the trainer starts"));
+        assert!(said.contains("is written for development measures only") && said.contains("by key Some(") && said.contains("thresholds Some("), "{said}");
+        /// What the test reads of the seal of a fit by the mean key.
+        #[derive(Deserialize)]
+        struct BelowFloor {
+            epoch_selection: Counted,
+            calibration_passed: bool,
+        }
+        #[derive(Deserialize)]
+        struct Counted {
+            counts: bool,
+        }
+        let seal: BelowFloor = read(&output.join("seal.json"));
+        assert!(!seal.epoch_selection.counts && !seal.calibration_passed);
     }
 
     /// The frames of schemas three and four, read with the orthotactic models and the term lists, closed to a share of the
@@ -899,7 +1223,15 @@ mod words {
         // without the term lists.
         let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&recipe_path).arg("--output").arg(&output).args(["--jobs", "2"]).output().expect("the trainer starts");
         let said = String::from_utf8_lossy(&answer.stdout);
-        assert!(said.contains("train: ") && said.contains("prefix-v2 epoch 1"), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        assert!(said.contains("train: ") && said.contains("prefix-v2 epoch 1") && said.contains(", 0 read a term list, 0 of them"), "{said}{}", String::from_utf8_lossy(&answer.stderr));
+        // Closed to the reading as typed of the words typed as meant alone: the other readings, and every reading of the
+        // words typed in the other layout, read the lists; a prefix that goes on a word of the lexicon converts.
+        let typed_only = word_recipe(&small, "words-schemas", &[("runtime_feature_version", "4"), ("closed_term_families_per_mille", "1000"), ("closed_terms_typed_reading_only", "true"), ("convert_lexicon_continuations", "true"), ("wait_below_target_completions", "4"), ("epochs", "1"), ("minimum_feature_mass", "1.0"), ("support", "\"engine\"")]);
+        let answer = trainer().arg("prefix").arg("--tree").arg(&small).arg("--recipe").arg(&typed_only).arg("--output").arg(scratch("words-schemas-typed").join("out")).args(["--jobs", "2"]).output().expect("the trainer starts");
+        let said = String::from_utf8_lossy(&answer.stdout);
+        let line = said.lines().find(|line| line.starts_with("train: ")).unwrap_or_default();
+        let counts: Vec<usize> = line.split(|character: char| !character.is_ascii_digit()).filter_map(|number| number.parse().ok()).collect();
+        assert!(counts.len() == 3 && counts[1] > counts[2], "{said}{}", String::from_utf8_lossy(&answer.stderr));
         // Models that convert every prefix: whatever is typed as meant, each word converted once.
         let list = scratch("words-schemas-list").join("words.txt");
         std::fs::write(&list, "garden\nпогода\n").expect("a list");
@@ -914,7 +1246,16 @@ mod words {
         // A probe of a recipe that names no word corpus reads the prefix-v1 corpus.
         let plain = scratch("words-schemas-plain").join("probe.json");
         let installed = small.join("resources/models/prefix_policy_v1.json");
-        succeeded(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(small.join("model/prefix_v2/recipe.json")).arg("--split").arg("development").arg("--output").arg(&plain).output().expect("the trainer starts"));
+        let installed_probe = |extra: &[&str], output: &Path| trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(small.join("model/prefix_v2/recipe.json")).arg("--split").arg("development").args(extra).arg("--output").arg(output).output().expect("the trainer starts");
+        succeeded(&installed_probe(&[], &plain));
+        // The installed model of schema two reads the plain lexicon, as the program gives it; held, every word (`M`), and
+        // with them converts more of the words typed in Latin.
+        let held = scratch("words-schemas-held").join("probe.json");
+        succeeded(&installed_probe(&["--lexicon", "held"], &held));
+        let (plain_found, held_found): (Probe, Probe) = (read(&plain), read(&held));
+        assert_eq!((plain_found.index.as_str(), held_found.index.as_str(), plain_found.words), ("plain", "held", held_found.words));
+        assert!(at(&held_found.by_threshold, "0.985")[0].converted > at(&plain_found.by_threshold, "0.985")[0].converted);
+        refused(&installed_probe(&["--lexicon", "every"], &held), "--lexicon is plain or held: every");
         refused(&trainer().arg("prefix-probe").arg("--tree").arg(&small).arg("--model").arg(&installed).arg("--recipe").arg(&recipe_path).arg("--output").arg(&plain).output().expect("the trainer starts"), "one of --split and --words is required");
         // The parents of a word corpus: of its fitting splits only, and hard when their row says so.
         let corpus = small.join("model/words-schemas");
@@ -1143,17 +1484,25 @@ mod acceptance {
             command.args(["--reference", reference, "--jobs", "2"]).args(extra).arg("--output").arg(report);
             command.output().expect("the trainer starts")
         };
+        // The installed pair once more with the index named: plain, the one its prefix model of schema two runs with, and
+        // held, every word the language model holds (`M`).
+        let named = |name: &str, lexicon: &str| format!("{name}={},{},{lexicon}", models.join("context_policy_v1.json").display(), models.join("prefix_policy_v1.json").display());
+        let (plain, measured) = (named("plain", "plain"), named("measured", "held"));
         let report_path = scratch("acceptance-report").join("report.json");
-        let said = succeeded(&run(&[&installed, &early], "installed", &report_path, &[]));
+        let said = succeeded(&run(&[&installed, &early, &plain, &measured], "installed", &report_path, &[]));
         assert!(said.contains("eager: gates held false"), "{said}");
         let report: AcceptanceReport = read(&report_path);
-        assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager"]);
+        assert_eq!(report.gates.keys().map(String::as_str).collect::<Vec<_>>(), ["eager", "measured", "plain"]);
+        assert_eq!(at(&report.pairs, "plain"), at(&report.pairs, "installed"));
+        refused(&run(&[&named("other", "every")], "other", &scratch("acceptance-every").join("report.json"), &[]), "a pair is <name>=<context model>,<prefix model>[,plain|held]");
         let (reference, candidate) = (at(&report.pairs, "installed"), at(&report.pairs, "eager"));
         for pair in [reference, candidate] {
             assert!(pair.safety_by_sample.contains_key("N2") && pair.safety_by_profile.len() == 2);
             assert_eq!(at(&pair.safety_by_sample, "A3_closed")[0].rows, at(&pair.safety_by_sample, "A3")[0].rows);
             assert_eq!(at(&pair.earliness, "A1")[0].rows, 2 * at(&receipt.counts, "A1").words[0]);
         }
+        // The digest of the rows: the same for the pair replayed twice (`plain`, above), another for another model.
+        assert!(reference.rows_sha256.len() == 64 && reference.rows_sha256 != candidate.rows_sha256);
         // A model that converts every prefix switches words typed as meant away: more false early switches than the
         // installed one, and its gates do not hold.
         assert!(at(&candidate.safety, "all").false_early.words > at(&reference.safety, "all").false_early.words);
@@ -1168,7 +1517,7 @@ mod acceptance {
         // Samples that hold a row the replay cannot type fail the run.
         let untypable = scratch("acceptance-untypable").join("samples");
         std::fs::create_dir_all(&untypable).expect("a folder");
-        let packed = gz(&lines(&[AcceptanceRow { sample: Sample::A2, text: "café".to_owned(), group: 0, class: "rare".to_owned(), other: false, engine: true }]));
+        let packed = gz(&lines(&[AcceptanceRow { sample: Sample::A2, text: "café".to_owned(), group: 0, class: "rare".to_owned(), other: false, engine: true, source: String::new() }]));
         std::fs::write(untypable.join("rows.jsonl.gz"), &packed).expect("rows");
         let mut pinned: SamplesReceipt = read(&output.join("receipt.json"));
         pinned.sha256.insert("rows.jsonl.gz".to_owned(), digest(&packed));

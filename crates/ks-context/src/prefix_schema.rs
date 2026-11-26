@@ -11,8 +11,9 @@ use crate::constants::{
     MIN_PREFIX_CONVERSION_THRESHOLD, PREFIX_HEAD_MAX_LENGTH_BUCKET, PREFIX_HEAD_MIN_CHARACTERS, PREFIX_MAX_CHARACTERS, PREFIX_ORTHO_ABSOLUTE_MAX_STEPS,
     PREFIX_ORTHO_ABSOLUTE_STEP_NATS, PREFIX_ORTHO_BOTH_MAX_STEPS, PREFIX_ORTHO_BOTH_STEP_NATS, PREFIX_ORTHO_LENGTH_BUCKETS, PREFIX_ORTHO_MAX_STEPS,
     PREFIX_TAIL_MAX_LENGTH_BUCKET, PREFIX_TERM_COUNT_LOG_DIVISOR, TERMS_PREFIX_FEATURE_VERSION, PREFIX_ORTHO_MEAN_BOUND_NATS, PREFIX_ORTHO_STEP_NATS, PREFIX_ORTHO_SUM_BOUND_NATS,
-    PREFIX_ORTHO_WORST_BOUND_NATS,
+    PREFIX_ORTHO_WORST_BOUND_NATS, SUPPLEMENTED_PREFIX_FEATURE_VERSION,
 };
+use ks_lang::early_switch::PrefixLexicon;
 use crate::context_model::{first_greatest, ContextAction, ContextPrediction, ACTIONS};
 use crate::flat_table::load_artifact;
 use crate::prefix_model::{actions_match, features, finish_load, weight_spec, PrefixInput, PrefixModel, PrefixSide, ARTIFACT_FILE, PREFIX_FEATURE_VERSION};
@@ -22,6 +23,13 @@ use ks_lang::ortho_model::{BOS, Channel, OrthoModel};
 use ks_text::pystr;
 use serde_json::Value;
 use std::path::Path;
+
+/// The words the prefix index of a schema holds (`VersionedPrefixModel::prefix_lexicon`), for whoever builds frames of that
+/// schema before any model of it exists: the trainer.
+#[must_use]
+pub fn prefix_lexicon_of(feature_version: i64) -> PrefixLexicon {
+    if feature_version >= SUPPLEMENTED_PREFIX_FEATURE_VERSION.to::<i64>() { PrefixLexicon::Held } else { PrefixLexicon::Plain }
+}
 
 /// Schema one stays frozen; schema two learns characters of observed prefixes.
 ///
@@ -37,11 +45,14 @@ pub fn features_for_version(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], fea
 pub struct PrefixReaders<'a> {
     pub ortho: Option<&'a OrthoModel>,
     pub terms: Option<&'a PrefixTerms>,
+    /// The lists the reading as typed is looked up in, when not `terms`: a trainer's frames of a word typed as meant
+    /// whose lists are closed to that reading alone. The program never sets it.
+    pub typed_terms: Option<&'a PrefixTerms>,
 }
 
 /// The features of any schema; schema three reads the keys with the orthotactic models and refuses without them.
 pub fn features_with_ortho(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], feature_version: i64, ortho: Option<&OrthoModel>) -> Result<indexmap::IndexMap<String, f64>, LoadError> {
-    features_with_readers(item, sides, feature_version, PrefixReaders { ortho, terms: None })
+    features_with_readers(item, sides, feature_version, PrefixReaders { ortho, terms: None, typed_terms: None })
 }
 
 /// The features of any schema, with what schemas three and four read; each refuses without its readers.
@@ -52,7 +63,7 @@ pub fn features_with_readers(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], fe
             return Ok(schema_three(item, sides, ortho));
         }
         let terms = readers.terms.ok_or_else(|| LoadError::value("prefix schema four needs the term lists"))?;
-        return Ok(schema_four(item, sides, ortho, terms));
+        return Ok(schema_four(item, sides, ortho, [readers.typed_terms.unwrap_or(terms), terms]));
     }
     if feature_version != 1 && feature_version != CURRENT_PREFIX_FEATURE_VERSION.to::<i64>() {
         return Err(LoadError::value("unsupported prefix features"));
@@ -173,11 +184,13 @@ fn term_features(result: &mut indexmap::IndexMap<String, f64>, name: &str, kind:
 /// Each reading's own score by its own language's channel, apart and together: a compound token or a random
 /// abbreviation (`vgcfgb`, `мпсапи`) reads badly both ways, where a word typed in the wrong layout reads well the other
 /// way. And the longest whole word or term the typed keys start with, with what follows it: `verify|csrf`, `git|rfgrep`.
-fn schema_four(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoModel, terms: &PrefixTerms) -> indexmap::IndexMap<String, f64> {
+/// `terms` are the lists of the reading as typed (its head and tail as well) and of the other reading.
+fn schema_four(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoModel, terms: [&PrefixTerms; 2]) -> indexmap::IndexMap<String, f64> {
     let mut result = schema_three(item, sides, ortho);
     let other_group = 1 - item.source_group;
-    for (name, text, group) in [("typed", &item.original, item.source_group), ("other", &item.alternative, other_group)] {
-        let found = terms.lookup(text, group);
+    let [typed_terms, other_terms] = terms;
+    for (name, text, group, lists) in [("typed", &item.original, item.source_group, typed_terms), ("other", &item.alternative, other_group, other_terms)] {
+        let found = lists.lookup(text, group);
         term_features(&mut result, name, "exact", found.exact);
         term_features(&mut result, name, "begins", found.begins);
     }
@@ -205,7 +218,7 @@ fn schema_four(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoMod
         if side.model.frequencies.contains(&head) {
             Some(("word", length))
         } else {
-            terms.lookup(&head, item.source_group).exact.map(|_| ("term", length))
+            typed_terms.lookup(&head, item.source_group).exact.map(|_| ("term", length))
         }
     });
     if let Some((kind, length)) = head {
@@ -215,7 +228,7 @@ fn schema_four(item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: &OrthoMod
         if side.index.completions(&tail).completions > 0 {
             result.insert("head:tail_continues".to_owned(), 1.0);
         }
-        let found = terms.lookup(&tail, item.source_group);
+        let found = typed_terms.lookup(&tail, item.source_group);
         if found.exact.is_some() || found.begins.is_some() {
             result.insert("head:tail_term".to_owned(), 1.0);
         }
@@ -244,7 +257,7 @@ impl VersionedPrefixModel {
 
     /// The prediction with the orthotactic models at hand, which schema three reads.
     pub fn predict_with(&self, item: &PrefixInput, sides: [&PrefixSide<'_>; 2], ortho: Option<&OrthoModel>) -> Result<ContextPrediction, LoadError> {
-        self.predict_with_readers(item, sides, PrefixReaders { ortho, terms: None })
+        self.predict_with_readers(item, sides, PrefixReaders { ortho, terms: None, typed_terms: None })
     }
 
     /// The prediction with what schemas three and four read. A model with a threshold for each direction converts at the
@@ -279,6 +292,15 @@ impl VersionedPrefixModel {
     #[must_use]
     pub fn needs_terms(&self) -> bool {
         self.feature_version == TERMS_PREFIX_FEATURE_VERSION.to::<i64>()
+    }
+
+    /// The words its prefix index holds (`Resources::prefix_index`). A model of schema four is trained, measured and run
+    /// with every word of the language model, the supplement's among them. An older one runs with the index the program
+    /// has always given it, without the supplement: prefix_v2 was trained with the supplement, but users have run it
+    /// without since 0.37.0, and it stays as they know it.
+    #[must_use]
+    pub fn prefix_lexicon(&self) -> PrefixLexicon {
+        prefix_lexicon_of(self.feature_version)
     }
 
     pub fn load(path: &Path) -> Result<VersionedPrefixModel, LoadError> {

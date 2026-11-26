@@ -248,7 +248,7 @@ impl EngineCore {
             source_group: baseline.source_group,
             field: field.clone(),
         };
-        let readers = PrefixReaders { ortho: self.context_policy.ortho.as_deref(), terms: terms.as_deref() };
+        let readers = PrefixReaders { ortho: self.context_policy.ortho.as_deref(), terms: terms.as_deref(), typed_terms: None };
         let prediction = model.predict_with_readers(&item, [&sides[0], &sides[1]], readers)?;
         let action = prediction.action.as_str();
         technical_event!(

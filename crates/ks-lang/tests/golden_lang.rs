@@ -10,7 +10,7 @@ use ks_cast::To as _;
 use flate2::read::GzDecoder;
 use ks_lang::boundary_model::{self, BoundaryModel, Features};
 use ks_lang::boundary_policy::{self, BoundaryPolicy};
-use ks_lang::early_switch::{self, EarlySwitchDecision, EarlySwitchPolicy, PrefixEvidence, PrefixIndex, PrefixScorer};
+use ks_lang::early_switch::{self, EarlySwitchDecision, EarlySwitchPolicy, PrefixEvidence, PrefixIndex, PrefixLexicon, PrefixScorer};
 use ks_lang::identifier_lexicon::IdentifierLexicon;
 use ks_lang::language_model::{LanguageModel, WordScore};
 use ks_lang::ortho_model::{self as ortho, Identifier, KnownWord, OrthoEvidence, OrthoModel, OrthoScore};
@@ -640,8 +640,13 @@ fn early_switch_on_prefixes() {
     let Some(f) = fixture() else {
         return;
     };
-    let production = [f.resources.prefix_index(&f.en), f.resources.prefix_index(&f.ru)];
+    // The Python's program indexed the plain lexicon, its replays every word the reference model holds: the two indexes a
+    // prefix model may now be given (`PrefixLexicon`).
+    let production = [f.resources.prefix_index(&f.en, PrefixLexicon::Plain), f.resources.prefix_index(&f.ru, PrefixLexicon::Plain)];
     let reference = [PrefixIndex::from_lexicon(f.en.frequencies.clone(), "reference"), PrefixIndex::from_lexicon(f.ru.frequencies.clone(), "reference")];
+    for (group, model) in [&f.en, &f.ru].into_iter().enumerate() {
+        assert_eq!(f.resources.prefix_index(model, PrefixLexicon::Held).len(), reference[group].len(), "the held index of group {group}");
+    }
     let Some(mut file) = reader("early_prefixes.jsonl.gz") else {
         return;
     };

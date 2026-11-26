@@ -10,7 +10,7 @@ use ks_context::{ContextPolicy, VersionedPrefixModel};
 use ks_engine::engine::{EngineCore, EngineParts, EngineResult};
 use ks_lang::boundary_policy::BoundaryPolicy;
 use ks_lang::detector::ProtectedTokens;
-use ks_lang::early_switch::PrefixIndex;
+use ks_lang::early_switch::{PrefixIndex, PrefixLexicon};
 use ks_lang::intent_model::{IntentModelStatus, LinearNgramModel};
 use ks_lang::resources::SpellerFactory;
 use ks_lang::{LanguageModel, Resources};
@@ -692,9 +692,11 @@ impl Bundle {
         let (intent_model, intent_model_status) = resources.intent_model();
         let known = EngineCore::known_of(&models);
         let context_policy = ContextPolicy::new(&resources, None, known, Some(Arc::new(|| 0.0)));
-        // The reference lexicon names no Hunspell dictionary, so the index holds the words of that lexicon alone.
-        let prefix_indexes = models.iter().map(|model| Arc::new(PrefixIndex::from_lexicon(model.frequencies.clone(), &model.source))).collect();
+        // The index the program gives the installed prefix model (`Resources::prefix_index`), so that the barrier types as
+        // users' program does.
         let prefix_model = VersionedPrefixModel::default_model(&resources.resource_dir().join("models")).map(Arc::new);
+        let lexicon = prefix_model.as_ref().map_or(PrefixLexicon::Plain, |model| model.prefix_lexicon());
+        let prefix_indexes = models.iter().map(|model| resources.prefix_index(model, lexicon)).collect();
         // Each its own: the tests of one program run side by side, and each cleans up after itself.
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!("ks-replay-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));

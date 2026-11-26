@@ -38,7 +38,7 @@ fn keys(text: &str, group: usize) -> Vec<ks_train::physical::PhysicalKey> {
 #[test]
 fn a_replay_refuses_a_plan_it_cannot_type_as_asked() {
     let models = &*MODELS;
-    let mut replayer = Replayer::new(&models.tools, &models.portable, (None, "unavailable".to_owned()), scratch("replay-plans"), installed(), None, prefix_indexes(&models.portable));
+    let mut replayer = Replayer::new(&models.tools, &models.portable, (None, "unavailable".to_owned()), scratch("replay-plans"), installed(), None, prefix_indexes(&models.tools.resources, &models.portable, None));
     // Default settings type one key per character.
     let mut extra = keys("hello ", 0);
     extra.push(extra[0].clone());

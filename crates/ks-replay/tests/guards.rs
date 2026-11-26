@@ -51,6 +51,15 @@ fn press_in(session: &mut Session, character: char, window: i64) {
 }
 
 /// A press of the key that types `character` in the layout the window is in: no layout is picked for it.
+/// A press of the key that types `character` in layout `group`, in whatever layout the window is in now: the user goes on
+/// pressing the keys of the word as an early switch changes the layout under them.
+fn press_key_of(session: &mut Session, character: char, group: usize) {
+    let now = session.backend.group();
+    let key = KEYS.iter().find(|key| key.characters.get(group) == Some(&character)).expect("a key of the layout");
+    let typed = usize::try_from(now).ok().and_then(|place| key.characters.get(place)).copied().unwrap_or(character);
+    session.tap(KeyEvent { pressed: true, keycode: key.keycode, key_name: typed.to_string(), character: typed.to_string(), characters: key.strings(), group: now, ..KeyEvent::default() });
+}
+
 fn press_as_laid_out(session: &mut Session, character: char) {
     let group = session.backend.group();
     let key = KEYS.iter().find(|key| usize::try_from(group).ok().and_then(|place| key.characters.get(place)) == Some(&character)).expect("a key of the layout");
@@ -570,16 +579,17 @@ fn a_stop_after_a_word_that_waits_for_its_neighbour_leaves_it_to_the_neighbour()
     for stop in [0.2, 1.5, 3.0] {
         let mut session = bundle.session("app", 1, Vec::new());
         log_technically(&mut session);
-        for (text, shown) in [("кувшы ", "redis "), ("b ", "redis b ")] {
+        // The keys of `redis` typed in the Russian layout, the model free to switch it early or at the space.
+        for (text, group, shown) in [("кувшы ", 1, "redis "), ("b ", 0, "redis b ")] {
             for character in text.chars() {
-                press_as_laid_out(&mut session, character);
+                press_key_of(&mut session, character, group);
                 session.idle(0.12);
             }
             assert_eq!(session.backend.text().iter().collect::<String>(), shown, "a stop of {stop} s");
         }
         session.idle(stop);
         for character in "nats ".chars() {
-            press_as_laid_out(&mut session, character);
+            press_key_of(&mut session, character, 0);
             session.idle(0.12);
         }
         session.idle(1.0);

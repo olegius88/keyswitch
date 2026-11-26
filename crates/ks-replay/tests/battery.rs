@@ -13,7 +13,13 @@
 //! rest (13) change the reading a word was typed in, not whether it ends right. Written again on 23.11.2026, when the
 //! first word typed after a caret move came to wait for the word after it: one row differs in either mode, the first
 //! word of a stream that opens after a caret move, typed in the English layout before Russian words typed so too, which
-//! stayed as typed and is now converted with the word after it, as its label has it.
+//! stayed as typed and is now converted with the word after it, as its label has it. Written again on 26.11.2026, when the
+//! replay came to give the prefix model the index the program gives it (`Resources::prefix_index`): the installed
+//! prefix_v2 reads the lexicon without the supplement, as users have run it since 0.37.0, where the replay had given it
+//! every word the reference model holds. Nothing changes for users; the battery now types as their program does. 57 rows
+//! differ without Hunspell and 39 with it: by the battery's labels 20 and 18 are right that were wrong, 28 and 15 wrong that
+//! were right, the rest change the reading a word was typed in. Most are a word ending in a sign that is a letter of the
+//! other layout (`zgydvy;`, labelled `япнвмнж`), switched now at the boundary rather than with that sign.
 #![cfg(any(not(debug_assertions), coverage))]
 
 use serde_json::Value;

@@ -323,7 +323,8 @@ fn a_prefix_model_says_which_features_it_reads() {
     use ks_lang::Resources;
     let resources = Resources::new(models().parent().expect("the resources"));
     let (ru, en) = (resources.engine_language_model("ru_RU").expect("ru"), resources.engine_language_model("en_US").expect("en"));
-    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    let plain = ks_lang::early_switch::PrefixLexicon::Plain;
+    let (en_index, ru_index) = (resources.prefix_index(&en, plain), resources.prefix_index(&ru, plain));
     let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
     let mut field = ks_backend::FieldContext::new("firefox", "1");
     "/* a comment ".clone_into(&mut field.before);
@@ -614,7 +615,10 @@ fn a_prefix_model_with_a_threshold_for_each_direction_converts_at_the_threshold_
     assert_eq!((model.thresholds(), model.threshold_for(0), model.threshold_for(1)), ([0.985, 0.99], 0.985, 0.99));
     let resources = Resources::new(models().parent().expect("the resources"));
     let (ru, en) = (resources.engine_language_model("ru_RU").expect("ru"), resources.engine_language_model("en_US").expect("en"));
-    let (en_index, ru_index) = (resources.prefix_index(&en), resources.prefix_index(&ru));
+    // The model of the test is of schema two, whose index is the plain one.
+    let lexicon = model.prefix_lexicon();
+    assert_eq!(lexicon, ks_lang::early_switch::PrefixLexicon::Plain);
+    let (en_index, ru_index) = (resources.prefix_index(&en, lexicon), resources.prefix_index(&ru, lexicon));
     let sides = [&PrefixSide { index: &en_index, model: &en }, &PrefixSide { index: &ru_index, model: &ru }];
     let item = |source_group: i64| {
         let (original, alternative) = if source_group == 0 { ("ghbd", "прив") } else { ("руды", "hello") };
