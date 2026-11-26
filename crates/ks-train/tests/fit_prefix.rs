@@ -673,6 +673,7 @@ mod words {
         let nowhere = || scratch("words-samples-refused").join("samples");
         refused(&run_build(&derived, &nowhere(), with(&["--word-list", &format!("text={},1,latin", english.display())])), "two sources of the samples are named text");
         refused(&build(&derived, &nowhere(), &["--word-list", &ru]), "read with the classes of the word corpus");
+        refused(&build(&derived, &nowhere(), &["--supplement"]), "read with the classes of the word corpus");
         refused(&run_build(frozen, &nowhere(), with(&["--supplement"])), "the families a cut moved are those of a derived corpus");
         let changed_config = copied(&derived, "words-samples-config");
         std::fs::write(changed_config.join("config.json"), [std::fs::read(derived.join("config.json")).expect("the config").as_slice(), b"\n"].concat()).expect("a config");

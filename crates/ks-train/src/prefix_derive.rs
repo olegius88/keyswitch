@@ -157,13 +157,8 @@ pub fn derive(request: &DeriveRequest<'_>) -> Result<WordReceipt, String> {
     let cut_families = moved.iter().map(|row| row.family.as_str()).collect::<BTreeSet<_>>().len();
     let mut added = None;
     if let Some(addition) = &request.addition {
-        let offered: Vec<WordRow> = read_gzip_lines(addition.rows)?
-            .iter()
-            .map(|line| ks_text::json::loads::<WordRow>(line).map_err(|error| format!("{}: {error}", addition.rows.display())))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .filter(|row| addition.classes.contains(&row.class) && row.source == addition.source)
-            .collect();
+        let parsed: Result<Vec<WordRow>, String> = read_gzip_lines(addition.rows)?.iter().map(|line| ks_text::json::loads::<WordRow>(line).map_err(|error| format!("{}: {error}", addition.rows.display()))).collect();
+        let offered: Vec<WordRow> = parsed?.into_iter().filter(|row| addition.classes.contains(&row.class) && row.source == addition.source).collect();
         let present: BTreeSet<(&str, i64)> = train.iter().chain(&moved).map(|row| (row.text.as_str(), row.group)).collect();
         let words: BTreeSet<(&str, i64, &str)> = offered.iter().map(|row| (row.text.as_str(), row.group, row.family.as_str())).collect();
         let mut eligible: Vec<(u64, &str, i64)> = words

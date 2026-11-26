@@ -1012,9 +1012,11 @@ pub fn gates(candidate: &PairReport, reference: &PairReport, unknown: usize) -> 
     let as_meant_half = |sample: &str| if sample == Sample::A5.as_str() { A5_AS_MEANT } else { "" };
     let each = |gates: &BTreeMap<String, [bool; 2]>, half: &dyn Fn(&str) -> &'static str| -> Vec<bool> { gates.iter().flat_map(|(sample, by)| [0, 1].into_iter().filter(|direction| counts(half(sample), *direction)).map(|direction| by[direction])).collect() };
     let mut held: Vec<bool> = vec![gates.execution];
-    let counted = |gate: &CountGate| gate.rows && gate.words;
-    let earlier = |gate: &EarlierGate| gate.early_mean_key_lower && gate.any_mean_key_lower && counted(&gate.switched_by_key_not_fewer) && counted(&gate.inside_word_not_fewer);
-    let safe = |gate: &SafetyGate| gate.false_early_not_more && gate.stays_not_more;
+    // Each gate's parts are all read, as one list: whether it holds, not which part failed first.
+    let all = |parts: &[bool]| !parts.contains(&false);
+    let counted = |gate: &CountGate| all(&[gate.rows, gate.words]);
+    let earlier = |gate: &EarlierGate| all(&[gate.early_mean_key_lower, gate.any_mean_key_lower, counted(&gate.switched_by_key_not_fewer), counted(&gate.inside_word_not_fewer)]);
+    let safe = |gate: &SafetyGate| all(&[gate.false_early_not_more, gate.stays_not_more]);
     held.extend(each(&held_by_direction(&gates.e1, earlier), &half_of));
     held.extend(each(&gates.e2, &half_of));
     held.extend(gates.s1.values().map(safe));
