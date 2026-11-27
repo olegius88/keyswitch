@@ -1799,6 +1799,33 @@ impl Inner {
                 if self.shortcut_modifier_down() {
                     return Err(failed("Нажат Ctrl, Alt или Win; текст не изменён"));
                 }
+                // DIAGNOSTIC BRANCH, never merged (Notepad of Windows 11 losing corrections, 27.11.2026): KS_DIAG chooses
+                // how this correction is typed, for a stand comparison of the ways.
+                let diag = std::env::var("KS_DIAG").unwrap_or_default();
+                if diag == "late150" {
+                    self.clock.sleep(0.15);
+                }
+                if diag == "unicode" || diag == "noswitch" {
+                    let mut letters = Vec::new();
+                    for stroke in strokes.iter().chain(literal.iter().copied()) {
+                        for unit in stroke.character_for(target_group).encode_utf16() {
+                            letters.extend([true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) }));
+                        }
+                    }
+                    let mut batch = delete_inputs.concat();
+                    batch.extend_from_slice(&letters);
+                    if diag == "unicode" {
+                        self.switch_group_inner(target_group)?;
+                        self.send_layout_free(&batch)?;
+                    } else {
+                        self.send_layout_free(&batch)?;
+                        self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
+                        self.switch_group_inner(target_group)?;
+                    }
+                    late_deleted = true;
+                    late_typed = true;
+                    return self.type_keys(&late_inputs, pace);
+                }
                 // The layout is switched first so that the deletion and the replacement travel in one SendInput call:
                 // Windows keeps the events of a single call together ("These events are not interspersed with other
                 // keyboard or mouse input events", SendInput, Microsoft Learn), while between separate calls the hold
@@ -1831,12 +1858,18 @@ impl Inner {
                 if switched {
                     // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS); the
                     // user's keys are held meanwhile (hold_input).
-                    self.type_keys(&delete_inputs, pace)?;
+                    if diag != "nosettle" {
+                        self.type_keys(&delete_inputs, pace)?;
+                    }
                     late_deleted = true;
-                    self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
+                    self.clock.sleep(match diag.as_str() {
+                        "nosettle" => 0.0,
+                        "settle200" => 0.2,
+                        _ => WINDOWS_LAYOUT_SETTLE_SECONDS,
+                    });
                 }
                 let mut batch = Vec::new();
-                if !switched {
+                if !switched || diag == "nosettle" {
                     batch.extend_from_slice(&delete_inputs);
                 }
                 batch.extend_from_slice(&replay_inputs);
