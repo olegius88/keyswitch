@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+## 0.76.0 — 2026-11-27
+
 - Windows: a word converted while it is typed shows in the other layout about 40 ms sooner. The new letters used to wait 50 ms after the old ones were erased, for the window to take the new layout, and the word stood half erased meanwhile. Where the field was just read and showed the word, a short word whose keys all typed letters now gets its new letters as characters together with the Backspaces, right after the window has confirmed the layout. When a key is held down at that moment, when the word's keys typed signs (`,` for `б`, `;` for `ж`), for a longer replacement or one with keys typed after it, and in a remote-control window, the letters are typed as keys, as before
 - For developers: `Injection::verified_in_field` says the field was read just before the typing and showed the word (the engine sets it from the plan's `context_field`, which the field check before typing demands). `ks_win::windows_backend::Inner::unicode_replacement` gives the letters as `KEYEVENTF_UNICODE` events for such a word alone whose every key typed a letter, up to `UNICODE_CORRECTION_MAX_EVENTS` events with the Backspaces, outside `REMOTE_INPUT_APPLICATIONS`; they go in one call after the switch (`send_layout_free`, which sets no `typed_until`) only while no key of the user's is down or held back (`no_user_key_on_its_way`), and the rest of `WINDOWS_LAYOUT_SETTLE_SECONDS` from the switch's confirmation is waited before the held keys are given back. The layout an early switch waits for is asked every `LAYOUT_SWITCH_FAST_POLL_SECONDS` for the first `LAYOUT_SWITCH_FAST_POLL_WINDOW_SECONDS` after the request
 
