@@ -230,7 +230,7 @@ fn letter(keycode: u32) -> KeyEvent {
 }
 
 fn injection<'a>(strokes: &'a [KeyEvent], target_group: i32, boundary: Option<&'a KeyEvent>) -> Injection<'a> {
-    Injection { strokes, target_group, boundary, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" }
+    Injection { strokes, target_group, boundary, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary", verified_in_field: false }
 }
 
 fn make() -> (Arc<FakeApi>, WaylandBackend, Arc<Mutex<Vec<KeyEvent>>>) {
@@ -952,6 +952,7 @@ fn walk_injection(backend: &WaylandBackend, dice: &mut Dice) {
         kept_tail: *dice.of(&[0, 0, 0, 1, 9]),
         erased,
         mode: "boundary",
+        verified_in_field: false,
     });
 }
 
