@@ -460,6 +460,8 @@ struct FakeClock {
     readings: Mutex<VecDeque<f64>>,
     perf: Mutex<VecDeque<f64>>,
     sleeps: Mutex<Vec<f64>>,
+    /// What happens meanwhile, where a test has something happen while the backend waits.
+    on_sleep: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl FakeClock {
@@ -485,6 +487,10 @@ impl Clock for FakeClock {
     fn sleep(&self, seconds: f64) {
         self.sleeps.lock().unwrap().push(seconds);
         *self.now.lock().unwrap() += seconds;
+        let meanwhile = self.on_sleep.lock().unwrap().clone();
+        if let Some(meanwhile) = meanwhile {
+            meanwhile();
+        }
     }
 }
 
@@ -1079,9 +1085,8 @@ fn a_correction_deletes_switches_replays_shift_and_boundary() {
         .inject_correction(Injection { boundary: Some(&boundary), source_group: Some(0), ..injection(&strokes, 1) })
         .unwrap();
     assert_eq!(held, 0);
-    // The layout switches first; the deletion needs no layout and goes at once, and the keys of the new layout follow once
-    // the window's text service has it (WINDOWS_LAYOUT_SETTLE_SECONDS). The user's keys are held by the hook meanwhile, so
-    // none slips in between.
+    // The layout switches first; once the window's text service has it (WINDOWS_LAYOUT_SETTLE_SECONDS), the deletion and
+    // the keys of the new layout go in one call. The user's keys are held by the hook meanwhile, so none slips in between.
     let sent = api.sent();
     assert_eq!(
         sent[0],
@@ -1090,11 +1095,6 @@ fn a_correction_deletes_switches_replays_shift_and_boundary() {
             NativeInput::key(false, VK_BACK),
             NativeInput::key(true, VK_BACK),
             NativeInput::key(false, VK_BACK),
-        ]
-    );
-    assert_eq!(
-        sent[1],
-        [
             NativeInput::scan(true, SCAN_CODE_LEFT_SHIFT),
             NativeInput::scan(true, SCAN_CODE_A),
             NativeInput::scan(false, SCAN_CODE_A),
@@ -1102,8 +1102,8 @@ fn a_correction_deletes_switches_replays_shift_and_boundary() {
         ]
     );
     // The boundary keeps its own layout: typed after a switch back.
-    assert_eq!(sent[2][0].scan_code, SCAN_CODE_SEMICOLON);
-    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[1][0].scan_code, SCAN_CODE_SEMICOLON);
+    assert_eq!(sent.len(), 2);
     assert_eq!(api.requests(), [RUSSIAN_HKL, ENGLISH_HKL, RUSSIAN_HKL]);
 }
 
@@ -1113,8 +1113,19 @@ fn the_layout_settles_before_the_keys_of_a_new_layout() {
     let clock = FakeClock::stepping(0.0);
     let subject = backend_with(&api, clock.clone(), script(|_| {}));
     let strokes = [key_event()];
+    let sent_by_the_pause = Arc::new(Mutex::new(Vec::new()));
+    let (seen, watched) = (Arc::clone(&sent_by_the_pause), Arc::clone(&api));
+    *clock.on_sleep.lock().unwrap() = Some(Arc::new(move || seen.lock().unwrap().push(watched.state().sent.len())));
     subject.inject_correction(injection(&strokes, 1)).unwrap();
+    *clock.on_sleep.lock().unwrap() = None;
     assert_eq!(*clock.sleeps.lock().unwrap(), [WINDOWS_LAYOUT_SETTLE_SECONDS]);
+    // Nothing goes before the pause: then the deletion and the replacement travel in one call, as Notepad of Windows 11
+    // lost the letters that came in a call of their own after the Backspaces.
+    assert_eq!(*sent_by_the_pause.lock().unwrap(), [0]);
+    let sent = api.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0][0], NativeInput::key(true, VK_BACK));
+    assert_eq!(sent[0][2], NativeInput::scan(true, SCAN_CODE_A));
     // No switch, no pause: the deletion and the replacement travel in one call.
     clock.sleeps.lock().unwrap().clear();
     api.state().sent.clear();
@@ -1208,7 +1219,7 @@ fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
         }
         subject.inject_correction(read(&one)).unwrap();
         assert!(api.sent().iter().flatten().all(|input| !input.unicode), "kept {kept}");
-        assert!(api.sent().len() > 1, "kept {kept}");
+        assert!(api.sent().iter().flatten().any(|input| input.scan_code == SCAN_CODE_A), "kept {kept}");
         subject.stop();
     }
     // A window that sends the keys on to another computer: keys, one to a call.
@@ -1230,9 +1241,9 @@ fn a_boundary_can_stay_in_the_target_and_empty_batches_are_skipped() {
     let strokes = [key_event()];
     subject.inject_correction(Injection { boundary: Some(&boundary), ..injection(&strokes, 1) }).unwrap();
     assert_eq!(api.requests(), [RUSSIAN_HKL]);
-    // The deletion, then the keys typed in the layout switched to.
+    // The deletion and the keys typed in the layout switched to, in one call.
     let sent = api.sent();
-    assert_eq!(sent.len(), 2);
+    assert_eq!(sent.len(), 1);
     let scans: Vec<u32> = sent.iter().flatten().map(|item| item.scan_code).filter(|&code| code != 0).collect();
     assert_eq!(scans, [SCAN_CODE_A; 4]);
 }
@@ -1288,7 +1299,7 @@ fn invalid_groups_a_partial_send_and_a_rejected_switch_fail_loudly() {
     let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
     assert_eq!(
         message(&error),
-        "SendInput отправил 0 из 2 событий; результат текста неизвестен; возможно, целевое приложение запущено с правами администратора"
+        "SendInput отправил 0 из 4 событий; результат текста неизвестен; возможно, целевое приложение запущено с правами администратора"
     );
 
     api.state().send_count = None;
@@ -1337,14 +1348,14 @@ fn late_and_held_keys_are_deleted_and_typed_again_as_the_users_own() {
     assert_eq!(held, 2);
     assert_eq!(api.requests(), [RUSSIAN_HKL]);
     let sent = api.sent();
-    let batch: Vec<NativeInput> = sent[0].iter().chain(&sent[1]).copied().collect();
+    let batch = &sent[0];
     // Two characters to delete: the word and the late key after it.
     assert_eq!(batch.iter().filter(|item| item.virtual_key == VK_BACK).count(), 4);
     let scans: Vec<u32> = batch.iter().map(|item| item.scan_code).filter(|&code| code != 0).collect();
     assert_eq!(scans, [SCAN_CODE_A; 2]);
     assert!(batch.iter().all(|item| item.synthetic));
-    assert_eq!(sent[2], [replayed_scan(true, LATE_KEY_SCAN_CODE), replayed_scan(false, LATE_KEY_SCAN_CODE)]);
-    let held_sent: Vec<NativeInput> = sent[3..].iter().flatten().copied().collect();
+    assert_eq!(sent[1], [replayed_scan(true, LATE_KEY_SCAN_CODE), replayed_scan(false, LATE_KEY_SCAN_CODE)]);
+    let held_sent: Vec<NativeInput> = sent[2..].iter().flatten().copied().collect();
     assert_eq!(held_sent, [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE), replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)]);
     // The hold is over: the next key is delivered as before (the only one: the backend's own key above was not).
     assert!(!hook(native(true, u32::from(b'A'), SCAN_CODE_A, false, 13)));
@@ -1781,6 +1792,28 @@ fn a_window_that_took_the_front_before_a_correction_keeps_its_layout() {
     assert!(api.requests().is_empty());
     assert!(api.sent().is_empty());
     assert!(!subject.inner.hold.lock().unwrap().holding);
+}
+
+/// A click while the window's text service takes the new layout comes before any key of the correction, as the
+/// Backspaces wait with the letters: the correction stops there and nothing is typed.
+#[test]
+fn a_pointer_pressed_while_the_layout_settles_stops_the_correction_before_any_key() {
+    let api = FakeWindowsAPI::plain();
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let inner = Arc::clone(&subject.inner);
+    *clock.on_sleep.lock().unwrap() = Some(Arc::new(move || {
+        inner.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1));
+    }));
+    subject.hold_input();
+    let strokes = [key_event()];
+    let error = subject.inject_correction(injection(&strokes, 1)).unwrap_err();
+    assert!(message(&error).contains("Место ввода изменилось до замены; текст не изменён"));
+    assert_eq!(*clock.sleeps.lock().unwrap(), [WINDOWS_LAYOUT_SETTLE_SECONDS]);
+    assert_eq!(api.requests(), [RUSSIAN_HKL]);
+    assert!(api.sent().is_empty());
+    assert!(!subject.inner.hold.lock().unwrap().holding);
+    *clock.on_sleep.lock().unwrap() = None;
 }
 
 /// The same with no pointer pressed: another window is in front when the correction begins.
@@ -4275,12 +4308,12 @@ fn a_correction_goes_into_a_remote_control_window_key_by_key_with_the_keys_of_th
     let boundary = key_with(SCAN_CODE_SEMICOLON, ";", [";", "ж"], 0);
     let strokes = [stroke];
     let correction = || Injection { boundary: Some(&boundary), source_group: Some(0), ..injection(&strokes, 1) };
-    // In Notepad: the deletion, the word and the boundary go as three calls, the word in one.
+    // In Notepad: the deletion with the word in one call, and the boundary in its own layout after it.
     let local = FakeWindowsAPI::plain();
     let burst = backend(&local);
     burst.inject_correction(correction()).unwrap();
     assert!(!burst.typed_key_by_key());
-    assert_eq!(local.sent().iter().map(Vec::len).collect::<Vec<_>>(), [4, 4, 2]);
+    assert_eq!(local.sent().iter().map(Vec::len).collect::<Vec<_>>(), [8, 2]);
     // In TeamViewer: the same keys in the same order, one key to a call, each followed by the pause.
     let (api, clock, subject) = remote_backend(None);
     subject.inject_correction(correction()).unwrap();

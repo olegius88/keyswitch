@@ -1836,16 +1836,18 @@ impl Inner {
                     return Ok(());
                 }
                 if switched {
-                    // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS); the
-                    // user's keys are held meanwhile (hold_input).
-                    self.type_keys(&delete_inputs, pace)?;
-                    late_deleted = true;
+                    // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS), and the
+                    // Backspaces wait with them, to go in the same call. Sent before the pause, they left the letters a call
+                    // of their own 50 ms later, and Notepad of Windows 11 lost those letters in 7 of 20 corrections at a
+                    // word's boundary (`нежный.` came out as nothing), and in none of 20 once the Backspaces went with them
+                    // (a diagnostic build in a virtual machine, 28.11.2026). The user's keys are held meanwhile (hold_input);
+                    // a click is not, so the place is looked at again before anything is typed.
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
+                    if self.typing_place_left() {
+                        return Err(failed("Место ввода изменилось до замены; текст не изменён"));
+                    }
                 }
-                let mut batch = Vec::new();
-                if !switched {
-                    batch.extend_from_slice(&delete_inputs);
-                }
+                let mut batch = delete_inputs.clone();
                 batch.extend_from_slice(&replay_inputs);
                 if !preserve_boundary_layout && kept_tail == 0 {
                     batch.extend_from_slice(&boundary_inputs);
