@@ -1109,11 +1109,8 @@ impl Inner {
     /// Ask the filter about a press, and hide the matching release.
     ///
     /// A window that saw no key-down must not receive the key-up either, so the release of a swallowed key is swallowed
-    /// with it.
+    /// with it. KeySwitch's own keys never come here (`answer_native` passes them first).
     fn consumes(&self, event: &KeyEvent) -> KeyDisposition {
-        if event.synthetic {
-            return KeyDisposition::Pass;
-        }
         {
             let mut hook = lock(&self.hook);
             if !event.pressed {
@@ -1527,8 +1524,17 @@ impl Inner {
             }
             return false;
         }
-        if native.injected && native.virtual_key == VK_MENU_MASK {
-            // KeySwitch's own mask key (mask_menu) is no key of the user's.
+        if native.injected {
+            // KeySwitch's own keys: the engine takes none of them (`enqueue`) and the filter passes them all (`consumes`),
+            // while the window they are typed into gets each only once this hook has answered. The whole way below asked
+            // the window, its layout and two translations of each for nothing, so the hook only keeps the books of the
+            // keys down, as a correction's own Shift goes down and up in them; the mask key (`mask_menu`) and a character
+            // typed as such hold no key down. Measured with a watching hook behind this one, an event of KeySwitch's own
+            // reaches the next hook 0.50 ms after it is sent on a Windows 10 laptop (0.54 ms the whole way) and 2.7 ms in
+            // a Windows 11 virtual machine (2.9 ms): most of that is Windows handing the event from process to process.
+            if native.virtual_key != VK_MENU_MASK && native.virtual_key != VK_PACKET {
+                self.track_key_state(native);
+            }
             return false;
         }
         // A key-up of a key never seen going down (`orphan_release` below), not another program's, goes on to the window
@@ -1539,7 +1545,7 @@ impl Inner {
         // second tap switched the layout back; in the queue when a double tap's conversion began, after the switch back
         // to English the double tap makes, it gave the conversion up as a modifier typed after the word.
         let mut unseen_release = false;
-        if !native.injected && !native.replayed {
+        if !native.replayed {
             let (consumed_scan_code, down) = {
                 let hook = lock(&self.hook);
                 (hook.consumed_keys.contains(native.scan_code), hook.pressed.contains(native.virtual_key))
@@ -1588,7 +1594,7 @@ impl Inner {
         let foreground = self.api.foreground_window();
         if native.virtual_key != VK_PACKET {
             // A packet is a character, not a key: nothing is held down by it.
-            if !native.injected && !native.replayed && !native.foreign {
+            if !native.replayed && !native.foreign {
                 self.recheck_modifiers(native, foreground);
             }
             self.track_key_state(native);
@@ -1615,16 +1621,17 @@ impl Inner {
             group,
             state,
             timestamp: native.timestamp,
-            synthetic: native.injected,
+            // KeySwitch's own keys were answered above: none reaches the engine.
+            synthetic: false,
             deferred: false,
             foreign: native.foreign,
             // The window this key is on its way to: the system has not queued it for a window yet. The window, not
             // the focused control: a key typed behind a Tab is seen here before the program has taken the Tab, and goes
             // to the next field. A key kept back comes here again when it is typed again, with the window of that
-            // moment. KeySwitch's own keys are not the engine's to place.
-            window: if native.injected { 0 } else { foreground },
+            // moment.
+            window: foreground,
         };
-        let repeated_answer = !event.synthetic && event.pressed && lock(&self.hook).consumed_keys.contains(event.keycode);
+        let repeated_answer = event.pressed && lock(&self.hook).consumed_keys.contains(event.keycode);
         let consumed = self.consumes(&event);
         if consumed != KeyDisposition::Pass && event.pressed && self.alt_or_super_down() {
             self.mask_menu();

@@ -667,8 +667,8 @@ fn small_answers_of_the_backend() {
 
 /// Every key the hook hears names the window it is on its way to: the window in front, as `key_window` names it for the
 /// engine, and not the control that has the keyboard, which `focused_window` names and a Tab changes inside one window.
-/// Naming it does not move the window the tray menu switches. One of KeySwitch's own keys names no window, and neither
-/// does a click or a turn of the wheel.
+/// Naming it does not move the window the tray menu switches. One of KeySwitch's own keys does not reach the engine at
+/// all, and a click or a turn of the wheel names no window.
 #[test]
 fn a_key_names_the_window_it_is_on_its_way_to() {
     let api = FakeWindowsAPI::plain();
@@ -685,8 +685,9 @@ fn a_key_names_the_window_it_is_on_its_way_to() {
     api.state().foreground = WINDOWS_OTHER_HWND;
     assert!(!hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
     assert_eq!((last().window, subject.key_window()), (WINDOWS_OTHER_HWND, Some(WINDOWS_OTHER_HWND)));
+    let heard = delivered.lock().unwrap().len();
     assert!(!hook(native(true, VK_D, HELD_KEY_SCAN_CODE, true, 12)));
-    assert!(last().synthetic && last().window == 0);
+    assert_eq!(delivered.lock().unwrap().len(), heard);
     assert!(!hook(native(true, 0, 0, false, 13)));
     assert_eq!((last().key_name.as_str(), last().window), ("Pointer", 0));
     assert!(!hook(NativeKeyEvent { wheel: true, ..native(false, 0, 0, false, 14) }));
@@ -894,13 +895,17 @@ fn start_events_idempotence_stop_and_close() {
     assert!(subject.running());
     subject.start(collecting(&events)).unwrap();
     let hook = api.hook();
-    hook(native(true, u32::from(b'A'), SCAN_CODE_A, true, 123));
+    // KeySwitch's own keys reach no listener: the engine takes none of them.
+    assert!(!hook(native(true, u32::from(b'A'), SCAN_CODE_A, true, 121)));
+    assert!(!hook(native(false, u32::from(b'A'), SCAN_CODE_A, true, 122)));
+    assert!(events.lock().unwrap().is_empty());
+    hook(native(true, u32::from(b'A'), SCAN_CODE_A, false, 123));
     {
         let events = events.lock().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].characters, ["a", "ф"]);
         assert_eq!(events[0].character, "a");
-        assert!(events[0].synthetic);
+        assert!(!events[0].synthetic);
         assert!(events[0].caps_lock());
     }
 
@@ -1320,9 +1325,9 @@ fn late_and_held_keys_are_deleted_and_typed_again_as_the_users_own() {
     // Held keys are swallowed and never reach the engine directly.
     assert!(hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
     assert!(hook(native(false, VK_D, HELD_KEY_SCAN_CODE, false, 11)));
-    // The backend's own injection is never held.
+    // The backend's own injection is never held, and never reaches the engine.
     assert!(!hook(native(true, VK_X, INJECTED_KEY_SCAN_CODE, true, 12)));
-    assert_eq!(delivered.lock().unwrap().iter().map(|event| event.synthetic).collect::<Vec<_>>(), [true]);
+    assert!(delivered.lock().unwrap().is_empty());
 
     let late = [KeyEvent { keycode: LATE_KEY_SCAN_CODE, ..key_event() }];
     let strokes = [key_event()];
@@ -1341,9 +1346,9 @@ fn late_and_held_keys_are_deleted_and_typed_again_as_the_users_own() {
     assert_eq!(sent[2], [replayed_scan(true, LATE_KEY_SCAN_CODE), replayed_scan(false, LATE_KEY_SCAN_CODE)]);
     let held_sent: Vec<NativeInput> = sent[3..].iter().flatten().copied().collect();
     assert_eq!(held_sent, [replayed_key(true, VK_D, HELD_KEY_SCAN_CODE), replayed_key(false, VK_D, HELD_KEY_SCAN_CODE)]);
-    // The hold is over: the next key is delivered as before.
+    // The hold is over: the next key is delivered as before (the only one: the backend's own key above was not).
     assert!(!hook(native(true, u32::from(b'A'), SCAN_CODE_A, false, 13)));
-    assert_eq!(delivered.lock().unwrap().len(), 2);
+    assert_eq!(delivered.lock().unwrap().len(), 1);
     subject.stop();
 }
 
@@ -1405,6 +1410,32 @@ fn a_failed_injection_still_types_the_held_keys_again() {
         .unwrap_err();
     assert!(message(&error).contains("отклонило"));
     assert_eq!(api.sent().last().unwrap(), &[replayed_scan(true, LATE_KEY_SCAN_CODE), replayed_scan(false, LATE_KEY_SCAN_CODE)]);
+    subject.stop();
+}
+
+/// KeySwitch's own keys pass the hook at once: the window they are typed into gets each only once the hook has answered,
+/// and Notepad of Windows 11 lost the letters of corrections whose keys the hook held a millisecond each. Only the books
+/// of the keys down are kept for them; nothing goes to the engine and no key is translated.
+#[test]
+fn keyswitch_own_keys_pass_at_once_keeping_only_the_keys_down() {
+    let api = FakeWindowsAPI::plain();
+    let subject = backend(&api);
+    let delivered = collected();
+    subject.start(collecting(&delivered)).unwrap();
+    let hook = api.hook();
+    assert!(!hook(native(true, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, true, 1)));
+    assert!(subject.inner.hook.lock().unwrap().pressed.contains(VK_LSHIFT));
+    assert!(!hook(native(true, u32::from(b'A'), SCAN_CODE_A, true, 2)));
+    assert!(!hook(native(false, u32::from(b'A'), SCAN_CODE_A, true, 3)));
+    assert!(!hook(native(false, VK_LSHIFT, SCAN_CODE_LEFT_SHIFT, true, 4)));
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(VK_LSHIFT));
+    // A character typed as such and the mask key hold no key down.
+    assert!(!hook(native(true, VK_PACKET, PACKET_CHARACTER_CODE, true, 5)));
+    assert!(!hook(native(true, VK_MENU_MASK, 0, true, 6)));
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(VK_PACKET));
+    assert!(!subject.inner.hook.lock().unwrap().pressed.contains(VK_MENU_MASK));
+    assert!(delivered.lock().unwrap().is_empty());
+    assert!(lock(&subject.inner.translations).is_empty());
     subject.stop();
 }
 

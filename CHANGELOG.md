@@ -4,6 +4,8 @@ All notable changes to KeySwitch are documented in this file.
 
 ## Unreleased
 
+- For developers: `WindowsBackend::answer_native` answers KeySwitch's own keys (`NativeKeyEvent::injected`, the extra info `KEYSWITCH_EXTRA_INFO`) before anything else: it keeps only the books of the keys down (`track_key_state`; not for the mask key of `mask_menu` and not for a character typed as such) and passes them, with no window, layout or translation asked and nothing sent to the listener, whose `enqueue` dropped them all. `consumes` and the event built further on no longer meet them. Measured with a watching hook behind KeySwitch's, an event of KeySwitch's own reaches the next hook 0.50 ms after it is sent instead of 0.54 ms on a Windows 10 laptop, and 2.7 ms instead of 2.9 ms in a Windows 11 virtual machine
+
 ## 0.76.0 — 2026-11-27
 
 - Windows: a word converted while it is typed shows in the other layout about 40 ms sooner. The new letters used to wait 50 ms after the old ones were erased, for the window to take the new layout, and the word stood half erased meanwhile. Where the field was just read and showed the word, a short word whose keys all typed letters now gets its new letters as characters together with the Backspaces, right after the window has confirmed the layout. When a key is held down at that moment, when the word's keys typed signs (`,` for `б`, `;` for `ж`), for a longer replacement or one with keys typed after it, and in a remote-control window, the letters are typed as keys, as before
