@@ -62,7 +62,7 @@ fn what_a_backend_answers_by_default() {
     assert!(backend.active_application().is_empty() && backend.focused_window().is_none());
     let _ = backend.probe();
     let strokes = [KeyEvent::default()];
-    assert_eq!(backend.inject_correction(Injection { strokes: &strokes, target_group: 0, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary", verified_in_field: false }), Ok(0));
+    assert_eq!(backend.inject_correction(Injection { strokes: &strokes, target_group: 0, boundary: None, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" }), Ok(0));
     assert!(backend.erases_any_length() && !backend.swallows_hotkeys() && !backend.supports_selection() && !backend.typed_key_by_key());
     assert_eq!(backend.take_unseen_input(), Ok(None));
     assert!(backend.take_input_delay().is_none() && backend.take_hook_gap().is_none() && backend.input_anchor().is_none());

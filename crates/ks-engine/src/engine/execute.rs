@@ -859,12 +859,10 @@ impl EngineCore {
     fn inject_inner(&mut self, plan: &CorrectionPlan, late: &[Stroke]) -> Result<i32, BackendError> {
         let late = owned(late);
         let source = Some(plan.source_group.to::<i32>());
-        // A plan with a field of its own reaches the typing only when the field, read again a moment ago, showed the word
-        // before the caret (`field_refusal`): the window takes text typed into it here, on this computer.
-        let verified_in_field = !plan.context_field.is_empty();
         if plan.mode == "sign" {
             // Every key of the token, the signs after it and its boundary go out as literals of the layout the
-            // sign belongs to; nothing is converted, and the backend restores the current layout after them.
+            // sign belongs to; nothing is converted. The backend types each sign where the current layout has it too
+            // by that layout's own key (Windows), and the others in the sign's layout, restoring the current one after.
             let meant = (self.other_groups(plan.source_group)[0]).to::<i32>();
             let literal: Vec<KeyEvent> = plan
                 .strokes
@@ -883,7 +881,6 @@ impl EngineCore {
                 kept_tail: 0,
                 erased: None,
                 mode: plan.mode,
-                verified_in_field,
             });
         }
         let strokes = owned(&plan.strokes);
@@ -900,7 +897,6 @@ impl EngineCore {
             kept_tail: plan.kept_tail,
             erased: None,
             mode: plan.mode,
-            verified_in_field,
         };
         if !plan.replaced_strokes.is_empty() && plan.replaced_strokes.len() != plan.strokes.len() {
             // A typo correction (or its undo) types more or fewer keys than the word on screen has.

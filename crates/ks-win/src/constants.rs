@@ -10,16 +10,17 @@ pub const WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS: f64 = 1.5;
 /// Step at which a native backend polls for the layout it asked the operating system to switch to.
 pub const LAYOUT_SWITCH_POLL_SECONDS: f64 = 0.01;
 /// The finer step of the first moments after a layout request: a window takes the layout within a few milliseconds, and
-/// a word converted as it is typed goes as characters only once the layout is confirmed, so each step there is a delay
-/// the user sees. A sleep this short is kept on Windows 10 1803 and later, where the standard library sleeps on a
+/// a word converted as it is typed goes only once the layout is confirmed, so each step there is a delay the user sees.
+/// A sleep this short is kept on Windows 10 1803 and later, where the standard library sleeps on a
 /// high-resolution waitable timer.
 pub const LAYOUT_SWITCH_FAST_POLL_SECONDS: f64 = 0.001;
 /// How long after the request the layout is polled at the finer step; a window that has not taken it by then is busy,
 /// and is asked at the usual step.
 pub const LAYOUT_SWITCH_FAST_POLL_WINDOW_SECONDS: f64 = 0.03;
 /// Windows 11 confirms the layout before its text service has it and loses keys sent at once: `клавиатура ` typed
-/// right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms. The deletion
-/// needs no layout and goes before the pause.
+/// right after the switch came out as `кла`, and whole after a Backspace burst and 30 ms, or after 100 ms (03.11.2026).
+/// The Backspaces wait with the letters and go in their call (`Inner::inject_correction_inner`): sent before the pause,
+/// they left the letters a call of their own, and Notepad of Windows 11 lost such letters.
 pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
 /// How long a window is given to take in each key event this program typed before a layout is asked of it, and the most
 /// that is ever waited. A layout request is a posted message, and a window reads its posted messages before the keys
@@ -28,11 +29,6 @@ pub const WINDOWS_LAYOUT_SETTLE_SECONDS: f64 = 0.05;
 /// (about 1 ms an event; measured 12.11.2026); the allowance is five times that.
 pub const WINDOWS_TYPED_EVENT_SETTLE_SECONDS: f64 = 0.005;
 pub const WINDOWS_TYPED_SETTLE_MAX_SECONDS: f64 = 0.5;
-/// The most key events a correction types as characters in one call (`Inner::unicode_replacement`): the Backspaces and
-/// the letters of a word of up to six letters. Notepad of Windows 11 loses characters from long calls, of characters and
-/// of keys alike (`привет мир` came out as `привет `, 03.11.2026); a call of 16 events lost none in 135 trials
-/// (26.11.2026). A longer replacement is typed as keys of the new layout, as before.
-pub const UNICODE_CORRECTION_MAX_EVENTS: usize = 24;
 /// How long a layout chosen in the tray menu waits for the window the user worked in to come back to the front with its
 /// keyboard focus, before it is switched wherever the front is.
 pub const WORK_WINDOW_RETURN_TIMEOUT_SECONDS: f64 = 1.0;
@@ -392,6 +388,16 @@ pub const ASYNC_KEY_DOWN_BIT: i32 = 0x8000;
 /// `SetThreadPriority`: one step above the normal priority of the process.
 pub const THREAD_PRIORITY_ABOVE_NORMAL: i32 = 1;
 pub const VIRTUAL_KEY_BYTE_MASK: u32 = 0xFF;
+/// `VkKeyScanExW` when no key of the layout types the character: "both the low-order and high-order bytes contain –1".
+pub const VK_KEY_SCAN_NOT_FOUND: i16 = -1;
+/// `VkKeyScanExW` gives the virtual key in its low byte and the shift state in its high byte.
+pub const VK_KEY_SCAN_SHIFT_STATE_OFFSET: u32 = 8;
+/// The shift states of `VkKeyScanExW`'s high byte a key may be typed again in: none, and Shift alone (1). Ctrl (2) and
+/// Alt (4), and the right Alt that is both, would make a shortcut of the key.
+pub const VK_KEY_SCAN_UNSHIFTED: u32 = 0;
+pub const VK_KEY_SCAN_SHIFT: u32 = 1;
+/// `MapVirtualKeyExW`'s `MAPVK_VK_TO_VSC`: the scan code of a virtual key; 0 when there is none.
+pub const MAPVK_VK_TO_VSC: u32 = 0;
 pub const TRANSLATED_TEXT_BUFFER_CHARACTERS: usize = 8;
 /// `ToUnicodeEx` wFlags bit 2 (Windows 10 1607+): keyboard state is not changed.
 pub const TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG: u32 = 0x04;

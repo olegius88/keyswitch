@@ -647,9 +647,10 @@ impl EngineCore {
         {
             // Digits with the Russian letter on the key of the English dot (`2ю` for `2.`): the person writes
             // Russian and pressed the English key for the sign, so the layout stays where it is (target_group is the
-            // source one) and the keys are typed again in the other layout as literals, which the backends type in their
-            // own layout before restoring the current one, as the "@" of a mention (execute_correction). Retyped in the
-            // English layout as a conversion, the next Russian word would come out in Latin letters.
+            // source one) and the keys are typed again in the other layout as literals: Windows types each by the key of
+            // the current layout that has its character, and otherwise the backends type them in their own layout before
+            // restoring the current one, as the "@" of a mention (execute_correction). Retyped in the English layout as a
+            // conversion, the next Russian word would come out in Latin letters.
             return Arc::new(CorrectionPlan {
                 mode: "sign",
                 context_field: self.context_field_id(),
