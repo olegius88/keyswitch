@@ -132,6 +132,8 @@ struct FakeState {
     no_control: bool,
     /// The control that has the keyboard, when it is not the window in front itself.
     control: Option<i64>,
+    /// What `key_for_character` answers, by character and layout: the virtual key, the scan code and the shift state.
+    keys_by_character: HashMap<(char, i64), (u32, u32, u32)>,
 }
 
 struct FakeWindowsAPI {
@@ -197,6 +199,7 @@ impl FakeWindowsAPI {
                 text_limit: 0,
                 no_control: false,
                 control: None,
+                keys_by_character: HashMap::new(),
             }),
             stop_event: Condvar::new(),
             clipboard,
@@ -278,6 +281,10 @@ impl WindowsAPI for FakeWindowsAPI {
         let code = if layout == ENGLISH_HKL { virtual_key + 32 } else { 0x430 + virtual_key - VK_A };
         let base = char::from_u32(code).unwrap().to_string();
         if (modifiers & SHIFT_MASK != 0) == (modifiers & LOCK_MASK != 0) { base } else { pystr::upper(&base) }
+    }
+
+    fn key_for_character(&self, character: char, layout: i64) -> Option<(u32, u32, u32)> {
+        self.state().keys_by_character.get(&(character, layout)).copied()
     }
 
     fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError> {
@@ -627,7 +634,6 @@ fn injection(strokes: &[KeyEvent], target_group: i32) -> Injection<'_> {
         kept_tail: 0,
         erased: None,
         mode: "boundary",
-        verified_in_field: false,
     }
 }
 
@@ -1137,98 +1143,19 @@ fn the_layout_settles_before_the_keys_of_a_new_layout() {
     assert_eq!(sent[0][2], NativeInput::scan(true, SCAN_CODE_A));
 }
 
-/// The Unicode events of `text`, as `unicode_replacement` types them.
-fn characters_of(text: &str) -> Vec<NativeInput> {
-    text.encode_utf16().flat_map(|unit| [true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) })).collect()
-}
-
+/// A short word alone goes as keys of the new layout too, never as characters: typed as characters, Notepad of Windows 11
+/// gave a word converted after a Russian word as its last letter repeated (`привет hello` as `привет llllo`, 13 of 14
+/// tries, a virtual machine, 28.11.2026).
 #[test]
-fn a_short_word_in_a_read_field_goes_as_characters_right_after_the_switch() {
+fn a_short_word_alone_goes_as_keys_of_the_new_layout() {
     let api = FakeWindowsAPI::plain();
-    let clock = FakeClock::stepping(0.0);
-    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let subject = backend(&api);
     let strokes = [key_event(), key_event()];
-    let read = |strokes| Injection { verified_in_field: true, ..injection(strokes, 1) };
-    assert_eq!(subject.inject_correction(read(&strokes)).unwrap(), 0);
-    // One call: the Backspaces and the letters as characters, no pause between them. The user's keys held meanwhile wait
-    // for the window's text service, as the letters typed as keys did.
-    let mut expected = [NativeInput::key(true, VK_BACK), NativeInput::key(false, VK_BACK)].repeat(2);
-    expected.extend(characters_of("фф"));
-    assert_eq!(api.sent(), [expected.clone()]);
-    assert_eq!(api.requests(), [RUSSIAN_HKL]);
-    assert_eq!(*clock.sleeps.lock().unwrap(), [WINDOWS_LAYOUT_SETTLE_SECONDS]);
-    // No switch, no wait.
-    clock.sleeps.lock().unwrap().clear();
-    api.state().sent.clear();
-    subject.inject_correction(read(&strokes)).unwrap();
-    assert_eq!(api.sent(), [expected]);
-    assert!(clock.sleeps.lock().unwrap().is_empty());
-    // A switch that took the settle's time already: nothing left to wait.
-    api.state().current_layout = ENGLISH_HKL;
-    api.state().sent.clear();
-    let slow = FakeClock::stepping(WINDOWS_LAYOUT_SETTLE_SECONDS);
-    let subject = backend_with(&api, slow.clone(), script(|_| {}));
-    subject.inject_correction(read(&strokes)).unwrap();
-    assert_eq!(api.sent().len(), 1);
-    assert!(slow.sleeps.lock().unwrap().is_empty());
-    // A call the system did not take whole fails: the result of the text is unknown.
-    api.state().send_count = Some(1);
-    assert!(message(&subject.inject_correction(read(&strokes)).unwrap_err()).contains("SendInput"));
-}
-
-#[test]
-fn everything_but_a_short_word_alone_in_a_read_field_goes_as_keys() {
-    let one = [key_event()];
-    let seven = [key_event(), key_event(), key_event(), key_event(), key_event(), key_event(), key_event()];
-    let late = [key_event()];
-    let boundary = key_with(SCAN_CODE_SEMICOLON, ";", [";", "ж"], 0);
-    let two_characters = [KeyEvent { characters: vec!["a".to_owned(), "фф".to_owned()], ..key_event() }];
-    let no_character = [KeyEvent { characters: vec!["a".to_owned(), String::new()], ..key_event() }];
-    let sign = [key_event(), KeyEvent { character: ",".to_owned(), characters: vec![",".to_owned(), "б".to_owned()], ..key_event() }];
-    let nothing_typed = [KeyEvent { character: String::new(), ..key_event() }];
-    let read = |strokes| Injection { verified_in_field: true, ..injection(strokes, 1) };
-    let cases: [(&str, Injection<'_>); 10] = [
-        ("a sign typed in the word", read(&sign)),
-        ("nothing typed by a key", read(&nothing_typed)),
-        ("a field not read", injection(&one, 1)),
-        ("keys typed after the word", Injection { late: &late, ..read(&one) }),
-        ("signs after the word", Injection { trailing: &late, ..read(&one) }),
-        ("a boundary", Injection { boundary: Some(&boundary), source_group: Some(0), ..read(&one) }),
-        ("a kept tail", Injection { kept_tail: 1, source_group: Some(0), ..read(&seven) }),
-        ("two characters on a key", read(&two_characters)),
-        ("no character on a key", read(&no_character)),
-        ("a word too long for one call", read(&seven)),
-    ];
-    for (name, case) in cases {
-        let api = FakeWindowsAPI::plain();
-        let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
-        let _ = subject.inject_correction(case);
-        assert!(api.sent().iter().flatten().all(|input| !input.unicode), "{name}");
-    }
-    // A key of the user's kept back by the hold, or one down, as the letters go out: keys.
-    for kept in [true, false] {
-        let api = FakeWindowsAPI::plain();
-        let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
-        subject.start(collecting(&collected())).unwrap();
-        let hook = api.hook();
-        subject.hold_input();
-        if kept {
-            assert!(hook(native(true, VK_D, HELD_KEY_SCAN_CODE, false, 10)));
-        } else {
-            lock(&subject.inner.hook).pressed.insert(VK_D);
-        }
-        subject.inject_correction(read(&one)).unwrap();
-        assert!(api.sent().iter().flatten().all(|input| !input.unicode), "kept {kept}");
-        assert!(api.sent().iter().flatten().any(|input| input.scan_code == SCAN_CODE_A), "kept {kept}");
-        subject.stop();
-    }
-    // A window that sends the keys on to another computer: keys, one to a call.
-    let api = FakeWindowsAPI::plain();
-    api.state().application = "TeamViewer".to_owned();
-    let subject = backend_with(&api, FakeClock::stepping(0.0), script(|_| {}));
-    subject.inject_correction(read(&one)).unwrap();
-    assert!(api.sent().iter().flatten().all(|input| !input.unicode));
-    assert!(api.sent().len() > 1);
+    subject.inject_correction(injection(&strokes, 1)).unwrap();
+    let sent = api.sent();
+    assert_eq!(sent.len(), 1);
+    assert!(sent.iter().flatten().all(|input| !input.unicode));
+    assert_eq!(sent[0].iter().filter(|input| input.scan_code == SCAN_CODE_A).count(), 4);
 }
 
 #[test]
@@ -1814,6 +1741,137 @@ fn a_pointer_pressed_while_the_layout_settles_stops_the_correction_before_any_ke
     assert!(api.sent().is_empty());
     assert!(!subject.inner.hold.lock().unwrap().holding);
     *clock.on_sleep.lock().unwrap() = None;
+}
+
+/// `2ю` typed for `2.` in the Russian layout: a plan that converts no key, whose keys go again as signs of the English
+/// layout.
+fn signs_typed_for_digits() -> [KeyEvent; 2] {
+    [key_with(SCAN_CODE_A, "2", ["2", "2"], 0), key_with(SCAN_CODE_SEMICOLON, ".", [".", "ю"], 0)]
+}
+
+/// Its Backspaces wait for the layout of the signs and go in one call with them; the layout comes back after them.
+#[test]
+fn signs_typed_again_in_their_own_layout_go_in_one_call_with_the_backspaces() {
+    let api = FakeWindowsAPI::plain();
+    api.state().current_layout = RUSSIAN_HKL;
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let signs = signs_typed_for_digits();
+    let sent_by_the_pause = Arc::new(Mutex::new(Vec::new()));
+    let (seen, watched) = (Arc::clone(&sent_by_the_pause), Arc::clone(&api));
+    *clock.on_sleep.lock().unwrap() = Some(Arc::new(move || seen.lock().unwrap().push(watched.state().sent.len())));
+    subject.inject_correction(Injection { trailing: &signs, source_group: Some(1), ..injection(&[], 1) }).unwrap();
+    *clock.on_sleep.lock().unwrap() = None;
+    assert_eq!(api.requests(), [ENGLISH_HKL, RUSSIAN_HKL]);
+    assert_eq!(sent_by_the_pause.lock().unwrap().first(), Some(&0));
+    let sent = api.sent();
+    assert_eq!(sent.len(), 1);
+    let pressed: Vec<(u32, u32)> = sent[0].iter().filter(|item| item.pressed).map(|item| (item.virtual_key, item.scan_code)).collect();
+    assert_eq!(pressed, [(VK_BACK, 0), (VK_BACK, 0), (0, SCAN_CODE_A), (0, SCAN_CODE_SEMICOLON)]);
+}
+
+/// A pointer pressed while the layout of the signs settles: nothing is typed, and the layout goes back for the text to go
+/// on in; with another place in front, that place's layout is left alone.
+#[test]
+fn a_pointer_pressed_before_the_signs_leaves_the_text_and_takes_the_layout_back() {
+    for moved in [false, true] {
+        let api = FakeWindowsAPI::plain();
+        api.state().current_layout = RUSSIAN_HKL;
+        let clock = FakeClock::stepping(0.0);
+        let subject = backend_with(&api, clock.clone(), script(|_| {}));
+        let (inner, watched) = (Arc::clone(&subject.inner), Arc::clone(&api));
+        *clock.on_sleep.lock().unwrap() = Some(Arc::new(move || {
+            inner.handle_native(NativeKeyEvent::new(true, 0, 0, false, false, 1));
+            if moved {
+                watched.state().control = Some(WINDOWS_OTHER_HWND);
+            }
+        }));
+        subject.hold_input();
+        let signs = signs_typed_for_digits();
+        let error = subject.inject_correction(Injection { trailing: &signs, source_group: Some(1), ..injection(&[], 1) }).unwrap_err();
+        *clock.on_sleep.lock().unwrap() = None;
+        assert!(message(&error).contains("Место ввода изменилось до замены; текст не изменён"));
+        assert!(api.sent().is_empty());
+        let requests: &[i64] = if moved { &[ENGLISH_HKL] } else { &[ENGLISH_HKL, RUSSIAN_HKL] };
+        assert_eq!(api.requests(), requests);
+        assert!(!subject.inner.hold.lock().unwrap().holding);
+    }
+}
+
+/// A fake whose Russian layout types `character` on the slash key, with Shift when `shift_state` says so.
+fn russian_slash_types(character: &str, shift_state: u32) -> Arc<FakeWindowsAPI> {
+    let api = FakeWindowsAPI::plain();
+    let mut state = api.state();
+    state.keys_by_character.insert((character.chars().next().unwrap(), RUSSIAN_HKL), (VK_OEM_2, SCAN_CODE_SLASH, shift_state));
+    state.translation.insert((VK_OEM_2, RUSSIAN_HKL), character.to_owned());
+    drop(state);
+    api
+}
+
+/// The signs of `2ю` typed for `2.` go by the Russian layout's own keys where it has them: the Backspaces and the keys
+/// in one call, and no layout asked for at all.
+#[test]
+fn signs_the_target_layout_has_go_by_its_own_keys_with_no_switch() {
+    let api = russian_slash_types(".", VK_KEY_SCAN_UNSHIFTED);
+    api.state().current_layout = RUSSIAN_HKL;
+    let clock = FakeClock::stepping(0.0);
+    let subject = backend_with(&api, clock.clone(), script(|_| {}));
+    let signs = signs_typed_for_digits();
+    subject.inject_correction(Injection { trailing: &signs, source_group: Some(1), ..injection(&[], 1) }).unwrap();
+    assert!(api.requests().is_empty());
+    assert!(clock.sleeps.lock().unwrap().is_empty());
+    let sent = api.sent();
+    assert_eq!(sent.len(), 1);
+    let pressed: Vec<(u32, u32)> = sent[0].iter().filter(|item| item.pressed).map(|item| (item.virtual_key, item.scan_code)).collect();
+    assert_eq!(pressed, [(VK_BACK, 0), (VK_BACK, 0), (0, SCAN_CODE_A), (0, SCAN_CODE_SLASH)]);
+}
+
+/// A sign kept after a converted word (`rfr,` for `как,`) goes with the word's letters by the key of the new layout that
+/// types it, with Shift where that key needs it and Caps Lock on: one switch and one call.
+#[test]
+fn a_sign_kept_after_a_converted_word_goes_with_its_letters() {
+    let api = russian_slash_types(",", VK_KEY_SCAN_SHIFT);
+    let subject = backend(&api);
+    subject.inner.caps_lock.store(true, Ordering::Relaxed);
+    let comma = key_with(SCAN_CODE_SEMICOLON, ",", [",", "б"], 0);
+    let strokes = [KeyEvent { state: LOCK_MASK, ..key_event() }];
+    subject.inject_correction(Injection { boundary: Some(&comma), source_group: Some(0), ..injection(&strokes, 1) }).unwrap();
+    assert_eq!(api.requests(), [RUSSIAN_HKL]);
+    let sent = api.sent();
+    assert_eq!(sent.len(), 1);
+    let keys: Vec<(bool, u32)> = sent[0].iter().filter(|item| item.virtual_key != VK_BACK).map(|item| (item.pressed, item.scan_code)).collect();
+    assert_eq!(
+        keys,
+        [(true, SCAN_CODE_A), (false, SCAN_CODE_A), (true, SCAN_CODE_LEFT_SHIFT), (true, SCAN_CODE_SLASH), (false, SCAN_CODE_SLASH), (false, SCAN_CODE_LEFT_SHIFT)]
+    );
+}
+
+/// The signs go in their own layout, switched to and back, wherever the target layout's key for them is not certain:
+/// the window in a variant of the target's language, a key that needs Ctrl or Alt, one that types something else when
+/// asked (a dead key types nothing at once), no such key, a sign of two characters.
+#[test]
+fn signs_go_in_their_own_layout_where_the_target_key_is_not_certain() {
+    let cases: [(&str, Arc<FakeWindowsAPI>); 5] = [
+        ("a variant of the layout", russian_slash_types(".", VK_KEY_SCAN_UNSHIFTED)),
+        ("Ctrl and Alt", russian_slash_types(".", VK_KEY_SCAN_SHIFT + 1)),
+        ("a dead key", russian_slash_types(".", VK_KEY_SCAN_UNSHIFTED)),
+        ("no key", FakeWindowsAPI::plain()),
+        ("two characters", russian_slash_types(".", VK_KEY_SCAN_UNSHIFTED)),
+    ];
+    for (name, api) in cases {
+        api.state().current_layout = if name == "a variant of the layout" { RUSSIAN_HKL_WITH_HANDLE } else { RUSSIAN_HKL };
+        if name == "a dead key" {
+            api.state().translation.insert((VK_OEM_2, RUSSIAN_HKL), String::new());
+        }
+        let mut signs = signs_typed_for_digits().to_vec();
+        if name == "two characters" {
+            signs[1].character = "..".to_owned();
+        }
+        let subject = backend(&api);
+        subject.inject_correction(Injection { trailing: &signs, source_group: Some(1), ..injection(&[], 1) }).unwrap();
+        assert_eq!(api.requests(), [ENGLISH_HKL, RUSSIAN_HKL], "{name}");
+        assert_eq!(api.sent().len(), 1, "{name}");
+    }
 }
 
 /// The same with no pointer pressed: another window is in front when the correction begins.
@@ -2989,8 +3047,6 @@ mod golden {
             kept_tail: number(&op["kept_tail"]).to::<usize>(),
             erased: op["erased"].as_u64().map(ks_cast::To::to::<usize>),
             mode: "boundary",
-            // The recorded calls were typed key by key: the path for a field that was not read.
-            verified_in_field: false,
         });
         outcome.map_or_else(|error| json!(error_text(&error)), |count| json!(count))
     }
@@ -3344,7 +3400,6 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
                         kept_tail: *dice.of(&[0, 0, 1, 9]),
                         erased: *dice.of(&[None, None, Some(1)]),
                         mode: "boundary",
-                        verified_in_field: dice.one_in(2),
                     });
                 }
                 23 => match dice.below(4) {

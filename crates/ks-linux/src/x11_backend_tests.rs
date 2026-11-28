@@ -257,7 +257,7 @@ fn typing(fake: &Fake) -> Vec<Call> {
 }
 
 fn injection<'a>(strokes: &'a [KeyEvent], target_group: i32, boundary: Option<&'a KeyEvent>) -> Injection<'a> {
-    Injection { strokes, target_group, boundary, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary", verified_in_field: false }
+    Injection { strokes, target_group, boundary, source_group: None, late: &[], trailing: &[], kept_tail: 0, erased: None, mode: "boundary" }
 }
 
 fn opened(fake: &Arc<Fake>) -> X11Backend {
@@ -1059,7 +1059,6 @@ fn a_long_walk_through_the_backend_stops_nowhere() {
                         kept_tail: *dice.of(&[0, 0, 1, 9]),
                         erased: *dice.of(&[None, None, Some(1)]),
                         mode: "boundary",
-                        verified_in_field: false,
                     });
                 }
                 13 => fake.with(|state| {

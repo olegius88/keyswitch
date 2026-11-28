@@ -60,7 +60,7 @@ use crate::constants::{
     VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
     VK_PACKET, VK_PAUSE, VK_PRIOR, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
     VK_SPACE, VK_TAB, VK_UP, VK_V, VK_Z, WINDOWS_LAYOUT_SETTLE_SECONDS, WINDOWS_LAYOUT_SWITCH_TIMEOUT_SECONDS, WINDOWS_TYPED_EVENT_SETTLE_SECONDS,
-    WINDOWS_TYPED_SETTLE_MAX_SECONDS, UNICODE_CORRECTION_MAX_EVENTS,
+    WINDOWS_TYPED_SETTLE_MAX_SECONDS, VK_KEY_SCAN_SHIFT, VK_KEY_SCAN_UNSHIFTED,
     WITHHELD_ACTION_MAX_MS, WORK_WINDOW_RETURN_TIMEOUT_SECONDS,
 };
 use crate::log;
@@ -166,6 +166,9 @@ pub trait WindowsAPI: Send + Sync {
     fn window_layout(&self, window: i64) -> i64;
     fn request_layout(&self, layout: i64) -> bool;
     fn translate_key(&self, virtual_key: u32, scan_code: u32, state: u32, layout: i64) -> String;
+    /// `VkKeyScanExW` and `MapVirtualKeyExW`: the key of `layout` that types `character`, as its virtual key, its scan code
+    /// and the shift state of `VkKeyScanExW`'s high byte; None where the layout has no such key or the key no scan code.
+    fn key_for_character(&self, character: char, layout: i64) -> Option<(u32, u32, u32)>;
     /// `SendInput`: how many events it took. Never called on the hook's thread.
     fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError>;
     fn active_application(&self) -> String;
@@ -1780,11 +1783,9 @@ impl Inner {
         let (converted, kept) = strokes.split_at(strokes.len() - kept_tail);
         let replay_inputs = self.strokes_inputs(converted.iter(), true, Some(target_group));
         let kept_inputs = self.strokes_inputs(kept.iter(), true, Some(final_group));
-        let boundary_inputs = self.strokes_inputs(literal.iter().copied(), true, None);
         // Typed again as the user's own input: the engine must see these keys as the start of the next word, not as its
         // own injection.
         let late_inputs = self.strokes_inputs(late.iter(), false, Some(final_group));
-        let preserve_boundary_layout = literal.iter().any(|stroke| stroke.character_for(target_group) != stroke.character);
         let literal_group = literal.first().map_or(rendered_source_group, |stroke| stroke.group);
         if !valid_group(literal_group) || literal.iter().any(|stroke| stroke.group != literal_group) {
             return Err(failed("Некорректная раскладка пунктуации; замена отменена"));
@@ -1795,7 +1796,6 @@ impl Inner {
         // Into a window that sends the keys on to another computer, one key to a call (`typing_pace`).
         let pace = self.typing_pace();
         self.typed_key_by_key.store(pace.is_some(), Ordering::Relaxed);
-        let characters = self.unicode_replacement(injection, delete_count, pace);
         let held_count = {
             let _inject_inner = lock(&self.inject_lock);
             let typed = (|| -> Result<(), WindowsBackendError> {
@@ -1818,42 +1818,49 @@ impl Inner {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                 }
                 let switched = self.switch_group_inner(target_group)?;
-                let confirmed = self.clock.monotonic();
                 // The switch waits for the window to answer, and the place may change meanwhile.
                 if self.typing_place_left() {
                     return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                 }
-                if let Some(characters) = characters.as_ref().filter(|_| self.no_user_key_on_its_way()) {
-                    let mut batch = delete_inputs.concat();
-                    batch.extend_from_slice(characters);
-                    self.send_layout_free(&batch)?;
-                    // The user's keys held meanwhile are keys of the new layout: they wait for the window's text service
-                    // as the letters typed as keys did.
-                    let settled = confirmed + WINDOWS_LAYOUT_SETTLE_SECONDS - self.clock.monotonic();
-                    if switched && settled > 0.0 {
-                        self.clock.sleep(settled);
-                    }
-                    return Ok(());
-                }
                 if switched {
                     // The keys of the new layout wait for the window's text service (WINDOWS_LAYOUT_SETTLE_SECONDS), and the
                     // Backspaces wait with them, to go in the same call. Sent before the pause, they left the letters a call
-                    // of their own 50 ms later, and Notepad of Windows 11 lost those letters in 7 of 20 corrections at a
-                    // word's boundary (`нежный.` came out as nothing), and in none of 20 once the Backspaces went with them
-                    // (a diagnostic build in a virtual machine, 28.11.2026). The user's keys are held meanwhile (hold_input);
-                    // a click is not, so the place is looked at again before anything is typed.
+                    // of their own 50 ms later, and Notepad of Windows 11 lost such letters: `нежный.` corrected at its
+                    // boundary came out right in 17 of 40 tries and as nothing or a few of its letters in the others, and
+                    // right in 40 of 40 in this order (a virtual machine, 28.11.2026). The user's keys are held meanwhile
+                    // (hold_input); a click is not, so the place is looked at again before anything is typed.
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                     if self.typing_place_left() {
                         return Err(failed("Место ввода изменилось до замены; текст не изменён"));
                     }
                 }
+                // The signs after the word keep their characters. Where the window has the pair's own layout for the target
+                // and it types each of them on some key, they go by those keys with the rest, and the layout stays: `2ю`
+                // typed for `2.` needs no switch at all, the full stop being a key of the Russian layout too. Typed in
+                // their own layout and the layout taken back after them, Notepad of Windows 11 read some of them only
+                // after the request back and typed them in the editor's layout: `версии 1ю5ю3` came out as `версии 1.5ю3`
+                // and `пункт 2ю` stayed, in 4 of 20 tries (a virtual machine, 28.11.2026).
+                let literal_keys = if kept_tail == 0 { self.literal_keys(&literal, target_group)? } else { None };
+                let preserve_boundary_layout = kept_tail == 0 && literal_keys.is_none();
+                let boundary_inputs = match &literal_keys {
+                    Some(keys) => self.strokes_inputs(keys.iter(), true, None),
+                    None => self.strokes_inputs(literal.iter().copied(), true, None),
+                };
+                // Where the signs are typed in their own layout, a plan that converts no key has no keys of the new layout
+                // for the Backspaces to go with: they wait for the signs and go in their call. Sent before the switch,
+                // they left the signs a call of their own, and Notepad of Windows 11 lost the first of them or all:
+                // `пункт 2ю` came out as `пункт .` or `пункт ` (a virtual machine, 28.11.2026).
+                let deletion_waits = replay_inputs.is_empty() && preserve_boundary_layout;
                 let mut batch = delete_inputs.clone();
-                batch.extend_from_slice(&replay_inputs);
-                if !preserve_boundary_layout && kept_tail == 0 {
-                    batch.extend_from_slice(&boundary_inputs);
+                if !deletion_waits {
+                    batch.extend_from_slice(&replay_inputs);
+                    if !preserve_boundary_layout && kept_tail == 0 {
+                        batch.extend_from_slice(&boundary_inputs);
+                    }
+                    self.type_keys(&batch, pace)?;
+                    late_deleted = true;
+                    batch.clear();
                 }
-                self.type_keys(&batch, pace)?;
-                late_deleted = true;
                 if kept_tail != 0 {
                     // The kept word is typed in its own layout, and the text goes on there.
                     self.switch_group_inner(final_group)?;
@@ -1864,8 +1871,23 @@ impl Inner {
                 } else if preserve_boundary_layout {
                     self.switch_group_inner(literal_group)?;
                     self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
-                    self.type_keys(&boundary_inputs, pace)?;
+                    if deletion_waits && self.typing_place_left() {
+                        // Nothing is typed: the layout is asked back for the text to go on in, unless another window is in
+                        // front now, whose layout is not this correction's to change. Asked and not waited for: the focus
+                        // a click moves may leave while the answer is awaited, and the wait would read the layout of
+                        // another window with the keyboard held.
+                        if self.holding_place().is_some_and(|(_, hold_window)| self.input_place() == hold_window) {
+                            self.api.request_layout(self.layout_of_group(target_group)?);
+                        }
+                        return Err(failed("Место ввода изменилось до замены; текст не изменён"));
+                    }
+                    batch.extend_from_slice(&boundary_inputs);
+                    self.type_keys(&batch, pace)?;
+                    late_deleted = true;
                     self.switch_group_inner(target_group)?;
+                    // The keys typed after the word and the user's keys held meanwhile are keys of the layout taken back:
+                    // they wait for the window's text service as the letters of a new layout do.
+                    self.clock.sleep(WINDOWS_LAYOUT_SETTLE_SECONDS);
                 }
                 // A partial send is not an all-or-nothing failure; retrying this whole batch could duplicate an already
                 // delivered prefix.
@@ -1891,67 +1913,57 @@ impl Inner {
         }
     }
 
-    /// The letters of `injection` as characters (`KEYEVENTF_UNICODE`), to go with the Backspaces in one call; None where
-    /// the replacement is typed as keys of the new layout.
-    ///
-    /// Typed as keys, the letters wait after the Backspaces for the window's text service to take the new layout
-    /// (`WINDOWS_LAYOUT_SETTLE_SECONDS`): an early switch stood half done on the screen for those 50 ms, the old letters
-    /// erased and the new ones not typed yet, and Notepad of Windows 11 lost the end of the replacement in 9 of 86 trials
-    /// when the user's next key followed it at once (a probe without KeySwitch, 26.11.2026). Characters need no layout:
-    /// they go with the Backspaces right after the window has confirmed the switch, the replacement shows about 50 ms
-    /// sooner, and the user's keys held meanwhile still wait for the settle. Only a word alone, short enough
-    /// (`UNICODE_CORRECTION_MAX_EVENTS`), each key of it one character, in a field read a moment ago that showed the word
-    /// (`Injection::verified_in_field`): a window that sends the keys on to another computer gives no such read, and
-    /// might pass the Backspaces on and not the characters. The keys typed after the word are given back as keys, which
-    /// the engine takes as the user's typing.
-    fn unicode_replacement(&self, injection: &Injection<'_>, delete_count: usize, pace: Option<f64>) -> Option<Vec<NativeInput>> {
-        let alone = injection.late.is_empty() && injection.trailing.is_empty() && injection.boundary.is_none() && injection.kept_tail == 0;
-        if !injection.verified_in_field || pace.is_some() || !alone {
-            return None;
-        }
-        // A sign typed in the word (`,` for `б`, `;` for `ж`) is something a window may act on as it takes it in: in Notepad
-        // of Windows 11 (a virtual machine, ordinary pace, 26.11.2026) 5 of the 7 replacements typed as characters whose
-        // keys held `,` or `;` came out as their last letter repeated (`,fcc` as `сссс` for `басс`), and none of the 58
-        // whose keys typed letters only; typed as keys of the new layout, 50 ms later, the same words came out whole.
-        if !injection.strokes.iter().all(|stroke| !stroke.character.is_empty() && stroke.character.chars().all(char::is_alphabetic)) {
-            return None;
-        }
-        let mut letters = Vec::new();
-        for stroke in injection.strokes {
-            let mut characters = stroke.character_for(injection.target_group).chars();
-            let (Some(character), None) = (characters.next(), characters.next()) else {
-                return None;
-            };
-            let mut buffer = [0; 2];
-            for &unit in character.encode_utf16(&mut buffer).iter() {
-                letters.extend([true, false].map(|pressed| NativeInput { scan_code: u32::from(unit), unicode: true, ..NativeInput::new(pressed) }));
+    /// `literal` as keys of `group`'s layout that type the same characters, or None where they must be typed in their own
+    /// layout. A key whose character `group`'s layout gives it already stays as it is (a digit, the space); another one is
+    /// looked for in that layout (`key_in_layout`). Only while the window has the pair's own layout for `group`: a variant
+    /// of the same language (another English layout, the Russian typewriter one) takes `group` as well
+    /// (`group_for_layout`), and its keys are not the pair's.
+    fn literal_keys(&self, literal: &[&KeyEvent], group: i32) -> Result<Option<Vec<KeyEvent>>, WindowsBackendError> {
+        let layout = self.layout_of_group(group)?;
+        let mut keys = Vec::with_capacity(literal.len());
+        for &stroke in literal {
+            if stroke.character_for(group) == stroke.character {
+                keys.push(stroke.clone());
+                continue;
             }
+            if self.api.foreground_layout() != layout {
+                return Ok(None);
+            }
+            let Some(key) = self.key_in_layout(stroke, group, layout) else {
+                return Ok(None);
+            };
+            keys.push(key);
         }
-        (2 * delete_count + letters.len() <= UNICODE_CORRECTION_MAX_EVENTS).then_some(letters)
+        Ok(Some(keys))
     }
 
-    /// Whether no key of the user's is down or kept back by the hold as the letters of a correction go out, so that they
-    /// may go as characters (`unicode_replacement`).
-    ///
-    /// Typed fast, with each key pressed before the last one is up, an early switch always has the user's next key held
-    /// meanwhile; in Notepad of Windows 11 (a virtual machine, 120 rows at about 650 keys a minute, 26.11.2026) 3 of the
-    /// 23 replacements typed as characters with such a key held came out as their last letter repeated (`басс` as
-    /// `сссс`), while the keys of the new layout never did and none of the 78 typed as characters with no key held went
-    /// wrong (the same machine at an ordinary pace). Without KeySwitch, and with its hook but without a correction,
-    /// characters typed into a busy Notepad kept their letters, so the cause is not known: the characters wait for a
-    /// moment no key of the user's is on its way.
-    fn no_user_key_on_its_way(&self) -> bool {
-        lock(&self.hold).held.is_empty() && lock(&self.hook).pressed.0.is_empty()
-    }
-
-    /// `send_exact` for keys that mean the same in every layout (Backspace, characters): a layout asked for after them
-    /// cannot change them, so they set no time for the window to read them before it (`typed_until`).
-    fn send_layout_free(&self, inputs: &[NativeInput]) -> Result<(), WindowsBackendError> {
-        let sent = self.api.send_inputs(inputs)?;
-        if sent != inputs.len() {
-            return Err(failed(format!("SendInput отправил {sent} из {} событий; результат текста неизвестен", inputs.len())));
+    /// A press of the key of `layout` (`group`'s) that types the character of `stroke`, or None. The layout names the key
+    /// (`key_for_character`); it is taken only when nothing or Shift alone selects it, Ctrl and Alt making a shortcut of
+    /// it, and when `layout`, asked with that Shift and the Caps Lock of now, types that very character with it: a dead
+    /// key, which types nothing at once, and a key Caps Lock moves to another character are refused so.
+    fn key_in_layout(&self, stroke: &KeyEvent, group: i32, layout: i64) -> Option<KeyEvent> {
+        let mut characters = stroke.character.chars();
+        let (Some(character), None) = (characters.next(), characters.next()) else {
+            return None;
+        };
+        let (virtual_key, scan_code, shift_state) = self.api.key_for_character(character, layout)?;
+        let shift = match shift_state {
+            VK_KEY_SCAN_UNSHIFTED => 0,
+            VK_KEY_SCAN_SHIFT => SHIFT_MASK,
+            _ => return None,
+        };
+        let state = shift | if self.caps_lock.load(Ordering::Relaxed) { LOCK_MASK } else { 0 };
+        if self.translated(virtual_key, scan_code, state, layout) != stroke.character {
+            return None;
         }
-        Ok(())
+        Some(KeyEvent {
+            keycode: scan_code,
+            key_name: String::new(),
+            characters: vec![stroke.character.clone(); LAYOUT_GROUP_COUNT.to::<usize>()],
+            group,
+            state,
+            ..stroke.clone()
+        })
     }
 
     /// The keys of `strokes`, each the events of one stroke (`stroke_inputs`).
@@ -2330,14 +2342,19 @@ impl Inner {
         Ok(shown)
     }
 
+    /// The pair's own layout for `group`.
+    fn layout_of_group(&self, group: i32) -> Result<i64, WindowsBackendError> {
+        let (english, russian) = self.layouts()?;
+        match group {
+            0 => Ok(english),
+            1 => Ok(russian),
+            _ => Err(failed("tuple index out of range")),
+        }
+    }
+
     /// Switch the window's layout to `group` and wait for it to say so; whether the layout changed.
     fn switch_group_inner(&self, group: i32) -> Result<bool, WindowsBackendError> {
-        let (english, russian) = self.layouts()?;
-        let layout = match group {
-            0 => english,
-            1 => russian,
-            _ => return Err(failed("tuple index out of range")),
-        };
+        let layout = self.layout_of_group(group)?;
         if self.group_for_layout(self.api.foreground_layout())? == group {
             return Ok(false);
         }

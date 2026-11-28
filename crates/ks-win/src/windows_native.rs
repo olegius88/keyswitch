@@ -222,7 +222,7 @@ mod win32 {
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardLayoutList, GetLastInputInfo, INPUT, INPUT_0, KEYBDINPUT,
-        LASTINPUTINFO, SendInput, ToUnicodeEx,
+        LASTINPUTINFO, MapVirtualKeyExW, SendInput, ToUnicodeEx, VkKeyScanExW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, CallNextHookEx, CreateWindowExW, DestroyWindow, DispatchMessageW, GUITHREADINFO, GetAncestor,
@@ -235,10 +235,11 @@ mod win32 {
     use crate::constants::{
         ASYNC_KEY_DOWN_BIT, CF_PRIVATEFIRST, CF_PRIVATELAST, CF_UNICODETEXT, CLIPBOARD_DIB_FORMATS,
         CLIPBOARD_FORMATS_SYNTHESIZED_FROM_DIB, CLIPBOARD_HANDLE_FORMATS, CLIPBOARD_HISTORY_FORMAT_NAME, GA_ROOT, GMEM_MOVEABLE,
-        GWL_EXSTYLE, HC_ACTION, INPUT_KEYBOARD, PM_NOREMOVE, POINTER_INVALIDATING_MESSAGES, WHEEL_MESSAGES, PROCESS_IMAGE_NAME_BUFFER_CHARACTERS,
-        PROCESS_QUERY_LIMITED_INFORMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-        THREAD_PRIORITY_ABOVE_NORMAL, TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG, TRANSLATED_TEXT_BUFFER_CHARACTERS, UTF16_CODE_UNIT_BYTES,
-        VK_CAPITAL, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_CLASS_NAME_MAX_CHARACTERS, WM_INPUTLANGCHANGEREQUEST, WM_QUIT, WM_USER,
+        GWL_EXSTYLE, HC_ACTION, INPUT_KEYBOARD, MAPVK_VK_TO_VSC, PM_NOREMOVE, POINTER_INVALIDATING_MESSAGES, WHEEL_MESSAGES,
+        PROCESS_IMAGE_NAME_BUFFER_CHARACTERS, PROCESS_QUERY_LIMITED_INFORMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, THREAD_PRIORITY_ABOVE_NORMAL, TO_UNICODE_KEEP_KEYBOARD_STATE_FLAG,
+        TRANSLATED_TEXT_BUFFER_CHARACTERS, UTF16_CODE_UNIT_BYTES, VIRTUAL_KEY_BYTE_MASK, VK_CAPITAL, VK_KEY_SCAN_NOT_FOUND,
+        VK_KEY_SCAN_SHIFT_STATE_OFFSET, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_CLASS_NAME_MAX_CHARACTERS, WM_INPUTLANGCHANGEREQUEST, WM_QUIT, WM_USER,
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
     use crate::windows_backend::{
@@ -532,6 +533,25 @@ mod win32 {
                 Ok(result) if ks_text::pystr::isprintable(&result) => result,
                 _ => String::new(),
             }
+        }
+
+        fn key_for_character(&self, character: char, layout: i64) -> Option<(u32, u32, u32)> {
+            let mut buffer = [0u16; 2];
+            // `VkKeyScanExW` takes one UTF-16 unit: a character past the first plane has no key of its own.
+            let &mut [unit] = character.encode_utf16(&mut buffer) else {
+                return None;
+            };
+            let layout = layout.to::<isize>().pointer_mut::<c_void>();
+            // SAFETY: the call takes its arguments by value.
+            let answer = unsafe { VkKeyScanExW(unit, layout) };
+            if answer == VK_KEY_SCAN_NOT_FOUND {
+                return None;
+            }
+            let bits = u32::from(answer.bits::<u16>());
+            let virtual_key = bits & VIRTUAL_KEY_BYTE_MASK;
+            // SAFETY: the call takes its arguments by value.
+            let scan_code = unsafe { MapVirtualKeyExW(virtual_key, MAPVK_VK_TO_VSC, layout) };
+            (scan_code != 0).then_some((virtual_key, scan_code, bits >> VK_KEY_SCAN_SHIFT_STATE_OFFSET))
         }
 
         fn send_inputs(&self, inputs: &[NativeInput]) -> Result<usize, WindowsBackendError> {
